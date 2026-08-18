@@ -465,3 +465,114 @@ class FacultyAnswerKeyReleaseService:
             request=request,
         )
         return context
+
+    @classmethod
+    def build_checking_master_context(
+        cls,
+        *,
+        contribution,
+        release_id,
+        set_code,
+        actor,
+        request=None,
+        now=None,
+    ):
+        release, normalized_set, item_rows = cls._authorized_release(
+            contribution=contribution,
+            release_id=release_id,
+            set_code=set_code,
+            actor=actor,
+            now=now,
+        )
+        final_item_count = release.generation_revision.final_item_count_snapshot
+        if (
+            final_item_count < 1
+            or final_item_count > 75
+            or len(item_rows) != final_item_count
+        ):
+            raise PermissionDenied("The released Checking Master item count is invalid.")
+
+        normalized_answers = {}
+        for row in item_rows:
+            answer = (row["correct_answer_snapshot"] or "").strip().upper()
+            if answer not in {"A", "B", "C", "D"}:
+                raise PermissionDenied(
+                    "The released Checking Master answer snapshot is invalid."
+                )
+            normalized_answers[row["position"]] = answer
+
+        display_rows = []
+        for position in range(1, 76):
+            answer = normalized_answers.get(position)
+            is_unused = position > final_item_count
+            if not is_unused and answer is None:
+                raise PermissionDenied(
+                    "The released Checking Master item sequence is incomplete."
+                )
+            display_rows.append(
+                {
+                    "position": position,
+                    "is_unused": is_unused,
+                    "bubbles": tuple(
+                        {
+                            "code": code,
+                            "is_shaded": bool(not is_unused and code == answer),
+                        }
+                        for code in "ABCD"
+                    ),
+                }
+            )
+
+        cycle = release.cycle_course.cycle
+        tenant = cycle.tenant
+        accessed_at = timezone.now().astimezone(MANILA_TIMEZONE)
+        context = {
+            "school_name": SystemSettingService.get(
+                "PRINT_HEADER_SCHOOL_NAME",
+                tenant_id=tenant.id,
+                default=tenant.name,
+            ),
+            "school_address": SystemSettingService.get(
+                "PRINT_HEADER_SCHOOL_ADDRESS",
+                tenant_id=tenant.id,
+                default="",
+            ),
+            "academic_year": cycle.academic_year.name,
+            "term": cycle.term.name,
+            "exam_period": cycle.get_exam_period_display(),
+            "course_code": release.cycle_course.course.code,
+            "course_title": release.cycle_course.course.title,
+            "set_code": normalized_set,
+            "revision_number": release.generation_revision.revision_number,
+            "final_item_count": final_item_count,
+            "accessed_at": accessed_at,
+            "answer_columns": (
+                tuple(display_rows[0:25]),
+                tuple(display_rows[25:50]),
+                tuple(display_rows[50:75]),
+            ),
+            "release_id": release.id,
+            "contribution_id": contribution.id,
+        }
+        AuditService.log_event(
+            action="DE_FACULTY_CHECKING_MASTER_PRINTED",
+            portal="FACULTY",
+            entity_type="AnswerKeyRelease",
+            entity_id=release.id,
+            actor=actor,
+            tenant=tenant.id,
+            metadata={
+                "release_id": release.id,
+                "cycle_id": cycle.id,
+                "cycle_course_id": release.cycle_course_id,
+                "revision_id": release.generation_revision_id,
+                "revision_number": release.generation_revision.revision_number,
+                "set_code": normalized_set,
+                "faculty_user_id": actor.id,
+                "available_from": release.available_from,
+                "available_until": release.available_until,
+                "accessed_at": accessed_at,
+            },
+            request=request,
+        )
+        return context

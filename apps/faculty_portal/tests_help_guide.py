@@ -87,8 +87,13 @@ class FacultyHelpGuideTests(TestCase):
             "Questionnaire printing never grants Answer Key, Question Selection Audit, or Automatic Generation Audit access.",
         )
         self.assertContains(response, "View or Print Answer Key")
+        self.assertContains(response, "Open either Answer Key first, then use its existing Print option.")
         self.assertContains(response, "Answer Key Available From/Until window")
         self.assertContains(response, "superseded, expired, or revoked release is denied")
+        self.assertContains(response, "Print Pre-Shaded Checking Master")
+        self.assertContains(response, "FOR FACULTY CHECKING ONLY — CONFIDENTIAL")
+        self.assertContains(response, "marked UNUSED and contain no shaded answer")
+        self.assertContains(response, "without question text or a stored media artifact")
         self.assertContains(response, "portal-img/semester_workflow.png")
         self.assertContains(response, "imahe/faculty_workflow.png")
         self.assertNotContains(response, "Top Faculty Tasks")

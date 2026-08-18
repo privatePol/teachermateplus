@@ -1,4 +1,7 @@
 from importlib import import_module
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.apps import apps as django_apps
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -12,11 +15,13 @@ from django.utils import timezone
 from apps.academics.models import FacultyAssignment
 from apps.auditlog.models import AuditLog
 from apps.navigation.models import MenuItemPermission
-from apps.rbac.models import Permission, RolePermission, UserPermission
+from apps.rbac.models import Permission, Role, RolePermission, UserPermission, UserRole
+from apps.tenants.models import Campus
 
 from .answer_key_release import (
     ANSWER_KEY_RELEASE_ATTESTATION_VERSION,
     AnswerKeyReleaseService,
+    FacultyAnswerKeyReleaseService,
 )
 from .models import (
     AnswerKeyRelease,
@@ -110,9 +115,31 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         ]
         self.r4 = self._make_revision(4)
 
-    def _make_revision(self, number, *, supersedes=None):
+    def _make_revision(
+        self,
+        number,
+        *,
+        supersedes=None,
+        item_count=2,
+        cycle_course=None,
+    ):
+        cycle_course = cycle_course or self.parent
+        for position in range(len(self.questions) + 1, item_count + 1):
+            self.questions.append(
+                Question.objects.create(
+                    contribution=self.contribution,
+                    question_text=f"Confidential key source {position}",
+                    choice_a="A",
+                    choice_b="B",
+                    choice_c="C",
+                    choice_d="D",
+                    correct_answer="A",
+                    difficulty="EASY",
+                    position=position,
+                )
+            )
         revision = ExamGenerationRevision.objects.create(
-            cycle_course=self.parent,
+            cycle_course=cycle_course,
             revision_number=number,
             source_input_fingerprint=(str(number) * 64)[:64],
             algorithm_version="answer-key-release-test-v1",
@@ -120,7 +147,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             configuration_revision_snapshot=1,
             blueprint_revision_snapshot=1,
             roster_boundary_snapshot="r" * 64,
-            final_item_count_snapshot=2,
+            final_item_count_snapshot=item_count,
             request_token_digest=(str(number + 4) * 64)[:64],
             supersedes=supersedes,
             minimum_overlap=0,
@@ -128,14 +155,28 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             contributors_represented=1,
             squared_contributor_concentration=4,
         )
-        for set_code, answers in (("A", ("A", "D")), ("B", ("C", "B"))):
+        answers_by_set = {
+            "A": tuple(
+                ("A", "D")[position - 1]
+                if item_count == 2
+                else "ABCD"[(position - 1) % 4]
+                for position in range(1, item_count + 1)
+            ),
+            "B": tuple(
+                ("C", "B")[position - 1]
+                if item_count == 2
+                else "DCBA"[(position - 1) % 4]
+                for position in range(1, item_count + 1)
+            ),
+        }
+        for set_code, answers in answers_by_set.items():
             generated_set = GeneratedExamSet.objects.create(
                 generation_revision=revision,
                 set_code=set_code,
                 campus_quotas_snapshot={"MAIN": 2},
                 difficulty_quotas_snapshot={"EASY": 2},
                 section_quotas_snapshot={"0": 2},
-                item_count=2,
+                item_count=item_count,
             )
             for position, (question, answer) in enumerate(
                 zip(self.questions, answers), start=1
@@ -186,6 +227,30 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             ),
             args=[self.contribution.id, release.id, set_code],
         )
+
+    def _master_url(self, release_id, set_code="A"):
+        return reverse(
+            "departmental_exams:faculty_checking_master_print",
+            args=[self.contribution.id, release_id, set_code],
+        )
+
+    def _replace_current_revision(self, *, item_count):
+        current = ExamGenerationRevision.objects.get(
+            cycle_course=self.parent,
+            current_marker=1,
+        )
+        current.status = ExamGenerationRevision.Status.SUPERSEDED
+        current.current_marker = None
+        current.save(update_fields=["status", "current_marker", "updated_at"])
+        return self._make_revision(
+            current.revision_number + 1,
+            supersedes=current,
+            item_count=item_count,
+        )
+
+    @staticmethod
+    def _master_rows(response):
+        return [row for column in response.context["answer_columns"] for row in column]
 
     def test_model_lifecycle_constraints_immutability_and_delete_prohibition(self):
         release = self._release()
@@ -440,6 +505,315 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         response = self._faculty_client().get(reverse("departmental_exams:resources"))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Answer Key")
+
+    def test_checking_master_active_set_a_and_b_use_exact_persisted_answers(self):
+        release = self._release()
+        client = self._faculty_client()
+        expected = {"A": {1: "A", 2: "D"}, "B": {1: "C", 2: "B"}}
+
+        for set_code in ("A", "B"):
+            with self.subTest(set_code=set_code):
+                response = client.get(self._master_url(release.id, set_code))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "FOR FACULTY CHECKING ONLY")
+                self.assertContains(response, f"SET {set_code}")
+                self.assertNotContains(response, "Private Set")
+                self.assertNotContains(response, "Confidential key source")
+                self.assertNotContains(response, "Pair Code")
+                self.assertEqual(
+                    response.content.decode().count("data-master-item"),
+                    75,
+                )
+                rows = self._master_rows(response)
+                self.assertEqual(len(rows), 75)
+                shaded = {
+                    row["position"]: [
+                        bubble["code"]
+                        for bubble in row["bubbles"]
+                        if bubble["is_shaded"]
+                    ]
+                    for row in rows
+                }
+                self.assertEqual(
+                    {position: values[0] for position, values in shaded.items() if values},
+                    expected[set_code],
+                )
+                for row in rows[:2]:
+                    self.assertEqual(
+                        sum(bubble["is_shaded"] for bubble in row["bubbles"]),
+                        1,
+                    )
+                for row in rows[2:]:
+                    self.assertTrue(row["is_unused"])
+                    self.assertFalse(any(bubble["is_shaded"] for bubble in row["bubbles"]))
+
+    def test_checking_master_no_release_scheduled_expired_and_revoked_deny(self):
+        client = self._faculty_client()
+        self.assertEqual(client.get(self._master_url(999999)).status_code, 403)
+        now = timezone.now()
+
+        scheduled = self._release(
+            start=now + timezone.timedelta(hours=1),
+            end=now + timezone.timedelta(hours=2),
+        )
+        self.assertEqual(client.get(self._master_url(scheduled.id)).status_code, 403)
+        self.assertNotContains(
+            client.get(reverse("departmental_exams:contribution_list")),
+            "Print Pre-Shaded Master",
+        )
+
+        expired = self._release(
+            start=now - timezone.timedelta(hours=2),
+            end=now - timezone.timedelta(hours=1),
+        )
+        self.assertEqual(client.get(self._master_url(expired.id)).status_code, 403)
+        AnswerKeyReleaseService.revoke(
+            release_id=expired.id,
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+        )
+        self.assertEqual(client.get(self._master_url(expired.id)).status_code, 403)
+
+    def test_checking_master_stale_revision_denies_without_releasing_new_revision(self):
+        release = self._release()
+        self.r4.status = ExamGenerationRevision.Status.SUPERSEDED
+        self.r4.current_marker = None
+        self.r4.save(update_fields=["status", "current_marker", "updated_at"])
+        r5 = self._make_revision(5, supersedes=self.r4)
+
+        client = self._faculty_client()
+        self.assertEqual(client.get(self._master_url(release.id)).status_code, 403)
+        self.assertNotContains(
+            client.get(reverse("departmental_exams:contribution_list")),
+            "Print Pre-Shaded Master",
+        )
+        self.assertFalse(AnswerKeyRelease.objects.filter(generation_revision=r5).exists())
+
+    def test_checking_master_current_assignment_and_direct_allow_are_required(self):
+        release = self._release()
+        client = self._faculty_client()
+        self.assignment.is_active = False
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+        self.assertEqual(client.get(self._master_url(release.id)).status_code, 403)
+
+        self.assignment.is_active = True
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+        UserPermission.objects.create(
+            user=self.faculty,
+            permission=Permission.objects.get(code="faculty_portal.access"),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        self.assertEqual(client.get(self._master_url(release.id)).status_code, 403)
+
+    def test_checking_master_cross_tenant_course_and_nonparticipating_campus_deny(self):
+        release = self._release()
+        client = self._faculty_client()
+
+        foreign_course = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="KEY-CROSS",
+        )
+        foreign_revision = self._make_revision(1, cycle_course=foreign_course)
+        foreign_release = AnswerKeyRelease.objects.create(
+            cycle_course=foreign_course,
+            generation_revision=foreign_revision,
+            available_from=timezone.now() - timezone.timedelta(minutes=5),
+            available_until=timezone.now() + timezone.timedelta(hours=1),
+            released_by=self.release_manager,
+            attestation_version=ANSWER_KEY_RELEASE_ATTESTATION_VERSION,
+        )
+        self.assertEqual(client.get(self._master_url(foreign_release.id)).status_code, 403)
+
+        self.parent.offering_snapshots.update(campus=self.other_campus)
+        self.assertEqual(client.get(self._master_url(release.id)).status_code, 403)
+
+        other_tenant_campus = Campus.objects.create(
+            tenant=self.other_tenant,
+            code="OTHER",
+            name="Other Tenant Campus",
+        )
+        other_tenant_role = Role.objects.create(
+            code="S4_CROSS_TENANT_FACULTY",
+            name="Cross Tenant Faculty",
+        )
+        RolePermission.objects.create(
+            role=other_tenant_role,
+            permission=Permission.objects.get(code="faculty_portal.access"),
+        )
+        UserRole.objects.create(
+            user=self.faculty,
+            role=other_tenant_role,
+            tenant=self.other_tenant,
+            campus=other_tenant_campus,
+            is_active=True,
+        )
+        self.faculty.default_tenant = self.other_tenant
+        self.faculty.default_campus = other_tenant_campus
+        self.faculty.save(
+            update_fields=["default_tenant", "default_campus", "updated_at"]
+        )
+        client = Client()
+        client.force_login(self.faculty)
+        self.assertEqual(client.get(self._master_url(release.id)).status_code, 404)
+
+    def test_checking_master_invalid_answer_snapshot_fails_closed(self):
+        release = self._release()
+        with patch.object(
+            FacultyAnswerKeyReleaseService,
+            "_authorized_release",
+            return_value=(
+                release,
+                "A",
+                [
+                    {"position": 1, "correct_answer_snapshot": None},
+                    {"position": 2, "correct_answer_snapshot": "D"},
+                ],
+            ),
+        ):
+            with self.assertRaises(PermissionDenied):
+                FacultyAnswerKeyReleaseService.build_checking_master_context(
+                    contribution=self.contribution,
+                    release_id=release.id,
+                    set_code="A",
+                    actor=self.faculty,
+                )
+
+    def test_checking_master_revision_count_mismatch_and_noncontiguous_items_deny(self):
+        release = self._release()
+        client = self._faculty_client()
+        ExamGenerationRevision.objects.filter(pk=self.r4.pk).update(
+            final_item_count_snapshot=3
+        )
+        self.assertEqual(client.get(self._master_url(release.id)).status_code, 403)
+
+        ExamGenerationRevision.objects.filter(pk=self.r4.pk).update(
+            final_item_count_snapshot=2
+        )
+        set_a = GeneratedExamSet.objects.get(
+            generation_revision=self.r4,
+            set_code="A",
+        )
+        GeneratedExamItem.objects.filter(generated_set=set_a, position=2).update(
+            position=3
+        )
+        self.assertEqual(client.get(self._master_url(release.id)).status_code, 403)
+
+    def test_checking_master_count_over_75_denies(self):
+        release = self._release()
+        ExamGenerationRevision.objects.filter(pk=self.r4.pk).update(
+            final_item_count_snapshot=76
+        )
+        self.assertEqual(
+            self._faculty_client().get(self._master_url(release.id)).status_code,
+            403,
+        )
+
+    def test_checking_master_50_60_and_75_item_layouts(self):
+        client = self._faculty_client()
+        for item_count in (50, 60, 75):
+            with self.subTest(item_count=item_count):
+                revision = self._replace_current_revision(item_count=item_count)
+                release = self._release(revision=revision)
+                response = client.get(self._master_url(release.id, "A"))
+                self.assertEqual(response.status_code, 200)
+                rows = self._master_rows(response)
+                active_rows = rows[:item_count]
+                unused_rows = rows[item_count:]
+                self.assertEqual(response.context["final_item_count"], item_count)
+                self.assertTrue(all(not row["is_unused"] for row in active_rows))
+                self.assertTrue(all(row["is_unused"] for row in unused_rows))
+                self.assertTrue(
+                    all(
+                        sum(bubble["is_shaded"] for bubble in row["bubbles"]) == 1
+                        for row in active_rows
+                    )
+                )
+                self.assertFalse(
+                    any(
+                        bubble["is_shaded"]
+                        for row in unused_rows
+                        for bubble in row["bubbles"]
+                    )
+                )
+                self.assertContains(response, "UNUSED", count=75 - item_count)
+
+    def test_checking_master_paper_allowlist_no_store_and_get_only(self):
+        release = self._release()
+        client = self._faculty_client()
+        expected = (
+            ({}, "letter", "Letter", "8.5in", "11in"),
+            ({"paper": "a4"}, "a4", "A4", "210mm", "297mm"),
+            ({"paper": "legal"}, "legal", "Legal", "8.5in", "14in"),
+            ({"paper": "tabloid};body{display:none"}, "letter", "Letter", "8.5in", "11in"),
+        )
+        for query, value, css_size, width, height in expected:
+            with self.subTest(query=query):
+                response = client.get(self._master_url(release.id), query)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["paper_size"], value)
+                self.assertEqual(response.context["paper_css_size"], css_size)
+                self.assertEqual(response.context["paper_sheet_width"], width)
+                self.assertEqual(response.context["paper_sheet_height"], height)
+                self.assertIn(f"size: {css_size} portrait", response.content.decode())
+                self.assertIn("no-store", response["Cache-Control"])
+                self.assertIn("private", response["Cache-Control"])
+        self.assertEqual(client.post(self._master_url(release.id)).status_code, 405)
+
+    def test_checking_master_course_card_and_answer_key_print_workflow(self):
+        client = self._faculty_client()
+        unavailable = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(unavailable, "Print Pre-Shaded Master")
+        release = self._release()
+
+        course_card = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertContains(course_card, "View Set A Answer Key")
+        self.assertContains(course_card, "View Set B Answer Key")
+        self.assertContains(course_card, "CHECKING MASTER")
+        self.assertContains(course_card, "Print Pre-Shaded Master", count=2)
+        self.assertNotContains(course_card, "Print Set A Answer Key")
+        self.assertNotContains(course_card, "Print Set B Answer Key")
+
+        answer_key = client.get(self._url(release, "A"))
+        self.assertContains(answer_key, "Print Set A Answer Key")
+
+        template_source = (
+            Path(__file__).resolve().parents[2]
+            / "templates"
+            / "departmental_exams"
+            / "faculty"
+            / "contribution_list.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn(">Print Set A</a>", template_source)
+        self.assertIn(">Print Set B</a>", template_source)
+
+    def test_checking_master_uses_distinct_content_safe_audit(self):
+        release = self._release()
+        response = self._faculty_client().get(self._master_url(release.id, "B"))
+        self.assertEqual(response.status_code, 200)
+        audit = AuditLog.objects.get(action="DE_FACULTY_CHECKING_MASTER_PRINTED")
+        self.assertEqual(audit.entity_type, "AnswerKeyRelease")
+        self.assertEqual(str(audit.entity_id), str(release.id))
+        metadata = str(audit.metadata_json)
+        for forbidden in (
+            "correct_answer",
+            "shaded",
+            "Private Set",
+            "Confidential key source",
+        ):
+            self.assertNotIn(forbidden, metadata)
+
+    def test_checking_master_creates_no_media_artifact_or_dependency(self):
+        release = self._release()
+        release_count = AnswerKeyRelease.objects.count()
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            response = self._faculty_client().get(self._master_url(release.id))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(list(Path(media_root).iterdir()), [])
+        self.assertEqual(AnswerKeyRelease.objects.count(), release_count)
+        self.assertFalse(Permission.objects.filter(code__icontains="checking_master").exists())
 
 
 class AnswerKeyPermissionMigrationSafetyTests(TestCase):

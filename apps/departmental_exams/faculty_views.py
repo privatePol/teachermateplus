@@ -389,6 +389,30 @@ def answer_key_print_view(request, contribution_id, release_id, set_code):
 
 @_faculty_error_page
 @portal_required("FACULTY")
+@require_GET
+def checking_master_print_view(request, contribution_id, release_id, set_code):
+    contribution = _owner_contribution(request, contribution_id)
+    context = FacultyAnswerKeyReleaseService.build_checking_master_context(
+        contribution=contribution,
+        release_id=release_id,
+        set_code=set_code,
+        actor=request.user,
+        request=request,
+    )
+    context.update(_questionnaire_paper_context(request.GET.get("paper")))
+    response = render(
+        request,
+        "departmental_exams/faculty/checking_master_print.html",
+        context,
+    )
+    response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
 def contribution_workspace_view(request, contribution_id):
     contribution = _owner_contribution(request, contribution_id)
     return render(

@@ -39,14 +39,12 @@
               {% endif %}
               {% if contribution.answer_key_release %}
                 <div class="w-100 mt-2"><span class="badge text-bg-danger">CONFIDENTIAL ANSWER KEY</span> <span class="small text-muted">Released R{{ contribution.answer_key_release.revision_number }}</span></div>
-                <div class="btn-group btn-group-sm" role="group" aria-label="Set A Answer Key revision R{{ contribution.answer_key_release.revision_number }}">
-                  <a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id contribution.answer_key_release.release_id 'A' %}">View Set A Answer Key</a>
-                  <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_answer_key_print' contribution.id contribution.answer_key_release.release_id 'A' %}">Print Set A Answer Key</a>
-                </div>
-                <div class="btn-group btn-group-sm" role="group" aria-label="Set B Answer Key revision R{{ contribution.answer_key_release.revision_number }}">
-                  <a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id contribution.answer_key_release.release_id 'B' %}">View Set B Answer Key</a>
-                  <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_answer_key_print' contribution.id contribution.answer_key_release.release_id 'B' %}">Print Set B Answer Key</a>
-                </div>
+                <div class="w-100 small fw-semibold">Answer Key</div>
+                <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id contribution.answer_key_release.release_id 'A' %}">View Set A Answer Key</a>
+                <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id contribution.answer_key_release.release_id 'B' %}">View Set B Answer Key</a>
+                <div class="w-100 mt-2"><span class="badge text-bg-dark">CHECKING MASTER</span></div>
+                <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id contribution.answer_key_release.release_id 'A' %}">Print Pre-Shaded Master &mdash; Set A</a>
+                <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id contribution.answer_key_release.release_id 'B' %}">Print Pre-Shaded Master &mdash; Set B</a>
               {% endif %}
             </div>
           </div>

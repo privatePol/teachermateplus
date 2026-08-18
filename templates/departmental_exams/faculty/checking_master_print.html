@@ -1,0 +1,296 @@
+{% extends "faculty_portal/base.html" %}
+{% load static %}
+
+{% block title %}{{ course_code }} Set {{ set_code }} Pre-Shaded Checking Master | TeacherMate+{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .checking-master-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .checking-master-actions,
+  .checking-master-paper-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+  .checking-master-page {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: min(100%, var(--checking-master-width));
+    height: var(--checking-master-height);
+    margin: 0 auto;
+    padding: 0.22in 0.3in 0.18in;
+    overflow: hidden;
+    border: 1px solid #cfd7d0;
+    background: #fff;
+    color: #111;
+    box-shadow: 0 0.5rem 1.5rem rgba(18, 62, 38, 0.09);
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .checking-master-header {
+    flex: 0 0 auto;
+    text-align: center;
+  }
+  .checking-master-brand {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.12in;
+  }
+  .checking-master-logo {
+    width: 0.48in;
+    height: 0.48in;
+    object-fit: contain;
+  }
+  .checking-master-school {
+    margin: 0;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 14pt;
+    font-weight: 800;
+    line-height: 1;
+  }
+  .checking-master-address {
+    margin-top: 0.02in;
+    font-size: 7pt;
+  }
+  .checking-master-warning {
+    margin: 0.06in 0 0.045in;
+    border: 2px solid #111;
+    padding: 0.035in 0.08in;
+    background: #e7e7e7;
+    font-size: 9pt;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+  }
+  .checking-master-course {
+    margin: 0;
+    font-size: 11pt;
+    font-weight: 800;
+  }
+  .checking-master-meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.04in 0.14in;
+    margin-top: 0.035in;
+    font-size: 7.5pt;
+  }
+  .checking-master-set {
+    display: inline-block;
+    margin-top: 0.045in;
+    border: 2px solid #111;
+    padding: 0.025in 0.2in;
+    font-size: 13pt;
+    font-weight: 900;
+  }
+  .checking-master-divider {
+    margin: 0.06in 0 0.045in;
+    border: 0;
+    border-top: 3px solid #111;
+    opacity: 1;
+  }
+  .checking-master-body {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .checking-master-columns {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.12in;
+    height: 100%;
+  }
+  .checking-master-column {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-rows: 0.22in repeat(25, minmax(0.21in, 1fr));
+    min-width: 0;
+  }
+  .checking-master-column + .checking-master-column {
+    padding-left: 0.12in;
+    border-left: 1px solid #444;
+  }
+  .checking-master-column-header,
+  .checking-master-item {
+    display: grid;
+    grid-template-columns: 0.3in repeat(4, 1fr);
+    align-items: center;
+    text-align: center;
+  }
+  .checking-master-column-header {
+    font-size: 9pt;
+    font-weight: 800;
+  }
+  .checking-master-item {
+    position: relative;
+    font-size: 8.5pt;
+  }
+  .checking-master-item.is-unused {
+    background: #ededed;
+    color: #666;
+  }
+  .checking-master-number {
+    padding-right: 0.04in;
+    text-align: right;
+    font-weight: 700;
+  }
+  .checking-master-bubble {
+    display: inline-block;
+    box-sizing: border-box;
+    width: 0.19in;
+    height: 0.19in;
+    margin: 0 auto;
+    border: 1.35px solid #111;
+    border-radius: 50%;
+    background: #fff;
+  }
+  .checking-master-bubble.is-shaded {
+    border-width: 2px;
+    background: #111;
+  }
+  .checking-master-bubble.is-disabled {
+    border-color: #aaa;
+    background: #ddd;
+  }
+  .checking-master-unused-label {
+    position: absolute;
+    right: 0.02in;
+    left: 0.34in;
+    z-index: 2;
+    padding: 0.01in 0;
+    background: rgba(237, 237, 237, 0.94);
+    color: #555;
+    font-size: 6.5pt;
+    font-weight: 900;
+    letter-spacing: 0.11em;
+  }
+  .checking-master-footer {
+    flex: 0 0 auto;
+    margin-top: 0.055in;
+    border-top: 2px solid #111;
+    padding-top: 0.035in;
+    text-align: center;
+    font-size: 6.5pt;
+    font-weight: 800;
+  }
+  @media (max-width: 767.98px) {
+    .checking-master-controls {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+    .checking-master-page {
+      overflow-x: auto;
+    }
+  }
+  @page {
+    size: {{ paper_css_size }} portrait;
+    margin: 0;
+  }
+  @media print {
+    html,
+    body,
+    .faculty-app,
+    .faculty-main {
+      background: #fff !important;
+    }
+    .faculty-topbar,
+    .faculty-sidebar,
+    .faculty-utility-stack,
+    .faculty-identity-warning,
+    #inline-message-container,
+    #system-error-modal,
+    body > .modal-backdrop,
+    .screen-only {
+      display: none !important;
+    }
+    .faculty-layout {
+      display: block !important;
+      min-height: auto !important;
+    }
+    .faculty-main {
+      padding: 0 !important;
+    }
+    .checking-master-page {
+      width: var(--checking-master-width);
+      height: var(--checking-master-height);
+      margin: 0;
+      border: 0;
+      box-shadow: none;
+      page-break-inside: avoid;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="checking-master-controls screen-only">
+  <div>
+    <h1 class="h3 mb-1">Pre-Shaded Checking Master &mdash; Set {{ set_code }}</h1>
+    <p class="text-muted mb-0">Previewing {{ paper_label }} portrait. Choose the same paper size in your browser print dialog.</p>
+  </div>
+  <div class="checking-master-actions">
+    <form class="checking-master-paper-form" method="get" action="{% url 'departmental_exams:faculty_checking_master_print' contribution_id release_id set_code %}">
+      <div>
+        <label class="form-label small mb-1" for="checking-master-paper">Paper size</label>
+        <select class="form-select form-select-sm" id="checking-master-paper" name="paper">
+          {% for option in paper_options %}<option value="{{ option.value }}"{% if option.value == paper_size %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <button class="btn btn-outline-primary btn-sm" type="submit">Apply</button>
+    </form>
+    <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:faculty_answer_key' contribution_id release_id set_code %}">Back to Answer Key</a>
+    <button class="btn btn-dark" type="button" onclick="window.print()">Print Pre-Shaded Master</button>
+  </div>
+</div>
+
+<article class="checking-master-page" aria-label="Set {{ set_code }} pre-shaded checking master" data-paper-size="{{ paper_size }}" style="--checking-master-width: {{ paper_sheet_width }}; --checking-master-height: {{ paper_sheet_height }};">
+  <header class="checking-master-header">
+    <div class="checking-master-brand">
+      <img class="checking-master-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA logo">
+      <h2 class="checking-master-school">{{ school_name }}</h2>
+    </div>
+    {% if school_address %}<div class="checking-master-address">{{ school_address }}</div>{% endif %}
+    <div class="checking-master-warning">FOR FACULTY CHECKING ONLY &mdash; CONFIDENTIAL</div>
+    <p class="checking-master-course">{{ course_code }} &mdash; {{ course_title }}</p>
+    <div class="checking-master-meta">
+      <span>{{ academic_year }}</span>
+      <span>{{ term }}</span>
+      <span>{{ exam_period }}</span>
+      <span>Revision R{{ revision_number }}</span>
+      <span>Final Item Count: {{ final_item_count }}</span>
+    </div>
+    <div class="checking-master-set">SET {{ set_code }}</div>
+    <hr class="checking-master-divider">
+  </header>
+
+  <section class="checking-master-body" aria-label="Checking master answers 1 to 75">
+    <div class="checking-master-columns">
+      {% for column in answer_columns %}
+        <div class="checking-master-column" data-master-column="{{ forloop.counter }}">
+          <div class="checking-master-column-header" aria-hidden="true">
+            <span></span><span>A</span><span>B</span><span>C</span><span>D</span>
+          </div>
+          {% for item in column %}
+            <div class="checking-master-item{% if item.is_unused %} is-unused{% endif %}" data-master-item data-position="{{ item.position }}" data-unused="{% if item.is_unused %}true{% else %}false{% endif %}" aria-label="Item {{ item.position }}{% if item.is_unused %} unused{% endif %}">
+              <span class="checking-master-number">{{ item.position }}</span>
+              {% for bubble in item.bubbles %}
+                <span class="checking-master-bubble{% if item.is_unused %} is-disabled{% elif bubble.is_shaded %} is-shaded{% endif %}" data-option="{{ bubble.code }}" data-shaded="{% if bubble.is_shaded %}true{% else %}false{% endif %}" aria-label="Item {{ item.position }} option {{ bubble.code }}{% if bubble.is_shaded %} shaded{% elif item.is_unused %} disabled{% endif %}"></span>
+              {% endfor %}
+              {% if item.is_unused %}<span class="checking-master-unused-label">UNUSED</span>{% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <footer class="checking-master-footer">FOR FACULTY CHECKING ONLY &mdash; CONFIDENTIAL &bull; {{ course_code }} &bull; SET {{ set_code }} &bull; Revision R{{ revision_number }} &bull; {{ final_item_count }} active items &bull; Accessed {{ accessed_at|date:"M j, Y g:i A" }} Asia/Manila</footer>
+</article>
+{% endblock %}
