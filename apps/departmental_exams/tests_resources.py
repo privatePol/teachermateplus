@@ -89,24 +89,54 @@ class DepartmentalExamResourcesTests(Stage5FixtureMixin, Stage4TestCase):
             html=False,
         )
         self.assertContains(response, "Open / View")
+        self.assertContains(response, "Letter, A4, or Legal paper options")
 
     def test_answer_sheet_renders_required_fields_columns_items_and_print_control(self):
         response = self.client.get(reverse("departmental_exams:answer_sheet"))
         content = response.content.decode()
+        sheet_content = content.split(
+            '<article class="answer-sheet-page"', 1
+        )[1].split("</article>", 1)[0]
 
         for required_text in (
             "NATIONAL COLLEGE OF BUSINESS AND ARTS",
-            "Campus:",
-            "Period:",
+            "Cubao",
+            "Fairview",
+            "Taytay",
+            "Prelim",
+            "Midterm",
+            "Final",
+            "BSA",
+            "BSBA",
+            "HM",
+            "IS/CS",
+            "EDUC",
+            "Stud Number:",
             "Date:",
-            "Student Number:",
-            "Name of Student:",
-            "Course:",
-            "Year:",
+            "Student Name:",
+            "Course/Subject:",
+            "REMINDERS:",
+            "EDUCATING GLOBALLY",
+            "COMPETITIVE FILIPINOS",
+            "Set:",
+            "Revision:",
+            "Pair Code:",
             "Print Answer Sheet",
         ):
             with self.subTest(required_text=required_text):
                 self.assertContains(response, required_text)
+
+        for removed_label in (
+            "Campus:",
+            "Period:",
+            "Program:",
+            "Student Number:",
+            "Name of Student:",
+            "Course:",
+            "Year:",
+        ):
+            with self.subTest(removed_label=removed_label):
+                self.assertNotIn(removed_label, sheet_content)
 
         self.assertEqual(content.count('class="answer-column"'), 3)
         self.assertEqual(content.count('class="answer-item"'), 75)
@@ -139,9 +169,65 @@ class DepartmentalExamResourcesTests(Stage5FixtureMixin, Stage4TestCase):
         )
         self.assertContains(response, "logos/ncba-logo.png")
         self.assertContains(response, 'class="answer-sheet-divider"', html=False)
+        self.assertContains(response, 'class="answer-watermark"', html=False)
+        self.assertEqual(
+            sheet_content.count("<span>NCBA</span>"),
+            75,
+        )
+        self.assertIn("width: 0.19in", content)
         self.assertIn("@page", content)
         self.assertIn("size: Letter portrait", content)
         self.assertIn("window.print()", content)
+
+    def test_answer_sheet_supports_only_allowlisted_paper_sizes(self):
+        route = reverse("departmental_exams:answer_sheet")
+        paper_sizes = (
+            ("letter", "Letter", "8.5in", "11in"),
+            ("a4", "A4", "210mm", "297mm"),
+            ("legal", "Legal", "8.5in", "14in"),
+        )
+
+        for paper_value, css_size, sheet_width, sheet_height in paper_sizes:
+            with self.subTest(paper_value=paper_value):
+                response = self.client.get(route, {"paper": paper_value})
+                content = response.content.decode()
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["paper_size"], paper_value)
+                self.assertEqual(response.context["paper_css_size"], css_size)
+                self.assertEqual(response.context["paper_sheet_width"], sheet_width)
+                self.assertEqual(response.context["paper_sheet_height"], sheet_height)
+                self.assertIn(f"size: {css_size} portrait", content)
+                self.assertContains(
+                    response,
+                    f'data-paper-size="{paper_value}"',
+                    html=False,
+                )
+
+        option_values = tuple(
+            option["value"] for option in response.context["paper_options"]
+        )
+        self.assertEqual(option_values, ("letter", "a4", "legal"))
+
+    def test_answer_sheet_missing_or_invalid_paper_falls_back_to_letter(self):
+        route = reverse("departmental_exams:answer_sheet")
+        invalid_paper = "tabloid};body{display:none"
+
+        for query in ({}, {"paper": invalid_paper}):
+            with self.subTest(query=query):
+                response = self.client.get(route, query)
+                content = response.content.decode()
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["paper_size"], "letter")
+                self.assertEqual(response.context["paper_css_size"], "Letter")
+                self.assertIn("size: Letter portrait", content)
+                self.assertContains(
+                    response,
+                    'data-paper-size="letter"',
+                    html=False,
+                )
+                self.assertNotIn(invalid_paper, content)
 
     def test_print_css_hides_faculty_banner_and_shared_notification_chrome(self):
         response = self.client.get(reverse("departmental_exams:answer_sheet"))

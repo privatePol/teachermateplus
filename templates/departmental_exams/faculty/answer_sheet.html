@@ -13,11 +13,27 @@
     gap: 1rem;
     margin-bottom: 1rem;
   }
+  .answer-sheet-control-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+  .answer-sheet-paper-form {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
   .answer-sheet-page {
     box-sizing: border-box;
-    width: min(100%, 8.5in);
+    display: flex;
+    flex-direction: column;
+    width: min(100%, var(--answer-sheet-width));
+    height: var(--answer-sheet-height);
     margin: 0 auto;
-    padding: 0.34in 0.42in;
+    padding: 0.24in 0.3in 0.2in;
+    overflow: hidden;
     border: 1px solid #cfd7d0;
     background: #fff;
     color: #111;
@@ -28,30 +44,56 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 0.16in;
-    margin-bottom: 0.12in;
+    gap: 0.14in;
+    margin-bottom: 0.06in;
   }
   .answer-sheet-logo {
-    width: 0.66in;
-    height: 0.66in;
+    width: 0.56in;
+    height: 0.56in;
     object-fit: contain;
   }
   .answer-sheet-school {
     margin: 0;
-    font-size: 15pt;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 16pt;
     font-weight: 800;
-    line-height: 1.1;
+    line-height: 1;
     text-align: center;
+  }
+  .answer-sheet-selection-groups {
+    display: grid;
+    gap: 0.035in;
+    margin: 0 auto 0.07in;
+    font-size: 9pt;
+  }
+  .answer-sheet-selection-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.22in;
+    min-height: 0.18in;
+  }
+  .answer-sheet-selection-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.055in;
+    white-space: nowrap;
+  }
+  .answer-sheet-checkbox {
+    box-sizing: border-box;
+    width: 0.14in;
+    height: 0.14in;
+    border: 1px solid #111;
   }
   .answer-sheet-fields {
     display: grid;
-    gap: 0.075in;
-    font-size: 10pt;
+    gap: 0.055in;
+    font-size: 9pt;
   }
   .answer-sheet-field-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0.22in;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    gap: 0.28in;
   }
   .answer-sheet-field-row.field-row-single {
     grid-template-columns: 1fr;
@@ -59,29 +101,61 @@
   .answer-sheet-field {
     display: flex;
     align-items: flex-end;
-    gap: 0.07in;
+    gap: 0.055in;
     min-width: 0;
     white-space: nowrap;
   }
   .answer-sheet-field-line {
     flex: 1;
     min-width: 0.7in;
-    height: 0.16in;
+    height: 0.14in;
     border-bottom: 1px solid #111;
   }
   .answer-sheet-divider {
-    margin: 0.13in 0 0.11in;
+    margin: 0.09in 0 0.06in;
     border: 0;
-    border-top: 2px solid #111;
+    border-top: 3px solid #111;
     opacity: 1;
   }
+  .answer-body {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .answer-watermark {
+    position: absolute;
+    inset: 0.18in 0.06in 0.08in;
+    z-index: 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    align-content: space-around;
+    justify-items: center;
+    overflow: hidden;
+    color: rgba(31, 80, 50, 0.075);
+    font-size: 7pt;
+    font-weight: 700;
+    pointer-events: none;
+  }
+  .answer-watermark span {
+    transform: rotate(-22deg);
+  }
   .answer-columns {
+    position: relative;
+    z-index: 1;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.21in;
+    gap: 0.12in;
+    height: 100%;
   }
   .answer-column {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-rows: 0.22in repeat(25, minmax(0.23in, 1fr));
     min-width: 0;
+  }
+  .answer-column + .answer-column {
+    padding-left: 0.12in;
+    border-left: 1px solid #444;
   }
   .answer-column-header,
   .answer-item {
@@ -91,14 +165,10 @@
     text-align: center;
   }
   .answer-column-header {
-    min-height: 0.25in;
-    border-bottom: 1px solid #222;
     font-size: 9pt;
     font-weight: 800;
   }
   .answer-item {
-    min-height: 0.285in;
-    border-bottom: 1px solid #d6d6d6;
     font-size: 8.5pt;
   }
   .answer-number {
@@ -108,11 +178,82 @@
   }
   .answer-bubble {
     display: inline-block;
-    width: 0.16in;
-    height: 0.16in;
+    box-sizing: border-box;
+    width: 0.19in;
+    height: 0.19in;
     margin: 0 auto;
-    border: 1.25px solid #111;
+    border: 1.35px solid #111;
     border-radius: 50%;
+  }
+  .answer-sheet-footer {
+    display: grid;
+    grid-template-columns: 1.08fr 0.98fr 1fr;
+    flex: 0 0 0.7in;
+    min-height: 0;
+    margin-top: 0.07in;
+    overflow: hidden;
+    border: 2px solid #111;
+    border-radius: 0.06in;
+    font-size: 6.6pt;
+    line-height: 1.18;
+  }
+  .answer-sheet-footer-zone {
+    min-width: 0;
+    padding: 0.055in 0.08in;
+  }
+  .answer-sheet-footer-zone + .answer-sheet-footer-zone {
+    border-left: 1px solid #111;
+  }
+  .answer-sheet-reminders-title {
+    display: block;
+    margin-bottom: 0.02in;
+    font-size: 7pt;
+  }
+  .answer-sheet-reminders ul {
+    margin: 0;
+    padding-left: 0.12in;
+  }
+  .answer-sheet-reminders li + li {
+    margin-top: 0.012in;
+  }
+  .answer-sheet-statement {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 9pt;
+    font-weight: 800;
+    line-height: 1.35;
+  }
+  .answer-sheet-matching-box {
+    height: 100%;
+    padding: 0.035in 0.055in;
+    border: 1px solid #555;
+    border-radius: 0.035in;
+    text-align: center;
+  }
+  .answer-sheet-matching-title {
+    margin-bottom: 0.035in;
+    font-size: 6.2pt;
+    font-weight: 800;
+  }
+  .answer-sheet-matching-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.04in 0.08in;
+    text-align: left;
+  }
+  .answer-sheet-matching-field {
+    display: flex;
+    gap: 0.035in;
+    white-space: nowrap;
+  }
+  .answer-sheet-matching-field.pair-code {
+    grid-column: 1 / -1;
+  }
+  .answer-sheet-matching-line {
+    flex: 1;
+    border-bottom: 1px solid #111;
   }
   @media (max-width: 767.98px) {
     .answer-sheet-controls {
@@ -124,7 +265,7 @@
     }
   }
   @page {
-    size: Letter portrait;
+    size: {{ paper_css_size }} portrait;
     margin: 0;
   }
   @media print {
@@ -152,10 +293,9 @@
       padding: 0 !important;
     }
     .answer-sheet-page {
-      width: 100%;
-      min-height: 11in;
+      width: var(--answer-sheet-width);
+      height: var(--answer-sheet-height);
       margin: 0;
-      padding: 0.3in 0.4in;
       border: 0;
       box-shadow: none;
       page-break-inside: avoid;
@@ -168,61 +308,111 @@
 <div class="answer-sheet-controls screen-only">
   <div>
     <h1 class="h3 mb-1">NCBA 75-Item Answer Sheet</h1>
-    <p class="text-muted mb-0">Use your browser print dialog for a clean Letter-portrait copy.</p>
+    <p class="text-muted mb-0">Previewing {{ paper_label }} portrait. Choose the same paper size in your browser print dialog.</p>
   </div>
-  <div class="d-flex flex-wrap gap-2">
+  <div class="answer-sheet-control-actions">
+    <form class="answer-sheet-paper-form" method="get" action="{% url 'departmental_exams:answer_sheet' %}">
+      <div>
+        <label class="form-label small mb-1" for="answer-sheet-paper">Paper size</label>
+        <select class="form-select form-select-sm" id="answer-sheet-paper" name="paper">
+          {% for option in paper_options %}<option value="{{ option.value }}"{% if option.value == paper_size %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <button class="btn btn-outline-primary btn-sm" type="submit">Apply</button>
+    </form>
     <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:resources' %}">Back to Resources</a>
     <button class="btn btn-primary" type="button" onclick="window.print()">Print Answer Sheet</button>
   </div>
 </div>
 
-<article class="answer-sheet-page" aria-label="NCBA 75-item answer sheet">
+<article class="answer-sheet-page" aria-label="NCBA 75-item answer sheet" data-paper-size="{{ paper_size }}" style="--answer-sheet-width: {{ paper_sheet_width }}; --answer-sheet-height: {{ paper_sheet_height }};">
   <header>
     <div class="answer-sheet-brand">
       <img class="answer-sheet-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA logo">
       <h2 class="answer-sheet-school">NATIONAL COLLEGE OF BUSINESS AND ARTS</h2>
     </div>
-    <div class="answer-sheet-fields">
-      <div class="answer-sheet-field-row field-row-single">
-        <div class="answer-sheet-field"><strong>Campus:</strong><span class="answer-sheet-field-line"></span></div>
+    <div class="answer-sheet-selection-groups">
+      <div class="answer-sheet-selection-row">
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>Cubao</span>
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>Fairview</span>
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>Taytay</span>
       </div>
+      <div class="answer-sheet-selection-row">
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>Prelim</span>
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>Midterm</span>
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>Final</span>
+      </div>
+      <div class="answer-sheet-selection-row">
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>BSA</span>
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>BSBA</span>
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>HM</span>
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>IS/CS</span>
+        <span class="answer-sheet-selection-option"><span class="answer-sheet-checkbox" aria-hidden="true"></span>EDUC</span>
+      </div>
+    </div>
+    <div class="answer-sheet-fields">
       <div class="answer-sheet-field-row">
-        <div class="answer-sheet-field"><strong>Period:</strong><span class="answer-sheet-field-line"></span></div>
+        <div class="answer-sheet-field"><strong>Stud Number:</strong><span class="answer-sheet-field-line"></span></div>
         <div class="answer-sheet-field"><strong>Date:</strong><span class="answer-sheet-field-line"></span></div>
       </div>
-      <div class="answer-sheet-field-row">
-        <div class="answer-sheet-field"><strong>Student Number:</strong><span class="answer-sheet-field-line"></span></div>
-        <div class="answer-sheet-field"><strong>Name of Student:</strong><span class="answer-sheet-field-line"></span></div>
+      <div class="answer-sheet-field-row field-row-single">
+        <div class="answer-sheet-field"><strong>Student Name:</strong><span class="answer-sheet-field-line"></span></div>
       </div>
-      <div class="answer-sheet-field-row">
-        <div class="answer-sheet-field"><strong>Course:</strong><span class="answer-sheet-field-line"></span></div>
-        <div class="answer-sheet-field"><strong>Year:</strong><span class="answer-sheet-field-line"></span></div>
+      <div class="answer-sheet-field-row field-row-single">
+        <div class="answer-sheet-field"><strong>Course/Subject:</strong><span class="answer-sheet-field-line"></span></div>
       </div>
     </div>
     <hr class="answer-sheet-divider">
   </header>
 
-  <section class="answer-columns" aria-label="Answers 1 to 75">
-    {% for column in answer_columns %}
-      <div class="answer-column" data-answer-column="{{ forloop.counter }}">
-        <div class="answer-column-header" aria-hidden="true">
-          <span></span>
-          <span data-option="A">A</span>
-          <span data-option="B">B</span>
-          <span data-option="C">C</span>
-          <span data-option="D">D</span>
-        </div>
-        {% for item_number in column %}
-          <div class="answer-item">
-            <span class="answer-number">{{ item_number }}</span>
-            <span class="answer-bubble" aria-label="Item {{ item_number }} option A"></span>
-            <span class="answer-bubble" aria-label="Item {{ item_number }} option B"></span>
-            <span class="answer-bubble" aria-label="Item {{ item_number }} option C"></span>
-            <span class="answer-bubble" aria-label="Item {{ item_number }} option D"></span>
+  <section class="answer-body" aria-label="Answers 1 to 75">
+    <div class="answer-watermark" aria-hidden="true">
+      {% for item_number in answer_columns.0 %}<span>NCBA</span><span>NCBA</span><span>NCBA</span>{% endfor %}
+    </div>
+    <div class="answer-columns">
+      {% for column in answer_columns %}
+        <div class="answer-column" data-answer-column="{{ forloop.counter }}">
+          <div class="answer-column-header" aria-hidden="true">
+            <span></span>
+            <span data-option="A">A</span>
+            <span data-option="B">B</span>
+            <span data-option="C">C</span>
+            <span data-option="D">D</span>
           </div>
-        {% endfor %}
-      </div>
-    {% endfor %}
+          {% for item_number in column %}
+            <div class="answer-item">
+              <span class="answer-number">{{ item_number }}</span>
+              <span class="answer-bubble" aria-label="Item {{ item_number }} option A"></span>
+              <span class="answer-bubble" aria-label="Item {{ item_number }} option B"></span>
+              <span class="answer-bubble" aria-label="Item {{ item_number }} option C"></span>
+              <span class="answer-bubble" aria-label="Item {{ item_number }} option D"></span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
   </section>
+
+  <footer class="answer-sheet-footer">
+    <div class="answer-sheet-footer-zone answer-sheet-reminders">
+      <strong class="answer-sheet-reminders-title">REMINDERS:</strong>
+      <ul>
+        <li>Use a dark pen or pencil only.</li>
+        <li>Fill in the circle completely.</li>
+        <li>Erase cleanly any answer you wish to change.</li>
+      </ul>
+    </div>
+    <div class="answer-sheet-footer-zone answer-sheet-statement">EDUCATING GLOBALLY<br>COMPETITIVE FILIPINOS</div>
+    <div class="answer-sheet-footer-zone">
+      <div class="answer-sheet-matching-box">
+        <div class="answer-sheet-matching-title">FOR MATCHING PURPOSES ONLY</div>
+        <div class="answer-sheet-matching-fields">
+          <div class="answer-sheet-matching-field">Set:<span class="answer-sheet-matching-line"></span></div>
+          <div class="answer-sheet-matching-field">Revision:<span class="answer-sheet-matching-line"></span></div>
+          <div class="answer-sheet-matching-field pair-code">Pair Code:<span class="answer-sheet-matching-line"></span></div>
+        </div>
+      </div>
+    </div>
+  </footer>
 </article>
 {% endblock %}

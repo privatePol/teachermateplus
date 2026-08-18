@@ -34,7 +34,10 @@ from .contribution_selectors import ContributionSelector
 from .contribution_services import QuestionMutationService
 from .csv_import import CSV_FILENAME, QuestionCSVImportService
 from .models import FacultyContribution, Question, QuestionImportBatch
-from .questionnaire_printing import FacultyQuestionnairePrintService
+from .questionnaire_printing import (
+    FacultyQuestionnairePrintService,
+    _questionnaire_paper_context,
+)
 
 
 def _scope(request):
@@ -259,7 +262,8 @@ def answer_sheet_view(request):
                 range(1, 26),
                 range(26, 51),
                 range(51, 76),
-            )
+            ),
+            **_questionnaire_paper_context(request.GET.get("paper")),
         },
     )
 
