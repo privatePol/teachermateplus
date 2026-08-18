@@ -1,6 +1,13 @@
 from django.urls import path
 
-from . import faculty_views, monitoring_views, reporting_views, stage6_views, views
+from . import (
+    faculty_views,
+    monitoring_views,
+    planning_readiness_views,
+    reporting_views,
+    stage6_views,
+    views,
+)
 
 app_name = "departmental_exams"
 
@@ -105,6 +112,16 @@ urlpatterns = [
         "admin-portal/departmental-exams/contributor-monitoring/print/",
         monitoring_views.contributor_monitoring_print_view,
         name="contributor_monitoring_print",
+    ),
+    path(
+        "admin-portal/departmental-exams/planning-readiness/",
+        planning_readiness_views.planning_readiness_view,
+        name="planning_readiness",
+    ),
+    path(
+        "admin-portal/departmental-exams/planning-readiness/print/",
+        planning_readiness_views.planning_readiness_print_view,
+        name="planning_readiness_print",
     ),
     path(
         "admin-portal/departmental-exams/courses/<int:cycle_course_id>/roster/<str:action>/",

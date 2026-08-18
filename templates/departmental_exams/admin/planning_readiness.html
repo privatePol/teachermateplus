@@ -1,0 +1,51 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Planning &amp; Readiness</li></ol></nav>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+  <div><h1 class="h3 mb-1">Planning &amp; Readiness</h1><p class="text-muted mb-0">Authorized active/open offering, enrollment, faculty-assignment, and account-readiness summary.</p></div>
+  {% if can_print %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:planning_readiness_print' %}{% if filter_query %}?{{ filter_query }}{% endif %}" target="_blank" rel="noopener">Print / Printer-Friendly View</a>{% endif %}
+</div>
+
+<form method="get" class="card shadow-sm mb-3" aria-label="Planning and Readiness filters">
+  <div class="card-body"><div class="row g-3 align-items-end">
+    <div class="col-md-4 col-xl-3"><label class="form-label" for="planning-year">Academic Year</label><select class="form-select" id="planning-year" name="academic_year">{% for year in academic_years %}<option value="{{ year.id }}"{% if selected_academic_year.id == year.id %} selected{% endif %}>{{ year.name }}</option>{% empty %}<option value="">No authorized academic years</option>{% endfor %}</select></div>
+    <div class="col-md-4 col-xl-3"><label class="form-label" for="planning-term">Term</label><select class="form-select" id="planning-term" name="term">{% for term in terms %}<option value="{{ term.id }}"{% if selected_term.id == term.id %} selected{% endif %}>{{ term.name }}</option>{% empty %}<option value="">No authorized terms</option>{% endfor %}</select></div>
+    <div class="col-md-4 col-xl-3"><label class="form-label" for="planning-department">Exam Department</label><select class="form-select" id="planning-department" name="exam_department"><option value="">All authorized</option>{% for department in departments %}<option value="{{ department.id }}"{% if selected_exam_department.id == department.id %} selected{% endif %}>{{ department.code }} &mdash; {{ department.name }}</option>{% endfor %}{% if unassigned_available %}<option value="unassigned"{% if selected_exam_department == 'unassigned' %} selected{% endif %}>UNASSIGNED EXAM DEPARTMENT</option>{% endif %}</select></div>
+    <div class="col-md-4 col-xl-3"><label class="form-label" for="planning-campus">Campus</label><select class="form-select" id="planning-campus" name="campus"><option value="">All authorized</option>{% for campus in campuses %}<option value="{{ campus.id }}"{% if selected_campus.id == campus.id %} selected{% endif %}>{{ campus.name }}</option>{% endfor %}</select></div>
+    <div class="col-md-4 col-xl-3"><label class="form-label" for="planning-assignment">Assignment Status</label><select class="form-select" id="planning-assignment" name="assignment_status"><option value="">All</option>{% for value, label in assignment_status_options %}<option value="{{ value }}"{% if selected_assignment_status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="col-md-4 col-xl-3"><label class="form-label" for="planning-faculty-active">Faculty Active</label><select class="form-select" id="planning-faculty-active" name="faculty_active"><option value="">All</option>{% for value, label in faculty_active_options %}<option value="{{ value }}"{% if selected_faculty_active == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="col-md-4 col-xl-3"><label class="form-label" for="planning-account">TMP Account Status</label><select class="form-select" id="planning-account" name="account_status"><option value="">All</option>{% for value, label in account_status_options %}<option value="{{ value }}"{% if selected_account_status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="col-md-4 col-xl-3 d-flex gap-2"><button class="btn btn-primary" type="submit">Apply</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:planning_readiness' %}">Clear</a></div>
+  </div></div>
+</form>
+
+<section class="row g-2 mb-4" aria-label="Overall planning totals">
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Exam Departments</div><div class="h4 mb-0">{{ overall.exam_departments }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Courses</div><div class="h4 mb-0">{{ overall.courses }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Sections / Offerings</div><div class="h4 mb-0">{{ overall.offerings }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Enrolled Students</div><div class="h4 mb-0">{{ overall.enrolled }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Faculty</div><div class="h4 mb-0">{{ overall.faculty }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Accepted</div><div class="h4 mb-0">{{ overall.accepted }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Not Accepted</div><div class="h4 mb-0">{{ overall.not_accepted }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">No Faculty</div><div class="h4 mb-0">{{ overall.no_faculty }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Inactive Faculty</div><div class="h4 mb-0">{{ overall.inactive_faculty }}</div></div></div></div>
+  <div class="col-6 col-md-4 col-xl"><div class="card h-100"><div class="card-body"><div class="small text-muted">Not Activated</div><div class="h4 mb-0">{{ overall.not_activated }}</div></div></div></div>
+</section>
+
+{% for department in groups %}
+<section class="card shadow-sm mb-4">
+  <div class="card-header bg-white"><h2 class="h4 mb-1">{{ department.label }}</h2><div class="small text-muted">Courses: {{ department.summary.courses }} &middot; Sections / Offerings: {{ department.summary.offerings }} &middot; Students: {{ department.summary.enrolled }} &middot; Faculty: {{ department.summary.faculty }} &middot; Accepted: {{ department.summary.accepted }} &middot; Not Accepted: {{ department.summary.not_accepted }} &middot; No Faculty Assigned: {{ department.summary.no_faculty }}</div></div>
+  <div class="card-body">
+  {% for course in department.courses %}
+    <article class="mb-4{% if not forloop.last %} border-bottom pb-4{% endif %}">
+      <h3 class="h5 mb-1">{{ course.course.code }} &mdash; {{ course.course.title }}</h3>
+      <p class="small text-muted">Exam Department: {{ department.label }}<br>Campuses: {{ course.campuses|join:", " }}<br>Sections: {{ course.summary.offerings }} | Students: {{ course.summary.enrolled }} | Faculty: {{ course.summary.faculty }} | Accepted: {{ course.summary.accepted }} | Not Accepted: {{ course.summary.not_accepted }} | No Faculty Assigned: {{ course.summary.no_faculty }} | Inactive Faculty: {{ course.summary.inactive_faculty }} | Not Activated Accounts: {{ course.summary.not_activated }}</p>
+      <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Faculty</th><th>Campus</th><th>Section</th><th>Enrolled</th><th>Assignment Status</th><th>Faculty Active</th><th>TMP Account Status</th></tr></thead><tbody>
+      {% for row in course.rows %}<tr><td>{{ row.faculty_name }}</td><td>{{ row.campus.name }}</td><td>{{ row.section.code }}</td><td>{{ row.enrolled }}</td><td>{{ row.assignment_status_label }}</td><td>{{ row.faculty_active_label }}</td><td>{{ row.account_status_label }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </article>
+  {% endfor %}
+  </div>
+</section>
+{% empty %}<div class="alert alert-info">No authorized active/open course offerings match the selected filters.</div>{% endfor %}
+{% endblock %}

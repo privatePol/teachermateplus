@@ -54,6 +54,10 @@ class AdminHelpGuideTests(TestCase):
             code="departmental_exams.configure",
             defaults={"module": "departmental_exams", "action": "configure"},
         )
+        self.planning_readiness_permission, _ = Permission.objects.get_or_create(
+            code="departmental_exams.view_planning_readiness",
+            defaults={"module": "departmental_exams", "action": "view_planning_readiness"},
+        )
 
     def _make_user(self, *, username, role_code, permissions):
         user = User.objects.create_user(
@@ -248,6 +252,35 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(full, "not AI judgment")
         self.assertContains(full, "default to Letter paper and also support A4 and Legal")
         self.assertContains(full, "Supported scientific notation")
+
+    def test_planning_readiness_help_is_read_only_and_view_permission_scoped(self):
+        user = self._make_user(
+            username="planning_readiness_guide",
+            role_code="PLANNING_READINESS_GUIDE",
+            permissions=[self.portal_permission, self.planning_readiness_permission],
+        )
+        sections = build_admin_help_sections(
+            user=user,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        topic = next(
+            topic
+            for section in sections
+            for topic in section["topics"]
+            if topic["code"] == "departmental-exam-planning-readiness"
+        )
+        topic_text = " ".join(topic["steps"])
+        self.assertIn("Course.exam_department", topic_text)
+        self.assertIn("both view_planning_readiness and print_planning_readiness", topic_text)
+        self.assertEqual(topic["permissions"], ["departmental_exams.view_planning_readiness"])
+        self.assertIn("read-only", topic["actions"][0]["editable"])
+
+        self.client.force_login(user)
+        response = self.client.get(reverse("admin_portal:guide"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Planning &amp; Readiness")
+        self.assertContains(response, "unassigned courses appear only with global department scope")
 
     def test_admin_guide_can_restore_legacy_template(self):
         user = User.objects.create_superuser(

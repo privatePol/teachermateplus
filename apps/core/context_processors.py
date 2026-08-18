@@ -63,6 +63,10 @@ _DEPARTMENTAL_EXAM_ACTIVE_ROUTES = {
             "departmental_exams:roster_action",
             "departmental_exams:blocked_contribution_resolve",
         },
+        "DE_EXAM_PLANNING_READINESS": {
+            "departmental_exams:planning_readiness",
+            "departmental_exams:planning_readiness_print",
+        },
         "DE_EXAM_QUESTIONNAIRE_PRINT_RELEASE": {
             "departmental_exams:questionnaire_print_release",
         },
@@ -201,6 +205,24 @@ def portal_menu(request):
                     node for node in group["items"] if node["item"].code != stage5_code
                 ]
             menu = [group for group in menu if group["items"]]
+        if portal == "ADMIN":
+            from apps.departmental_exams.planning_readiness import (
+                PlanningReadinessAuthorizationService,
+            )
+
+            planning_visible = PlanningReadinessAuthorizationService.scope_for_permission(
+                user=request.user,
+                tenant_id=scope.get("tenant_id"),
+                permission_code=PlanningReadinessAuthorizationService.VIEW_PERMISSION,
+            ).allows_anything()
+            if not planning_visible:
+                for group in menu:
+                    group["items"] = [
+                        node
+                        for node in group["items"]
+                        if node["item"].code != "DE_EXAM_PLANNING_READINESS"
+                    ]
+                menu = [group for group in menu if group["items"]]
     _mark_departmental_exam_active_menu(request, menu, portal)
     admin_academic_performance_insights_enabled = False
     faculty_quick_tour_enabled = False

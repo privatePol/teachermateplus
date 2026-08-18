@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Planning &amp; Readiness</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 1200px; padding: 22px; color: #111; background: #fff; font: 11px/1.35 Arial, sans-serif; }
+    h1, h2, h3, p { margin-top: 0; }
+    .institution { margin-bottom: 2px; text-align: center; font-size: 19px; }
+    h1 { margin-bottom: 5px; text-align: center; font-size: 24px; }
+    .meta { text-align: center; color: #333; }
+    .toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+    button { padding: 7px 15px; border: 1px solid #222; border-radius: 4px; background: #fff; font: inherit; }
+    .summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; margin: 15px 0; }
+    .metric { padding: 6px; border: 1px solid #777; }
+    .metric strong { display: block; font-size: 17px; }
+    .department { margin-top: 20px; }
+    .department-heading { border-bottom: 2px solid #222; break-after: avoid; page-break-after: avoid; }
+    .department-heading h2 { margin-bottom: 3px; font-size: 17px; }
+    .course { margin-top: 14px; break-inside: avoid-page; }
+    .course-heading { break-after: avoid; page-break-after: avoid; }
+    .course-heading h3 { margin-bottom: 3px; font-size: 14px; }
+    .course-meta, .department-meta { margin-bottom: 6px; color: #333; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { display: table-header-group; }
+    th, td { padding: 4px 5px; border: 1px solid #777; text-align: left; vertical-align: top; }
+    th { background: #eee; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    .empty { padding: 12px; border: 1px solid #777; }
+    @page { size: landscape; margin: 10mm; }
+    @media print { body { max-width: none; padding: 0; } .print-controls { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="toolbar print-controls"><button type="button" onclick="window.print()">Print</button></div>
+  <header>
+    <h2 class="institution">{{ tenant.name }}</h2>
+    <h1>Planning &amp; Readiness</h1>
+    <p class="meta">{% for label, value in selected_filter_labels %}<strong>{{ label }}:</strong> {{ value }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}</p>
+    <p class="meta"><strong>Generated/printed:</strong> {{ generated_at|date:"M j, Y g:i A T" }} (Asia/Manila)</p>
+  </header>
+  <section class="summary" aria-label="Overall planning totals">
+    <div class="metric"><strong>{{ overall.exam_departments }}</strong>Exam Departments</div><div class="metric"><strong>{{ overall.courses }}</strong>Courses</div><div class="metric"><strong>{{ overall.offerings }}</strong>Sections / Offerings</div><div class="metric"><strong>{{ overall.enrolled }}</strong>Enrolled Students</div><div class="metric"><strong>{{ overall.faculty }}</strong>Faculty</div>
+    <div class="metric"><strong>{{ overall.accepted }}</strong>Accepted</div><div class="metric"><strong>{{ overall.not_accepted }}</strong>Not Accepted</div><div class="metric"><strong>{{ overall.no_faculty }}</strong>No Faculty Assigned</div><div class="metric"><strong>{{ overall.inactive_faculty }}</strong>Inactive Faculty</div><div class="metric"><strong>{{ overall.not_activated }}</strong>Not Activated Accounts</div>
+  </section>
+  {% for department in groups %}
+  <section class="department">
+    <header class="department-heading"><h2>{{ department.label }}</h2><p class="department-meta">Courses: {{ department.summary.courses }} | Sections / Offerings: {{ department.summary.offerings }} | Students: {{ department.summary.enrolled }} | Faculty: {{ department.summary.faculty }} | Accepted: {{ department.summary.accepted }} | Not Accepted: {{ department.summary.not_accepted }} | No Faculty Assigned: {{ department.summary.no_faculty }}</p></header>
+    {% for course in department.courses %}
+    <article class="course">
+      <header class="course-heading"><h3>{{ course.course.code }} &mdash; {{ course.course.title }}</h3><p class="course-meta">Exam Department: {{ department.label }} | Campuses: {{ course.campuses|join:", " }} | Sections: {{ course.summary.offerings }} | Students: {{ course.summary.enrolled }} | Faculty: {{ course.summary.faculty }} | Accepted: {{ course.summary.accepted }} | Not Accepted: {{ course.summary.not_accepted }} | No Faculty Assigned: {{ course.summary.no_faculty }} | Inactive Faculty: {{ course.summary.inactive_faculty }} | Not Activated Accounts: {{ course.summary.not_activated }}</p></header>
+      <table><thead><tr><th>Faculty</th><th>Campus</th><th>Section</th><th>Enrolled</th><th>Assignment Status</th><th>Faculty Active</th><th>TMP Account Status</th></tr></thead><tbody>{% for row in course.rows %}<tr><td>{{ row.faculty_name }}</td><td>{{ row.campus.name }}</td><td>{{ row.section.code }}</td><td>{{ row.enrolled }}</td><td>{{ row.assignment_status_label }}</td><td>{{ row.faculty_active_label }}</td><td>{{ row.account_status_label }}</td></tr>{% endfor %}</tbody></table>
+    </article>
+    {% endfor %}
+  </section>
+  {% empty %}<p class="empty">No authorized active/open course offerings match the selected filters.</p>{% endfor %}
+</body>
+</html>
