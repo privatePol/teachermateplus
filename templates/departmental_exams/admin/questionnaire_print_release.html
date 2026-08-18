@@ -95,6 +95,42 @@ document.addEventListener("DOMContentLoaded", function () {
     {% else %}
       <div class="alert alert-light border mb-0">Faculty release controls require generation-management authority. Admin questionnaire printing and deterministic audit permissions do not create or modify Faculty releases.</div>
     {% endif %}
+
+    <hr class="my-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><div><span class="badge text-bg-danger mb-2">SEPARATE CONFIDENTIAL RELEASE</span><h3 class="h5 mb-1">Faculty Answer Key Release</h3><p class="small text-muted mb-0">This release has its own exact revision and Available From / Available Until window. It never reuses the Questionnaire window.</p></div><span class="badge {% if course.answer_key_window_status == 'Available now' %}text-bg-success{% elif course.answer_key_window_status == 'Scheduled' %}text-bg-info{% elif course.answer_key_revision_superseded %}text-bg-danger{% elif course.answer_key_window_status == 'Window ended' %}text-bg-secondary{% else %}text-bg-light text-dark border{% endif %}">{{ course.answer_key_window_status }}</span></div>
+    {% if course.can_manage_answer_key_release %}
+      {% if course.active_answer_key_release %}
+        <div class="row g-3 mb-3">
+          <div class="col-md-2"><div class="small text-muted">Released revision</div><strong>R{{ course.active_answer_key_release.generation_revision.revision_number }}</strong></div>
+          <div class="col-md-3"><div class="small text-muted">Available From</div><strong>{{ course.active_answer_key_release.available_from|localtime|date:"M j, Y g:i A" }}</strong></div>
+          <div class="col-md-3"><div class="small text-muted">Available Until</div><strong>{{ course.active_answer_key_release.available_until|localtime|date:"M j, Y g:i A" }}</strong></div>
+          <div class="col-md-4"><div class="small text-muted">Released By / At</div><strong>{{ course.active_answer_key_release.released_by.full_name|default:course.active_answer_key_release.released_by.username }}</strong><div class="small">{{ course.active_answer_key_release.released_at|localtime|date:"M j, Y g:i A" }}</div></div>
+        </div>
+        {% if course.answer_key_revision_superseded %}<div class="alert alert-danger py-2"><strong>The released revision was superseded.</strong> Faculty access is blocked immediately. The newer revision has no Answer Key release until an authorized Admin explicitly replaces this release.</div>{% endif %}
+        <form method="post" class="mb-4">{% csrf_token %}<input type="hidden" name="action" value="answer_key_revoke"><input type="hidden" name="release_id" value="{{ course.active_answer_key_release.id }}"><button class="btn btn-sm btn-outline-danger" type="submit">Revoke Answer Key Release</button></form>
+      {% else %}
+        <p class="text-muted">No Answer Key revision is currently released to Faculty.</p>
+      {% endif %}
+
+      <h4 class="h6">{% if course.active_answer_key_release %}Replace active Answer Key release{% else %}Release an exact Answer Key revision{% endif %}</h4>
+      <form method="post" novalidate>
+        {% csrf_token %}<input type="hidden" name="action" value="answer_key_release">{{ course.answer_key_release_form.cycle_course_id }}
+        {% if course.answer_key_release_form.non_field_errors %}<div class="alert alert-danger">{{ course.answer_key_release_form.non_field_errors }}</div>{% endif %}
+        <div class="row g-3 align-items-start">
+          <div class="col-lg-4"><label class="form-label" for="{{ course.answer_key_release_form.generation_revision.id_for_label }}">Exact current final revision</label>{{ course.answer_key_release_form.generation_revision }}{{ course.answer_key_release_form.generation_revision.errors }}<div class="form-text">Automatic requires the current Generated revision; Manual Review requires the current Locked revision.</div></div>
+          <div class="col-lg-3"><label class="form-label" for="{{ course.answer_key_release_form.available_from.id_for_label }}">Available From</label>{{ course.answer_key_release_form.available_from }}{{ course.answer_key_release_form.available_from.errors }}<div class="form-text">Asia/Manila</div></div>
+          <div class="col-lg-3"><label class="form-label" for="{{ course.answer_key_release_form.available_until.id_for_label }}">Available Until</label>{{ course.answer_key_release_form.available_until }}{{ course.answer_key_release_form.available_until.errors }}<div class="form-text">Asia/Manila</div></div>
+          <div class="col-lg-2 d-grid"><label class="form-label invisible" aria-hidden="true">Action</label><button class="btn btn-danger" type="submit">{% if course.active_answer_key_release %}Replace Release{% else %}Release Answer Key{% endif %}</button></div>
+        </div>
+        <div class="form-check mt-3">{{ course.answer_key_release_form.sessions_concluded }}<label class="form-check-label fw-semibold" for="{{ course.answer_key_release_form.sessions_concluded.id_for_label }}">{{ course.answer_key_release_form.sessions_concluded.label }}</label>{{ course.answer_key_release_form.sessions_concluded.errors }}</div>
+      </form>
+
+      {% if course.answer_key_release_history %}
+        <details class="mt-4"><summary class="fw-semibold">Answer Key release history ({{ course.answer_key_release_history|length }})</summary><div class="table-responsive mt-2"><table class="table table-sm align-middle"><thead><tr><th>Revision</th><th>Status</th><th>Window</th><th>Released</th><th>Revoked</th></tr></thead><tbody>{% for release in course.answer_key_release_history %}<tr><td>R{{ release.generation_revision.revision_number }}</td><td>{{ release.get_status_display }}</td><td>{{ release.available_from|localtime|date:"M j, Y g:i A" }} &ndash; {{ release.available_until|localtime|date:"M j, Y g:i A" }}</td><td>{{ release.released_by.full_name|default:release.released_by.username }}<br><span class="small text-muted">{{ release.released_at|localtime|date:"M j, Y g:i A" }}</span></td><td>{% if release.revoked_at %}{{ release.revoked_by.full_name|default:release.revoked_by.username }}<br><span class="small text-muted">{{ release.revoked_at|localtime|date:"M j, Y g:i A" }}</span>{% else %}&mdash;{% endif %}</td></tr>{% endfor %}</tbody></table></div></details>
+      {% endif %}
+    {% else %}
+      <div class="alert alert-light border mb-0">Answer Key release controls require the dedicated <code>departmental_exams.release_answer_keys</code> permission. Generation-management authority is not an alternate.</div>
+    {% endif %}
   </div>
 </section>
 {% endfor %}

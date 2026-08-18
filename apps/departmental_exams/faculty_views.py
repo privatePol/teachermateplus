@@ -21,6 +21,7 @@ from .contribution_authorization import (
     ContributionExpired,
     ContributionQuotaReached,
 )
+from .answer_key_release import FacultyAnswerKeyReleaseService
 from .contribution_forms import (
     ContributionSubmitForm,
     QuestionCSVConfirmForm,
@@ -286,11 +287,15 @@ def contribution_list_view(request):
     print_options = FacultyQuestionnairePrintService.available_options(
         contributions=contributions,
     )
+    answer_key_options = FacultyAnswerKeyReleaseService.available_options(
+        contributions=contributions,
+    )
     for contribution in contributions:
         contribution.progress_percent = round(
             (contribution.saved_question_count / contribution.quota_snapshot) * 100
         )
         contribution.questionnaire_print = print_options.get(contribution.id)
+        contribution.answer_key_release = answer_key_options.get(contribution.id)
     return render(
         request,
         "departmental_exams/faculty/contribution_list.html",
@@ -325,6 +330,57 @@ def questionnaire_print_view(
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
     return response
+
+
+def _answer_key_response(request, *, contribution_id, release_id, set_code, printable):
+    contribution = _owner_contribution(request, contribution_id)
+    context = FacultyAnswerKeyReleaseService.build_safe_context(
+        contribution=contribution,
+        release_id=release_id,
+        set_code=set_code,
+        actor=request.user,
+        printable=printable,
+        request=request,
+    )
+    response = render(
+        request,
+        (
+            "departmental_exams/faculty/answer_key_print.html"
+            if printable
+            else "departmental_exams/faculty/answer_key.html"
+        ),
+        context,
+    )
+    response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def answer_key_view(request, contribution_id, release_id, set_code):
+    return _answer_key_response(
+        request,
+        contribution_id=contribution_id,
+        release_id=release_id,
+        set_code=set_code,
+        printable=False,
+    )
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def answer_key_print_view(request, contribution_id, release_id, set_code):
+    return _answer_key_response(
+        request,
+        contribution_id=contribution_id,
+        release_id=release_id,
+        set_code=set_code,
+        printable=True,
+    )
 
 
 @_faculty_error_page

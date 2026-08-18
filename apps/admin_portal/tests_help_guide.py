@@ -193,10 +193,14 @@ class AdminHelpGuideTests(TestCase):
             code="departmental_exams.manage_exam_generation",
             defaults={"module": "departmental_exams", "action": "manage_exam_generation"},
         )
+        answer_key_release_permission, _ = Permission.objects.get_or_create(
+            code="departmental_exams.release_answer_keys",
+            defaults={"module": "departmental_exams", "action": "release_answer_keys"},
+        )
         user = self._make_user(
             username="departmental_exam_output_guide",
             role_code="DEPARTMENTAL_EXAM_OUTPUT_GUIDE",
-            permissions=[self.portal_permission, output_permission],
+            permissions=[self.portal_permission, output_permission, answer_key_release_permission],
         )
 
         sections = build_admin_help_sections(
@@ -222,6 +226,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertIn("Selected representative (EQ-###)", guide_text)
         self.assertIn("not AI judgment", guide_text)
         self.assertIn("legacy source snapshot", guide_text)
+        self.assertIn("all examination sessions", guide_text)
+        self.assertIn("newer revision requires its own explicit release", guide_text)
 
         self.client.force_login(user)
         practical = self.client.get(reverse("admin_portal:guide"))
@@ -232,6 +238,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(practical, "scientific notation")
         self.assertContains(practical, "Equivalent copy not selected (EQ-###)")
         self.assertContains(practical, "PASS, WARNING, or FAIL")
+        self.assertContains(practical, "Faculty Answer Key Release")
+        self.assertContains(practical, "all examination sessions for the grouped course have concluded")
         full = self.client.get(reverse("admin_portal:guide"), {"view": "full"})
         self.assertEqual(full.status_code, 200)
         self.assertContains(full, "Bulk Print Release")

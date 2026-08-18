@@ -645,6 +645,7 @@ class DepartmentalExamAuthorizationService:
     PRINT_GENERATED_PERMISSION = "departmental_exams.print_generated_exams"
     MANAGE_GENERATION_PERMISSION = "departmental_exams.manage_exam_generation"
     AUDIT_GENERATED_PERMISSION = "departmental_exams.audit_generated_exams"
+    RELEASE_ANSWER_KEYS_PERMISSION = "departmental_exams.release_answer_keys"
     ANY_AUTOMATIC_PERMISSION = "__any_automatic_permission__"
 
     @staticmethod
@@ -1373,6 +1374,31 @@ class DepartmentalExamAuthorizationService:
                 cls.MANAGE_GENERATION_PERMISSION,
             ),
         )
+
+    @classmethod
+    def require_answer_key_release(cls, *, user, cycle_course):
+        if (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            return cls.require_automatic_course_permission(
+                user=user,
+                cycle_course=cycle_course,
+                permissions=(cls.RELEASE_ANSWER_KEYS_PERMISSION,),
+            )
+        return cls.require_course_responsibility(
+            user=user,
+            cycle_course=cycle_course,
+            permission=cls.RELEASE_ANSWER_KEYS_PERMISSION,
+        )
+
+    @classmethod
+    def can_release_answer_keys(cls, *, user, cycle_course):
+        try:
+            cls.require_answer_key_release(user=user, cycle_course=cycle_course)
+        except PermissionDenied:
+            return False
+        return True
 
     @classmethod
     def require_automatic_inclusion_management(cls, *, user, cycle_course):

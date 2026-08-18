@@ -31,6 +31,16 @@ urlpatterns = [
         name="questionnaire_print",
     ),
     path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/answer-keys/<int:release_id>/set-<str:set_code>/",
+        faculty_views.answer_key_view,
+        name="faculty_answer_key",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/answer-keys/<int:release_id>/set-<str:set_code>/print/",
+        faculty_views.answer_key_print_view,
+        name="faculty_answer_key_print",
+    ),
+    path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/questions/add/",
         faculty_views.question_create_view,
         name="question_create",

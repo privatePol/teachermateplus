@@ -549,6 +549,79 @@ class BulkQuestionnairePrintReleaseForm(forms.Form):
         return cleaned
 
 
+class AnswerKeyReleaseForm(forms.Form):
+    CONFIRMATION_TEXT = (
+        "Confirm that all examination sessions for this course have concluded "
+        "before releasing the Answer Key to faculty."
+    )
+
+    cycle_course_id = forms.IntegerField(widget=forms.HiddenInput)
+    generation_revision = forms.ModelChoiceField(
+        queryset=ExamGenerationRevision.objects.none(),
+        empty_label=None,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    available_from = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+    )
+    available_until = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+    )
+    sessions_concluded = forms.BooleanField(
+        required=True,
+        label=CONFIRMATION_TEXT,
+        error_messages={
+            "required": "Confirm that all examination sessions have concluded."
+        },
+    )
+
+    def __init__(self, *args, cycle_course=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if cycle_course is not None:
+            queryset = ExamGenerationRevision.objects.filter(
+                cycle_course=cycle_course,
+                current_marker=1,
+            )
+            if (
+                cycle_course.cycle.processing_mode
+                == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            ):
+                queryset = queryset.filter(status=ExamGenerationRevision.Status.GENERATED)
+            else:
+                queryset = queryset.filter(status=ExamGenerationRevision.Status.LOCKED)
+            self.fields["generation_revision"].queryset = queryset.order_by(
+                "-revision_number"
+            )
+            self.fields["generation_revision"].label_from_instance = (
+                lambda revision: (
+                    f"R{revision.revision_number} — {revision.get_status_display()}"
+                )
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+        available_from = cleaned.get("available_from")
+        available_until = cleaned.get("available_until")
+        if (
+            available_from
+            and available_until
+            and available_until <= available_from
+        ):
+            self.add_error(
+                "available_until",
+                "Available Until must be later than Available From.",
+            )
+        return cleaned
+
+
 class _ReasonedConfigurationActionForm(_ConfigurationActionForm):
     reason = forms.CharField(min_length=10, max_length=500, widget=forms.Textarea(attrs={"rows": 3}))
 

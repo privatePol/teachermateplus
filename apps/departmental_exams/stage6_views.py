@@ -27,6 +27,7 @@ from .automatic_workflow import (
     AutomaticContributionReopenService,
     AutomaticGenerationSummaryService,
 )
+from .answer_key_release import AnswerKeyReleaseService
 from .generation_readiness import (
     Stage6ReadinessService,
     eligible_submitted_question_pool,
@@ -37,6 +38,7 @@ from .generation_services import (
     GenerationLimitExceeded,
 )
 from .models import (
+    AnswerKeyRelease,
     AutomaticGenerationAuditRun,
     CourseExamConfiguration,
     CycleCourse,
@@ -50,6 +52,7 @@ from .models import (
     QuestionnairePrintRelease,
 )
 from .forms import (
+    AnswerKeyReleaseForm,
     AutomaticContributionReopenForm,
     BulkQuestionnairePrintReleaseForm,
     QuestionnairePrintReleaseForm,
@@ -860,7 +863,6 @@ def questionnaire_print_release_view(request):
     courses = list(
         CycleCourse.objects.filter(
             cycle__tenant_id=tenant_id,
-            cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
             inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
             generation_revisions__isnull=False,
         )
@@ -869,6 +871,8 @@ def questionnaire_print_release_view(request):
             "cycle__academic_year",
             "cycle__term",
             "course",
+            "responsible_department",
+            "reviewer",
         )
         .prefetch_related(
             Prefetch(
@@ -891,6 +895,14 @@ def questionnaire_print_release_view(request):
             Prefetch(
                 "questionnaire_print_releases",
                 queryset=QuestionnairePrintRelease.objects.select_related(
+                    "generation_revision",
+                    "released_by",
+                    "revoked_by",
+                ).order_by("-released_at", "-id"),
+            ),
+            Prefetch(
+                "answer_key_releases",
+                queryset=AnswerKeyRelease.objects.select_related(
                     "generation_revision",
                     "released_by",
                     "revoked_by",
@@ -926,6 +938,13 @@ def questionnaire_print_release_view(request):
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
         ),
     )
+    answer_key_release_map = {
+        course.id: DepartmentalExamAuthorizationService.can_release_answer_keys(
+            user=request.user,
+            cycle_course=course,
+        )
+        for course in courses
+    }
     courses = [
         course
         for course in courses
@@ -936,6 +955,7 @@ def questionnaire_print_release_view(request):
             in print_map[course.id]
             or DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION
             in audit_map[course.id]
+            or answer_key_release_map[course.id]
         )
     ]
     if not courses:
@@ -983,6 +1003,8 @@ def questionnaire_print_release_view(request):
     )
     bound_course_id = None
     bound_form = None
+    bound_answer_key_course_id = None
+    bound_answer_key_form = None
     status = 200
     now = timezone.now()
     local_now = timezone.localtime(now).replace(second=0, microsecond=0)
@@ -1108,6 +1130,81 @@ def questionnaire_print_release_view(request):
                     return redirect("departmental_exams:questionnaire_print_release")
             else:
                 status = 400
+        elif action == "answer_key_release":
+            try:
+                bound_answer_key_course_id = int(
+                    request.POST.get("cycle_course_id") or 0
+                )
+            except (TypeError, ValueError):
+                bound_answer_key_course_id = 0
+            course = course_by_id.get(bound_answer_key_course_id)
+            if course is None or not answer_key_release_map.get(course.id):
+                raise PermissionDenied(
+                    "The selected course examination is outside your Answer Key release authority."
+                )
+            bound_answer_key_form = AnswerKeyReleaseForm(
+                request.POST,
+                cycle_course=course,
+                auto_id=f"id_answer_key_course_{course.id}_%s",
+            )
+            if bound_answer_key_form.is_valid():
+                try:
+                    AnswerKeyReleaseService.release(
+                        cycle_course_id=course.id,
+                        revision_id=bound_answer_key_form.cleaned_data[
+                            "generation_revision"
+                        ].id,
+                        tenant_id=tenant_id,
+                        actor=request.user,
+                        available_from=bound_answer_key_form.cleaned_data[
+                            "available_from"
+                        ],
+                        available_until=bound_answer_key_form.cleaned_data[
+                            "available_until"
+                        ],
+                        attestation_confirmed=bound_answer_key_form.cleaned_data[
+                            "sessions_concluded"
+                        ],
+                        request=request,
+                    )
+                except ValidationError as exc:
+                    if hasattr(exc, "message_dict"):
+                        for field, errors in exc.message_dict.items():
+                            target = (
+                                field
+                                if field in bound_answer_key_form.fields
+                                else None
+                            )
+                            for error in errors:
+                                bound_answer_key_form.add_error(target, error)
+                    else:
+                        bound_answer_key_form.add_error(None, exc)
+                    status = 400
+                else:
+                    messages.success(
+                        request,
+                        "Exact Answer Key revision released to currently assigned faculty.",
+                    )
+                    return redirect("departmental_exams:questionnaire_print_release")
+            else:
+                status = 400
+        elif action == "answer_key_revoke":
+            try:
+                AnswerKeyReleaseService.revoke(
+                    release_id=int(request.POST.get("release_id") or 0),
+                    tenant_id=tenant_id,
+                    actor=request.user,
+                    request=request,
+                )
+            except (ValueError, ValidationError) as exc:
+                messages.error(
+                    request,
+                    " ".join(getattr(exc, "messages", (str(exc),))),
+                )
+                status = 400
+            else:
+                messages.success(request, "Faculty Answer Key release revoked.")
+                return redirect("departmental_exams:questionnaire_print_release")
         else:
             raise Http404("Unknown questionnaire print release action.")
 
@@ -1116,6 +1213,7 @@ def questionnaire_print_release_view(request):
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
             in management_map[course.id]
         )
+        course.can_manage_answer_key_release = answer_key_release_map[course.id]
         course.can_print_questionnaire = bool(
             course.can_manage_release
             or DepartmentalExamAuthorizationService.PRINT_GENERATED_PERMISSION
@@ -1168,6 +1266,93 @@ def questionnaire_print_release_view(request):
                 for revision in course.available_revisions
             )
         )
+        course.answer_key_release_history = list(course.answer_key_releases.all())
+        course.active_answer_key_release = next(
+            (
+                release
+                for release in course.answer_key_release_history
+                if release.status == AnswerKeyRelease.Status.ACTIVE
+                and release.active_marker == 1
+            ),
+            None,
+        )
+        active_answer_key = course.active_answer_key_release
+        course.answer_key_revision_superseded = bool(
+            active_answer_key
+            and not (
+                active_answer_key.generation_revision.current_marker == 1
+                and (
+                    (
+                        course.cycle.processing_mode
+                        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                        and active_answer_key.generation_revision.status
+                        == ExamGenerationRevision.Status.GENERATED
+                    )
+                    or (
+                        course.cycle.processing_mode
+                        == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+                        and active_answer_key.generation_revision.status
+                        == ExamGenerationRevision.Status.LOCKED
+                    )
+                )
+            )
+        )
+        if active_answer_key is None:
+            course.answer_key_window_status = "Not released"
+        elif course.answer_key_revision_superseded:
+            course.answer_key_window_status = "Superseded — blocked"
+        elif now < active_answer_key.available_from:
+            course.answer_key_window_status = "Scheduled"
+        elif now > active_answer_key.available_until:
+            course.answer_key_window_status = "Window ended"
+        else:
+            course.answer_key_window_status = "Available now"
+
+        if not course.can_manage_answer_key_release:
+            course.answer_key_release_form = None
+        elif (
+            bound_answer_key_form is not None
+            and course.id == bound_answer_key_course_id
+        ):
+            course.answer_key_release_form = bound_answer_key_form
+        else:
+            eligible_revisions = [
+                revision
+                for revision in course.available_revisions
+                if revision.current_marker == 1
+                and (
+                    (
+                        course.cycle.processing_mode
+                        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                        and revision.status == ExamGenerationRevision.Status.GENERATED
+                    )
+                    or (
+                        course.cycle.processing_mode
+                        == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+                        and revision.status == ExamGenerationRevision.Status.LOCKED
+                    )
+                )
+            ]
+            course.answer_key_release_form = AnswerKeyReleaseForm(
+                cycle_course=course,
+                auto_id=f"id_answer_key_course_{course.id}_%s",
+                initial={
+                    "cycle_course_id": course.id,
+                    "generation_revision": (
+                        eligible_revisions[0] if eligible_revisions else None
+                    ),
+                    "available_from": (
+                        active_answer_key.available_from
+                        if active_answer_key
+                        else local_now
+                    ),
+                    "available_until": (
+                        active_answer_key.available_until
+                        if active_answer_key
+                        else local_now + timezone.timedelta(days=1)
+                    ),
+                },
+            )
         if not course.can_manage_release:
             course.release_form = None
         elif bound_form is not None and course.id == bound_course_id:

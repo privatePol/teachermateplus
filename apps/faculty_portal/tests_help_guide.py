@@ -84,8 +84,11 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "scientific notation renders before the print dialog")
         self.assertContains(
             response,
-            "Faculty do not receive Answer Keys, Question Selection Audit reports, or Automatic Generation Audit reports.",
+            "Questionnaire printing never grants Answer Key, Question Selection Audit, or Automatic Generation Audit access.",
         )
+        self.assertContains(response, "View or Print Answer Key")
+        self.assertContains(response, "Answer Key Available From/Until window")
+        self.assertContains(response, "superseded, expired, or revoked release is denied")
         self.assertContains(response, "portal-img/semester_workflow.png")
         self.assertContains(response, "imahe/faculty_workflow.png")
         self.assertNotContains(response, "Top Faculty Tasks")

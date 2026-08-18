@@ -1386,6 +1386,173 @@ class QuestionnairePrintRelease(TimeStampedModel):
         raise ValidationError("Questionnaire print releases are auditable historical records.")
 
 
+class AnswerKeyRelease(TimeStampedModel):
+    _IMMUTABLE_FIELDS = (
+        "cycle_course_id",
+        "generation_revision_id",
+        "available_from",
+        "available_until",
+        "released_by_id",
+        "released_at",
+        "attestation_version",
+    )
+
+    class Status(models.TextChoices):
+        ACTIVE = "ACTIVE", "Active"
+        REVOKED = "REVOKED", "Revoked"
+
+    cycle_course = models.ForeignKey(
+        CycleCourse,
+        on_delete=models.PROTECT,
+        related_name="answer_key_releases",
+    )
+    generation_revision = models.ForeignKey(
+        ExamGenerationRevision,
+        on_delete=models.PROTECT,
+        related_name="answer_key_releases",
+    )
+    available_from = models.DateTimeField()
+    available_until = models.DateTimeField()
+    released_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="released_departmental_exam_answer_keys",
+    )
+    released_at = models.DateTimeField(default=timezone.now)
+    attestation_version = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=8,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+    # MariaDB permits multiple NULL values in this scoped uniqueness rule.
+    # The sole active row uses 1; historical rows use NULL.
+    active_marker = models.PositiveSmallIntegerField(null=True, blank=True, default=1)
+    revoked_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="revoked_departmental_exam_answer_key_releases",
+        null=True,
+        blank=True,
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "departmental_exam_answer_key_releases"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cycle_course", "active_marker"],
+                name="uq_de_key_release_active",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(available_until__gt=models.F("available_from")),
+                name="ck_de_key_release_window",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(attestation_version=""),
+                name="ck_de_key_attestation",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status="ACTIVE",
+                        active_marker=1,
+                        revoked_by__isnull=True,
+                        revoked_at__isnull=True,
+                    )
+                    | models.Q(
+                        status="REVOKED",
+                        active_marker__isnull=True,
+                        revoked_by__isnull=False,
+                        revoked_at__isnull=False,
+                    )
+                ),
+                name="ck_de_key_release_status",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=[
+                    "cycle_course",
+                    "status",
+                    "available_from",
+                    "available_until",
+                ],
+                name="idx_de_key_release_window",
+            ),
+            models.Index(
+                fields=["generation_revision", "status"],
+                name="idx_de_key_release_rev",
+            ),
+        ]
+
+    def clean(self):
+        if (
+            self.available_from
+            and self.available_until
+            and self.available_until <= self.available_from
+        ):
+            raise ValidationError(
+                {"available_until": "Available Until must be later than Available From."}
+            )
+        if not (self.attestation_version or "").strip():
+            raise ValidationError(
+                {"attestation_version": "Release attestation is required."}
+            )
+        if (
+            self.cycle_course_id
+            and self.generation_revision_id
+            and self.generation_revision.cycle_course_id != self.cycle_course_id
+        ):
+            raise ValidationError(
+                {"generation_revision": "Released revision must belong to the selected course examination."}
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "status",
+                "active_marker",
+                "revoked_by_id",
+                "revoked_at",
+                *self._IMMUTABLE_FIELDS,
+            ).first()
+            if previous is not None:
+                if any(
+                    previous[field] != getattr(self, field)
+                    for field in self._IMMUTABLE_FIELDS
+                ):
+                    raise ValidationError("Answer Key release details are immutable.")
+                before_state = (previous["status"], previous["active_marker"])
+                after_state = (self.status, self.active_marker)
+                allowed = {
+                    (self.Status.ACTIVE, 1): {
+                        (self.Status.ACTIVE, 1),
+                        (self.Status.REVOKED, None),
+                    },
+                    (self.Status.REVOKED, None): {(self.Status.REVOKED, None)},
+                }
+                if after_state not in allowed.get(before_state, set()):
+                    raise ValidationError("Answer Key release lifecycle transition is invalid.")
+                revoked_before = (
+                    previous["revoked_by_id"],
+                    previous["revoked_at"],
+                )
+                revoked_after = (self.revoked_by_id, self.revoked_at)
+                if before_state == (self.Status.ACTIVE, 1) and after_state == (
+                    self.Status.REVOKED,
+                    None,
+                ):
+                    if not all(revoked_after):
+                        raise ValidationError("Answer Key revocation metadata is incomplete.")
+                elif revoked_before != revoked_after:
+                    raise ValidationError("Answer Key revocation metadata is immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Answer Key releases are auditable historical records.")
+
+
 class GeneratedExamSet(TimeStampedModel):
     class SetCode(models.TextChoices):
         A = "A", "Set A"
