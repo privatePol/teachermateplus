@@ -151,7 +151,7 @@ ADMIN_HELP_SECTIONS = [
                     "Open Students -> Students and confirm that the student record exists.",
                     "Open Enrollment -> Enrollment and link the student to the correct course offering.",
                     "Open Academics -> Faculty Assignments and assign the correct faculty member.",
-                    "Confirm that the assignment is active and wait for the faculty member to accept it.",
+                    "Confirm that the assignment is active, then obtain faculty acceptance or authorized administrative confirmation.",
                 ],
                 "check_first": [
                     "Confirm the student or faculty account belongs to the selected campus.",
@@ -185,7 +185,7 @@ ADMIN_HELP_SECTIONS = [
                     },
                 ],
                 "avoid": "Do not treat a pending faculty assignment as an accepted, reviewable gradebook.",
-                "next_step": "Ask faculty to review and accept their assigned classes.",
+                "next_step": "Ask faculty to review and accept their assigned classes, or use the authorized administrative confirmation process when institutionally appropriate.",
             },
         ],
     },

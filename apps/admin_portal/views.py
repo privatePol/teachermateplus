@@ -9132,12 +9132,12 @@ def faculty_assignment_list_view(request):
             {
                 "label": "Accepted",
                 "value": accepted_count,
-                "meta": f"{acceptance_rate:.1f}% of assigned offerings acknowledged.",
+                "meta": f"{acceptance_rate:.1f}% accepted or administratively confirmed.",
             },
             {
                 "label": "Pending Acceptance",
                 "value": pending_acceptance_count,
-                "meta": "Assignments still waiting for faculty acknowledgment.",
+                "meta": "Assignments awaiting faculty acceptance or authorized administrative confirmation.",
             },
             {
                 "label": "Due Within 24 Hours",
@@ -10094,7 +10094,7 @@ def faculty_assignment_dashboard_view(request):
         {
             "label": "Accepted",
             "value": overall_counts["accepted_count"],
-            "meta": f"{round((overall_counts['accepted_count'] / overall_counts['assigned_count']) * 100, 1) if overall_counts['assigned_count'] else 0:.1f}% acknowledged.",
+            "meta": f"{round((overall_counts['accepted_count'] / overall_counts['assigned_count']) * 100, 1) if overall_counts['assigned_count'] else 0:.1f}% accepted or administratively confirmed.",
         },
         {
             "label": "Pending Acceptance",

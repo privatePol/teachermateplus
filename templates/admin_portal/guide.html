@@ -1287,7 +1287,7 @@
     <div class="guide-section-head">
       <div class="guide-section-title">
         <h3>10. Faculty Assignment Acceptance</h3>
-        <p>Make sure faculty accept their assigned classes before grading starts.</p>
+        <p>Make sure assigned classes are accepted by faculty or administratively confirmed by an authorized administrator before grading starts.</p>
       </div>
       <div class="guide-header-image">
         <img src="{% get_media_prefix %}portal-img/2.png" alt="Faculty assignment screenshot">
@@ -1298,9 +1298,10 @@
         <div>
           <div class="guide-subhead">Workflow Summary</div>
           <ul class="guide-list">
-            <li>New assignments stay pending until the faculty member responds.</li>
+            <li>New assignments stay pending until the faculty responds or an authorized administrator confirms the assignment.</li>
             <li>Pending assignments block grading and class-list work.</li>
             <li>Faculty may accept, ask for clarification, or decline with a note.</li>
+            <li>Authorized administrative confirmation may place an assignment in Accepted without impersonating the faculty.</li>
             <li>Pending assignments have a response deadline.</li>
             <li>Expired assignments must be refreshed by admin.</li>
           </ul>
@@ -1323,12 +1324,12 @@
           <ul class="guide-list">
             <li>Do not treat a class as ready for grading until the assignment is accepted.</li>
             <li>Use assignment instructions for schedule notes, room clarifications, or load-specific guidance.</li>
-            <li>Reissuing or changing the load should reset the acknowledgment window so the faculty confirms the latest version.</li>
+            <li>Reissuing or changing the load should reset the response window so the latest version is accepted or administratively confirmed.</li>
             <li>Follow up quickly on items marked <strong>Due Within 24 Hours</strong>.</li>
             <li>Schedule <code>manage.py process_faculty_assignment_reminders</code> so reminders and expirations run automatically.</li>
           </ul>
           <div class="guide-note">
-            This workflow confirms the teaching load before faculty can start grading.
+            This workflow confirms the teaching load through faculty acceptance or authorized administrative confirmation before class work begins.
           </div>
         </div>
       </div>
@@ -1375,7 +1376,7 @@
           <div class="guide-subhead">Faculty Grade Book Monitoring</div>
           <ol class="guide-steps">
             <li>Open Faculty Assignments and select the faculty member within your allowed tenant, campus, and department scope.</li>
-            <li>Use the acceptance status and metric cards to confirm whether the faculty member already acknowledged the assigned load.</li>
+            <li>Use the acceptance status and metric cards to confirm whether the assigned load was accepted by faculty or administratively confirmed.</li>
             <li>Watch the <strong>Due Within 24 Hours</strong> and <strong>Expired</strong> metric cards so pending loads do not stall class opening and grading start-up.</li>
             <li>Review any assignment instructions, clarification requests, or decline notes directly on the assigned-offerings table before changing the load.</li>
             <li>Click <strong>Open Grade Book</strong>, then choose the accepted class and grading period to review. Pending, declined, clarification, or expired loads remain in Faculty Assignments but are not listed as reviewable gradebooks.</li>
