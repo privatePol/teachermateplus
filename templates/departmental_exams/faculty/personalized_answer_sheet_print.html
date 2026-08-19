@@ -1,0 +1,112 @@
+{% extends "faculty_portal/base.html" %}
+{% load static %}
+{% block title %}{{ course_code }} {{ section }} Personalized Answer Sheets | TeacherMate+{% endblock %}
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .personalized-controls { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:1rem; }
+  .personalized-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:flex-end; gap:.5rem; }
+  .personalized-paper-form { display:flex; align-items:flex-end; gap:.5rem; }
+  .personalized-sheet {
+    box-sizing:border-box; display:flex; flex-direction:column;
+    width:min(100%, var(--sheet-width)); height:var(--sheet-height);
+    margin:0 auto 1rem; padding:.24in .3in .2in; overflow:hidden;
+    border:1px solid #cfd7d0; background:#fff; color:#111;
+    box-shadow:0 .5rem 1.5rem rgba(18,62,38,.09);
+    font-family:Arial,Helvetica,sans-serif;
+  }
+  .sheet-brand { display:flex; justify-content:center; align-items:center; gap:.14in; margin-bottom:.04in; }
+  .sheet-logo { width:.56in; height:.56in; object-fit:contain; }
+  .sheet-school { margin:0; font-family:Georgia,"Times New Roman",serif; font-size:16pt; font-weight:800; line-height:1; text-align:center; }
+  .sheet-selections { display:grid; gap:.025in; margin:0 auto .035in; font-size:8pt; }
+  .selection-row { display:flex; justify-content:center; align-items:center; gap:.2in; min-height:.16in; }
+  .selection-option { display:inline-flex; align-items:center; gap:.045in; white-space:nowrap; }
+  .selection-box { box-sizing:border-box; width:.13in; height:.13in; border:1px solid #111; }
+  .selection-box.checked { background:#111; box-shadow:inset 0 0 0 2px #fff; }
+  .sheet-set { margin:.015in 0 .025in; font-size:20pt; font-weight:900; line-height:1; text-align:center; letter-spacing:.06em; }
+  .sheet-fields { display:grid; gap:.045in; font-size:8.5pt; }
+  .field-row { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr); gap:.28in; }
+  .field-row.single { grid-template-columns:1fr; }
+  .field { display:flex; align-items:flex-end; gap:.055in; min-width:0; white-space:nowrap; }
+  .field-value { flex:1; min-width:.7in; min-height:.14in; padding:0 .025in .01in; border-bottom:1px solid #111; font-weight:700; overflow:hidden; text-overflow:ellipsis; }
+  .field-value.blank { font-weight:400; }
+  .sheet-divider { margin:.07in 0 .045in; border:0; border-top:3px solid #111; opacity:1; }
+  .answer-body { position:relative; flex:1 1 auto; min-height:0; }
+  .answer-watermark { position:absolute; inset:.16in .06in .06in; z-index:0; display:grid; grid-template-columns:repeat(5,1fr); align-content:space-around; justify-items:center; overflow:hidden; color:rgba(31,80,50,.075); font-size:7pt; font-weight:700; pointer-events:none; }
+  .answer-watermark span { transform:rotate(-22deg); }
+  .answer-columns { position:relative; z-index:1; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.12in; height:100%; }
+  .answer-column { box-sizing:border-box; display:grid; grid-template-rows:.22in repeat(25,minmax(.23in,1fr)); min-width:0; }
+  .answer-column + .answer-column { padding-left:.12in; border-left:1px solid #444; }
+  .answer-column-header,.answer-item { display:grid; grid-template-columns:.3in repeat(4,1fr); align-items:center; text-align:center; }
+  .answer-column-header { font-size:9pt; font-weight:800; }
+  .answer-item { font-size:8.5pt; }
+  .answer-item.unused { grid-template-columns:.3in 1fr; color:#777; background:rgba(90,90,90,.08); }
+  .answer-number { padding-right:.04in; text-align:right; font-weight:700; }
+  .unused-label { font-size:6.5pt; font-weight:800; letter-spacing:.08em; }
+  .answer-bubble { display:inline-block; box-sizing:border-box; width:.19in; height:.19in; margin:0 auto; border:1.35px solid #111; border-radius:50%; }
+  .sheet-footer { display:grid; grid-template-columns:1.08fr .98fr 1fr; flex:0 0 .7in; min-height:0; margin-top:.055in; overflow:hidden; border:2px solid #111; border-radius:.06in; font-size:6.6pt; line-height:1.18; }
+  .footer-zone { min-width:0; padding:.055in .08in; }
+  .footer-zone + .footer-zone { border-left:1px solid #111; }
+  .reminders-title { display:block; margin-bottom:.02in; font-size:7pt; }
+  .reminders ul { margin:0; padding-left:.12in; }
+  .statement { display:flex; align-items:center; justify-content:center; text-align:center; font-size:9pt; font-weight:800; line-height:1.35; }
+  .matching-box { height:100%; padding:.035in .055in; border:1px solid #555; border-radius:.035in; text-align:center; }
+  .matching-title { margin-bottom:.035in; font-size:6.2pt; font-weight:800; }
+  .matching-fields { display:grid; grid-template-columns:1fr 1fr; gap:.04in .08in; text-align:left; }
+  .matching-field { display:flex; gap:.035in; white-space:nowrap; }
+  .matching-line { flex:1; border-bottom:1px solid #111; }
+  @media (max-width:767.98px) { .personalized-controls { flex-direction:column; } .personalized-actions { justify-content:flex-start; } .personalized-sheet { overflow-x:auto; } }
+  @page { size:{{ paper_css_size }} portrait; margin:0; }
+  @media print {
+    html,body,.faculty-app,.faculty-main { background:#fff !important; }
+    .faculty-topbar,.faculty-sidebar,.faculty-utility-stack,.faculty-identity-warning,#inline-message-container,#system-error-modal,body > .modal-backdrop,.screen-only { display:none !important; }
+    .faculty-layout { display:block !important; min-height:auto !important; }
+    .faculty-main { padding:0 !important; }
+    .personalized-sheet { width:var(--sheet-width); height:var(--sheet-height); margin:0; border:0; box-shadow:none; break-after:page; page-break-after:always; break-inside:avoid; page-break-inside:avoid; }
+    .personalized-sheet:last-child { break-after:auto; page-break-after:auto; }
+  }
+</style>
+{% endblock %}
+{% block faculty_content %}
+<div class="personalized-controls screen-only">
+  <div><h1 class="h3 mb-1">Personalized Answer Sheets</h1><p class="text-muted mb-0">{{ course_code }} &mdash; {{ section }} &middot; {{ sheets|length }} page{{ sheets|length|pluralize }} &middot; {{ paper_label }} portrait</p></div>
+  <div class="personalized-actions">
+    <form class="personalized-paper-form" method="get">
+      <div><label class="form-label small mb-1" for="personalized-paper">Paper size</label><select class="form-select form-select-sm" id="personalized-paper" name="paper">{% for option in paper_options %}<option value="{{ option.value }}"{% if option.value == paper_size %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div>
+      <button class="btn btn-outline-primary btn-sm" type="submit">Apply</button>
+    </form>
+    <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:personalized_answer_sheet_overview' contribution.id release.id %}">Back to Sections</a>
+    <button class="btn btn-primary" type="button" onclick="window.print()">Print {{ set_filter|title }}</button>
+  </div>
+</div>
+{% for sheet in sheets %}
+<article class="personalized-sheet" aria-label="Personalized answer sheet" data-set-code="{{ sheet.set_code }}" data-paper-size="{{ paper_size }}" style="--sheet-width:{{ paper_sheet_width }};--sheet-height:{{ paper_sheet_height }};">
+  <header>
+    <div class="sheet-brand"><img class="sheet-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA logo"><h2 class="sheet-school">{{ school_name|upper }}</h2></div>
+    <div class="sheet-selections">
+      <div class="selection-row"><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>Cubao</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>Fairview</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>Taytay</span></div>
+      <div class="selection-row"><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>Prelim</span><span class="selection-option"><span class="selection-box{% if exam_period_code == 'MIDTERM' %} checked{% endif %}" aria-hidden="true"></span>Midterm</span><span class="selection-option"><span class="selection-box{% if exam_period_code == 'FINAL' %} checked{% endif %}" aria-hidden="true"></span>Final</span></div>
+      <div class="selection-row"><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>BSA</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>BSBA</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>HM</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>IS/CS</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>EDUC</span></div>
+    </div>
+    <div class="sheet-set">SET {{ sheet.set_code }}</div>
+    <div class="sheet-fields">
+      <div class="field-row"><div class="field"><strong>Stud Number:</strong><span class="field-value student-number">{{ sheet.student_number }}</span></div><div class="field"><strong>Date:</strong><span class="field-value blank"></span></div></div>
+      <div class="field-row single"><div class="field"><strong>Student Name:</strong><span class="field-value student-name">{{ sheet.student_name }}</span></div></div>
+      <div class="field-row single"><div class="field"><strong>Course/Subject:</strong><span class="field-value course-section">{{ course_code }} &mdash; {{ course_title }} &mdash; {{ section }}</span></div></div>
+    </div>
+    <hr class="sheet-divider">
+  </header>
+  <section class="answer-body" aria-label="Answers 1 to 75">
+    <div class="answer-watermark" aria-hidden="true">{% for item in answer_columns.0 %}<span>NCBA</span><span>NCBA</span><span>NCBA</span>{% endfor %}</div>
+    <div class="answer-columns">
+      {% for column in answer_columns %}<div class="answer-column" data-answer-column="{{ forloop.counter }}"><div class="answer-column-header" aria-hidden="true"><span></span><span>A</span><span>B</span><span>C</span><span>D</span></div>{% for item in column %}{% if item.active %}<div class="answer-item active-item"><span class="answer-number">{{ item.number }}</span><span class="answer-bubble" aria-label="Item {{ item.number }} option A"></span><span class="answer-bubble" aria-label="Item {{ item.number }} option B"></span><span class="answer-bubble" aria-label="Item {{ item.number }} option C"></span><span class="answer-bubble" aria-label="Item {{ item.number }} option D"></span></div>{% else %}<div class="answer-item unused"><span class="answer-number">{{ item.number }}</span><span class="unused-label">UNUSED</span></div>{% endif %}{% endfor %}</div>{% endfor %}
+    </div>
+  </section>
+  <footer class="sheet-footer">
+    <div class="footer-zone reminders"><strong class="reminders-title">REMINDERS:</strong><ul><li>Use a dark pen or pencil only.</li><li>Fill in the circle completely.</li><li>Erase cleanly any answer you wish to change.</li></ul></div>
+    <div class="footer-zone statement">EDUCATING GLOBALLY<br>COMPETITIVE FILIPINOS</div>
+    <div class="footer-zone"><div class="matching-box"><div class="matching-title">FOR MATCHING PURPOSES ONLY</div><div class="matching-fields"><div class="matching-field">Set: <strong>{{ sheet.set_code }}</strong></div><div class="matching-field">Revision: <strong>R{{ revision_number }}</strong></div><div class="matching-field" style="grid-column:1/-1;">Pair Code:<span class="matching-line"></span></div></div></div></div>
+  </footer>
+</article>
+{% empty %}<div class="alert alert-info screen-only">No active students match this Set filter.</div>{% endfor %}
+{% endblock %}

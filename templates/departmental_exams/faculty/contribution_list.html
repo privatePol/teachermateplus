@@ -28,23 +28,46 @@
             <div class="progress mb-3" role="progressbar" aria-label="Contribution progress" aria-valuenow="{{ contribution.progress_percent }}" aria-valuemin="0" aria-valuemax="100">
               <div class="progress-bar" style="width: {{ contribution.progress_percent }}%">{{ contribution.progress_percent }}%</div>
             </div>
-            <div class="d-flex flex-wrap gap-2">
-              <a class="btn btn-primary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Open workspace</a>
-              {% if contribution.questionnaire_print %}
-                <div class="btn-group" role="group" aria-label="Print Questionnaire revision R{{ contribution.questionnaire_print.revision_number }}">
-                  <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id contribution.questionnaire_print.release_id 'A' %}">Print Set A</a>
-                  <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id contribution.questionnaire_print.release_id 'B' %}">Print Set B</a>
-                </div>
-                <span class="small text-muted align-self-center">Print Questionnaire &middot; Released R{{ contribution.questionnaire_print.revision_number }}</span>
-              {% endif %}
-              {% if contribution.answer_key_release %}
-                <div class="w-100 mt-2"><span class="badge text-bg-danger">CONFIDENTIAL ANSWER KEY</span> <span class="small text-muted">Released R{{ contribution.answer_key_release.revision_number }}</span></div>
-                <div class="w-100 small fw-semibold">Answer Key</div>
-                <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id contribution.answer_key_release.release_id 'A' %}">View Set A Answer Key</a>
-                <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id contribution.answer_key_release.release_id 'B' %}">View Set B Answer Key</a>
-                <div class="w-100 mt-2"><span class="badge text-bg-dark">CHECKING MASTER</span></div>
-                <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id contribution.answer_key_release.release_id 'A' %}">Print Pre-Shaded Master &mdash; Set A</a>
-                <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id contribution.answer_key_release.release_id 'B' %}">Print Pre-Shaded Master &mdash; Set B</a>
+            <div class="d-grid gap-3">
+              <div><a class="btn btn-primary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Open workspace</a></div>
+              {% if contribution.questionnaire_print or contribution.answer_key_release %}
+                <section class="border rounded-3 bg-light p-3" aria-label="Exam outputs">
+                  <h3 class="h6 text-uppercase text-muted mb-3">Exam Outputs</h3>
+                  <div class="d-grid gap-3">
+                    {% if contribution.questionnaire_print %}
+                      <div>
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                          <strong>Questionnaire</strong>
+                          <span class="small text-muted">Released R{{ contribution.questionnaire_print.revision_number }}</span>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                          <a class="btn btn-sm btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id contribution.questionnaire_print.release_id 'A' %}">Print Set A</a>
+                          <a class="btn btn-sm btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id contribution.questionnaire_print.release_id 'B' %}">Print Set B</a>
+                          <a class="btn btn-sm btn-success" href="{% url 'departmental_exams:personalized_answer_sheet_overview' contribution.id contribution.questionnaire_print.release_id %}">Personalized Answer Sheets</a>
+                        </div>
+                      </div>
+                    {% endif %}
+                    {% if contribution.answer_key_release %}
+                      <div>
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                          <span><span class="badge text-bg-danger me-1">CONFIDENTIAL</span><strong>Answer Key</strong></span>
+                          <span class="small text-muted">Released R{{ contribution.answer_key_release.revision_number }}</span>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                          <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id contribution.answer_key_release.release_id 'A' %}">View Set A Answer Key</a>
+                          <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id contribution.answer_key_release.release_id 'B' %}">View Set B Answer Key</a>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="small fw-semibold text-uppercase mb-2">CHECKING MASTER</div>
+                        <div class="d-flex flex-wrap gap-2">
+                          <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id contribution.answer_key_release.release_id 'A' %}">Print Set A Master</a>
+                          <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id contribution.answer_key_release.release_id 'B' %}">Print Set B Master</a>
+                        </div>
+                      </div>
+                    {% endif %}
+                  </div>
+                </section>
               {% endif %}
             </div>
           </div>

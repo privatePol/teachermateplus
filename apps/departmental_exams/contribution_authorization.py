@@ -394,13 +394,38 @@ class ContributionAuthorizationService:
 
     @staticmethod
     def has_retained_current_print_eligibility(*, contribution):
+        return bool(
+            ContributionAuthorizationService.retained_current_print_assignments(
+                contribution=contribution
+            )
+        )
+
+    @staticmethod
+    def retained_current_print_assignments(*, contribution):
+        """Return live print-eligible assignments retained by this contribution."""
         inventory = ContributorEligibilityService.print_source_inventory(
             cycle_course=contribution.cycle_course,
             faculty_user_id=contribution.faculty_user_id,
         )
-        return ContributionAuthorizationService._retained_source_intersects(
-            contribution=contribution,
-            assignments=inventory.eligible_sources,
+        retained_current_keys = {
+            (
+                source.assignment_id_snapshot,
+                source.offering_id_snapshot,
+                source.tenant_id_snapshot,
+                source.campus_id_snapshot,
+            )
+            for source in contribution.eligibility_sources.all()
+            if source.is_current
+        }
+        return tuple(
+            assignment
+            for assignment in inventory.eligible_sources
+            if (
+                assignment.id,
+                assignment.offering_id,
+                *ContributorEligibilityService._effective_scope(assignment),
+            )
+            in retained_current_keys
         )
 
     @staticmethod

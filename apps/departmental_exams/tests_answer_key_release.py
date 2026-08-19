@@ -765,14 +765,15 @@ class AnswerKeyReleaseTests(Stage4TestCase):
     def test_checking_master_course_card_and_answer_key_print_workflow(self):
         client = self._faculty_client()
         unavailable = client.get(reverse("departmental_exams:contribution_list"))
-        self.assertNotContains(unavailable, "Print Pre-Shaded Master")
+        self.assertNotContains(unavailable, "Print Set A Master")
         release = self._release()
 
         course_card = client.get(reverse("departmental_exams:contribution_list"))
         self.assertContains(course_card, "View Set A Answer Key")
         self.assertContains(course_card, "View Set B Answer Key")
         self.assertContains(course_card, "CHECKING MASTER")
-        self.assertContains(course_card, "Print Pre-Shaded Master", count=2)
+        self.assertContains(course_card, "Print Set A Master")
+        self.assertContains(course_card, "Print Set B Master")
         self.assertNotContains(course_card, "Print Set A Answer Key")
         self.assertNotContains(course_card, "Print Set B Answer Key")
 

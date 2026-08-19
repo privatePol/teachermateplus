@@ -38,6 +38,7 @@ from .questionnaire_printing import (
     FacultyQuestionnairePrintService,
     _questionnaire_paper_context,
 )
+from .personalized_answer_sheets import PersonalizedAnswerSheetService
 
 
 def _scope(request):
@@ -328,6 +329,88 @@ def questionnaire_print_view(
     response = render(
         request,
         "departmental_exams/faculty/questionnaire_print.html",
+        context,
+    )
+    response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def personalized_answer_sheet_overview_view(request, contribution_id, release_id):
+    contribution = _owner_contribution(request, contribution_id)
+    context = PersonalizedAnswerSheetService.overview_context(
+        contribution=contribution,
+        release_id=release_id,
+    )
+    response = render(
+        request,
+        "departmental_exams/faculty/personalized_answer_sheet_overview.html",
+        context,
+    )
+    response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_POST
+def personalized_answer_sheet_prepare_view(
+    request,
+    contribution_id,
+    release_id,
+    offering_id,
+):
+    contribution = _owner_contribution(request, contribution_id)
+    result = PersonalizedAnswerSheetService.prepare(
+        contribution=contribution,
+        release_id=release_id,
+        offering_id=offering_id,
+        actor=request.user,
+        request=request,
+    )
+    if result["created_count"]:
+        messages.success(
+            request,
+            f"Prepared {result['created_count']} personalized answer sheet assignment(s).",
+        )
+    else:
+        messages.info(request, "All active students already have persistent Set assignments.")
+    return redirect(
+        "departmental_exams:personalized_answer_sheet_overview",
+        contribution_id=contribution.id,
+        release_id=release_id,
+    )
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def personalized_answer_sheet_print_view(
+    request,
+    contribution_id,
+    release_id,
+    offering_id,
+    set_filter,
+):
+    contribution = _owner_contribution(request, contribution_id)
+    context = PersonalizedAnswerSheetService.print_context(
+        contribution=contribution,
+        release_id=release_id,
+        offering_id=offering_id,
+        set_filter=set_filter,
+        actor=request.user,
+        request=request,
+        paper_size=request.GET.get("paper"),
+    )
+    response = render(
+        request,
+        "departmental_exams/faculty/personalized_answer_sheet_print.html",
         context,
     )
     response["Cache-Control"] = "no-store, no-cache, private, max-age=0"

@@ -1,0 +1,46 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Personalized Answer Sheets | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Contributions</a></li><li class="breadcrumb-item active">Personalized Answer Sheets</li></ol></nav>
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+  <div>
+    <h1 class="h3 mb-1">Personalized Answer Sheets</h1>
+    <p class="text-muted mb-0">{{ course_code }} &mdash; {{ course_title }} &middot; {{ exam_period }} &middot; Released R{{ revision_number }} &middot; {{ item_count }} items</p>
+  </div>
+  <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_list' %}">Back to Courses</a>
+</div>
+<div class="alert alert-light border">Set assignments are persistent for this exact released revision. Preparing newly enrolled students never reshuffles existing assignments.</div>
+{% if offering_rows %}
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead><tr><th>Section</th><th class="text-end">Active Students</th><th class="text-end">Set A</th><th class="text-end">Set B</th><th class="text-end">Missing</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for row in offering_rows %}
+          <tr>
+            <td><strong>{{ row.offering.section.code }}</strong><div class="small text-muted">{{ row.offering.campus.name }}</div></td>
+            <td class="text-end">{{ row.active_students }}</td>
+            <td class="text-end">{{ row.set_a }}</td>
+            <td class="text-end">{{ row.set_b }}</td>
+            <td class="text-end">{{ row.missing }}</td>
+            <td>
+              {% if row.missing %}
+                <form method="post" action="{% url 'departmental_exams:personalized_answer_sheet_prepare' contribution.id release.id row.offering.id %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">{% if row.set_a or row.set_b %}Prepare New Enrollment{% else %}Prepare Personalized Sheets{% endif %}</button></form>
+              {% elif row.ready %}
+                <div class="d-flex flex-wrap gap-2">
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'all' %}">Print All</a>
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'A' %}">Print Set A</a>
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'B' %}">Print Set B</a>
+                </div>
+              {% else %}
+                <span class="text-muted small">No active students</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="alert alert-info">No currently authorized course offering is available for personalized sheets.</div>
+{% endif %}
+{% endblock %}

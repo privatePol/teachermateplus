@@ -1000,7 +1000,8 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self._print_url(release, "A"))
         self.assertContains(response, self._print_url(release, "B"))
-        self.assertContains(response, "Print Questionnaire")
+        self.assertContains(response, "Questionnaire")
+        self.assertContains(response, "Personalized Answer Sheets")
 
     def test_unrelated_faculty_cannot_see_or_access_print_output(self):
         release = self._release()

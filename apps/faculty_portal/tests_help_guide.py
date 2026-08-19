@@ -86,6 +86,11 @@ class FacultyHelpGuideTests(TestCase):
             response,
             "Questionnaire printing never grants Answer Key, Question Selection Audit, or Automatic Generation Audit access.",
         )
+        self.assertContains(response, "Prepare and Print Personalized Answer Sheets")
+        self.assertContains(response, "persistently assigns each current active enrollment")
+        self.assertContains(response, "Print All, Print Set A, and Print Set B")
+        self.assertContains(response, "Reprinting and repeated preparation never reshuffle")
+        self.assertContains(response, "Campus and Program remain unmarked")
         self.assertContains(response, "View or Print Answer Key")
         self.assertContains(response, "Open either Answer Key first, then use its existing Print option.")
         self.assertContains(response, "Answer Key Available From/Until window")

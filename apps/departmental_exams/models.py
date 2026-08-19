@@ -1386,6 +1386,140 @@ class QuestionnairePrintRelease(TimeStampedModel):
         raise ValidationError("Questionnaire print releases are auditable historical records.")
 
 
+class PersonalizedAnswerSheetAssignment(TimeStampedModel):
+    ALGORITHM_VERSION = "hmac-alternate-v1"
+    _IMMUTABLE_FIELDS = (
+        "generation_revision_id",
+        "enrollment_id",
+        "course_offering_id",
+        "set_code",
+        "assignment_method",
+        "algorithm_version",
+        "assigned_by_id",
+        "public_id",
+    )
+
+    class AssignmentMethod(models.TextChoices):
+        INITIAL_BALANCED = "INITIAL_BALANCED", "Initial balanced assignment"
+        LATE_BALANCED = "LATE_BALANCED", "Late balanced assignment"
+
+    generation_revision = models.ForeignKey(
+        ExamGenerationRevision,
+        on_delete=models.PROTECT,
+        related_name="personalized_answer_sheet_assignments",
+    )
+    enrollment = models.ForeignKey(
+        "enrollment.Enrollment",
+        on_delete=models.PROTECT,
+        related_name="personalized_answer_sheet_assignments",
+    )
+    course_offering = models.ForeignKey(
+        "academics.CourseOffering",
+        on_delete=models.PROTECT,
+        related_name="personalized_answer_sheet_assignments",
+    )
+    set_code = models.CharField(
+        max_length=1,
+        choices=(("A", "Set A"), ("B", "Set B")),
+    )
+    assignment_method = models.CharField(
+        max_length=20,
+        choices=AssignmentMethod.choices,
+    )
+    algorithm_version = models.CharField(
+        max_length=64,
+        default=ALGORITHM_VERSION,
+    )
+    assigned_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="assigned_personalized_answer_sheets",
+    )
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
+    class Meta:
+        db_table = "departmental_exam_personalized_sheet_assignments"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["generation_revision", "enrollment"],
+                name="uq_de_personalized_revision_enrollment",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(set_code__in=["A", "B"]),
+                name="ck_de_personalized_set_code",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    assignment_method__in=["INITIAL_BALANCED", "LATE_BALANCED"]
+                ),
+                name="ck_de_personalized_method",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["generation_revision", "course_offering", "set_code"],
+                name="idx_de_pers_rev_offer_set",
+            )
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.enrollment_id and self.course_offering_id:
+            enrollment = self.enrollment
+            offering = self.course_offering
+            if enrollment.course_offering_id != offering.id:
+                errors["course_offering"] = "Enrollment must belong to the selected course offering."
+            elif (
+                enrollment.tenant_id != offering.tenant_id
+                or enrollment.campus_id != offering.campus_id
+                or enrollment.academic_year_id != offering.academic_year_id
+                or enrollment.term_id != offering.term_id
+            ):
+                errors["enrollment"] = "Enrollment scope must match the selected course offering."
+        if self.generation_revision_id and self.course_offering_id:
+            revision = self.generation_revision
+            cycle_course = revision.cycle_course
+            cycle = cycle_course.cycle
+            offering = self.course_offering
+            if (
+                offering.tenant_id != cycle.tenant_id
+                or offering.course_id != cycle_course.course_id
+                or offering.academic_year_id != cycle.academic_year_id
+                or offering.term_id != cycle.term_id
+                or offering.campus_id is None
+            ):
+                errors["generation_revision"] = (
+                    "Generation revision and course offering scope must match."
+                )
+            elif not CycleCourseOffering.objects.filter(
+                cycle_course=cycle_course,
+                offering=offering,
+                campus_id=offering.campus_id,
+            ).exists():
+                errors["course_offering"] = (
+                    "Course offering must belong to the generated course examination."
+                )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                *self._IMMUTABLE_FIELDS
+            ).first()
+            if previous is not None and any(
+                previous[field] != getattr(self, field)
+                for field in self._IMMUTABLE_FIELDS
+            ):
+                raise ValidationError("Personalized answer-sheet assignments are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Personalized answer-sheet assignments are auditable historical records."
+        )
+
+
 class AnswerKeyRelease(TimeStampedModel):
     _IMMUTABLE_FIELDS = (
         "cycle_course_id",

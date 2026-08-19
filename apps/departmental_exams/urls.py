@@ -38,6 +38,21 @@ urlpatterns = [
         name="questionnaire_print",
     ),
     path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/questionnaires/<int:release_id>/personalized-sheets/",
+        faculty_views.personalized_answer_sheet_overview_view,
+        name="personalized_answer_sheet_overview",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/questionnaires/<int:release_id>/personalized-sheets/offerings/<int:offering_id>/prepare/",
+        faculty_views.personalized_answer_sheet_prepare_view,
+        name="personalized_answer_sheet_prepare",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/questionnaires/<int:release_id>/personalized-sheets/offerings/<int:offering_id>/<str:set_filter>/print/",
+        faculty_views.personalized_answer_sheet_print_view,
+        name="personalized_answer_sheet_print",
+    ),
+    path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/answer-keys/<int:release_id>/set-<str:set_code>/",
         faculty_views.answer_key_view,
         name="faculty_answer_key",
