@@ -207,7 +207,7 @@ ADMIN_HELP_SECTIONS = [
                 "menu_path": "Admin Portal -> Departmental Exam Builder",
                 "steps": [
                     "Use Overview / Exam Cycles to create the Midterm or Final examination cycle. The cycle snapshots active offerings and groups them by course.",
-                    "Use Assigned Course Examinations to open only courses within your exact current exam responsibility. One grouped examination is shared across its listed campuses, including Cubao, Fairview, and Taytay where applicable; it is not one examination per campus.",
+                    "Use Assigned Course Examinations to open only courses within your exact current exam responsibility. One grouped examination is shared across its listed campuses, including Cubao, Fairview, and Taytay where applicable; it is not one examination per campus. Use PRINT ALL for the complete authorized course-code-sorted listing with cycle, responsibility, configuration, inclusion, and readiness context but no action controls. Use Print Exempt Courses for the authoritative Exempt-only reconciliation list with category and reason. Neither report changes course or exemption state.",
                     "Open Administer to confirm the one responsible exam department and reviewer. Responsibility is not assigned separately per campus. A null or inactive responsible department remains fail-closed for ordinary users.",
                     "Leave a course Included when it will use the departmental examination workflow.",
                     "Choose Exempt only while the cycle is Draft, select the approved category, and enter a specific reason. A saved exam configuration is preserved but dormant; configuration alone does not block Exempt.",

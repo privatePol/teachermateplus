@@ -1,3 +1,5 @@
+from zoneinfo import ZoneInfo
+
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -6,6 +8,7 @@ from django.http import Http404
 from django.core import signing
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
@@ -635,89 +638,18 @@ def cycle_course_list_view(request, cycle_id):
 @portal_required("ADMIN")
 def assigned_course_examinations_view(request):
     """List only the grouped course examinations currently assigned to the user."""
-    tenant_id = _tenant_id(request)
-    DepartmentalExamAuthorizationService.require_assigned_course_route_capability(
-        user=request.user, tenant_id=tenant_id
-    )
-    base_courses = (
-        CycleCourse.objects.filter(cycle__tenant_id=tenant_id)
-        .select_related(
-            "cycle__academic_year",
-            "cycle__term",
-            "cycle__term__academic_year",
-            "course",
-            "responsible_department",
-            "reviewer",
-            "configuration",
-        )
-        .prefetch_related("offering_snapshots__campus", "generation_revisions")
-    )
-    manual_courses = base_courses.filter(
-        cycle__processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW,
-    )
-    configurer_courses = (
-        DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
-            user=request.user,
-            tenant_id=tenant_id,
-            queryset=manual_courses,
-            include_null_for_superuser=False,
-        )
-    )
-    reviewer_courses = (
-        DepartmentalExamAuthorizationService.reviewer_visible_cycle_courses(
-            user=request.user,
-            tenant_id=tenant_id,
-            queryset=manual_courses,
-        )
-    )
-    configurer_ids = set(configurer_courses.values_list("id", flat=True))
-    reviewer_ids = set(reviewer_courses.values_list("id", flat=True))
-    automatic_courses = list(
-        base_courses.filter(
-            cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
-        )
-    )
-    automatic_permissions = (
-        DepartmentalExamAuthorizationService.automatic_permission_map(
-            user=request.user,
-            courses=automatic_courses,
-            permissions=(
-                DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
-                DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
-            ),
-        )
-    )
-    automatic_ids = {
-        course_id
-        for course_id, codes in automatic_permissions.items()
-        if DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION in codes
-    }
-    automatic_manage_ids = {
-        course_id
-        for course_id, codes in automatic_permissions.items()
-        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION in codes
-    }
-    automatic_inclusion_permissions = (
-        DepartmentalExamAuthorizationService.automatic_inclusion_management_map(
-            user=request.user,
-            courses=automatic_courses,
-        )
-    )
-    automatic_inclusion_manage_ids = {
-        course_id
-        for course_id, codes in automatic_inclusion_permissions.items()
-        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION in codes
-    }
+    scope = _assigned_course_scope(request)
+    base_courses = scope["base_courses"]
+    configurer_ids = scope["configurer_ids"]
+    reviewer_ids = scope["reviewer_ids"]
+    automatic_courses = scope["automatic_courses"]
+    automatic_ids = scope["automatic_ids"]
+    automatic_manage_ids = scope["automatic_manage_ids"]
+    automatic_inclusion_manage_ids = scope["automatic_inclusion_manage_ids"]
     courses = list(
         _with_downstream_activity_flags(
-            base_courses.filter(
-                Q(id__in=configurer_courses.values("id"))
-                | Q(id__in=reviewer_courses.values("id"))
-                | Q(id__in=automatic_ids)
-                | Q(id__in=automatic_inclusion_manage_ids)
-            ).distinct()
-        )
-        .order_by("-cycle__created_at", "course__code")
+            base_courses.filter(id__in=scope["visible_ids"])
+        ).order_by("-cycle__created_at", "course__code")
     )
     for course in courses:
         _prepare_cycle_course_campus_display(course)
@@ -800,6 +732,177 @@ def assigned_course_examinations_view(request):
         {
             "courses": courses,
             "automatic_summary_cycles": automatic_summary_cycles,
+        },
+    )
+
+
+def _assigned_course_scope(request):
+    """Return the exact visibility contract shared by Assigned Courses reports."""
+    tenant_id = _tenant_id(request)
+    DepartmentalExamAuthorizationService.require_assigned_course_route_capability(
+        user=request.user, tenant_id=tenant_id
+    )
+    base_courses = (
+        CycleCourse.objects.filter(cycle__tenant_id=tenant_id)
+        .select_related(
+            "cycle__academic_year",
+            "cycle__term",
+            "cycle__term__academic_year",
+            "course",
+            "responsible_department",
+            "reviewer",
+            "configuration",
+        )
+        .prefetch_related("offering_snapshots__campus", "generation_revisions")
+    )
+    manual_courses = base_courses.filter(
+        cycle__processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW,
+    )
+    configurer_courses = (
+        DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
+            user=request.user,
+            tenant_id=tenant_id,
+            queryset=manual_courses,
+            include_null_for_superuser=False,
+        )
+    )
+    reviewer_courses = (
+        DepartmentalExamAuthorizationService.reviewer_visible_cycle_courses(
+            user=request.user,
+            tenant_id=tenant_id,
+            queryset=manual_courses,
+        )
+    )
+    configurer_ids = set(configurer_courses.values_list("id", flat=True))
+    reviewer_ids = set(reviewer_courses.values_list("id", flat=True))
+    automatic_courses = list(
+        base_courses.filter(
+            cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+        )
+    )
+    automatic_permissions = (
+        DepartmentalExamAuthorizationService.automatic_permission_map(
+            user=request.user,
+            courses=automatic_courses,
+            permissions=(
+                DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+                DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+            ),
+        )
+    )
+    automatic_ids = {
+        course_id
+        for course_id, codes in automatic_permissions.items()
+        if DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION in codes
+    }
+    automatic_manage_ids = {
+        course_id
+        for course_id, codes in automatic_permissions.items()
+        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION in codes
+    }
+    automatic_inclusion_permissions = (
+        DepartmentalExamAuthorizationService.automatic_inclusion_management_map(
+            user=request.user,
+            courses=automatic_courses,
+        )
+    )
+    automatic_inclusion_manage_ids = {
+        course_id
+        for course_id, codes in automatic_inclusion_permissions.items()
+        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION in codes
+    }
+    return {
+        "tenant_id": tenant_id,
+        "base_courses": base_courses,
+        "configurer_ids": configurer_ids,
+        "reviewer_ids": reviewer_ids,
+        "automatic_courses": automatic_courses,
+        "automatic_ids": automatic_ids,
+        "automatic_manage_ids": automatic_manage_ids,
+        "automatic_inclusion_manage_ids": automatic_inclusion_manage_ids,
+        "visible_ids": (
+            configurer_ids
+            | reviewer_ids
+            | automatic_ids
+            | automatic_inclusion_manage_ids
+        ),
+    }
+
+
+def _assigned_course_cycle_contexts(courses):
+    """Return deterministic distinct cycle contexts represented by report rows."""
+    cycles_by_id = {course.cycle_id: course.cycle for course in courses}
+    return sorted(
+        cycles_by_id.values(),
+        key=lambda cycle: (
+            str(cycle.academic_year).casefold(),
+            str(cycle.term).casefold(),
+            cycle.exam_period,
+            cycle.processing_mode,
+            cycle.id,
+        ),
+    )
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET"])
+def assigned_courses_print_view(request):
+    """Render every course examination visible on Assigned Courses, without actions."""
+    scope = _assigned_course_scope(request)
+    courses = list(
+        _with_downstream_activity_flags(
+            scope["base_courses"].filter(id__in=scope["visible_ids"])
+        ).order_by("course__code", "course__title", "cycle_id", "id")
+    )
+    for print_number, course in enumerate(courses, start=1):
+        _prepare_cycle_course_campus_display(course)
+        course.print_number = print_number
+        course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
+            cycle_course=course,
+            configuration=getattr(course, "configuration", None),
+            user=request.user,
+        )
+
+    return render(
+        request,
+        "departmental_exams/admin/assigned_courses_print.html",
+        {
+            "courses": courses,
+            "cycle_contexts": _assigned_course_cycle_contexts(courses),
+            "generated_at": timezone.localtime(
+                timezone.now(), timezone=ZoneInfo("Asia/Manila")
+            ),
+            "total_rows": len(courses),
+        },
+    )
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET"])
+def exempt_courses_print_view(request):
+    """Render all authorized Exempt course examinations without pagination."""
+    scope = _assigned_course_scope(request)
+    courses = list(
+        scope["base_courses"]
+        .filter(
+            id__in=scope["visible_ids"],
+            inclusion_status=CycleCourse.InclusionStatus.EXEMPT,
+        )
+        .order_by("course__code", "course__title", "id")
+    )
+    for course in courses:
+        _prepare_cycle_course_campus_display(course)
+
+    return render(
+        request,
+        "departmental_exams/admin/exempt_courses_print.html",
+        {
+            "courses": courses,
+            "cycle_contexts": _assigned_course_cycle_contexts(courses),
+            "generated_at": timezone.localtime(
+                timezone.now(), timezone=ZoneInfo("Asia/Manila")
+            ),
+            "total_exempt_courses": len(courses),
         },
     )
 

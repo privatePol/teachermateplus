@@ -160,6 +160,16 @@ urlpatterns = [
         views.assigned_course_examinations_view,
         name="assigned_course_examinations",
     ),
+    path(
+        "admin-portal/departmental-exams/assigned-courses/print/",
+        views.assigned_courses_print_view,
+        name="assigned_courses_print",
+    ),
+    path(
+        "admin-portal/departmental-exams/assigned-courses/exempt/print/",
+        views.exempt_courses_print_view,
+        name="exempt_courses_print",
+    ),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/courses/", views.cycle_course_list_view, name="cycle_course_list"),
     path("admin-portal/departmental-exams/automatic-summary/", stage6_views.automatic_generation_summary_entry_view, name="automatic_generation_summary_entry"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/automatic-summary/", stage6_views.automatic_generation_summary_view, name="automatic_generation_summary"),

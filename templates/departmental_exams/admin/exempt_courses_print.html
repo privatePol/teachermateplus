@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Exempt Courses</title>
+  <style>
+    @page { size: Letter landscape; margin: .45in; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 11in; padding: 18px; color: #111; background: #fff; font-family: Arial, sans-serif; font-size: 9.5pt; }
+    .print-controls { margin-bottom: 14px; text-align: right; }
+    button { border: 1px solid #174a7c; border-radius: 4px; padding: 7px 16px; color: #fff; background: #174a7c; font: inherit; cursor: pointer; }
+    header { border-bottom: 2px solid #174a7c; padding-bottom: 10px; text-align: center; }
+    .institution { font-size: 12pt; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+    .builder { margin-top: 2px; color: #444; }
+    h1 { margin: 6px 0 2px; font-size: 20pt; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 18px; margin: 12px 0; }
+    .meta strong { display: inline-block; min-width: 92px; }
+    .cycle-contexts { margin: 4px 0 0; padding-left: 18px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #777; padding: 6px; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: #eaf0f6; text-align: left; }
+    th:nth-child(1) { width: 11%; }
+    th:nth-child(2) { width: 20%; }
+    th:nth-child(3) { width: 16%; }
+    th:nth-child(4) { width: 15%; }
+    th:nth-child(5) { width: 16%; }
+    th:nth-child(6) { width: 22%; }
+    .empty { border: 1px solid #aaa; padding: 20px; text-align: center; font-size: 11pt; }
+    @media print {
+      body { max-width: none; padding: 0; }
+      .print-controls { display: none !important; }
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-controls"><button type="button" onclick="window.print()">Print</button></div>
+  <header>
+    <div class="institution">National College of Business and Arts</div>
+    <div class="builder">TeacherMate+ Departmental Exam Builder</div>
+    <h1>Exempt Courses</h1>
+  </header>
+  <section class="meta" aria-label="Report context">
+    <div><strong>Generated:</strong> {{ generated_at|date:"M j, Y g:i A" }} Asia/Manila</div>
+    <div><strong>Total Exempt:</strong> {{ total_exempt_courses }}</div>
+    <div style="grid-column: 1 / -1;"><strong>Cycle Context:</strong>
+      {% if cycle_contexts %}
+        <ul class="cycle-contexts">
+          {% for cycle in cycle_contexts %}<li><strong>Academic Year:</strong> <span class="academic-year">{{ cycle.academic_year }}</span> &middot; <strong>Term:</strong> <span class="term">{{ cycle.term }}</span> &middot; <strong>Examination:</strong> <span class="examination">{{ cycle.get_exam_period_display }}</span> &middot; <strong>Cycle Type:</strong> <span class="cycle-type">{{ cycle.get_processing_mode_display }}</span></li>{% endfor %}
+        </ul>
+      {% else %}
+        <span>&mdash;</span>
+      {% endif %}
+    </div>
+  </section>
+  {% if courses %}
+    <table>
+      <thead><tr><th>Course Code</th><th>Course Title</th><th>Exam Department</th><th>Campus / Campuses</th><th>Exemption Category</th><th>Exemption Reason</th></tr></thead>
+      <tbody>
+        {% for item in courses %}<tr>
+          <td><strong>{% if item.course.code %}{{ item.course.code }}{% else %}&mdash;{% endif %}</strong></td>
+          <td>{% if item.course.title %}{{ item.course.title }}{% else %}&mdash;{% endif %}</td>
+          <td>{% if item.responsible_department %}{{ item.responsible_department }}{% else %}&mdash;{% endif %}</td>
+          <td>{% if item.included_campuses %}{{ item.included_campuses|join:", " }}{% else %}&mdash;{% endif %}</td>
+          <td>{% if item.exemption_category %}{{ item.get_exemption_category_display }}{% else %}&mdash;{% endif %}</td>
+          <td>{% if item.exemption_reason %}{{ item.exemption_reason }}{% else %}&mdash;{% endif %}</td>
+        </tr>{% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="empty">No exempt courses found.</div>
+  {% endif %}
+</body>
+</html>

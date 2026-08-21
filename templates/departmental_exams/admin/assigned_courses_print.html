@@ -1,0 +1,99 @@
+{% load tz %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assigned Course Examinations</title>
+  <style>
+    @page { size: Letter landscape; margin: .35in; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 11in; padding: 16px; color: #111; background: #fff; font-family: Arial, sans-serif; font-size: 7.8pt; }
+    .print-controls { margin-bottom: 12px; text-align: right; }
+    button { border: 1px solid #174a7c; border-radius: 4px; padding: 7px 16px; color: #fff; background: #174a7c; font: inherit; cursor: pointer; }
+    header { border-bottom: 2px solid #174a7c; padding-bottom: 8px; text-align: center; }
+    .institution { font-size: 11pt; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+    .builder { margin-top: 2px; color: #444; font-size: 9pt; }
+    h1 { margin: 5px 0 2px; font-size: 18pt; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 10px 0; }
+    .meta strong { display: inline-block; min-width: 78px; }
+    .cycle-contexts { margin: 3px 0 0; padding-left: 16px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #777; padding: 4px; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: #eaf0f6; text-align: left; }
+    th:nth-child(1) { width: 3.5%; text-align: center; }
+    th:nth-child(2) { width: 7%; }
+    th:nth-child(3) { width: 13%; }
+    th:nth-child(4) { width: 7%; }
+    th:nth-child(5) { width: 7%; }
+    th:nth-child(6) { width: 10%; }
+    th:nth-child(7) { width: 11%; }
+    th:nth-child(8) { width: 10%; }
+    th:nth-child(9) { width: 7%; }
+    th:nth-child(10) { width: 16%; }
+    th:nth-child(11) { width: 8.5%; }
+    td:first-child { text-align: center; }
+    .configuration div + div { margin-top: 2px; }
+    .source { color: #555; font-size: 7pt; }
+    .empty { border: 1px solid #aaa; padding: 20px; text-align: center; font-size: 11pt; }
+    @media print {
+      body { max-width: none; padding: 0; }
+      .print-controls { display: none !important; }
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-controls"><button type="button" onclick="window.print()">Print</button></div>
+  <header>
+    <div class="institution">National College of Business and Arts</div>
+    <div class="builder">TeacherMatePlus Departmental Exam Builder</div>
+    <h1>Assigned Course Examinations</h1>
+  </header>
+  <section class="meta" aria-label="Report context">
+    <div><strong>Generated:</strong> {{ generated_at|date:"M j, Y g:i A" }} Asia/Manila</div>
+    <div><strong>Total Rows:</strong> {{ total_rows }}</div>
+    <div style="grid-column: 1 / -1;"><strong>Cycle Context:</strong>
+      {% if cycle_contexts %}
+        <ul class="cycle-contexts">
+          {% for cycle in cycle_contexts %}<li><strong>Academic Year:</strong> {{ cycle.academic_year }} &middot; <strong>Term:</strong> {{ cycle.term }} &middot; <strong>Examination:</strong> {{ cycle.get_exam_period_display }} &middot; <strong>Cycle Type:</strong> {{ cycle.get_processing_mode_display }}</li>{% endfor %}
+        </ul>
+      {% else %}
+        <span>&mdash;</span>
+      {% endif %}
+    </div>
+  </section>
+  {% if courses %}
+    <table>
+      <thead><tr><th>No.</th><th>Course Code</th><th>Course Title</th><th>Academic Year</th><th>Term</th><th>Examination / Cycle</th><th>Exam Department</th><th>Campus / Campuses</th><th>Inclusion Status</th><th>Effective Configuration</th><th>Readiness</th></tr></thead>
+      <tbody>
+        {% for item in courses %}<tr>
+          <td>{{ item.print_number }}</td>
+          <td><strong>{% if item.course.code %}{{ item.course.code }}{% else %}&mdash;{% endif %}</strong></td>
+          <td>{% if item.course.title %}{{ item.course.title }}{% else %}&mdash;{% endif %}</td>
+          <td>{{ item.cycle.academic_year }}</td>
+          <td>{{ item.cycle.term }}</td>
+          <td>{{ item.cycle.get_exam_period_display }}<br><span class="source">{{ item.cycle.get_processing_mode_display }} &middot; {{ item.cycle.get_status_display }}</span></td>
+          <td>{% if item.responsible_department %}{{ item.responsible_department }}{% elif item.cycle.processing_mode == 'AUTOMATIC_GENERATION' %}No Exam Department assigned{% else %}Needs Exam Department{% endif %}</td>
+          <td>{% if item.included_campuses %}{{ item.included_campuses|join:", " }}{% else %}&mdash;{% endif %}</td>
+          <td>{{ item.get_inclusion_status_display }}</td>
+          <td class="configuration">
+            {% if item.configuration %}
+              <div>Faculty quota: <strong>{{ item.configuration.questions_required_per_faculty|default:"--" }}</strong> <span class="source">{{ item.configuration.questions_required_per_faculty_source|default:"NOT CONFIGURED" }}</span></div>
+              <div>Final items: <strong>{{ item.configuration.final_item_count|default:"--" }}</strong> <span class="source">{{ item.configuration.final_item_count_source|default:"NOT CONFIGURED" }}</span></div>
+              <div>Deadline: <strong>{% if item.configuration.contribution_deadline %}{{ item.configuration.contribution_deadline|localtime|date:"M j, Y g:i A" }}{% else %}--{% endif %}</strong> <span class="source">{{ item.configuration.contribution_deadline_source|default:"NOT CONFIGURED" }}</span></div>
+              <div>Coverage: <strong>{% if item.configuration.coverage %}Configured{% else %}--{% endif %}</strong> <span class="source">{{ item.configuration.coverage_source|default:"NOT CONFIGURED" }}</span></div>
+            {% else %}
+              NOT CONFIGURED
+            {% endif %}
+          </td>
+          <td>{{ item.readiness.label }}</td>
+        </tr>{% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="empty">No assigned course examinations found.</div>
+  {% endif %}
+</body>
+</html>
