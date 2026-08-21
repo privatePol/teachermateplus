@@ -242,6 +242,12 @@ class PersonalizedAnswerSheetTests(Stage4TestCase):
         overview = client.get(self._overview_url(release))
         self.assertEqual(overview.status_code, 200)
         self.assertIn("private", overview["Cache-Control"])
+        self.assertContains(
+            overview,
+            f'<li class="breadcrumb-item"><a href="{reverse("departmental_exams:contribution_list")}">Question Bank</a></li>',
+            html=True,
+        )
+        self.assertContains(overview, "Back to Question Bank")
         self.assertEqual(PersonalizedAnswerSheetAssignment.objects.count(), 0)
         self.assertEqual(client.get(self._print_url(release)).status_code, 403)
         self.assertEqual(PersonalizedAnswerSheetAssignment.objects.count(), 0)

@@ -4,7 +4,7 @@
 {% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
 {% block faculty_content %}
 <div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% url 'departmental_exams:csv_status' active_import.token %}"{% endif %}>
-<a class="btn btn-sm btn-outline-secondary mb-3" href="{% url 'departmental_exams:contribution_list' %}">Back to contributions</a>
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item active">{{ contribution.cycle_course.course.code }}</li></ol></nav>
 <div class="card shadow-sm mb-3">
   <div class="card-body">
     <div class="d-flex flex-wrap justify-content-between gap-3">

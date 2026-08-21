@@ -779,6 +779,11 @@ class AnswerKeyReleaseTests(Stage4TestCase):
 
         answer_key = client.get(self._url(release, "A"))
         self.assertContains(answer_key, "Print Set A Answer Key")
+        self.assertContains(
+            answer_key,
+            f'<li class="breadcrumb-item"><a href="{reverse("departmental_exams:contribution_list")}">Question Bank</a></li>',
+            html=True,
+        )
 
         template_source = (
             Path(__file__).resolve().parents[2]
