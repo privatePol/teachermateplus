@@ -580,6 +580,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             self.assertTemplateUsed(response, "faculty_portal/base.html")
             self.assertContains(response, "Contribution quota reached", status_code=409)
             self.assertContains(response, "required quota of 50 questions", status_code=409)
+            self.assertContains(response, "Return to Question Bank", status_code=409)
             self.assertNotContains(response, 'name="question_text"', status_code=409)
             self.assertNotContains(
                 response,
@@ -689,13 +690,27 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             self.contribution.eligibility_sources.count(),
             self.configuration.contributor_roster_revision,
         )
-        self.assertEqual(self.client.get(reverse("departmental_exams:contribution_list")).status_code, 200)
-        self.assertEqual(
-            self.client.get(
-                reverse("departmental_exams:contribution_workspace", args=[self.contribution.id])
-            ).status_code,
-            200,
+        list_response = self.client.get(reverse("departmental_exams:contribution_list"))
+        self.assertEqual(list_response.status_code, 200)
+        self.assertContains(list_response, "<title>Question Bank | TeacherMate+</title>", html=True)
+        self.assertContains(list_response, '<h1 class="h3 mb-1">Question Bank</h1>', html=True)
+        menu_item = next(
+            node["item"]
+            for group in list_response.context["portal_menu"]
+            for node in group["items"]
+            if node["item"].code == "DE_EXAM_FACULTY_CONTRIBUTIONS"
         )
+        self.assertEqual(menu_item.label, "Question Bank")
+        workspace_response = self.client.get(
+            reverse("departmental_exams:contribution_workspace", args=[self.contribution.id])
+        )
+        self.assertEqual(workspace_response.status_code, 200)
+        self.assertContains(
+            workspace_response,
+            f'<li class="breadcrumb-item"><a href="{reverse("departmental_exams:contribution_list")}">Question Bank</a></li>',
+            html=True,
+        )
+        self.assertContains(workspace_response, "<strong>Deadline:</strong>", html=True)
         self.configuration.refresh_from_db()
         after = (
             FacultyContribution.objects.count(),

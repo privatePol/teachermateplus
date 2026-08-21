@@ -8,9 +8,9 @@ FACULTY_HELP_SECTIONS = [
         "topics": [
             {
                 "code": "question-contribution-workspace",
-                "title": "Prepare and Submit Your Question Contribution",
+                "title": "Question Bank",
                 "purpose": "Lets an eligible assigned faculty member prepare the exact course quota of private plain-text multiple-choice questions.",
-                "how_to_open": ["From the Faculty Portal navigation, open Departmental Exam Builder.", "Choose Question Contributions, then open the grouped course workspace."],
+                "how_to_open": ["From the Faculty Portal navigation, open Departmental Exam Builder.", "Choose Question Bank, then open the grouped course workspace."],
                 "check_first": ["Confirm the cycle, grouped course, campuses, coverage, quota, instructions, and deadline.", "A blocked Draft remains readable but cannot be changed.", "A Submitted contribution is final and read-only."],
                 "actions": [
                     {"name": "Add or Edit Question", "does": "Saves question text, four distinct choices, one correct answer, and Easy, Moderate, or Difficult difficulty. Enter ordinary text normally. For Question Text and Choices A-D, Insert Equation, Chemical Formula, and the compact math palette insert supported notation and show a live preview; use the provided tools or the supported \\(...\\) and \\[...\\] delimiters, not dollar-sign delimiters. Normal Unicode and meaningful line breaks are supported; markup-looking text is displayed literally rather than interpreted as HTML.", "when": "Use it while the contribution is an Active Draft and before the deadline.", "avoid": "Do not enter images, tabs, control or bidirectional formatting characters, arbitrary HTML, another contributor's content, or more than the exact quota.", "result": "The question is saved in your private workspace with a stable position, and supported scientific notation renders in later review and questionnaire pages without changing the stored question.", "editable": "Editable only while the contribution remains an Active Draft."},

@@ -1,13 +1,13 @@
 {% extends "faculty_portal/base.html" %}
 {% block title %}Personalized Answer Sheets | TeacherMate+{% endblock %}
 {% block faculty_content %}
-<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Contributions</a></li><li class="breadcrumb-item active">Personalized Answer Sheets</li></ol></nav>
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item active">Personalized Answer Sheets</li></ol></nav>
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
   <div>
     <h1 class="h3 mb-1">Personalized Answer Sheets</h1>
     <p class="text-muted mb-0">{{ course_code }} &mdash; {{ course_title }} &middot; {{ exam_period }} &middot; Released R{{ revision_number }} &middot; {{ item_count }} items</p>
   </div>
-  <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_list' %}">Back to Courses</a>
+  <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_list' %}">Back to Question Bank</a>
 </div>
 <div class="alert alert-light border">Set assignments are persistent for this exact released revision. Preparing newly enrolled students never reshuffles existing assignments.</div>
 {% if offering_rows %}
