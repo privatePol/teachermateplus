@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -80,6 +80,8 @@ class SubmissionReadinessEmailService:
 
     @classmethod
     def _role_department_ids(cls, role_row, *, tenant_id):
+        if role_row.role.code in cls.ROLE_ALIASES["CAO"]:
+            return None
         if role_row.role.code not in cls.ROLE_ALIASES["COLLEGE_DEAN"]:
             if not role_row.department_id:
                 return None
@@ -117,13 +119,56 @@ class SubmissionReadinessEmailService:
         return supervised_ids
 
     @classmethod
-    def _role_covers(cls, role_row, result, department_ids):
+    def _faculty_department_ids_by_scope(cls, *, tenant_id, results):
+        faculty_scopes = {
+            (
+                result.assignment.faculty_user_id,
+                result.assignment.offering.tenant_id,
+                result.assignment.offering.campus_id,
+            )
+            for result in results
+        }
+        if not faculty_scopes:
+            return {}
+
+        user_ids = {scope[0] for scope in faculty_scopes}
+        campus_ids = {scope[2] for scope in faculty_scopes}
+        department_ids_by_scope = defaultdict(set)
+        faculty_roles = UserRole.objects.filter(
+            user_id__in=user_ids,
+            user__is_active=True,
+            role__code="FACULTY",
+            role__is_active=True,
+            tenant_id=tenant_id,
+            campus_id__in=campus_ids,
+            department__isnull=False,
+            department__is_active=True,
+            department__tenant_id=F("tenant_id"),
+            department__campus_id=F("campus_id"),
+            is_active=True,
+        ).values_list("user_id", "tenant_id", "campus_id", "department_id")
+        for user_id, role_tenant_id, campus_id, department_id in faculty_roles:
+            scope = (user_id, role_tenant_id, campus_id)
+            if scope in faculty_scopes:
+                department_ids_by_scope[scope].add(department_id)
+
+        return {
+            scope: next(iter(department_ids)) if len(department_ids) == 1 else None
+            for scope, department_ids in department_ids_by_scope.items()
+        }
+
+    @classmethod
+    def _role_covers(cls, role_row, result, department_ids, faculty_department_id):
         offering = result.assignment.offering
+        if role_row.role.code in cls.ROLE_ALIASES["CAO"]:
+            return role_row.tenant_id == offering.tenant_id
         if role_row.tenant_id and role_row.tenant_id != offering.tenant_id:
             return False
         if role_row.campus_id and role_row.campus_id != offering.campus_id:
             return False
-        return department_ids is None or offering.department_id in department_ids
+        if not faculty_department_id:
+            return False
+        return department_ids is None or faculty_department_id in department_ids
 
     @staticmethod
     def _primary_concern(result):
@@ -201,10 +246,30 @@ class SubmissionReadinessEmailService:
                 role_row.id: cls._role_department_ids(role_row, tenant_id=tenant.id)
                 for role_row in recipient_roles
             }
+            faculty_department_ids_by_scope = cls._faculty_department_ids_by_scope(
+                tenant_id=tenant.id,
+                results=qualifying,
+            )
+            faculty_department_ids_by_assignment = {}
+            for result in qualifying:
+                offering = result.assignment.offering
+                faculty_scope = (
+                    result.assignment.faculty_user_id,
+                    offering.tenant_id,
+                    offering.campus_id,
+                )
+                faculty_department_ids_by_assignment[result.assignment.id] = faculty_department_ids_by_scope.get(
+                    faculty_scope
+                )
             grouped = defaultdict(lambda: {"rows": {}, "roles": set(), "role_rows": []})
             for role_row in recipient_roles:
                 for result in qualifying:
-                    if not cls._role_covers(role_row, result, department_ids_by_role[role_row.id]):
+                    if not cls._role_covers(
+                        role_row,
+                        result,
+                        department_ids_by_role[role_row.id],
+                        faculty_department_ids_by_assignment[result.assignment.id],
+                    ):
                         continue
                     group_key = (
                         role_row.user_id, result.assignment.offering.academic_year_id,
@@ -233,7 +298,13 @@ class SubmissionReadinessEmailService:
                     "role_campus_ids": sorted({r.campus_id for r in payload["role_rows"] if r.campus_id}),
                     "role_department_ids": sorted({r.department_id for r in payload["role_rows"] if r.department_id}),
                     "report_campus_ids": sorted({r.assignment.offering.campus_id for r in rows}),
-                    "report_department_ids": sorted({r.assignment.offering.department_id for r in rows}),
+                    "report_department_ids": sorted(
+                        {
+                            faculty_department_ids_by_assignment[r.assignment.id]
+                            for r in rows
+                            if faculty_department_ids_by_assignment[r.assignment.id]
+                        }
+                    ),
                 }
                 report_campus_ids = scope_context["report_campus_ids"]
                 context = {
