@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.urls import reverse
 from django.utils import timezone
@@ -15,6 +17,10 @@ from apps.academics.models import (
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 from .contribution_services import ContributionRosterService
+from .automatic_workflow import (
+    AutomaticExamDeadlineService,
+    AutomaticGenerationSummaryService,
+)
 from .generation_readiness import Stage6ReadinessService
 from .models import (
     CourseExamConfiguration,
@@ -23,6 +29,7 @@ from .models import (
     ExaminationCycle,
     ExamGenerationRevision,
     FacultyContribution,
+    Question,
 )
 from .services import (
     CourseExamConfigurationReadinessService,
@@ -73,6 +80,57 @@ class AutomaticSmokeRemediationTests(Stage5FixtureMixin, Stage4TestCase):
                 deadline_source=CourseExamConfiguration.ValueSource.DEFAULT,
             )
         return parent
+
+    def exempt_automatic(self, parent, *, user=None):
+        return CycleCourseInclusionService.exempt(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            user=user or self.generation_manager,
+            exemption_category=CycleCourse.ExemptionCategory.INTERNSHIP,
+            reason="Approved late output-based assessment exemption",
+            expected_updated_at=CycleCourseInclusionService.transition_token(parent),
+        )
+
+    @staticmethod
+    def make_question(contribution, *, position=1):
+        return Question.objects.create(
+            contribution=contribution,
+            question_text=f"Which retained answer is correct for item {position}?",
+            choice_a="The retained answer",
+            choice_b="A discarded answer",
+            choice_c="No answer",
+            choice_d="Every answer",
+            correct_answer="A",
+            difficulty=Question.Difficulty.EASY,
+            position=position,
+        )
+
+    @staticmethod
+    def make_generation_revision(parent, *, current=True):
+        configuration = CourseExamConfiguration.objects.get(cycle_course=parent)
+        return ExamGenerationRevision.objects.create(
+            cycle_course=parent,
+            revision_number=1,
+            status=(
+                ExamGenerationRevision.Status.GENERATED
+                if current
+                else ExamGenerationRevision.Status.SUPERSEDED
+            ),
+            current_marker=1 if current else None,
+            source_input_fingerprint="a" * 64,
+            algorithm_version="late-exempt-regression",
+            generated_by=None,
+            generation_trigger=ExamGenerationRevision.GenerationTrigger.AUTOMATIC,
+            configuration_revision_snapshot=configuration.revision,
+            blueprint_revision_snapshot=1,
+            roster_boundary_snapshot="b" * 64,
+            final_item_count_snapshot=configuration.final_item_count,
+            request_token_digest="c" * 64,
+            minimum_overlap=0,
+            proportional_score=0,
+            contributors_represented=0,
+            squared_contributor_concentration=0,
+        )
 
     def make_other_tenant_automatic_course(self, *, code="AUTO-OTHER"):
         campus = Campus.objects.create(
@@ -416,6 +474,460 @@ class AutomaticSmokeRemediationTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertTrue(restored.can_configure)
         self.assertTrue(restored.can_manage_generation)
         self.assertContains(assigned_response, configuration_url)
+
+    def test_automatic_open_late_exempt_preserves_roster_and_closes_only_target(self):
+        cycle = self.make_automatic_cycle()
+        parent = self.make_automatic_course(cycle=cycle, code="AE215-AIS")
+        other = self.make_automatic_course(cycle=cycle, code="AE216-CONTROL")
+        faculty = self.make_faculty("late-exempt-zero-question-faculty")
+        self.make_assignment(parent, faculty)
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.generation_manager,
+        )
+        contribution = FacultyContribution.objects.get(cycle_course=parent)
+        contribution_snapshot = list(
+            FacultyContribution.objects.filter(cycle_course=parent).values()
+        )
+        source_snapshot = list(contribution.eligibility_sources.values())
+        configuration = CourseExamConfiguration.objects.get(cycle_course=parent)
+        configuration.automatic_processing_status = (
+            CourseExamConfiguration.AutomaticProcessingStatus.GENERATED
+        )
+        configuration.automatic_processing_code = "GENERATED"
+        configuration.automatic_processed_at = timezone.now()
+        configuration.save(
+            update_fields=[
+                "automatic_processing_status",
+                "automatic_processing_code",
+                "automatic_processed_at",
+                "updated_at",
+            ]
+        )
+        original_revision = configuration.revision
+        other_snapshot = CycleCourse.objects.values(
+            "inclusion_status", "updated_at"
+        ).get(pk=other.pk)
+
+        updated, changed = self.exempt_automatic(parent)
+
+        self.assertTrue(changed)
+        self.assertEqual(updated.inclusion_status, CycleCourse.InclusionStatus.EXEMPT)
+        configuration.refresh_from_db()
+        self.assertEqual(
+            configuration.workflow_status,
+            CourseExamConfiguration.WorkflowStatus.CLOSED,
+        )
+        self.assertEqual(configuration.closed_by_id, self.generation_manager.id)
+        self.assertEqual(configuration.revision, original_revision + 1)
+        self.assertEqual(
+            configuration.automatic_processing_status,
+            CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED,
+        )
+        self.assertEqual(configuration.automatic_processing_code, "NOT_APPLICABLE")
+        self.assertEqual(
+            list(FacultyContribution.objects.filter(cycle_course=parent).values()),
+            contribution_snapshot,
+        )
+        self.assertEqual(list(contribution.eligibility_sources.values()), source_snapshot)
+        self.assertEqual(
+            CycleCourse.objects.values("inclusion_status", "updated_at").get(pk=other.pk),
+            other_snapshot,
+        )
+        audit = AuditLog.objects.get(
+            action="DE_EXAM_CYCLE_COURSE_EXEMPTED", entity_id=str(parent.id)
+        )
+        self.assertEqual(audit.actor_user_id, self.generation_manager.id)
+        self.assertEqual(audit.before_json["inclusion_status"], "INCLUDED")
+        self.assertEqual(audit.after_json["inclusion_status"], "EXEMPT")
+        self.assertEqual(
+            audit.after_json["configuration"]["workflow_status"], "CLOSED"
+        )
+
+        readiness = Stage6ReadinessService.evaluate(cycle_course=updated)
+        self.assertIn("NOT_INCLUDED", {item["code"] for item in readiness["blockers"]})
+        direct_result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+        self.assertEqual(direct_result.code, "NOT_APPLICABLE")
+        due_ids = {
+            item.cycle_course_id for item in AutomaticExamDeadlineService.process_due()
+        }
+        self.assertNotIn(parent.id, due_ids)
+        self.client.force_login(self.generation_manager)
+        self.assertEqual(
+            self.client.get(
+                reverse("departmental_exams:generation_workspace", args=[parent.id])
+            ).status_code,
+            403,
+        )
+
+    def test_deadline_processing_interleaving_preserves_late_exempt_outcome(self):
+        parent = self.make_automatic_course(code="AE215-PROCESS-RACE")
+        configuration = CourseExamConfiguration.objects.get(cycle_course=parent)
+        processor_now = timezone.now() - timezone.timedelta(minutes=5)
+        CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
+            contribution_deadline=processor_now - timezone.timedelta(minutes=1)
+        )
+        real_close_due_intake = AutomaticExamDeadlineService._close_due_intake
+
+        def close_then_exempt(**kwargs):
+            result = real_close_due_intake(**kwargs)
+            self.exempt_automatic(parent)
+            return result
+
+        with patch.object(
+            AutomaticExamDeadlineService,
+            "_close_due_intake",
+            side_effect=close_then_exempt,
+        ):
+            result = AutomaticExamDeadlineService.process_course(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+                now=processor_now,
+            )
+
+        parent.refresh_from_db()
+        configuration.refresh_from_db()
+        self.assertEqual(parent.inclusion_status, CycleCourse.InclusionStatus.EXEMPT)
+        self.assertEqual(result.status, "SKIPPED")
+        self.assertEqual(result.code, "NOT_APPLICABLE")
+        self.assertEqual(
+            configuration.automatic_processing_status,
+            CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED,
+        )
+        self.assertEqual(configuration.automatic_processing_code, "NOT_APPLICABLE")
+        self.assertGreater(configuration.automatic_processed_at, processor_now)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_EXAM_AUTOMATIC_GENERATION_BLOCKED",
+                entity_id=str(configuration.id),
+            ).exists()
+        )
+        self.assertFalse(ExamGenerationRevision.objects.filter(cycle_course=parent).exists())
+
+    def test_late_exempt_audit_snapshots_automatic_processing_state(self):
+        parent = self.make_automatic_course(code="AE215-AUDIT-STATE")
+        configuration = CourseExamConfiguration.objects.get(cycle_course=parent)
+        previous_processed_at = timezone.now() - timezone.timedelta(hours=2)
+        configuration.automatic_processing_status = (
+            CourseExamConfiguration.AutomaticProcessingStatus.BLOCKED
+        )
+        configuration.automatic_processing_code = "QUESTION_SHORTAGES"
+        configuration.automatic_processed_at = previous_processed_at
+        configuration.save(
+            update_fields=[
+                "automatic_processing_status",
+                "automatic_processing_code",
+                "automatic_processed_at",
+                "updated_at",
+            ]
+        )
+
+        self.exempt_automatic(parent)
+
+        audit = AuditLog.objects.get(
+            action="DE_EXAM_CYCLE_COURSE_EXEMPTED",
+            entity_id=str(parent.id),
+        )
+        before_configuration = audit.before_json["configuration"]
+        after_configuration = audit.after_json["configuration"]
+        self.assertEqual(before_configuration["automatic_processing_status"], "BLOCKED")
+        self.assertEqual(
+            before_configuration["automatic_processing_code"], "QUESTION_SHORTAGES"
+        )
+        self.assertEqual(
+            before_configuration["automatic_processed_at"],
+            previous_processed_at.isoformat(),
+        )
+        self.assertEqual(after_configuration["automatic_processing_status"], "SKIPPED")
+        self.assertEqual(after_configuration["automatic_processing_code"], "NOT_APPLICABLE")
+        self.assertNotEqual(
+            after_configuration["automatic_processed_at"],
+            before_configuration["automatic_processed_at"],
+        )
+
+    def test_automatic_open_late_exempt_preserves_draft_and_submitted_questions(self):
+        cycle = self.make_automatic_cycle()
+        for suffix, submitted in (("DRAFT", False), ("SUBMITTED", True)):
+            with self.subTest(status=suffix):
+                parent = self.make_automatic_course(
+                    cycle=cycle, code=f"AE215-{suffix}"
+                )
+                faculty = self.make_faculty(f"late-exempt-{suffix.lower()}-faculty")
+                self.make_assignment(parent, faculty)
+                ContributionRosterService.initialize(
+                    cycle_course_id=parent.id,
+                    tenant_id=self.tenant.id,
+                    actor=self.generation_manager,
+                )
+                contribution = FacultyContribution.objects.get(cycle_course=parent)
+                question = self.make_question(contribution)
+                if submitted:
+                    contribution.status = FacultyContribution.Status.SUBMITTED
+                    contribution.submitted_at = timezone.now()
+                    contribution.save(
+                        update_fields=["status", "submitted_at", "updated_at"]
+                    )
+                contribution_snapshot = FacultyContribution.objects.values().get(
+                    pk=contribution.pk
+                )
+                question_snapshot = Question.objects.values().get(pk=question.pk)
+                source_snapshot = list(contribution.eligibility_sources.values())
+
+                self.exempt_automatic(parent)
+
+                self.assertEqual(
+                    FacultyContribution.objects.values().get(pk=contribution.pk),
+                    contribution_snapshot,
+                )
+                self.assertEqual(
+                    Question.objects.values().get(pk=question.pk), question_snapshot
+                )
+                self.assertEqual(
+                    list(contribution.eligibility_sources.values()), source_snapshot
+                )
+
+    def test_automatic_open_late_exempt_blocks_current_generation_without_mutation(self):
+        parent = self.make_automatic_course(code="AE215-CURRENT")
+        configuration = CourseExamConfiguration.objects.get(cycle_course=parent)
+        configuration.automatic_processing_status = (
+            CourseExamConfiguration.AutomaticProcessingStatus.GENERATED
+        )
+        configuration.automatic_processing_code = "GENERATED"
+        configuration.save(
+            update_fields=[
+                "automatic_processing_status",
+                "automatic_processing_code",
+                "updated_at",
+            ]
+        )
+        revision = self.make_generation_revision(parent, current=True)
+        before_configuration = CourseExamConfiguration.objects.values().get(
+            pk=configuration.pk
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError, "A current generated examination revision exists"
+        ):
+            self.exempt_automatic(parent)
+
+        parent.refresh_from_db()
+        revision.refresh_from_db()
+        self.assertEqual(parent.inclusion_status, CycleCourse.InclusionStatus.INCLUDED)
+        self.assertEqual(
+            CourseExamConfiguration.objects.values().get(pk=configuration.pk),
+            before_configuration,
+        )
+        self.assertEqual(revision.status, ExamGenerationRevision.Status.GENERATED)
+        self.assertEqual(revision.current_marker, 1)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_EXAM_CYCLE_COURSE_EXEMPTED", entity_id=str(parent.id)
+            ).exists()
+        )
+
+    def test_automatic_open_late_exempt_allows_superseded_history_and_restore_stays_blocked(self):
+        parent = self.make_automatic_course(code="AE215-HISTORICAL")
+        historical = self.make_generation_revision(parent, current=False)
+
+        self.exempt_automatic(parent)
+
+        historical.refresh_from_db()
+        self.assertEqual(historical.status, ExamGenerationRevision.Status.SUPERSEDED)
+        self.assertIsNone(historical.current_marker)
+        parent.refresh_from_db()
+        with self.assertRaisesMessage(
+            ValidationError, "Only Draft examination cycles can change course inclusion"
+        ):
+            CycleCourseInclusionService.restore(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+                user=self.generation_manager,
+                reason="Restore remains unavailable during the open cycle",
+                expected_updated_at=CycleCourseInclusionService.transition_token(parent),
+            )
+        parent.refresh_from_db()
+        self.assertEqual(parent.inclusion_status, CycleCourse.InclusionStatus.EXEMPT)
+
+    def test_automatic_open_late_exempt_audit_failure_rolls_back_every_change(self):
+        parent = self.make_automatic_course(code="AE215-AUDIT-ROLLBACK")
+        faculty = self.make_faculty("late-exempt-audit-faculty")
+        self.make_assignment(parent, faculty)
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.generation_manager,
+        )
+        contribution_ids = list(
+            FacultyContribution.objects.filter(cycle_course=parent).values_list(
+                "id", flat=True
+            )
+        )
+        configuration = CourseExamConfiguration.objects.get(cycle_course=parent)
+        configuration_snapshot = CourseExamConfiguration.objects.values().get(
+            pk=configuration.pk
+        )
+
+        with patch(
+            "apps.departmental_exams.services.AuditService.log_event",
+            side_effect=RuntimeError("audit unavailable"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.exempt_automatic(parent)
+
+        parent.refresh_from_db()
+        self.assertEqual(parent.inclusion_status, CycleCourse.InclusionStatus.INCLUDED)
+        self.assertEqual(
+            CourseExamConfiguration.objects.values().get(pk=configuration.pk),
+            configuration_snapshot,
+        )
+        self.assertEqual(
+            list(
+                FacultyContribution.objects.filter(cycle_course=parent).values_list(
+                    "id", flat=True
+                )
+            ),
+            contribution_ids,
+        )
+
+    def test_automatic_open_late_exempt_faculty_history_is_explicitly_read_only(self):
+        parent = self.make_automatic_course(code="AE215-FACULTY")
+        faculty = self.make_faculty("late-exempt-read-only-faculty")
+        self.make_assignment(parent, faculty)
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.generation_manager,
+        )
+        contribution = FacultyContribution.objects.get(cycle_course=parent)
+        question = self.make_question(contribution)
+        self.exempt_automatic(parent)
+        self.client.force_login(faculty)
+
+        contribution_list = self.client.get(
+            reverse("departmental_exams:contribution_list")
+        )
+        self.assertEqual(contribution_list.status_code, 200)
+        self.assertContains(contribution_list, "Exempt / Read-only")
+        self.assertContains(contribution_list, "Review read-only history")
+        workspace = self.client.get(
+            reverse("departmental_exams:contribution_workspace", args=[contribution.id])
+        )
+        self.assertContains(workspace, "This course is Exempt and read-only")
+        for label in (
+            ">Add question<",
+            ">Upload CSV<",
+            ">Edit<",
+            ">Delete<",
+            "Final submission",
+            "Save displayed order",
+        ):
+            self.assertNotContains(workspace, label)
+        for route in (
+            reverse("departmental_exams:question_create", args=[contribution.id]),
+            reverse(
+                "departmental_exams:question_edit", args=[contribution.id, question.id]
+            ),
+            reverse(
+                "departmental_exams:question_delete", args=[contribution.id, question.id]
+            ),
+            reverse("departmental_exams:csv_upload", args=[contribution.id]),
+            reverse("departmental_exams:contribution_submit", args=[contribution.id]),
+        ):
+            with self.subTest(route=route):
+                self.assertEqual(self.client.get(route).status_code, 403)
+
+    def test_automatic_summary_classifies_late_exempt_as_not_applicable(self):
+        cycle = self.make_automatic_cycle()
+        included = self.make_automatic_course(cycle=cycle, code="AE215-INCLUDED")
+        exempt = self.make_automatic_course(cycle=cycle, code="AE215-EXEMPT")
+        self.exempt_automatic(exempt)
+
+        summary = AutomaticGenerationSummaryService.build(cycle=cycle)
+
+        self.assertEqual(summary["total"], 1)
+        self.assertEqual(summary["exempt_count"], 1)
+        self.assertEqual(summary["exempt"][0]["course"].id, exempt.id)
+        self.assertNotIn(exempt.id, {item["course"].id for item in summary["not_generated"]})
+        self.assertIn(included.id, {item["course"].id for item in summary["not_generated"]})
+        self.client.force_login(self.generation_manager)
+        response = self.client.get(
+            reverse("departmental_exams:automatic_generation_summary", args=[cycle.id])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Exempt Courses")
+        self.assertContains(response, "AE215-EXEMPT")
+        self.assertContains(response, "Exempt / Not applicable")
+
+    def test_summary_hidden_exempt_cannot_influence_last_processed_at(self):
+        cycle = self.make_automatic_cycle()
+        visible = self.make_automatic_course(cycle=cycle, code="AE215-VISIBLE")
+        hidden = self.make_automatic_course(cycle=cycle, code="AE215-HIDDEN")
+        visible_configuration = CourseExamConfiguration.objects.get(cycle_course=visible)
+        visible_processed_at = timezone.now() - timezone.timedelta(days=1)
+        visible_configuration.automatic_processing_status = (
+            CourseExamConfiguration.AutomaticProcessingStatus.BLOCKED
+        )
+        visible_configuration.automatic_processing_code = "QUESTION_SHORTAGES"
+        visible_configuration.automatic_processed_at = visible_processed_at
+        visible_configuration.save(
+            update_fields=[
+                "automatic_processing_status",
+                "automatic_processing_code",
+                "automatic_processed_at",
+                "updated_at",
+            ]
+        )
+        program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            code=f"AE-SCOPE-{hidden.id}",
+            name="Late Exempt Hidden Scope Program",
+        )
+        section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=program,
+            code=f"AE-SCOPE-{hidden.id}",
+            name="Late Exempt Hidden Scope Section",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=program,
+            academic_year=cycle.academic_year,
+            term=cycle.term,
+            course=hidden.course,
+            section=section,
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=hidden,
+            offering=offering,
+            campus=self.other_campus,
+        )
+        self.exempt_automatic(hidden, user=self.admin)
+        hidden_configuration = CourseExamConfiguration.objects.get(cycle_course=hidden)
+        self.assertGreater(
+            hidden_configuration.automatic_processed_at,
+            visible_processed_at,
+        )
+        self.client.force_login(self.generation_manager)
+
+        response = self.client.get(
+            reverse("departmental_exams:automatic_generation_summary", args=[cycle.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["exempt_count"], 0)
+        self.assertEqual(response.context["last_processed_at"], visible_processed_at)
+        self.assertContains(response, visible.course.code)
+        self.assertNotContains(response, hidden.course.code)
 
     def test_automatic_lists_never_use_manual_configurer_or_reviewer_scope(self):
         cycle = self.make_automatic_cycle()

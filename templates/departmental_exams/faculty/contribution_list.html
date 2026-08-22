@@ -19,8 +19,8 @@
                 <p class="text-muted small mb-2">{{ contribution.cycle_course.cycle.get_exam_period_display }} · {{ contribution.cycle_course.cycle.academic_year }} · {{ contribution.cycle_course.cycle.term }}</p>
               </div>
               <div class="text-end">
-                <span class="badge {% if contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
-                  {% if contribution.status == 'SUBMITTED' %}Submitted{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
+                <span class="badge {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}text-bg-secondary{% elif contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
+                  {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
                 </span>
               </div>
             </div>
@@ -28,7 +28,7 @@
             <div class="progress mb-3" role="progressbar" aria-label="Contribution progress" aria-valuenow="{{ contribution.progress_percent }}" aria-valuemin="0" aria-valuemax="100">
               <div class="progress-bar" style="width: {{ contribution.progress_percent }}%">{{ contribution.progress_percent }}%</div>
             </div>
-            <a class="btn btn-primary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Open workspace</a>
+            <a class="btn {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}btn-outline-secondary{% else %}btn-primary{% endif %}" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">{% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Review read-only history{% else %}Open workspace{% endif %}</a>
           </div>
         </div>
       </div>

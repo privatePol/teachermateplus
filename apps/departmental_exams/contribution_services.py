@@ -778,6 +778,11 @@ class QuestionMutationService:
             request_tenant_id=tenant_id,
             request_campus_id=campus_id,
         )
+        if (
+            contribution.cycle_course.inclusion_status
+            != CycleCourse.InclusionStatus.INCLUDED
+        ):
+            raise PermissionDenied("Exempt course examinations are read-only.")
         if contribution.status == FacultyContribution.Status.SUBMITTED:
             return contribution, False
         ContributionAuthorizationService.require_mutable_locked(

@@ -23,7 +23,7 @@ from .contribution_services import (
     ContributionRosterService,
     QuestionMutationService,
 )
-from .models import CycleCourseOffering, FacultyContribution, Question
+from .models import CycleCourse, CycleCourseOffering, FacultyContribution, Question
 from .services import CourseExamConfigurationService
 from .stage4_test_support import Stage4TestCase
 
@@ -1188,6 +1188,79 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertFalse(replay_changed)
         self.assertEqual(replay.pk, submitted.pk)
         self.assertEqual(AuditLog.objects.filter(action="DE_EXAM_CONTRIBUTION_SUBMITTED").count(), 1)
+
+    def test_submitted_replay_is_idempotent_only_while_course_is_included(self):
+        Question.objects.bulk_create(
+            [
+                Question(
+                    contribution=self.contribution,
+                    question_text=f"Replay question {index}",
+                    choice_a="A",
+                    choice_b="B",
+                    choice_c="C",
+                    choice_d="D",
+                    correct_answer="A",
+                    difficulty="EASY",
+                    position=index,
+                )
+                for index in range(1, 51)
+            ]
+        )
+        submitted, changed = QuestionMutationService.submit(
+            contribution_id=self.contribution.id,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=self.contribution.revision,
+        )
+        self.assertTrue(changed)
+        included_snapshot = FacultyContribution.objects.values().get(pk=submitted.pk)
+        replay, replay_changed = QuestionMutationService.submit(
+            contribution_id=self.contribution.id,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=1,
+        )
+        self.assertFalse(replay_changed)
+        self.assertEqual(replay.pk, submitted.pk)
+        self.assertEqual(
+            FacultyContribution.objects.values().get(pk=submitted.pk),
+            included_snapshot,
+        )
+
+        CycleCourse.objects.filter(pk=self.parent.pk).update(
+            inclusion_status=CycleCourse.InclusionStatus.EXEMPT,
+            exemption_category=CycleCourse.ExemptionCategory.INTERNSHIP,
+            exemption_reason="Approved retained submitted-work regression",
+            exemption_changed_by=self.configurer,
+            exemption_changed_at=timezone.now(),
+        )
+        exempt_snapshot = FacultyContribution.objects.values().get(pk=submitted.pk)
+        audit_count = AuditLog.objects.filter(
+            action="DE_EXAM_CONTRIBUTION_SUBMITTED"
+        ).count()
+
+        with self.assertRaisesMessage(
+            PermissionDenied,
+            "Exempt course examinations are read-only",
+        ):
+            QuestionMutationService.submit(
+                contribution_id=self.contribution.id,
+                user=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                expected_contribution_revision=1,
+            )
+
+        self.assertEqual(
+            FacultyContribution.objects.values().get(pk=submitted.pk),
+            exempt_snapshot,
+        )
+        self.assertEqual(
+            AuditLog.objects.filter(action="DE_EXAM_CONTRIBUTION_SUBMITTED").count(),
+            audit_count,
+        )
 
     def test_submission_under_quota_and_past_deadline_are_denied(self):
         with self.assertRaises(ValidationError):

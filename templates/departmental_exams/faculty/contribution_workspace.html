@@ -21,7 +21,9 @@
     {% if configuration.additional_instructions %}<div class="mt-2"><strong>Course instructions:</strong><br>{{ configuration.additional_instructions|linebreaksbr }}</div>{% endif %}
   </div>
 </div>
-{% if contribution.status == 'SUBMITTED' %}
+{% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}
+  <div class="alert alert-warning"><strong>This course is Exempt and read-only.</strong> Your retained contribution history remains visible to you, but no additions, edits, deletions, uploads, reordering, or submission are allowed.</div>
+{% elif contribution.status == 'SUBMITTED' %}
   <div class="alert alert-success"><strong>Submitted and read-only.</strong> Submitted {{ contribution.submitted_at|date:"M j, Y g:i A" }}. Your questions remain visible to you, but no further changes are allowed.</div>
 {% elif contribution.roster_status == 'BLOCKED' %}
   <div class="alert alert-warning"><strong>This Draft is blocked and read-only.</strong> Your current teaching-assignment eligibility is no longer valid. Your saved content remains private and visible here; contact an authorized administrator.</div>
