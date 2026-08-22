@@ -756,20 +756,58 @@ def automatic_generation_summary_view(request, cycle_id):
     courses = list(
         CycleCourse.objects.filter(
             cycle=cycle,
-            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
         ).select_related("cycle").prefetch_related("offering_snapshots")
     )
     if not courses:
         raise PermissionDenied("No applicable automatic course examinations exist.")
-    permission_map = _automatic_summary_permission_map(
+    included_courses = [
+        course
+        for course in courses
+        if course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+    ]
+    exempt_courses = [
+        course
+        for course in courses
+        if course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT
+    ]
+    permission_map = DepartmentalExamAuthorizationService.automatic_permission_map(
         user=request.user,
-        courses=courses,
+        courses=included_courses,
+        permissions=(
+            DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+        ),
     )
-    if not _has_automatic_summary_access(courses, permission_map):
+    if included_courses and any(
+        DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION
+        not in permission_map[course.id]
+        for course in included_courses
+    ):
         raise PermissionDenied(
             "You do not have automatic examination authority for every participating campus."
         )
-    summary = AutomaticGenerationSummaryService.build(cycle=cycle)
+    inclusion_map = (
+        DepartmentalExamAuthorizationService.automatic_inclusion_management_map(
+            user=request.user,
+            courses=exempt_courses,
+        )
+    )
+    can_view_exempt = bool(exempt_courses) and all(
+        DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+        in inclusion_map[course.id]
+        for course in exempt_courses
+    )
+    if not included_courses and not can_view_exempt:
+        raise PermissionDenied(
+            "You do not have automatic examination authority for every participating campus."
+        )
+    visible_course_ids = [course.id for course in included_courses]
+    if can_view_exempt:
+        visible_course_ids.extend(course.id for course in exempt_courses)
+    summary = AutomaticGenerationSummaryService.build(
+        cycle=cycle,
+        cycle_course_ids=visible_course_ids,
+    )
     for item in summary["generated"]:
         item["can_manage_generation"] = (
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION

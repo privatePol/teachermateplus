@@ -24,7 +24,9 @@
     {% if configuration.additional_instructions %}<div class="mt-2"><strong>Course instructions:</strong><br>{{ configuration.additional_instructions|linebreaksbr }}</div>{% endif %}
   </div>
 </div>
-{% if active_import %}
+{% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}
+  <div class="alert alert-warning"><strong>This course is Exempt and read-only.</strong> Your retained contribution history remains visible to you, but no additions, edits, deletions, uploads, reordering, or submission are allowed.</div>
+{% elif active_import %}
   <div class="alert alert-info" role="status">
     <strong>An interrupted question import is available.</strong>
     <div data-import-progress-text>{{ active_import.committed_rows }} / {{ active_import.total_rows }} rows committed ({{ active_import_progress.percentage }}%).</div>

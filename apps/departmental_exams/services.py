@@ -18,6 +18,7 @@ from .models import (
     CycleCourse,
     CycleCourseOffering,
     ExaminationCycle,
+    ExamGenerationRevision,
     FacultyContribution,
     Question,
     normalize_contribution_deadline_to_minute,
@@ -1557,14 +1558,35 @@ class CycleCourseInclusionService:
 
     @classmethod
     def _require_exempt_transition_window(cls, *, cycle_course):
-        cls._require_draft_active_department(cycle_course=cycle_course)
-        if FacultyContribution.objects.filter(cycle_course=cycle_course).exists():
+        automatic_open = (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            and cycle_course.cycle.status == ExaminationCycle.Status.OPEN
+        )
+        if not automatic_open:
+            cls._require_draft_active_department(cycle_course=cycle_course)
+        if (
+            not automatic_open
+            and FacultyContribution.objects.filter(cycle_course=cycle_course).exists()
+        ):
             raise ValidationError(
                 "This course has downstream faculty contribution data and cannot change inclusion."
             )
-        if Question.objects.filter(contribution__cycle_course=cycle_course).exists():
+        if (
+            not automatic_open
+            and Question.objects.filter(
+                contribution__cycle_course=cycle_course
+            ).exists()
+        ):
             raise ValidationError(
                 "This course has downstream examination question data and cannot change inclusion."
+            )
+        if ExamGenerationRevision.objects.filter(
+            cycle_course=cycle_course,
+            current_marker=1,
+        ).exists():
+            raise ValidationError(
+                "A current generated examination revision exists. Resolve its lifecycle before exempting this course."
             )
 
     @classmethod
@@ -1589,6 +1611,11 @@ class CycleCourseInclusionService:
                 "closed_at": configuration.closed_at,
                 "closed_by_id": configuration.closed_by_id,
                 "revision": configuration.revision,
+                "automatic_processing_status": (
+                    configuration.automatic_processing_status
+                ),
+                "automatic_processing_code": configuration.automatic_processing_code,
+                "automatic_processed_at": configuration.automatic_processed_at,
             }
         return payload
 
@@ -1678,17 +1705,48 @@ class CycleCourseInclusionService:
 
         configuration = CourseExamConfiguration.objects.select_for_update().filter(cycle_course=cycle_course).first()
         before = cls._state_payload(cycle_course, configuration)
-        if configuration and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN:
-            configuration.workflow_status = CourseExamConfiguration.WorkflowStatus.CLOSED
-            configuration.closed_at = timezone.now()
-            configuration.closed_by = user
-            configuration.revision += 1
-            configuration.save(update_fields=["workflow_status", "closed_at", "closed_by", "revision", "updated_at"])
+        transition_time = timezone.now()
+        if configuration:
+            configuration_updates = []
+            if (
+                configuration.workflow_status
+                == CourseExamConfiguration.WorkflowStatus.OPEN
+            ):
+                configuration.workflow_status = (
+                    CourseExamConfiguration.WorkflowStatus.CLOSED
+                )
+                configuration.closed_at = transition_time
+                configuration.closed_by = user
+                configuration.revision += 1
+                configuration_updates.extend(
+                    ["workflow_status", "closed_at", "closed_by", "revision"]
+                )
+            if (
+                cycle_course.cycle.processing_mode
+                == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                and cycle_course.cycle.status == ExaminationCycle.Status.OPEN
+            ):
+                configuration.automatic_processing_status = (
+                    CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED
+                )
+                configuration.automatic_processing_code = "NOT_APPLICABLE"
+                configuration.automatic_processed_at = transition_time
+                configuration_updates.extend(
+                    [
+                        "automatic_processing_status",
+                        "automatic_processing_code",
+                        "automatic_processed_at",
+                    ]
+                )
+            if configuration_updates:
+                configuration.save(
+                    update_fields=[*dict.fromkeys(configuration_updates), "updated_at"]
+                )
         cycle_course.inclusion_status = CycleCourse.InclusionStatus.EXEMPT
         cycle_course.exemption_category = exemption_category
         cycle_course.exemption_reason = reason
         cycle_course.exemption_changed_by = user
-        cycle_course.exemption_changed_at = timezone.now()
+        cycle_course.exemption_changed_at = transition_time
         cycle_course.full_clean()
         cycle_course.save(
             update_fields=[

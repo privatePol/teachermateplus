@@ -19,8 +19,8 @@
                 <p class="text-muted small mb-2">{{ contribution.cycle_course.cycle.get_exam_period_display }} · {{ contribution.cycle_course.cycle.academic_year }} · {{ contribution.cycle_course.cycle.term }}</p>
               </div>
               <div class="text-end">
-                <span class="badge {% if contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
-                  {% if contribution.status == 'SUBMITTED' %}Submitted{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
+                <span class="badge {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}text-bg-secondary{% elif contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
+                  {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
                 </span>
               </div>
             </div>
@@ -29,7 +29,7 @@
               <div class="progress-bar" style="width: {{ contribution.progress_percent }}%">{{ contribution.progress_percent }}%</div>
             </div>
             <div class="d-grid gap-3">
-              <div><a class="btn btn-primary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Open workspace</a></div>
+              <div><a class="btn {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}btn-outline-secondary{% else %}btn-primary{% endif %}" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">{% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Review read-only history{% else %}Open workspace{% endif %}</a></div>
               {% if contribution.questionnaire_print or contribution.answer_key_release %}
                 <section class="border rounded-3 bg-light p-3" aria-label="Exam outputs">
                   <h3 class="h6 text-uppercase text-muted mb-3">Exam Outputs</h3>

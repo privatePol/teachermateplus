@@ -445,6 +445,76 @@ class AutomaticExamDeadlineService:
             )
 
     @classmethod
+    def _canonical_exempt_result_locked(cls, *, course, configuration, now):
+        if course.inclusion_status != CycleCourse.InclusionStatus.EXEMPT:
+            return None
+        if configuration is not None and (
+            configuration.automatic_processing_status
+            != CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED
+            or configuration.automatic_processing_code != "NOT_APPLICABLE"
+            or configuration.automatic_processed_at is None
+        ):
+            cls._record_status(
+                course=course,
+                configuration=configuration,
+                status=CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED,
+                code="NOT_APPLICABLE",
+                now=now,
+            )
+        return AutomaticProcessingResult(
+            course.id,
+            "SKIPPED",
+            "NOT_APPLICABLE",
+            "Course is not applicable.",
+        )
+
+    @classmethod
+    @transaction.atomic
+    def _record_status_authoritatively(
+        cls,
+        *,
+        cycle_course_id,
+        tenant_id,
+        status,
+        code,
+        now,
+    ):
+        _cycle, course, configuration = Stage5LockService.lock_cycle_course(
+            cycle_course_id=cycle_course_id,
+            tenant_id=tenant_id,
+        )
+        exempt_result = cls._canonical_exempt_result_locked(
+            course=course,
+            configuration=configuration,
+            now=now,
+        )
+        if exempt_result is not None:
+            return exempt_result
+        if configuration is None:
+            return None
+        cls._record_status(
+            course=course,
+            configuration=configuration,
+            status=status,
+            code=code,
+            now=now,
+        )
+        return None
+
+    @classmethod
+    @transaction.atomic
+    def _preserve_exempt_outcome(cls, *, cycle_course_id, tenant_id, now):
+        _cycle, course, configuration = Stage5LockService.lock_cycle_course(
+            cycle_course_id=cycle_course_id,
+            tenant_id=tenant_id,
+        )
+        return cls._canonical_exempt_result_locked(
+            course=course,
+            configuration=configuration,
+            now=now,
+        )
+
+    @classmethod
     def process_course(cls, *, cycle_course_id, tenant_id, now=None, max_states=None):
         now = now or timezone.now()
         preparation = cls._close_due_intake(
@@ -471,13 +541,15 @@ class AutomaticExamDeadlineService:
 
         current = ExamGenerationService.current_for_course(cycle_course=course)
         if current is not None:
-            cls._record_status(
-                course=course,
-                configuration=configuration,
+            exempt_result = cls._record_status_authoritatively(
+                cycle_course_id=course.id,
+                tenant_id=tenant_id,
                 status=CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED,
                 code="CURRENT_GENERATION_EXISTS",
                 now=now,
             )
+            if exempt_result is not None:
+                return exempt_result
             return AutomaticProcessingResult(
                 course.id,
                 "SKIPPED",
@@ -495,13 +567,15 @@ class AutomaticExamDeadlineService:
             code = (readiness.get("blockers") or [{"code": "READINESS_BLOCKED"}])[0][
                 "code"
             ]
-            cls._record_status(
-                course=course,
-                configuration=configuration,
+            exempt_result = cls._record_status_authoritatively(
+                cycle_course_id=course.id,
+                tenant_id=tenant_id,
                 status=CourseExamConfiguration.AutomaticProcessingStatus.BLOCKED,
                 code=code,
                 now=now,
             )
+            if exempt_result is not None:
+                return exempt_result
             return AutomaticProcessingResult(
                 course.id, "BLOCKED", code, readiness_blocker_text(readiness)
             )
@@ -512,29 +586,41 @@ class AutomaticExamDeadlineService:
                 f"{problem.input_fingerprint}"
             ).encode("utf-8")
         ).hexdigest()
-        outcome = ExamGenerationService.generate(
-            cycle_course_id=course.id,
-            tenant_id=tenant_id,
-            actor=None,
-            expected_current_revision=0,
-            expected_input_fingerprint=problem.input_fingerprint,
-            request_token=request_token,
-            generation_trigger=ExamGenerationRevision.GenerationTrigger.AUTOMATIC,
-            max_states=automatic_state_budget,
-        )
+        try:
+            outcome = ExamGenerationService.generate(
+                cycle_course_id=course.id,
+                tenant_id=tenant_id,
+                actor=None,
+                expected_current_revision=0,
+                expected_input_fingerprint=problem.input_fingerprint,
+                request_token=request_token,
+                generation_trigger=ExamGenerationRevision.GenerationTrigger.AUTOMATIC,
+                max_states=automatic_state_budget,
+            )
+        except Exception:
+            exempt_result = cls._preserve_exempt_outcome(
+                cycle_course_id=course.id,
+                tenant_id=tenant_id,
+                now=now,
+            )
+            if exempt_result is not None:
+                return exempt_result
+            raise
         status = (
             CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED
             if outcome.reused
             else CourseExamConfiguration.AutomaticProcessingStatus.GENERATED
         )
         code = "CURRENT_GENERATION_EXISTS" if outcome.reused else "GENERATED"
-        cls._record_status(
-            course=course,
-            configuration=configuration,
+        exempt_result = cls._record_status_authoritatively(
+            cycle_course_id=course.id,
+            tenant_id=tenant_id,
             status=status,
             code=code,
             now=now,
         )
+        if exempt_result is not None:
+            return exempt_result
         return AutomaticProcessingResult(
             course.id,
             status,
@@ -652,21 +738,21 @@ class AutomaticExamDeadlineService:
                     course_id,
                     exc.__class__.__name__,
                 )
-                results.append(
-                    AutomaticProcessingResult(
-                        course_id,
-                        "ERROR",
-                        exc.__class__.__name__,
-                        "Course processing failed; inspect the secured application log.",
-                    )
+                failure_result = AutomaticProcessingResult(
+                    course_id,
+                    "ERROR",
+                    exc.__class__.__name__,
+                    "Course processing failed; inspect the secured application log.",
                 )
                 try:
-                    cls._record_error(
+                    exempt_result = cls._record_error(
                         cycle_course_id=course_id,
                         tenant_id=tenant_id,
                         code=exc.__class__.__name__,
                         now=now,
                     )
+                    if exempt_result is not None:
+                        failure_result = exempt_result
                 except Exception as record_exc:
                     logger.error(
                         "Automatic departmental-exam error recording failed for tenant=%s course=%s original_error_type=%s recording_error_type=%s.",
@@ -675,6 +761,7 @@ class AutomaticExamDeadlineService:
                         exc.__class__.__name__,
                         record_exc.__class__.__name__,
                     )
+                results.append(failure_result)
         return results
 
     @classmethod
@@ -687,6 +774,13 @@ class AutomaticExamDeadlineService:
             )
         except (CycleCourse.DoesNotExist, Http404, PermissionDenied):
             return
+        exempt_result = cls._canonical_exempt_result_locked(
+            course=course,
+            configuration=configuration,
+            now=now,
+        )
+        if exempt_result is not None:
+            return exempt_result
         if configuration is not None:
             cls._record_status(
                 course=course,
@@ -695,6 +789,7 @@ class AutomaticExamDeadlineService:
                 code=str(code)[:64],
                 now=now,
             )
+        return None
 
 
 class AutomaticContributionReopenService:
@@ -803,18 +898,18 @@ class AutomaticContributionReopenService:
 
 class AutomaticGenerationSummaryService:
     @classmethod
-    def build(cls, *, cycle, now=None):
+    def build(cls, *, cycle, now=None, cycle_course_ids=None):
         if (
             cycle.processing_mode
             != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         ):
             raise ValidationError("This cycle does not use automatic generation.")
         now = now or timezone.now()
+        course_queryset = CycleCourse.objects.filter(cycle=cycle)
+        if cycle_course_ids is not None:
+            course_queryset = course_queryset.filter(pk__in=tuple(cycle_course_ids))
         courses = list(
-            CycleCourse.objects.filter(
-                cycle=cycle,
-                inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
-            )
+            course_queryset
             .select_related("course", "configuration")
             .prefetch_related(
                 "offering_snapshots__campus",
@@ -837,6 +932,7 @@ class AutomaticGenerationSummaryService:
         )
         generated = []
         not_generated = []
+        exempt = []
         last_processed_at = None
         for course in courses:
             campuses = tuple(
@@ -879,6 +975,17 @@ class AutomaticGenerationSummaryService:
                     for item in contributions
                 ),
             }
+            if course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT:
+                exempt.append(
+                    {
+                        "course": course,
+                        "campuses": campuses,
+                        "category": course.get_exemption_category_display(),
+                        "reason": course.exemption_reason,
+                        "configuration": configuration,
+                    }
+                )
+                continue
             if current:
                 sets = {item.set_code: item for item in current.generated_sets.all()}
                 actual_set_counts = []
@@ -1049,8 +1156,10 @@ class AutomaticGenerationSummaryService:
         return {
             "generated": generated,
             "not_generated": not_generated,
-            "total": len(courses),
+            "exempt": exempt,
+            "total": len(generated) + len(not_generated),
             "generated_count": len(generated),
             "not_generated_count": len(not_generated),
+            "exempt_count": len(exempt),
             "last_processed_at": last_processed_at,
         }
