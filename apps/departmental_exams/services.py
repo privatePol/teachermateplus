@@ -1590,9 +1590,44 @@ class CycleCourseInclusionService:
             )
 
     @classmethod
-    def _require_restore_transition_window(cls, *, cycle_course):
-        """A dormant configuration is preserved and does not block restoration."""
-        cls._require_draft_active_department(cycle_course=cycle_course)
+    def _require_restore_transition_window(
+        cls,
+        *,
+        cycle_course,
+        configuration,
+        transition_time,
+    ):
+        """Allow governed Automatic OPEN restore before the effective deadline."""
+        automatic_open = (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            and cycle_course.cycle.status == ExaminationCycle.Status.OPEN
+        )
+        if automatic_open:
+            if configuration is None:
+                raise ValidationError(
+                    "A course examination configuration is required before restoring this course."
+                )
+            deadline = configuration.active_contribution_deadline
+            if deadline is None:
+                raise ValidationError(
+                    "A contribution deadline is required before restoring this course."
+                )
+            if transition_time >= deadline:
+                raise ValidationError(
+                    "The contribution deadline has been reached. This course cannot be restored."
+                )
+        else:
+            cls._require_draft_active_department(cycle_course=cycle_course)
+
+        if ExamGenerationRevision.objects.filter(
+            cycle_course=cycle_course,
+            current_marker=1,
+        ).exists():
+            raise ValidationError(
+                "A current generated examination revision exists. Resolve its lifecycle before restoring this course."
+            )
+        return automatic_open
 
     @staticmethod
     def _state_payload(cycle_course, configuration=None):
@@ -1798,10 +1833,20 @@ class CycleCourseInclusionService:
             cycle_course=cycle_course,
             expected_updated_at=expected_updated_at,
         )
-        cls._require_restore_transition_window(cycle_course=cycle_course)
+        configuration = (
+            CourseExamConfiguration.objects.select_for_update()
+            .filter(cycle_course=cycle_course)
+            .first()
+        )
+        transition_time = timezone.now()
+        automatic_open = cls._require_restore_transition_window(
+            cycle_course=cycle_course,
+            configuration=configuration,
+            transition_time=transition_time,
+        )
         reason = cls._validate_reason(reason)
 
-        before = cls._state_payload(cycle_course)
+        before = cls._state_payload(cycle_course, configuration)
         reviewer_revalidated = bool(cycle_course.reviewer_id)
         reviewer_cleared = False
         if cycle_course.reviewer_id and not DepartmentalExamAuthorizationService.is_eligible_reviewer(
@@ -1816,7 +1861,7 @@ class CycleCourseInclusionService:
         cycle_course.exemption_category = ""
         cycle_course.exemption_reason = ""
         cycle_course.exemption_changed_by = user
-        cycle_course.exemption_changed_at = timezone.now()
+        cycle_course.exemption_changed_at = transition_time
         cycle_course.full_clean()
         cycle_course.save(
             update_fields=[
@@ -1829,6 +1874,39 @@ class CycleCourseInclusionService:
                 "updated_at",
             ]
         )
+        if automatic_open:
+            configuration.workflow_status = (
+                CourseExamConfiguration.WorkflowStatus.OPEN
+            )
+            configuration.closed_at = None
+            configuration.closed_by = None
+            configuration.revision += 1
+            configuration.automatic_processing_status = ""
+            configuration.automatic_processing_code = ""
+            configuration.automatic_processed_at = None
+            configuration.save(
+                update_fields=[
+                    "workflow_status",
+                    "closed_at",
+                    "closed_by",
+                    "revision",
+                    "automatic_processing_status",
+                    "automatic_processing_code",
+                    "automatic_processed_at",
+                    "updated_at",
+                ]
+            )
+
+            # Local import keeps the existing services module boundary acyclic.
+            from .contribution_services import ContributionRosterService
+
+            ContributionRosterService._synchronize_locked(
+                cycle_course=cycle_course,
+                configuration=configuration,
+                actor=user,
+                request=request,
+                initializing=False,
+            )
         cls._audit_transition(
             action="DE_EXAM_CYCLE_COURSE_RESTORED",
             cycle_course=cycle_course,
@@ -1839,6 +1917,7 @@ class CycleCourseInclusionService:
             reviewer_cleared=reviewer_cleared,
             expected_updated_at=expected_updated_at,
             request=request,
+            configuration=configuration,
         )
         return cycle_course, True
 
