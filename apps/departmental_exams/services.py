@@ -1900,13 +1900,21 @@ class CycleCourseInclusionService:
             # Local import keeps the existing services module boundary acyclic.
             from .contribution_services import ContributionRosterService
 
-            ContributionRosterService._synchronize_locked(
-                cycle_course=cycle_course,
-                configuration=configuration,
-                actor=user,
-                request=request,
-                initializing=False,
-            )
+            if configuration.contributor_roster_initialized_at is None:
+                ContributionRosterService.initialize_for_open_locked(
+                    cycle_course=cycle_course,
+                    configuration=configuration,
+                    actor=user,
+                    request=request,
+                )
+            else:
+                ContributionRosterService._synchronize_locked(
+                    cycle_course=cycle_course,
+                    configuration=configuration,
+                    actor=user,
+                    request=request,
+                    initializing=False,
+                )
         cls._audit_transition(
             action="DE_EXAM_CYCLE_COURSE_RESTORED",
             cycle_course=cycle_course,

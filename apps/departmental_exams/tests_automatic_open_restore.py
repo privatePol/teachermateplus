@@ -138,6 +138,90 @@ class AutomaticOpenRestoreTests(Stage5FixtureMixin, Stage4TestCase):
             squared_contributor_concentration=0,
         )
 
+    def test_restore_initializes_never_initialized_roster_before_deadline(self):
+        parent, configuration = self.make_automatic_course(code="AOR-INITIALIZE")
+        faculty = self.make_faculty("aor-initialized-faculty")
+        assignment = self.make_assignment(parent, faculty)
+        original_deadline = configuration.contribution_deadline
+        reopened_deadline = original_deadline + timezone.timedelta(days=1)
+        configuration.reopened_contribution_deadline = reopened_deadline
+        configuration.save(
+            update_fields=["reopened_contribution_deadline", "updated_at"]
+        )
+        self.exempt(parent)
+        configuration.refresh_from_db()
+        self.assertIsNone(configuration.contributor_roster_initialized_at)
+        self.assertEqual(configuration.contributor_roster_revision, 0)
+
+        restored, changed = self.restore(parent)
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            restored.inclusion_status,
+            CycleCourse.InclusionStatus.INCLUDED,
+        )
+        configuration.refresh_from_db()
+        contribution = FacultyContribution.objects.get(
+            cycle_course=parent,
+            faculty_user=faculty,
+        )
+        self.assertEqual(configuration.workflow_status, CourseExamConfiguration.WorkflowStatus.OPEN)
+        self.assertIsNotNone(configuration.contributor_roster_initialized_at)
+        self.assertEqual(
+            configuration.contributor_roster_initialized_by_id,
+            self.generation_manager.id,
+        )
+        self.assertEqual(configuration.contributor_roster_revision, 1)
+        self.assertEqual(configuration.contribution_deadline, original_deadline)
+        self.assertEqual(configuration.reopened_contribution_deadline, reopened_deadline)
+        self.assertEqual(configuration.active_contribution_deadline, reopened_deadline)
+        self.assertEqual(contribution.source_assignment_id, assignment.id)
+        self.assertEqual(contribution.status, FacultyContribution.Status.DRAFT)
+        self.assertEqual(contribution.roster_status, FacultyContribution.RosterStatus.ACTIVE)
+
+    def test_restore_initializes_only_current_eligible_contributors_without_duplicates(self):
+        parent, configuration = self.make_automatic_course(code="AOR-ELIGIBLE")
+        multi_source_faculty = self.make_faculty("aor-multi-source-faculty")
+        second_faculty = self.make_faculty("aor-second-eligible-faculty")
+        ineligible_faculty = self.make_faculty("aor-ineligible-faculty")
+        first_assignment = self.make_assignment(parent, multi_source_faculty)
+        second_offering = self.add_grouped_offering(
+            parent,
+            campus=self.campus,
+            department=self.department,
+            slug="AOR-DUPLICATE-SOURCE",
+        )
+        second_assignment = self.make_assignment(
+            parent,
+            multi_source_faculty,
+            offering=second_offering,
+        )
+        self.make_assignment(parent, second_faculty)
+        inactive_assignment = self.make_assignment(parent, ineligible_faculty)
+        inactive_assignment.is_active = False
+        inactive_assignment.save(update_fields=["is_active", "updated_at"])
+        self.exempt(parent)
+
+        self.restore(parent)
+
+        configuration.refresh_from_db()
+        contributions = FacultyContribution.objects.filter(cycle_course=parent)
+        self.assertEqual(configuration.contributor_roster_revision, 1)
+        self.assertEqual(contributions.count(), 2)
+        self.assertFalse(contributions.filter(faculty_user=ineligible_faculty).exists())
+        multi_source = contributions.get(faculty_user=multi_source_faculty)
+        self.assertEqual(
+            set(
+                multi_source.eligibility_sources.filter(is_current=True).values_list(
+                    "assignment_id_snapshot",
+                    flat=True,
+                )
+            ),
+            {first_assignment.id, second_assignment.id},
+        )
+        self.assertEqual(contributions.filter(faculty_user=multi_source_faculty).count(), 1)
+        self.assertFalse(Question.objects.filter(contribution__cycle_course=parent).exists())
+
     def test_restore_succeeds_before_effective_deadline_and_reopens_configuration(self):
         parent, configuration = self.make_automatic_course(code="AOR-SUCCESS")
         first_deadline = configuration.contribution_deadline
@@ -456,6 +540,45 @@ class AutomaticOpenRestoreTests(Stage5FixtureMixin, Stage4TestCase):
                 .values()
             ),
             before_contributions,
+        )
+        self.assertEqual(AuditLog.objects.count(), before_audits)
+
+    def test_restore_initialization_failure_rolls_back_every_change(self):
+        parent, configuration = self.make_automatic_course(code="AOR-INIT-ROLLBACK")
+        faculty = self.make_faculty("aor-initialization-rollback")
+        self.make_assignment(parent, faculty)
+        self.exempt(parent)
+        before_parent = CycleCourse.objects.values().get(pk=parent.pk)
+        before_configuration = CourseExamConfiguration.objects.values().get(
+            pk=configuration.pk
+        )
+        before_audits = AuditLog.objects.count()
+        initialize_for_open_locked = (
+            ContributionRosterService.initialize_for_open_locked
+        )
+
+        def initialize_then_fail(**kwargs):
+            initialize_for_open_locked(**kwargs)
+            raise ValidationError("Forced roster initialization failure.")
+
+        with patch.object(
+            ContributionRosterService,
+            "initialize_for_open_locked",
+            side_effect=initialize_then_fail,
+        ):
+            with self.assertRaisesMessage(
+                ValidationError,
+                "Forced roster initialization failure.",
+            ):
+                self.restore(parent)
+
+        self.assertEqual(CycleCourse.objects.values().get(pk=parent.pk), before_parent)
+        self.assertEqual(
+            CourseExamConfiguration.objects.values().get(pk=configuration.pk),
+            before_configuration,
+        )
+        self.assertFalse(
+            FacultyContribution.objects.filter(cycle_course=parent).exists()
         )
         self.assertEqual(AuditLog.objects.count(), before_audits)
 
