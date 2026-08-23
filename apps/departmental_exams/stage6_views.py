@@ -337,7 +337,7 @@ def blocked_contribution_resolve_view(request, contribution_id):
     filter_query = urlencode(
         {
             key: request.POST.get(key)
-            for key in ("cycle", "period", "course")
+            for key in ("cycle", "period", "course", "contributor")
             if request.POST.get(key)
         }
     )

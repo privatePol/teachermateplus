@@ -455,6 +455,7 @@ class Stage6BlockedResolutionTests(Stage6FixtureMixin, Stage4TestCase):
                 "cycle": parent.cycle_id,
                 "period": parent.cycle.exam_period,
                 "course": parent.course_id,
+                "contributor": contribution.faculty_user_id,
                 "next": "https://attacker.example/redirect",
                 "return_url": "/admin-portal/",
             },
@@ -463,6 +464,7 @@ class Stage6BlockedResolutionTests(Stage6FixtureMixin, Stage4TestCase):
             reverse("departmental_exams:contributor_monitoring")
             + f"?cycle={parent.cycle_id}&period={parent.cycle.exam_period}"
             + f"&course={parent.course_id}"
+            + f"&contributor={contribution.faculty_user_id}"
         )
         self.assertRedirects(response, expected, fetch_redirect_response=False)
         follow = client.get(response.url)
@@ -470,6 +472,9 @@ class Stage6BlockedResolutionTests(Stage6FixtureMixin, Stage4TestCase):
         self.assertEqual(follow.context["selected_cycle_id"], parent.cycle_id)
         self.assertEqual(follow.context["selected_period"], parent.cycle.exam_period)
         self.assertEqual(follow.context["selected_course_id"], parent.course_id)
+        self.assertEqual(
+            follow.context["selected_contributor_id"], contribution.faculty_user_id
+        )
 
     def test_resolution_redirect_leaves_stale_filters_for_normal_validation(self):
         _parent, configuration, contribution, _assignment = self._blocked()

@@ -85,6 +85,11 @@ def _monitoring_scope_context(request):
     courses_by_id = {
         course.course_id: course.course for course in visible_courses
     }
+    contributors_by_id = {
+        contribution.faculty_user_id: contribution.faculty_user
+        for course in visible_courses
+        for contribution in course.faculty_contributions.all()
+    }
 
     def selected_int(name, valid_ids):
         try:
@@ -98,6 +103,19 @@ def _monitoring_scope_context(request):
     selected_period = request.GET.get("period", "")
     if selected_period not in ExaminationCycle.ExamPeriod.values:
         selected_period = ""
+    raw_contributor_id = request.GET.get("contributor", "").strip()
+    selected_contributor_id = None
+    invalid_contributor_filter = False
+    if raw_contributor_id:
+        try:
+            requested_contributor_id = int(raw_contributor_id)
+        except (TypeError, ValueError):
+            invalid_contributor_filter = True
+        else:
+            if requested_contributor_id in contributors_by_id:
+                selected_contributor_id = requested_contributor_id
+            else:
+                invalid_contributor_filter = True
 
     courses = [
         course
@@ -106,10 +124,29 @@ def _monitoring_scope_context(request):
         and (not selected_period or course.cycle.exam_period == selected_period)
         and (selected_course_id is None or course.course_id == selected_course_id)
     ]
+    if invalid_contributor_filter:
+        courses = []
+    else:
+        for course in courses:
+            course.monitoring_contributions = [
+                contribution
+                for contribution in course.faculty_contributions.all()
+                if (
+                    selected_contributor_id is None
+                    or contribution.faculty_user_id == selected_contributor_id
+                )
+            ]
+        if selected_contributor_id is not None:
+            courses = [course for course in courses if course.monitoring_contributions]
     selected_filters = {
         "cycle": selected_cycle_id or "",
         "period": selected_period,
         "course": selected_course_id or "",
+        "contributor": (
+            selected_contributor_id
+            if selected_contributor_id is not None
+            else raw_contributor_id if invalid_contributor_filter else ""
+        ),
     }
     filter_query = urlencode(
         {key: value for key, value in selected_filters.items() if value}
@@ -131,16 +168,33 @@ def _monitoring_scope_context(request):
             courses_by_id.values(),
             key=lambda course: (course.code, course.id),
         ),
+        "contributor_choices": sorted(
+            contributors_by_id.values(),
+            key=lambda contributor: (
+                contributor.last_name,
+                contributor.first_name,
+                contributor.username,
+                contributor.id,
+            ),
+        ),
         "selected_cycle_id": selected_cycle_id,
         "selected_period": selected_period,
         "selected_course_id": selected_course_id,
+        "selected_contributor_id": selected_contributor_id,
         "filter_query": filter_query,
     }
 
 
+def _course_contributions(course):
+    contributions = getattr(course, "monitoring_contributions", None)
+    if contributions is not None:
+        return contributions
+    return list(course.faculty_contributions.all())
+
+
 def _decorate_contribution_metrics(courses):
     for course in courses:
-        for contribution in course.faculty_contributions.all():
+        for contribution in _course_contributions(course):
             contribution.progress_percent = round(
                 (contribution.saved_question_count / contribution.quota_snapshot) * 100
             )
@@ -175,7 +229,7 @@ def contributor_monitoring_view(request):
         in automatic_permissions[course.id]
     }
     for course in courses:
-        for contribution in course.faculty_contributions.all():
+        for contribution in _course_contributions(course):
             configuration = getattr(course, "configuration", None)
             contribution.is_overdue = bool(
                 configuration
@@ -233,7 +287,7 @@ def _decorate_contributor_locations(*, courses, tenant_id):
             for snapshot in snapshots
             if snapshot.campus.tenant_id == tenant_id
         }
-        contributions = list(course.faculty_contributions.all())
+        contributions = _course_contributions(course)
         for contribution in contributions:
             contributor_campuses = set()
             contributor_sections = set()
@@ -272,7 +326,7 @@ def _decorate_print_report(*, courses, tenant_id):
     _decorate_contribution_metrics(courses)
     _decorate_contributor_locations(courses=courses, tenant_id=tenant_id)
     for course_number, course in enumerate(courses, start=1):
-        contributions = list(course.faculty_contributions.all())
+        contributions = _course_contributions(course)
         course.print_number = course_number
         course.total_contributors = len(contributions)
         course.total_questions_saved = sum(
@@ -340,7 +394,7 @@ def roster_action_view(request, cycle_course_id, action):
     filter_query = urlencode(
         {
             key: request.GET.get(key)
-            for key in ("cycle", "period", "course")
+            for key in ("cycle", "period", "course", "contributor")
             if request.GET.get(key)
         }
     )

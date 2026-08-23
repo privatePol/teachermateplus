@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Fixed
+- Contributor Completion Monitoring now renders Submitted workflow rows with the Bootstrap success badge, shows the authoritative submission timestamp immediately after Progress, offers an authorized-scope contributor filter that fails closed for stale or cross-scope IDs and hides zero-match course cards, and marks visible Exempt courses with the warning badge. Exempt course examinations no longer expose roster controls, and the locked roster service rejects both initialization and synchronization before roster or success-audit mutation unless the authoritative `CycleCourse` is Included. The printer-friendly report retains its existing four-column contributor contract. No migration is required.
 - Departmental Exam Builder Stage 6 now canonicalizes the explicitly supported `CUBAO` / `FAIRVIEW` / `TAYTAY`, `NCBA-CUBAO` / `NCBA-FAIRVIEW` / `NCBA-TAYTAY`, and `NCBA-01` / `NCBA-02` / `NCBA-03` Campus.code conventions at the readiness and confidential-placement ingress boundary. Unknown or unofficial abbreviations remain fail closed, distinct Campus rows cannot silently collapse to one canonical allocation key, and persisted generation snapshots continue using the unchanged internal Stage 6 keys and 33/33/34 algorithm. No migration is required.
 
 ### Added

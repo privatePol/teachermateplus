@@ -1,11 +1,19 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-08-06
+Last updated by Codex: 2026-08-23
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+### Contributor Monitoring Presentation and Roster Guard
+- Date/baseline: 2026-08-23; isolated worktree `D:\teachermateplus-contributor-monitoring`; branch `fix/contributor-monitoring-presentation`; unchanged approved HEAD `7b53ba85a7f38e445b772bf009403b2d06419233`. The dirty source checkout `D:\teachermateplus` was not modified.
+- Completed: Submitted rows use `badge text-bg-success`; interactive monitoring shows authoritative `submitted_at` immediately after Progress with an em dash for Draft/null; contributor choices come only from the authorized visible course set; contributor filtering composes with cycle/period/course, fails closed for invalid/cross-scope IDs, hides zero-match cards, and is preserved through print, roster-action, and blocked-resolution navigation. Visible Exempt courses use the warning badge and expose no roster control. The locked roster service rejects initialize/synchronize unless the course is Included, before roster or success-audit mutation. The print report remains four columns.
+- Changed: `apps/departmental_exams/contribution_services.py`, `monitoring_views.py`, `stage6_views.py`, new `tests_contributor_monitoring_presentation.py`, `tests_stage6_lifecycle.py`, both contributor-monitoring templates, `templates/admin_portal/guide.html`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, and this handoff.
+- Validation: the final four new focused tests passed 4/4. Five existing print/monitoring tests, the Included roster idempotency test, the Automatic combined-filter test, and the blocked-resolution redirect test passed, for 12/12 credited focused tests total. One earlier four-test run timed out before a summary and was not credited; one compatibility command had two selector-name errors, while its six valid selectors passed, and the corrected two selectors later passed. `git diff --check` passed; `python -B manage.py check` reported zero issues; and `makemigrations --check --dry-run --no-color` reported `No changes detected`. The read-only `migrate --plan --no-color` enumerated the existing migration chain because this new isolated worktree has no initialized local database; no migration was created or applied. Django logs were redirected under `%TEMP%`; no repository log was written.
+- Pending/risks: browser/device and MariaDB validation remain unrun. The isolated worktree's uninitialized database means its full migration plan is baseline environment state, not feature drift. No commit, push, normal-database migration application, deployment, or restart occurred.
+- Exact next step after successful local closeout: short independent read-only review of the exact changed-file inventory and focused test evidence before any separately authorized staging or commit gate.
+
 ### Stage 6 Campus-Code Adapter Remediation
 - Date/baseline: 2026-08-13; branch `feat/departmental-exam-builder-stage5-8`; unchanged HEAD `7eb5ca7716fe359bdbc8bc2ceea23a2fc002e1aa`. Staging commit `7f479cd046c745c11d4d3ef10ad979a24b9584a9` is an ancestor of this HEAD with three later Departmental Exam Builder commits retained. The initial seven dirty paths, including both protected Submission Readiness files and `logs/system.log`, were preserved.
 - Completed: added one explicit Stage 6 Campus.code adapter for the approved internal, deployed `NCBA-*`, and setup-bundle `NCBA-01/02/03` aliases. Readiness canonicalizes participating snapshot and Submitted source-campus ingress; confidential question placement uses the same boundary. Unknown/unofficial codes remain fail closed, and distinct Campus rows that collapse to one canonical key are rejected. `generation_algorithms.py`, 33/33/34 weights, difficulty/section/scenario/overlap/contributor/HMAC semantics, generation/approval services, algorithm version, revision/audit behavior, and canonical persisted quota/item snapshots are unchanged.

@@ -93,6 +93,10 @@ class ContributionRosterService:
         request,
         initializing,
     ):
+        if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
+            raise ValidationError(
+                "Only included course examinations may initialize or synchronize a contributor roster."
+            )
         if configuration is None or configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.OPEN:
             raise ValidationError("The course must be open for faculty contribution.")
         quota = configuration.questions_required_per_faculty
