@@ -10,6 +10,7 @@ from .models import (
     CourseExamConfiguration,
     CycleCourse,
     CycleCourseOffering,
+    ExaminationCycle,
     FacultyContribution,
     FacultyContributionEligibilitySource,
     QuestionImportBatch,
@@ -83,24 +84,32 @@ class ContributionMonitoringSelector:
     @staticmethod
     def visible_cycle_courses(*, user, tenant_id):
         base = CycleCourse.objects.filter(cycle__tenant_id=tenant_id)
+        manual_courses = base.filter(
+            cycle__processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW,
+        )
         configurer = DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
             user=user,
             tenant_id=tenant_id,
-            queryset=base,
+            queryset=manual_courses,
         )
         reviewer = DepartmentalExamAuthorizationService.reviewer_visible_cycle_courses(
             user=user,
             tenant_id=tenant_id,
-            queryset=base,
+            queryset=manual_courses,
         )
         visible_ids = configurer.values("pk").union(reviewer.values("pk"))
         automatic_courses = list(
             base.filter(
-                cycle__processing_mode="AUTOMATIC_GENERATION",
-                inclusion_status="INCLUDED",
+                cycle__processing_mode=(
+                    ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                ),
+                inclusion_status__in=(
+                    CycleCourse.InclusionStatus.INCLUDED,
+                    CycleCourse.InclusionStatus.EXEMPT,
+                ),
             ).select_related("cycle").prefetch_related("offering_snapshots")
         )
-        automatic_permissions = (
+        automatic_downstream_permissions = (
             DepartmentalExamAuthorizationService.automatic_permission_map(
                 user=user,
                 courses=automatic_courses,
@@ -109,11 +118,26 @@ class ContributionMonitoringSelector:
                 ),
             )
         )
+        automatic_inclusion_permissions = (
+            DepartmentalExamAuthorizationService.automatic_inclusion_management_map(
+                user=user,
+                courses=automatic_courses,
+            )
+        )
+        manage_permission = (
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+        )
         automatic_ids = {
             course.id
             for course in automatic_courses
-            if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
-            in automatic_permissions[course.id]
+            if (
+                course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+                and manage_permission in automatic_downstream_permissions[course.id]
+            )
+            or (
+                course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT
+                and manage_permission in automatic_inclusion_permissions[course.id]
+            )
         }
         contribution_sources = (
             FacultyContributionEligibilitySource.objects.select_related(

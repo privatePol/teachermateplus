@@ -200,7 +200,11 @@ def _assignment_context_snapshot(contribution):
 
 
 def _assessed_submitted_question_pool(
-    *, cycle_course, participating_codes=None, participating_campus_ids=None
+    *,
+    cycle_course,
+    participating_codes=None,
+    participating_campus_ids=None,
+    include_source_audit=True,
 ):
     if (participating_codes is None) == (participating_campus_ids is None):
         raise ValueError(
@@ -280,38 +284,39 @@ def _assessed_submitted_question_pool(
         if eligible:
             question.stage6_campus_code = campus_code
             eligible_questions.append(question)
-        contribution = question.contribution
-        contributor = contribution.faculty_user
-        audit_questions.append(
-            GenerationSourceQuestion(
-                source_id=question.id,
-                source_revision=question.revision,
-                source_digest=_generation_question_source_digest(question),
-                contribution_id=contribution.id,
-                contribution_revision=contribution.revision,
-                contribution_submitted_at=contribution.submitted_at,
-                contributor_id=contributor.id,
-                contributor_name=contributor.full_name,
-                campus_id=contribution.source_campus_id,
-                campus_code=campus_code,
-                campus_name=contribution.source_campus.name,
-                assignment_context=_assignment_context_snapshot(contribution),
-                question_text=question.question_text,
-                choices=(
-                    question.choice_a,
-                    question.choice_b,
-                    question.choice_c,
-                    question.choice_d,
-                ),
-                difficulty=question.difficulty,
-                correct_answer=question.correct_answer,
-                normalized_fingerprint=QuestionPayloadService.question_fingerprint(
-                    question.question_text
-                ),
-                eligible_for_generation=eligible,
-                exclusion_code=exclusion_code,
+        if include_source_audit:
+            contribution = question.contribution
+            contributor = contribution.faculty_user
+            audit_questions.append(
+                GenerationSourceQuestion(
+                    source_id=question.id,
+                    source_revision=question.revision,
+                    source_digest=_generation_question_source_digest(question),
+                    contribution_id=contribution.id,
+                    contribution_revision=contribution.revision,
+                    contribution_submitted_at=contribution.submitted_at,
+                    contributor_id=contributor.id,
+                    contributor_name=contributor.full_name,
+                    campus_id=contribution.source_campus_id,
+                    campus_code=campus_code,
+                    campus_name=contribution.source_campus.name,
+                    assignment_context=_assignment_context_snapshot(contribution),
+                    question_text=question.question_text,
+                    choices=(
+                        question.choice_a,
+                        question.choice_b,
+                        question.choice_c,
+                        question.choice_d,
+                    ),
+                    difficulty=question.difficulty,
+                    correct_answer=question.correct_answer,
+                    normalized_fingerprint=QuestionPayloadService.question_fingerprint(
+                        question.question_text
+                    ),
+                    eligible_for_generation=eligible,
+                    exclusion_code=exclusion_code,
+                )
             )
-        )
     return eligible_questions, len(submitted_questions) - len(eligible_questions), audit_questions
 
 
@@ -371,7 +376,35 @@ class Stage6ReadinessService:
         return report
 
     @classmethod
-    def build_problem(cls, *, cycle_course, automatic_max_states=None):
+    def evaluate_automatic_pool(cls, *, cycle_course, automatic_max_states=None):
+        """Evaluate current usable Automatic questions without deadline/lifecycle gates.
+
+        The same pool assessment, allocations, logical duplicate grouping, and exact
+        two-set solver used by ``build_problem()`` remain authoritative.  Only the
+        operational gates that cannot change question-pool feasibility are omitted.
+        """
+        if (
+            cycle_course.cycle.processing_mode
+            != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            raise ValidationError(
+                "Automatic question-pool readiness requires an Automatic Generation cycle."
+            )
+        _problem, report = cls.build_problem(
+            cycle_course=cycle_course,
+            automatic_max_states=automatic_max_states,
+            question_pool_only=True,
+        )
+        return report
+
+    @classmethod
+    def build_problem(
+        cls,
+        *,
+        cycle_course,
+        automatic_max_states=None,
+        question_pool_only=False,
+    ):
         blockers = []
         warnings = []
         shortages = []
@@ -388,7 +421,7 @@ class Stage6ReadinessService:
             else ExamBlueprint.objects.filter(cycle_course=cycle_course).first()
         )
 
-        if not stage6_cycle_is_open(cycle_course.cycle):
+        if not question_pool_only and not stage6_cycle_is_open(cycle_course.cycle):
             cls._block(
                 blockers,
                 STAGE6_CYCLE_NOT_OPEN_CODE,
@@ -407,11 +440,15 @@ class Stage6ReadinessService:
                 configuration.difficult_percent,
             ) != (30, 50, 20):
                 cls._block(blockers, "DIFFICULTY_POLICY_INVALID", "Difficulty configuration must be exactly 30/50/20.")
-            if configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.CLOSED:
+            if (
+                not question_pool_only
+                and configuration.workflow_status
+                != CourseExamConfiguration.WorkflowStatus.CLOSED
+            ):
                 cls._block(blockers, "CONTRIBUTION_NOT_CLOSED", "Faculty contribution must be Closed.")
 
         roster = None
-        if configuration is not None:
+        if configuration is not None and not question_pool_only:
             roster = ContributorRosterReadinessService.evaluate(
                 cycle_course=cycle_course, configuration=configuration
             )
@@ -530,12 +567,13 @@ class Stage6ReadinessService:
             source_audit_questions,
         ) = _assessed_submitted_question_pool(
             cycle_course=cycle_course,
+            include_source_audit=not question_pool_only,
             **pool_kwargs,
         )
         submitted_question_count = len(eligible_questions)
         duplicate_question_count = 0
         automatic_question_groups = {}
-        if invalid_question_count:
+        if invalid_question_count and not question_pool_only:
             cls._block(
                 blockers,
                 "ELIGIBLE_POOL_INVALID",
@@ -927,12 +965,38 @@ class Stage6ReadinessService:
 
         report = {
             "ready": not blockers,
-            "status": "READY" if not blockers else "BLOCKED",
+            "status": (
+                "READY"
+                if not blockers
+                else "NEEDS QUESTIONS" if question_pool_only else "BLOCKED"
+            ),
             "blockers": blockers,
             "warnings": warnings,
             "shortages": shortages,
             "campus_quotas": campus_quotas,
             "difficulty_quotas": difficulty_quotas,
+            "campus_requirements": [
+                {
+                    "campus_id": campus_key if automatic_flat_mode else None,
+                    "label": (
+                        automatic_campus_labels[campus_key]
+                        if automatic_flat_mode
+                        else campus_key.title()
+                    ),
+                    "required": required,
+                    "available": available_by_campus[campus_key],
+                }
+                for campus_key, required in campus_quotas.items()
+            ],
+            "difficulty_requirements": [
+                {
+                    "code": code,
+                    "label": code.title(),
+                    "required": required,
+                    "available": available_by_difficulty[code],
+                }
+                for code, required in difficulty_quotas.items()
+            ],
             "section_quotas": [
                 {
                     "id": section_id,
@@ -948,6 +1012,7 @@ class Stage6ReadinessService:
             "invalid_question_count": invalid_question_count,
             "duplicate_question_count": duplicate_question_count,
             "automatic_pool": automatic_flat_mode,
+            "question_pool_only": question_pool_only,
             "contributor_counts": {
                 "required_active": roster.required_active_count if roster else 0,
                 "submitted_required": roster.submitted_required_count if roster else 0,
@@ -959,6 +1024,10 @@ class Stage6ReadinessService:
             "solver_states": solver_result.states_explored if solver_result else 0,
             "solver_limit_hit": solver_result.limit_hit if solver_result else False,
         }
+        if question_pool_only:
+            # Aggregate reporting stops after exact feasibility.  Do not assemble
+            # a confidential GenerationProblem or generation-source snapshots.
+            return None, report
         problem = None
         if not blockers and solver_result and solver_result.feasible:
             section_labels = {section.id: section.title for section in section_rows}

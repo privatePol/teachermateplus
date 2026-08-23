@@ -3,7 +3,10 @@
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Contributor Completion Monitoring</li></ol></nav>
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
   <h1 class="h3 mb-0">Contributor Completion Monitoring</h1>
-  <a class="btn btn-outline-primary" href="{% url 'departmental_exams:contributor_monitoring_print' %}{% if filter_query %}?{{ filter_query }}{% endif %}" target="_blank" rel="noopener">Print / Printer-Friendly View</a>
+  <div class="d-flex flex-wrap gap-2">
+    {% if show_automatic_generation_readiness %}<a class="btn btn-primary" href="{% url 'departmental_exams:automatic_generation_readiness' %}">Automatic Generation Readiness</a>{% endif %}
+    <a class="btn btn-outline-primary" href="{% url 'departmental_exams:contributor_monitoring_print' %}{% if filter_query %}?{{ filter_query }}{% endif %}" target="_blank" rel="noopener">Print / Printer-Friendly View</a>
+  </div>
 </div>
 <p class="text-muted">Aggregate progress only. This page never fetches or displays question text, choices, answers, fingerprints, or preview payloads.</p>
 

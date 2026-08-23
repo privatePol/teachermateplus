@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import (
     faculty_views,
+    generation_readiness_views,
     monitoring_views,
     planning_readiness_views,
     reporting_views,
@@ -132,6 +133,16 @@ urlpatterns = [
         "admin-portal/departmental-exams/contributor-monitoring/print/",
         monitoring_views.contributor_monitoring_print_view,
         name="contributor_monitoring_print",
+    ),
+    path(
+        "admin-portal/departmental-exams/contributor-monitoring/automatic-generation-readiness/",
+        generation_readiness_views.automatic_generation_readiness_view,
+        name="automatic_generation_readiness",
+    ),
+    path(
+        "admin-portal/departmental-exams/contributor-monitoring/automatic-generation-readiness/print/",
+        generation_readiness_views.automatic_generation_readiness_print_view,
+        name="automatic_generation_readiness_print",
     ),
     path(
         "admin-portal/departmental-exams/planning-readiness/",

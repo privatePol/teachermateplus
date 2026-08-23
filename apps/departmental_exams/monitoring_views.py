@@ -208,11 +208,17 @@ def contributor_monitoring_view(request):
     tenant_id = context["tenant_id"]
     _decorate_contribution_metrics(courses)
     _decorate_contributor_locations(courses=courses, tenant_id=tenant_id)
+    manual_course_ids = [
+        course.pk
+        for course in courses
+        if course.cycle.processing_mode
+        == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+    ]
     configurer_ids = set(
         DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
             user=request.user,
             tenant_id=tenant_id,
-            queryset=CycleCourse.objects.filter(pk__in=[course.pk for course in courses]),
+            queryset=CycleCourse.objects.filter(pk__in=manual_course_ids),
         ).values_list("pk", flat=True)
     )
     automatic_permissions = DepartmentalExamAuthorizationService.automatic_permission_map(
@@ -222,12 +228,31 @@ def contributor_monitoring_view(request):
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
         ),
     )
+    automatic_inclusion_permissions = (
+        DepartmentalExamAuthorizationService.automatic_inclusion_management_map(
+            user=request.user,
+            courses=courses,
+        )
+    )
+    manage_permission = (
+        DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+    )
     automatic_manage_ids = {
         course.id
         for course in courses
-        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
-        in automatic_permissions[course.id]
+        if manage_permission in automatic_permissions[course.id]
     }
+    context["show_automatic_generation_readiness"] = any(
+        (
+            course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+            and manage_permission in automatic_permissions[course.id]
+        )
+        or (
+            course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT
+            and manage_permission in automatic_inclusion_permissions[course.id]
+        )
+        for course in courses
+    )
     for course in courses:
         for contribution in _course_contributions(course):
             configuration = getattr(course, "configuration", None)
@@ -250,7 +275,18 @@ def contributor_monitoring_view(request):
                     for resolution in contribution.blocked_resolution_events.all()
                 )
             )
-        course.can_configure = course.pk in configurer_ids | automatic_manage_ids
+        if (
+            course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        ):
+            course.can_configure = course.pk in configurer_ids
+        elif (
+            course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            course.can_configure = course.pk in automatic_manage_ids
+        else:
+            course.can_configure = False
     return render(
         request,
         "departmental_exams/admin/contributor_monitoring.html",

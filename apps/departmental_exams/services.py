@@ -1131,6 +1131,57 @@ class DepartmentalExamAuthorizationService:
         if len(tenant_ids) != 1:
             return result
         tenant_id = next(iter(tenant_ids))
+        automatic_scopes = {
+            course.id: {
+                "inclusion_status": course.inclusion_status,
+                "campus_ids": cls.participating_campus_ids(course),
+            }
+            for course in courses
+            if (
+                course.cycle.processing_mode
+                == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            )
+        }
+        scoped_result = cls.automatic_scope_permission_map(
+            user=user,
+            tenant_id=tenant_id,
+            course_scopes=automatic_scopes,
+            permissions=permission_codes,
+            require_included=require_included,
+        )
+        result.update(scoped_result)
+        return result
+
+    @classmethod
+    def automatic_scope_permission_map(
+        cls,
+        *,
+        user,
+        tenant_id,
+        course_scopes,
+        permissions,
+        require_included,
+    ):
+        """Authorize lightweight Automatic course/campus scope without ORM prefetch.
+
+        ``course_scopes`` maps a CycleCourse PK to its inclusion status and the
+        distinct participating Campus PKs.  It intentionally carries no course,
+        contribution, offering, configuration, or revision objects, allowing
+        aggregate reports to validate a selected cycle before loading those
+        heavier relations.  Permission semantics remain shared with every other
+        Automatic workflow path.
+        """
+        permission_codes = tuple(dict.fromkeys(permissions))
+        scopes = {
+            course_id: {
+                "inclusion_status": scope["inclusion_status"],
+                "campus_ids": tuple(sorted(set(scope["campus_ids"]))),
+            }
+            for course_id, scope in course_scopes.items()
+        }
+        result = {course_id: set() for course_id in scopes}
+        if not scopes or not permission_codes:
+            return result
         try:
             cls.require_enabled(tenant_id=tenant_id)
         except PermissionDenied:
@@ -1145,20 +1196,18 @@ class DepartmentalExamAuthorizationService:
                     is_active=True,
                 ).values_list("code", flat=True)
             )
-            for course in courses:
+            for course_id, scope in scopes.items():
                 if (
-                    course.cycle.processing_mode
-                    == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-                    and (
+                    (
                         not require_included
-                        or course.inclusion_status
+                        or scope["inclusion_status"]
                         == CycleCourse.InclusionStatus.INCLUDED
                     )
-                    and cls.participating_campus_ids(course)
+                    and scope["campus_ids"]
                 ):
-                    result[course.id] = set(active_codes)
+                    result[course_id] = set(active_codes)
                     if active_codes:
-                        result[course.id].add(cls.ANY_AUTOMATIC_PERMISSION)
+                        result[course_id].add(cls.ANY_AUTOMATIC_PERMISSION)
             return result
 
         direct_rows = list(
@@ -1215,18 +1264,14 @@ class DepartmentalExamAuthorizationService:
                 direct is None and role_allows(permission, campus_id)
             )
 
-        for course in courses:
+        for course_id, scope in scopes.items():
             if (
-                course.cycle.processing_mode
-                != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-                or (
-                    require_included
-                    and course.inclusion_status
-                    != CycleCourse.InclusionStatus.INCLUDED
-                )
+                require_included
+                and scope["inclusion_status"]
+                != CycleCourse.InclusionStatus.INCLUDED
             ):
                 continue
-            campus_ids = cls.participating_campus_ids(course)
+            campus_ids = scope["campus_ids"]
             if not campus_ids:
                 continue
             for permission in permission_codes:
@@ -1234,7 +1279,7 @@ class DepartmentalExamAuthorizationService:
                     permission_allows(permission, campus_id)
                     for campus_id in campus_ids
                 ):
-                    result[course.id].add(permission)
+                    result[course_id].add(permission)
             if all(
                 any(
                     permission_allows(permission, campus_id)
@@ -1242,7 +1287,7 @@ class DepartmentalExamAuthorizationService:
                 )
                 for campus_id in campus_ids
             ):
-                result[course.id].add(cls.ANY_AUTOMATIC_PERMISSION)
+                result[course_id].add(cls.ANY_AUTOMATIC_PERMISSION)
         return result
 
     @classmethod
