@@ -63,7 +63,7 @@
     <table>
       <thead><tr><th>Contributor</th><th>Campus</th><th>Section</th><th>Progress</th></tr></thead>
       <tbody>
-      {% for contribution in course.faculty_contributions.all %}
+      {% for contribution in course.monitoring_contributions %}
         <tr>
           <td>{{ contribution.faculty_user.full_name|default:contribution.faculty_user.username }}</td>
           <td class="contributor-campuses">{% if contribution.print_campus_names %}{{ contribution.print_campus_names|join:", " }}{% else %}&mdash;{% endif %}</td>
