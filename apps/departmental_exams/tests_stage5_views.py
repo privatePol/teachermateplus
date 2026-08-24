@@ -372,8 +372,11 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(workspace, "0 / 10")
         self.assertContains(
             workspace,
-            "Needs 25 more Moderate questions and 10 more Difficult questions before Final Submission.",
+            "Difficulty distribution does not meet the required mix. Reclassify "
+            "your draft questions&#x27; difficulty levels to meet the required Easy, "
+            "Moderate, and Difficult counts before Final Submission.",
         )
+        self.assertNotContains(workspace, "Needs 25 more Moderate questions")
         self.assertContains(workspace, f'href="{submit_url}"')
         self.assertContains(
             workspace,
@@ -419,6 +422,37 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         )
         self.contribution.refresh_from_db()
         self.assertEqual(self.contribution.status, FacultyContribution.Status.DRAFT)
+
+    def test_workspace_reclassifies_excess_moderate_to_easy_in_red(self):
+        questions = self.fill_questions(50)
+        difficulties = (
+            [Question.Difficulty.EASY] * 14
+            + [Question.Difficulty.MODERATE] * 26
+            + [Question.Difficulty.DIFFICULT] * 10
+        )
+        for question, difficulty in zip(questions, difficulties):
+            question.difficulty = difficulty
+        Question.objects.bulk_update(questions, ["difficulty"])
+
+        workspace = self.client.get(
+            reverse(
+                "departmental_exams:contribution_workspace",
+                args=[self.contribution.id],
+            )
+        )
+
+        self.assertEqual(workspace.status_code, 200)
+        self.assertContains(workspace, "14 / 15")
+        self.assertContains(workspace, "26 / 25")
+        self.assertContains(workspace, "10 / 10")
+        self.assertContains(
+            workspace,
+            '<p class="mb-0 text-danger">Difficulty distribution does not meet '
+            "the required mix. Reclassify 1 excess Moderate question to Easy "
+            "before Final Submission.</p>",
+            html=True,
+        )
+        self.assertNotContains(workspace, "Needs 1 more Easy question")
 
     def test_unsynchronized_assignment_loss_at_49_is_rendered_read_only(self):
         questions = self.fill_questions(49)

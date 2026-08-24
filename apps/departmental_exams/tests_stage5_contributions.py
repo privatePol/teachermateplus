@@ -1322,15 +1322,15 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
         scenarios = (
             (
                 {"EASY": 14, "MODERATE": 26, "DIFFICULT": 10},
-                "Easy: 14 of 15 required - add 1.",
+                "Easy: 14 of 15 required.",
             ),
             (
                 {"EASY": 16, "MODERATE": 24, "DIFFICULT": 10},
-                "Moderate: 24 of 25 required - add 1.",
+                "Moderate: 24 of 25 required.",
             ),
             (
                 {"EASY": 16, "MODERATE": 25, "DIFFICULT": 9},
-                "Difficult: 9 of 10 required - add 1.",
+                "Difficult: 9 of 10 required.",
             ),
         )
 
@@ -1365,6 +1365,62 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
                 action="DE_EXAM_CONTRIBUTION_SUBMITTED"
             ).exists()
         )
+
+    def test_draft_guidance_reclassifies_dynamic_single_surplus_to_single_deficit(self):
+        scenarios = (
+            (
+                {"EASY": 14, "MODERATE": 26, "DIFFICULT": 10},
+                "Reclassify 1 excess Moderate question to Easy before Final Submission.",
+            ),
+            (
+                {"EASY": 17, "MODERATE": 25, "DIFFICULT": 8},
+                "Reclassify 2 excess Easy questions to Difficult before Final Submission.",
+            ),
+        )
+
+        for counts, expected_guidance in scenarios:
+            with self.subTest(counts=counts):
+                questions = [
+                    Question(difficulty=difficulty)
+                    for difficulty in Question.Difficulty.values
+                    for _index in range(counts[difficulty])
+                ]
+                distribution = ContributionDifficultyDistributionService.evaluate(
+                    questions=questions,
+                    quota=50,
+                    configuration=self.configuration,
+                )
+
+                self.assertEqual(
+                    distribution["guidance"],
+                    "Difficulty distribution does not meet the required mix. "
+                    + expected_guidance,
+                )
+
+    def test_draft_guidance_generalizes_complex_reclassification(self):
+        questions = [
+            Question(difficulty=difficulty)
+            for difficulty, count in {
+                "EASY": 14,
+                "MODERATE": 27,
+                "DIFFICULT": 9,
+            }.items()
+            for _index in range(count)
+        ]
+
+        distribution = ContributionDifficultyDistributionService.evaluate(
+            questions=questions,
+            quota=50,
+            configuration=self.configuration,
+        )
+
+        self.assertEqual(
+            distribution["guidance"],
+            "Difficulty distribution does not meet the required mix. Reclassify "
+            "your draft questions' difficulty levels to meet the required Easy, "
+            "Moderate, and Difficult counts before Final Submission.",
+        )
+        self.assertNotIn("Reclassify 2 excess Moderate", distribution["guidance"])
 
     def test_cycle_default_and_course_override_quotas_drive_exact_allocation(self):
         def make_contribution(*, suffix, default_quota, effective_quota, source):

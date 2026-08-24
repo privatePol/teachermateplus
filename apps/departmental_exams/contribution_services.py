@@ -47,6 +47,27 @@ class ContributionDifficultyDistributionService:
     def _question_count_phrase(count, label):
         return f"{count} more {label} question{'s' if count != 1 else ''}"
 
+    @staticmethod
+    def _reclassification_guidance(*, deficient, surplus):
+        prefix = "Difficulty distribution does not meet the required mix."
+        if (
+            len(deficient) == 1
+            and len(surplus) == 1
+            and deficient[0]["shortfall"]
+            == surplus[0]["current"] - surplus[0]["required"]
+        ):
+            count = deficient[0]["shortfall"]
+            return (
+                f"{prefix} Reclassify {count} excess {surplus[0]['label']} "
+                f"question{'s' if count != 1 else ''} to {deficient[0]['label']} "
+                "before Final Submission."
+            )
+        return (
+            f"{prefix} Reclassify your draft questions' difficulty levels to meet "
+            "the required Easy, Moderate, and Difficult counts before Final "
+            "Submission."
+        )
+
     @classmethod
     def evaluate(cls, *, questions, quota, configuration):
         try:
@@ -76,11 +97,17 @@ class ContributionDifficultyDistributionService:
 
         deficient = [row for row in rows if row["shortfall"]]
         if deficient:
-            needs = " and ".join(
-                cls._question_count_phrase(row["shortfall"], row["label"])
-                for row in deficient
-            )
-            guidance = f"Needs {needs} before Final Submission."
+            if sum(row["current"] for row in rows) >= sum(required.values()):
+                guidance = cls._reclassification_guidance(
+                    deficient=deficient,
+                    surplus=[row for row in rows if row["current"] > row["required"]],
+                )
+            else:
+                needs = " and ".join(
+                    cls._question_count_phrase(row["shortfall"], row["label"])
+                    for row in deficient
+                )
+                guidance = f"Needs {needs} before Final Submission."
             submission_guidance = (
                 "Cannot submit yet. The difficulty distribution does not meet the "
                 "required mix. Click the Cancel button to return to your draft/imported "

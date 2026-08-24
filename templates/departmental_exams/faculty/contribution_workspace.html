@@ -37,7 +37,7 @@
         </tbody>
       </table>
     </div>
-    <p class="mb-0 {% if difficulty_distribution.compliant %}text-success{% else %}text-warning{% endif %}">{{ difficulty_distribution.guidance }}</p>
+    <p class="mb-0 {% if difficulty_distribution.compliant %}text-success{% else %}text-danger{% endif %}">{{ difficulty_distribution.guidance }}</p>
   </div>
 </div>
 {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}
