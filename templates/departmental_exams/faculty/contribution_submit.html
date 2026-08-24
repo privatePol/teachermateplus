@@ -1,13 +1,13 @@
 {% extends "faculty_portal/base.html" %}
 {% block faculty_content %}
 <h1 class="h3">Final contribution submission</h1>
-<div class="alert alert-warning">Submission requires exactly {{ contribution.quota_snapshot }} valid questions and is permanent in Stage 5. There is no contributor reopen or grace-period override.</div>
+<div class="alert alert-warning">Submission requires exactly {{ contribution.quota_snapshot }} valid questions and is permanent. There is no contributor reopen or grace-period override.</div>
 <div class="card shadow-sm mb-3"><div class="card-body">
   <h2 class="h5">Difficulty Distribution</h2>
   <ul class="mb-2">
     {% for row in difficulty_distribution.rows %}<li>{{ row.label }}: {{ row.current }} / {{ row.required }}</li>{% endfor %}
   </ul>
-  <p class="mb-0 {% if difficulty_distribution.compliant %}text-success{% else %}text-warning{% endif %}">{{ difficulty_distribution.guidance }}</p>
+  <p class="mb-0 {% if difficulty_distribution.compliant %}text-success{% else %}text-danger{% endif %}">{{ difficulty_distribution.submission_guidance }}</p>
 </div></div>
 <form method="post" class="card shadow-sm" novalidate><div class="card-body">
   {% csrf_token %}

@@ -81,14 +81,18 @@ class ContributionDifficultyDistributionService:
                 for row in deficient
             )
             guidance = f"Needs {needs} before Final Submission."
+            submission_guidance = (
+                "Cannot submit yet. The difficulty distribution does not meet the "
+                "required mix. Click the Cancel button to return to your draft/imported "
+                "questions, then edit the questions’ difficulty levels to meet the "
+                "required Easy, Moderate, and Difficult counts."
+            )
         else:
             guidance = "Difficulty requirements met for Final Submission."
+            submission_guidance = guidance
 
         submission_details = " ".join(
-            (
-                f"{row['label']}: {row['current']} of {row['required']} required"
-                + (f" - add {row['shortfall']}." if row["shortfall"] else ".")
-            )
+            f"{row['label']}: {row['current']} of {row['required']} required."
             for row in rows
         )
         return {
@@ -96,7 +100,12 @@ class ContributionDifficultyDistributionService:
             "required_total": sum(required.values()),
             "compliant": not deficient,
             "guidance": guidance,
-            "submission_error": f"Cannot submit yet. {submission_details}",
+            "submission_guidance": submission_guidance,
+            "submission_error": (
+                f"Cannot submit yet. {submission_details} Click the Cancel button to "
+                "return to your draft/imported questions and edit the questions’ "
+                "difficulty levels to meet the required distribution."
+            ),
         }
 
 

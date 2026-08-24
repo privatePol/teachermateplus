@@ -342,6 +342,28 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             args=[self.contribution.id],
         )
 
+        submit_page = self.client.get(submit_url)
+        self.assertEqual(submit_page.status_code, 200)
+        self.assertContains(
+            submit_page,
+            "Submission requires exactly 50 valid questions and is permanent. "
+            "There is no contributor reopen or grace-period override.",
+        )
+        self.assertNotContains(submit_page, "is permanent in Stage 5")
+        self.assertContains(submit_page, "text-danger")
+        self.assertContains(
+            submit_page,
+            "Cannot submit yet. The difficulty distribution does not meet the required mix.",
+        )
+        self.assertContains(
+            submit_page,
+            "Click the Cancel button to return to your draft/imported questions",
+        )
+        self.assertContains(
+            submit_page,
+            "edit the questions’ difficulty levels",
+        )
+
         workspace = self.client.get(workspace_url)
         self.assertEqual(workspace.status_code, 200)
         self.assertContains(workspace, "Difficulty Distribution")
@@ -372,12 +394,27 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(response, "Cannot submit yet.", status_code=400)
         self.assertContains(
             response,
-            "Moderate: 0 of 25 required - add 25.",
+            "Easy: 50 of 15 required.",
             status_code=400,
         )
         self.assertContains(
             response,
-            "Difficult: 0 of 10 required - add 10.",
+            "Moderate: 0 of 25 required.",
+            status_code=400,
+        )
+        self.assertContains(
+            response,
+            "Difficult: 0 of 10 required.",
+            status_code=400,
+        )
+        self.assertContains(
+            response,
+            "Click the Cancel button to return to your draft/imported questions",
+            status_code=400,
+        )
+        self.assertContains(
+            response,
+            "edit the questions’ difficulty levels",
             status_code=400,
         )
         self.contribution.refresh_from_db()
