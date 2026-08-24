@@ -331,6 +331,58 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(workspace, ">Upload CSV<")
         self.assertContains(workspace, ">Download CSV template<")
 
+    def test_workspace_shows_distribution_and_submission_returns_concrete_deficiencies(self):
+        self.fill_questions(50)
+        workspace_url = reverse(
+            "departmental_exams:contribution_workspace",
+            args=[self.contribution.id],
+        )
+        submit_url = reverse(
+            "departmental_exams:contribution_submit",
+            args=[self.contribution.id],
+        )
+
+        workspace = self.client.get(workspace_url)
+        self.assertEqual(workspace.status_code, 200)
+        self.assertContains(workspace, "Difficulty Distribution")
+        self.assertContains(workspace, "50 / 15")
+        self.assertContains(workspace, "0 / 25")
+        self.assertContains(workspace, "0 / 10")
+        self.assertContains(
+            workspace,
+            "Needs 25 more Moderate questions and 10 more Difficult questions before Final Submission.",
+        )
+        self.assertContains(workspace, f'href="{submit_url}"')
+        self.assertContains(
+            workspace,
+            "Adjust the difficulty distribution before Final Submission.",
+        )
+
+        response = self.client.post(
+            submit_url,
+            {
+                "expected_contribution_revision": self.contribution.revision,
+                "confirm_exact_quota": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTemplateUsed(
+            response, "departmental_exams/faculty/contribution_submit.html"
+        )
+        self.assertContains(response, "Cannot submit yet.", status_code=400)
+        self.assertContains(
+            response,
+            "Moderate: 0 of 25 required - add 25.",
+            status_code=400,
+        )
+        self.assertContains(
+            response,
+            "Difficult: 0 of 10 required - add 10.",
+            status_code=400,
+        )
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.status, FacultyContribution.Status.DRAFT)
+
     def test_unsynchronized_assignment_loss_at_49_is_rendered_read_only(self):
         questions = self.fill_questions(49)
         batch = QuestionCSVImportService.create_preview(

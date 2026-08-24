@@ -20,9 +20,12 @@ from .contribution_authorization import (
     ContributorEligibilityService,
 )
 from .contribution_services import (
+    ContributionDifficultyDeficient,
+    ContributionDifficultyDistributionService,
     ContributionRosterService,
     QuestionMutationService,
 )
+from .generation_algorithms import allocate_difficulties
 from .models import CycleCourse, CycleCourseOffering, FacultyContribution, Question
 from .services import CourseExamConfigurationService
 from .stage4_test_support import Stage4TestCase
@@ -130,6 +133,18 @@ class Stage5FixtureMixin:
             "correct_answer": "d",
             "difficulty": "easy",
         }
+
+    @staticmethod
+    def difficulty_for_position(position, quota):
+        requirements = allocate_difficulties(quota)
+        if position <= requirements[Question.Difficulty.EASY]:
+            return Question.Difficulty.EASY
+        if position <= (
+            requirements[Question.Difficulty.EASY]
+            + requirements[Question.Difficulty.MODERATE]
+        ):
+            return Question.Difficulty.MODERATE
+        return Question.Difficulty.DIFFICULT
 
 
 class Stage5EligibilityRosterTests(Stage5FixtureMixin, Stage4TestCase):
@@ -700,7 +715,9 @@ class Stage5SubmittedContributionImmutabilityTests(Stage5FixtureMixin, Stage4Tes
                     choice_c="C",
                     choice_d="D",
                     correct_answer="A",
-                    difficulty=Question.Difficulty.EASY,
+                    difficulty=self.difficulty_for_position(
+                        position, self.contribution.quota_snapshot
+                    ),
                     position=position,
                 )
                 for position in range(1, self.contribution.quota_snapshot + 1)
@@ -1005,6 +1022,30 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
             payload=payload or self.payload(),
         )
 
+    def fill_difficulty_counts(self, counts, *, contribution=None):
+        contribution = contribution or self.contribution
+        difficulties = [
+            difficulty
+            for difficulty in Question.Difficulty.values
+            for _index in range(counts.get(difficulty, 0))
+        ]
+        return Question.objects.bulk_create(
+            [
+                Question(
+                    contribution=contribution,
+                    question_text=f"Difficulty question {position}",
+                    choice_a="A",
+                    choice_b="B",
+                    choice_c="C",
+                    choice_d="D",
+                    correct_answer="A",
+                    difficulty=difficulty,
+                    position=position,
+                )
+                for position, difficulty in enumerate(difficulties, start=1)
+            ]
+        )
+
     def test_create_normalizes_text_answer_and_difficulty(self):
         question = self.create_question(
             self.payload("  First line\r\nSecond line  ")
@@ -1015,6 +1056,33 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(question.position, 1)
         self.contribution.refresh_from_db()
         self.assertEqual(self.contribution.revision, 2)
+
+    def test_draft_create_continue_and_reclassify_remain_permitted_when_incomplete(self):
+        first = self.create_question(self.payload("First incomplete Draft question"))
+        self.contribution.refresh_from_db()
+        second = self.create_question(self.payload("Second incomplete Draft question"))
+        self.contribution.refresh_from_db()
+
+        replacement = self.payload("First incomplete Draft question")
+        replacement["difficulty"] = "difficult"
+        updated, changed = QuestionMutationService.update(
+            contribution_id=self.contribution.id,
+            question_id=first.id,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=self.contribution.revision,
+            expected_question_revision=first.revision,
+            payload=replacement,
+        )
+
+        self.contribution.refresh_from_db()
+        second.refresh_from_db()
+        self.assertTrue(changed)
+        self.assertEqual(updated.difficulty, Question.Difficulty.DIFFICULT)
+        self.assertEqual(second.difficulty, Question.Difficulty.EASY)
+        self.assertEqual(self.contribution.status, FacultyContribution.Status.DRAFT)
+        self.assertEqual(self.contribution.questions.count(), 2)
 
     def test_create_and_update_preserve_scientific_notation_in_all_text_fields(self):
         payload = {
@@ -1217,7 +1285,7 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
                 choice_c="C",
                 choice_d="D",
                 correct_answer="A",
-                difficulty="EASY",
+                difficulty=self.difficulty_for_position(index, 50),
                 position=index,
             )
             for index in range(1, 51)
@@ -1243,6 +1311,140 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(replay.pk, submitted.pk)
         self.assertEqual(AuditLog.objects.filter(action="DE_EXAM_CONTRIBUTION_SUBMITTED").count(), 1)
 
+    def test_submission_blocks_each_deficient_category_and_surplus_does_not_compensate(self):
+        questions = self.fill_difficulty_counts(
+            {
+                Question.Difficulty.EASY: 15,
+                Question.Difficulty.MODERATE: 25,
+                Question.Difficulty.DIFFICULT: 10,
+            }
+        )
+        scenarios = (
+            (
+                {"EASY": 14, "MODERATE": 26, "DIFFICULT": 10},
+                "Easy: 14 of 15 required - add 1.",
+            ),
+            (
+                {"EASY": 16, "MODERATE": 24, "DIFFICULT": 10},
+                "Moderate: 24 of 25 required - add 1.",
+            ),
+            (
+                {"EASY": 16, "MODERATE": 25, "DIFFICULT": 9},
+                "Difficult: 9 of 10 required - add 1.",
+            ),
+        )
+
+        for counts, expected_message in scenarios:
+            with self.subTest(counts=counts):
+                difficulties = [
+                    difficulty
+                    for difficulty in Question.Difficulty.values
+                    for _index in range(counts[difficulty])
+                ]
+                for question, difficulty in zip(questions, difficulties):
+                    question.difficulty = difficulty
+                Question.objects.bulk_update(questions, ["difficulty"])
+
+                with self.assertRaises(ContributionDifficultyDeficient) as captured:
+                    QuestionMutationService.submit(
+                        contribution_id=self.contribution.id,
+                        user=self.faculty,
+                        tenant_id=self.tenant.id,
+                        campus_id=self.campus.id,
+                        expected_contribution_revision=self.contribution.revision,
+                    )
+
+                self.assertIn(expected_message, captured.exception.messages[0])
+                self.contribution.refresh_from_db()
+                self.assertEqual(
+                    self.contribution.status, FacultyContribution.Status.DRAFT
+                )
+
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_EXAM_CONTRIBUTION_SUBMITTED"
+            ).exists()
+        )
+
+    def test_cycle_default_and_course_override_quotas_drive_exact_allocation(self):
+        def make_contribution(*, suffix, default_quota, effective_quota, source):
+            cycle = self.make_cycle(
+                status="OPEN",
+                default_questions_required_per_faculty=default_quota,
+                default_final_item_count=50,
+                default_contribution_deadline=self.future_deadline(),
+                instructions="Write plain-text questions.",
+                scope_suffix=suffix,
+            )
+            parent = self.make_course(cycle=cycle, code=f"S5-{suffix}")
+            configuration = self.make_configuration(
+                parent,
+                quota=effective_quota,
+                quota_source=source,
+                workflow="OPEN",
+                opened_at=timezone.now(),
+                deadline=self.future_deadline(),
+            )
+            faculty = self.make_faculty(f"quota-{suffix.lower()}")
+            self.make_assignment(parent, faculty)
+            self.initialize(parent)
+            contribution = FacultyContribution.objects.get(
+                cycle_course=parent,
+                faculty_user=faculty,
+            )
+            return configuration, contribution, faculty
+
+        inherited_configuration, inherited, _faculty = make_contribution(
+            suffix="DEFAULT60",
+            default_quota=60,
+            effective_quota=60,
+            source="DEFAULT",
+        )
+        override_configuration, overridden, override_faculty = make_contribution(
+            suffix="OVERRIDE60",
+            default_quota=50,
+            effective_quota=60,
+            source="OVERRIDE",
+        )
+        self.assertEqual(
+            inherited_configuration.questions_required_per_faculty_source,
+            "DEFAULT",
+        )
+        self.assertEqual(
+            override_configuration.questions_required_per_faculty_source,
+            "OVERRIDE",
+        )
+
+        for configuration, contribution in (
+            (inherited_configuration, inherited),
+            (override_configuration, overridden),
+        ):
+            distribution = ContributionDifficultyDistributionService.evaluate(
+                questions=(),
+                quota=contribution.quota_snapshot,
+                configuration=configuration,
+            )
+            self.assertEqual(contribution.quota_snapshot, 60)
+            self.assertEqual(distribution["required_total"], 60)
+            self.assertEqual(
+                [row["required"] for row in distribution["rows"]],
+                [18, 30, 12],
+            )
+
+        self.fill_difficulty_counts(
+            allocate_difficulties(overridden.quota_snapshot),
+            contribution=overridden,
+        )
+        submitted, changed = QuestionMutationService.submit(
+            contribution_id=overridden.id,
+            user=override_faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=overridden.revision,
+        )
+        self.assertTrue(changed)
+        self.assertEqual(submitted.status, FacultyContribution.Status.SUBMITTED)
+
     def test_submitted_scientific_notation_remains_immutable(self):
         notation = r"\(\frac{\alpha}{\beta}\) and \(\ce{H2O}\)"
         questions = [
@@ -1254,7 +1456,7 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
                 choice_c="C",
                 choice_d="D",
                 correct_answer="A",
-                difficulty="EASY",
+                difficulty=self.difficulty_for_position(index, 50),
                 position=index,
             )
             for index in range(1, 51)
@@ -1294,7 +1496,7 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
                     choice_c="C",
                     choice_d="D",
                     correct_answer="A",
-                    difficulty="EASY",
+                    difficulty=self.difficulty_for_position(index, 50),
                     position=index,
                 )
                 for index in range(1, 51)

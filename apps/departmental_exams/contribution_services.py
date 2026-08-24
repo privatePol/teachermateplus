@@ -16,6 +16,7 @@ from .contribution_authorization import (
     ContributionConflict,
     ContributorEligibilityService,
 )
+from .generation_algorithms import AllocationError, allocate_difficulties
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
@@ -25,6 +26,78 @@ from .models import (
     Question,
 )
 from .services import DepartmentalExamAuthorizationService
+
+
+class ContributionDifficultyDeficient(ValidationError):
+    def __init__(self, distribution):
+        self.distribution = distribution
+        super().__init__(distribution["submission_error"])
+
+
+class ContributionDifficultyDistributionService:
+    @staticmethod
+    def _policy_weights(configuration):
+        return {
+            Question.Difficulty.EASY: configuration.easy_percent,
+            Question.Difficulty.MODERATE: configuration.moderate_percent,
+            Question.Difficulty.DIFFICULT: configuration.difficult_percent,
+        }
+
+    @staticmethod
+    def _question_count_phrase(count, label):
+        return f"{count} more {label} question{'s' if count != 1 else ''}"
+
+    @classmethod
+    def evaluate(cls, *, questions, quota, configuration):
+        try:
+            required = allocate_difficulties(
+                quota,
+                weights=cls._policy_weights(configuration),
+            )
+        except (AllocationError, TypeError) as exc:
+            raise ValidationError(
+                "The configured difficulty requirements could not be calculated."
+            ) from exc
+
+        current = Counter(question.difficulty for question in questions)
+        rows = []
+        for code, label in Question.Difficulty.choices:
+            actual = current.get(code, 0)
+            target = required[code]
+            rows.append(
+                {
+                    "code": code,
+                    "label": label,
+                    "current": actual,
+                    "required": target,
+                    "shortfall": max(target - actual, 0),
+                }
+            )
+
+        deficient = [row for row in rows if row["shortfall"]]
+        if deficient:
+            needs = " and ".join(
+                cls._question_count_phrase(row["shortfall"], row["label"])
+                for row in deficient
+            )
+            guidance = f"Needs {needs} before Final Submission."
+        else:
+            guidance = "Difficulty requirements met for Final Submission."
+
+        submission_details = " ".join(
+            (
+                f"{row['label']}: {row['current']} of {row['required']} required"
+                + (f" - add {row['shortfall']}." if row["shortfall"] else ".")
+            )
+            for row in rows
+        )
+        return {
+            "rows": rows,
+            "required_total": sum(required.values()),
+            "compliant": not deficient,
+            "guidance": guidance,
+            "submission_error": f"Cannot submit yet. {submission_details}",
+        }
 
 
 class Stage5LockService:
@@ -857,6 +930,13 @@ class QuestionMutationService:
                     for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty")
                 }
             )
+        difficulty_distribution = ContributionDifficultyDistributionService.evaluate(
+            questions=questions,
+            quota=contribution.quota_snapshot,
+            configuration=configuration,
+        )
+        if not difficulty_distribution["compliant"]:
+            raise ContributionDifficultyDeficient(difficulty_distribution)
         before_revision = contribution.revision
         contribution.status = FacultyContribution.Status.SUBMITTED
         contribution.submitted_at = timezone.now()

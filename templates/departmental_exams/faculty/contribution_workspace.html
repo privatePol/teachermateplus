@@ -24,6 +24,22 @@
     {% if configuration.additional_instructions %}<div class="mt-2"><strong>Course instructions:</strong><br>{{ configuration.additional_instructions|linebreaksbr }}</div>{% endif %}
   </div>
 </div>
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <h2 class="h5">Difficulty Distribution</h2>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-2">
+        <thead><tr><th scope="col">Difficulty</th><th scope="col">Current / Required</th></tr></thead>
+        <tbody>
+          {% for row in difficulty_distribution.rows %}
+            <tr><th scope="row">{{ row.label }}</th><td>{{ row.current }} / {{ row.required }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="mb-0 {% if difficulty_distribution.compliant %}text-success{% else %}text-warning{% endif %}">{{ difficulty_distribution.guidance }}</p>
+  </div>
+</div>
 {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}
   <div class="alert alert-warning"><strong>This course is Exempt and read-only.</strong> Your retained contribution history remains visible to you, but no additions, edits, deletions, uploads, reordering, or submission are allowed.</div>
 {% elif active_import %}
@@ -50,7 +66,7 @@
   <div class="alert alert-warning"><strong>This Draft is currently read-only.</strong> Its cycle, Included course state, contribution window, deadline, quota, or current assignment eligibility no longer permits changes. Contact an authorized administrator.</div>
 {% endif %}
 {% if quota_reached %}
-  <div class="alert alert-success" role="status"><strong>Quota reached.</strong> You have reached the required quota of {{ quota }} questions. You may now submit your contribution.</div>
+  <div class="alert {% if difficulty_distribution.compliant %}alert-success{% else %}alert-warning{% endif %}" role="status"><strong>Quota reached.</strong> You have reached the required quota of {{ quota }} questions. {% if difficulty_distribution.compliant %}You may now submit your contribution.{% else %}Adjust the difficulty distribution before Final Submission.{% endif %}</div>
 {% endif %}
 {% if is_mutable %}
   <div class="d-flex flex-wrap gap-2 mb-3">

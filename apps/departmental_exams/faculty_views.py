@@ -31,7 +31,11 @@ from .contribution_forms import (
     QuestionReorderForm,
 )
 from .contribution_selectors import ContributionSelector
-from .contribution_services import QuestionMutationService
+from .contribution_services import (
+    ContributionDifficultyDeficient,
+    ContributionDifficultyDistributionService,
+    QuestionMutationService,
+)
 from .csv_import import CSV_FILENAME, QuestionCSVImportService
 from .models import FacultyContribution, Question, QuestionImportBatch
 from .questionnaire_printing import (
@@ -174,6 +178,11 @@ def _workspace_context(contribution):
         otherwise_mutable and has_retained_live_eligibility and active_import is None
     )
     quota_reached = is_mutable and saved_count >= quota
+    difficulty_distribution = ContributionDifficultyDistributionService.evaluate(
+        questions=questions,
+        quota=quota,
+        configuration=configuration,
+    )
     return {
         "contribution": contribution,
         "questions": questions,
@@ -188,6 +197,7 @@ def _workspace_context(contribution):
             otherwise_mutable and not has_retained_live_eligibility
         ),
         "quota_reached": quota_reached,
+        "difficulty_distribution": difficulty_distribution,
         "active_import": active_import,
         "active_import_progress": (
             QuestionCSVImportService.status_payload(active_import)
@@ -941,13 +951,27 @@ def contribution_submit_view(request, contribution_id):
                 expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
                 request=request,
             )
+        except ContributionDifficultyDeficient as exc:
+            form.add_error(None, exc.messages[0])
         except (ContributionConflict, ValidationError) as exc:
             return _error_response(request, exc)
-        messages.success(request, "Contribution submitted." if changed else "Contribution was already submitted.")
-        return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
+        else:
+            messages.success(request, "Contribution submitted." if changed else "Contribution was already submitted.")
+            return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
     return render(
         request,
         "departmental_exams/faculty/contribution_submit.html",
-        {"form": form, "contribution": contribution},
+        {
+            "form": form,
+            "contribution": contribution,
+            "difficulty_distribution": ContributionDifficultyDistributionService.evaluate(
+                questions=contribution.questions.filter(
+                    Q(import_batch__isnull=True)
+                    | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+                ),
+                quota=contribution.quota_snapshot,
+                configuration=contribution.cycle_course.configuration,
+            ),
+        },
         status=400 if request.method == "POST" else 200,
     )

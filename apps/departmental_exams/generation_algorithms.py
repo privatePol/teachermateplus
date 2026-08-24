@@ -64,10 +64,12 @@ def allocate_campuses(total: int, campus_codes) -> dict[str, int]:
     return hamilton_allocate(total=total, weights=weights, tie_priority=ordered)
 
 
-def allocate_difficulties(total: int) -> dict[str, int]:
+def allocate_difficulties(
+    total: int, *, weights: dict[str, int] | None = None
+) -> dict[str, int]:
     return hamilton_allocate(
         total=total,
-        weights=DIFFICULTY_WEIGHTS,
+        weights=DIFFICULTY_WEIGHTS if weights is None else weights,
         tie_priority=DIFFICULTY_TIE_PRIORITY,
     )
 

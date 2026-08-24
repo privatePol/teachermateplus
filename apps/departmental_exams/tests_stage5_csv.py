@@ -8,7 +8,11 @@ from django.http import Http404
 from apps.auditlog.models import AuditLog
 
 from .contribution_authorization import ContributionQuotaReached
-from .contribution_services import QuestionMutationService, QuestionPayloadService
+from .contribution_services import (
+    ContributionDifficultyDistributionService,
+    QuestionMutationService,
+    QuestionPayloadService,
+)
 from .csv_import import (
     CSV_FILENAME,
     CSV_HEADERS,
@@ -78,6 +82,32 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
         )
         self.assertEqual(parsed.data_rows[0].payload, {})
 
+    def assert_draft_import_with_deficiency(self, *, difficulty, deficient_code):
+        row = self.row(f"Draft {difficulty} CSV question")
+        row[-1] = difficulty
+        batch = self.create_preview(self.csv_upload([row]))
+        self.assertEqual(batch.status, QuestionImportBatch.Status.READY)
+
+        confirmed, changed = QuestionCSVImportService.confirm(
+            token=batch.token,
+            expected_file_sha256=batch.file_sha256,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+
+        self.contribution.refresh_from_db()
+        distribution = ContributionDifficultyDistributionService.evaluate(
+            questions=self.contribution.questions.all(),
+            quota=self.contribution.quota_snapshot,
+            configuration=self.configuration,
+        )
+        by_code = {row["code"]: row for row in distribution["rows"]}
+        self.assertTrue(changed)
+        self.assertEqual(confirmed.status, QuestionImportBatch.Status.CONFIRMED)
+        self.assertEqual(self.contribution.status, FacultyContribution.Status.DRAFT)
+        self.assertGreater(by_code[deficient_code]["shortfall"], 0)
+
     def test_template_has_exact_filename_headers_and_labeled_sample(self):
         decoded = QuestionCSVImportService.template_bytes().decode("utf-8")
         rows = list(csv.reader(io.StringIO(decoded)))
@@ -91,6 +121,33 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(batch.status, "READY")
         self.assertEqual(preview.payload["correct_answer"], "A")
         self.assertEqual(preview.payload["difficulty"], "MODERATE")
+
+    def test_csv_import_succeeds_while_easy_is_deficient(self):
+        self.assert_draft_import_with_deficiency(
+            difficulty="Moderate",
+            deficient_code=Question.Difficulty.EASY,
+        )
+
+    def test_csv_import_succeeds_while_moderate_is_deficient(self):
+        self.assert_draft_import_with_deficiency(
+            difficulty="Easy",
+            deficient_code=Question.Difficulty.MODERATE,
+        )
+
+    def test_csv_import_succeeds_while_difficult_is_deficient(self):
+        self.assert_draft_import_with_deficiency(
+            difficulty="Easy",
+            deficient_code=Question.Difficulty.DIFFICULT,
+        )
+
+    def test_invalid_csv_difficulty_remains_blocking(self):
+        row = self.row("Invalid difficulty CSV question")
+        row[-1] = "Expert"
+        batch = self.create_preview(self.csv_upload([row]))
+
+        self.assertEqual(batch.status, QuestionImportBatch.Status.INVALID)
+        self.assertGreater(batch.error_count, 0)
+        self.assertFalse(Question.objects.exists())
 
     def test_nul_is_rejected_with_safe_error(self):
         self.assert_rejected_question_character("\x00")
