@@ -301,14 +301,17 @@ class ContributionRosterService:
                 current = assignment.id in eligible_ids
                 source = source_map.get((contribution.id, assignment.id))
                 if source is None:
+                    source_tenant_id, source_campus_id = (
+                        ContributorEligibilityService.source_evidence_scope(assignment)
+                    )
                     source_creates.append(
                         FacultyContributionEligibilitySource(
                             contribution=contribution,
                             assignment=assignment,
                             assignment_id_snapshot=assignment.id,
                             offering_id_snapshot=assignment.offering_id,
-                            tenant_id_snapshot=assignment.tenant_id or assignment.offering.tenant_id,
-                            campus_id_snapshot=assignment.campus_id or assignment.offering.campus_id,
+                            tenant_id_snapshot=source_tenant_id,
+                            campus_id_snapshot=source_campus_id,
                             is_current=current,
                             invalidated_at=None if current else now,
                         )

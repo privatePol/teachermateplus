@@ -252,7 +252,71 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             squared_contributor_concentration=0,
         )
 
-    def test_non_50_cycle_default_quota_drives_completion_and_waiting_status(self):
+    def test_missing_configuration_is_blocked_on_screen_print_and_build_without_write(self):
+        cycle = self.make_cycle(
+            status=ExaminationCycle.Status.OPEN,
+            default_questions_required_per_faculty=50,
+            default_final_item_count=50,
+            default_contribution_deadline=self.future_deadline(),
+        )
+        cycle.processing_mode = ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        cycle.save(update_fields=["processing_mode", "updated_at"])
+        parent = self.make_course(cycle=cycle, code="READINESS-NO-CONFIG")
+        configuration_count = CourseExamConfiguration.objects.count()
+
+        report = AutomaticGenerationReadinessReport(
+            tenant_id=self.tenant.id,
+            user=self.generation_manager,
+            params={"cycle": str(cycle.id)},
+        ).build()
+        self.assertEqual(len(report["rows"]), 1)
+        direct_row = report["rows"][0]
+        self.assertEqual(direct_row["cycle_course"].id, parent.id)
+        self.assertEqual(direct_row["generation_status"], "BLOCKED")
+        self.assertIn("Configure the course examination.", direct_row["action_items"])
+        self.assertIsNone(direct_row["configuration"])
+        self.assertEqual(
+            direct_row["contribution_progress"]["submitted_question_volume"], 0
+        )
+        self.assertIsNone(
+            direct_row["contribution_progress"]["expected_monitoring_volume"]
+        )
+
+        screen = self.client.get(
+            reverse("departmental_exams:automatic_generation_readiness"),
+            {"cycle": cycle.id},
+        )
+        printed = self.client.get(
+            reverse("departmental_exams:automatic_generation_readiness_print"),
+            {"cycle": cycle.id},
+        )
+
+        headers = (
+            "Authorized Course",
+            "Campuses Offered",
+            "Final Exam Items",
+            "Contribution Progress",
+            "Automatic Exam Generation Status",
+            "Action Needed",
+        )
+        self.assertEqual(screen.status_code, 200)
+        self.assertEqual(printed.status_code, 200)
+        self.assertContains(screen, parent.course.code)
+        self.assertContains(printed, parent.course.code)
+        self.assertContains(screen, "BLOCKED")
+        self.assertContains(printed, "BLOCKED")
+        self.assertContains(screen, "Configure the course examination.")
+        self.assertContains(printed, "Configure the course examination.")
+        self.assertEqual(screen.content.decode().count('<th scope="col">'), 6)
+        self.assertEqual(printed.content.decode().count("<th>"), 6)
+        for header in headers:
+            self.assertContains(screen, header)
+            self.assertContains(printed, header)
+        self.assertEqual(
+            CourseExamConfiguration.objects.count(), configuration_count
+        )
+
+    def test_non_50_cycle_default_quota_drives_monitoring_progress_and_waiting_status(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course(
             campus_codes=("CUBAO",), quota=60, quota_source="DEFAULT"
         )
@@ -263,28 +327,55 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         row = response.context["rows"][0]
         self.assertEqual(row["faculty"]["required_quota"], 60)
         self.assertEqual(row["faculty"]["required_quota_source"], "DEFAULT")
+        self.assertEqual(row["faculty"]["required_count"], 1)
+        self.assertEqual(row["faculty"]["completed_count"], 1)
         self.assertEqual(
-            row["faculty"]["completion_text"],
-            "1 of 1 faculty completed the required 60 questions.",
+            row["contribution_progress"]["submitted_question_volume"], 60
         )
-        self.assertEqual(row["pool_status"], "READY")
+        self.assertEqual(
+            row["contribution_progress"]["expected_monitoring_volume"], 60
+        )
         self.assertEqual(row["generation_status"], "WAITING FOR DEADLINE")
-        self.assertContains(response, "60 (cycle default)")
-        self.assertContains(
-            response,
-            "Requirements are complete. Automatic generation will proceed after the contribution deadline.",
-        )
+        self.assertContains(response, "60 / 60 submitted")
+        self.assertContains(response, "Contribution Progress is for monitoring only")
 
-    def test_non_50_course_override_is_displayed_without_hardcoded_quota(self):
+    def test_non_50_course_override_drives_monitoring_denominator_without_hardcoding(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course(
-            campus_codes=("CUBAO",), quota=75, quota_source="OVERRIDE"
+            campus_codes=("CUBAO", "FAIRVIEW", "TAYTAY"),
+            quota=60,
+            quota_source="OVERRIDE",
         )
 
         row = self._screen(parent).context["rows"][0]
 
-        self.assertEqual(row["faculty"]["required_quota"], 75)
-        self.assertEqual(row["faculty"]["required_quota_display"], "75 (course override)")
-        self.assertIn("required 75 questions", row["faculty"]["completion_text"])
+        self.assertEqual(row["faculty"]["required_quota"], 60)
+        self.assertEqual(row["faculty"]["required_quota_source"], "OVERRIDE")
+        self.assertEqual(
+            row["contribution_progress"]["expected_monitoring_volume"], 180
+        )
+        self.assertEqual(
+            row["contribution_progress"]["submitted_question_volume"], 180
+        )
+
+    def test_three_campus_monitoring_denominator_is_150_at_quota_50(self):
+        parent, _configuration, _campuses, _offerings = self._automatic_course(
+            campus_codes=("CUBAO", "FAIRVIEW", "TAYTAY"), quota=50
+        )
+
+        progress = self._screen(parent).context["rows"][0]["contribution_progress"]
+
+        self.assertEqual(progress["expected_monitoring_volume"], 150)
+        self.assertEqual(progress["submitted_question_volume"], 150)
+
+    def test_one_campus_monitoring_denominator_is_50_at_quota_50(self):
+        parent, _configuration, _campuses, _offerings = self._automatic_course(
+            campus_codes=("CUBAO",), quota=50
+        )
+
+        progress = self._screen(parent).context["rows"][0]["contribution_progress"]
+
+        self.assertEqual(progress["expected_monitoring_volume"], 50)
+        self.assertEqual(progress["submitted_question_volume"], 50)
 
     def test_pool_only_readiness_works_before_deadline_without_changing_generator_gate(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course()
@@ -334,23 +425,60 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             offering=duplicate_offering,
             campus=campuses["CUBAO"],
         )
+        extra_faculty, _assignment = self.add_faculty_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="second-cubao-submission",
+        )
+        ContributionRosterService.synchronize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.generation_manager,
+        )
+        extra_contribution = FacultyContribution.objects.get(
+            cycle_course=parent, faculty_user=extra_faculty
+        )
+        self._add_quota_questions(extra_contribution, 50)
+        extra_contribution.status = FacultyContribution.Status.SUBMITTED
+        extra_contribution.submitted_at = timezone.now()
+        extra_contribution.save(update_fields=["status", "submitted_at", "updated_at"])
 
         row = self._screen(parent).context["rows"][0]
 
         self.assertEqual(row["campuses"], ("Cubao", "Fairview"))
-        self.assertEqual(len(row["campus_requirements"]), 2)
         self.assertEqual(
-            {item["required"] for item in row["campus_requirements"]}, {25}
+            row["contribution_progress"]["expected_monitoring_volume"], 100
         )
-        self.assertTrue(all(item["sufficient"] for item in row["campus_requirements"]))
+        self.assertEqual(
+            row["contribution_progress"]["submitted_campuses"],
+            ("Cubao", "Fairview"),
+        )
+        self.assertEqual(
+            row["contribution_progress"]["submitted_question_volume"], 150
+        )
+
+    def test_no_submitted_contribution_renders_zero_progress_and_no_campus_message(self):
+        parent, _configuration, _campuses, _offerings = self._automatic_course(
+            submitted_codes=()
+        )
+
+        response = self._screen(parent)
+        progress = response.context["rows"][0]["contribution_progress"]
+
+        self.assertEqual(progress["submitted_question_volume"], 0)
+        self.assertEqual(progress["expected_monitoring_volume"], 150)
+        self.assertEqual(progress["submitted_campuses"], ())
+        self.assertContains(response, "0 / 150 submitted")
+        self.assertContains(response, "No campus has submitted questions yet.")
 
     def test_available_with_warning_keeps_ready_and_renders_missing_campus_on_screen_and_print(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course(
-            submitted_codes=("CUBAO", "FAIRVIEW")
+            submitted_codes=("CUBAO",)
         )
         expected = (
-            "Taytay currently has no usable submitted questions. Automatic generation "
-            "may proceed using represented campuses under the configured campus policy."
+            "No usable submitted questions from Fairview.",
+            "No usable submitted questions from Taytay.",
         )
 
         screen = self._screen(parent)
@@ -364,12 +492,30 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
                 {"cycle": parent.cycle_id},
             )
 
-        self.assertEqual(row["pool_status"], "READY")
         self.assertEqual(row["generation_status"], "WAITING FOR DEADLINE")
-        self.assertEqual(row["pool_warnings"], (expected,))
-        self.assertIn(expected, row["action_needed"])
-        self.assertContains(screen, expected)
-        self.assertContains(printed, expected)
+        self.assertEqual(row["pool_warnings"], expected)
+        self.assertEqual(
+            row["contribution_progress"]["submitted_question_volume"], 50
+        )
+        self.assertEqual(
+            row["contribution_progress"]["expected_monitoring_volume"], 150
+        )
+        self.assertEqual(
+            row["contribution_progress"]["submitted_campuses"], ("Cubao",)
+        )
+        for action in expected:
+            self.assertIn(action, row["action_items"])
+            self.assertContains(screen, action)
+            self.assertContains(printed, action)
+            self.assertIn(f"<li>{action}</li>", screen.content.decode())
+            self.assertIn(f"<li>{action}</li>", printed.content.decode())
+        self.assertTrue(
+            all("<" not in item and ">" not in item for item in row["action_items"])
+        )
+        self.assertNotContains(
+            screen,
+            "Automatic generation may proceed using represented campuses under the configured campus policy.",
+        )
         self.assertNotContains(screen, "MISSING_CAMPUS_REPRESENTATION")
 
     def test_strict_missing_campus_remains_hard_question_pool_blocker(self):
@@ -384,12 +530,12 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
 
         row = self._screen(parent).context["rows"][0]
 
-        self.assertEqual(row["pool_status"], "NEEDS QUESTIONS")
         self.assertEqual(row["generation_status"], "BLOCKED")
         self.assertEqual(row["pool_warnings"], ())
-        self.assertIn("Taytay currently has no usable submitted questions", row["action_needed"])
-        self.assertIn("strict campus policy", row["action_needed"])
-        self.assertNotIn("may proceed using represented campuses", row["action_needed"])
+        self.assertIn("No usable submitted questions from Taytay.", row["action_items"])
+        self.assertFalse(
+            any("strict campus policy" in item for item in row["action_items"])
+        )
 
     def test_malformed_and_duplicate_submitted_rows_are_excluded_from_usable_total(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course()
@@ -416,9 +562,14 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         self.assertEqual(pool["duplicate_question_count"], 1)
         self.assertEqual(pool["unique_question_count"], 148)
         row = self._screen(parent).context["rows"][0]
-        self.assertEqual(row["pool_status"], "READY")
         self.assertEqual(row["generation_status"], "BLOCKED")
-        self.assertIn("1 unusable Submitted question row", row["action_needed"])
+        self.assertIn("Resolve 1 unusable Submitted question row.", row["action_items"])
+        self.assertEqual(
+            row["contribution_progress"]["submitted_question_volume"], 150
+        )
+        body = self._screen(parent).content.decode()
+        self.assertNotIn("duplicate copies", body)
+        self.assertNotIn("148 unique", body)
 
     def test_unconfirmed_import_and_nonparticipating_campus_questions_do_not_count(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course(
@@ -450,42 +601,65 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         )
 
         unconfirmed_row = self._screen(parent).context["rows"][0]
-        self.assertEqual(unconfirmed_row["total_usable_questions"], 49)
-        self.assertEqual(unconfirmed_row["pool_status"], "NEEDS QUESTIONS")
+        self.assertEqual(unconfirmed_row["generation_status"], "BLOCKED")
+        self.assertEqual(
+            unconfirmed_row["contribution_progress"]["submitted_question_volume"], 50
+        )
 
         FacultyContribution.objects.filter(pk=contribution.pk).update(
             source_campus=self.other_campus
         )
         nonparticipating_row = self._screen(parent).context["rows"][0]
-        self.assertEqual(nonparticipating_row["total_usable_questions"], 0)
-        self.assertEqual(nonparticipating_row["pool_status"], "NEEDS QUESTIONS")
+        self.assertEqual(nonparticipating_row["generation_status"], "BLOCKED")
+        self.assertEqual(
+            nonparticipating_row["contribution_progress"]["submitted_campuses"], ()
+        )
 
-    def test_mixed_historical_quota_snapshots_are_rendered_truthfully(self):
+    def test_historical_submitted_questions_supply_pool_but_not_current_completion(self):
         parent, _configuration, campuses, offerings = self._automatic_course(
             campus_codes=("CUBAO",), quota=50
         )
-        extra_faculty, _assignment = self.add_faculty_source(
+        historical = FacultyContribution.objects.get(cycle_course=parent)
+        historical_assignment = historical.source_assignment
+        historical_assignment.is_active = False
+        historical_assignment.save(update_fields=["is_active", "updated_at"])
+        current_faculty, _assignment = self.add_faculty_source(
             parent=parent,
             campus=campuses["CUBAO"],
             offering=offerings["CUBAO"],
-            suffix="historical-quota",
+            suffix="current-replacement",
         )
         ContributionRosterService.synchronize(
             cycle_course_id=parent.id,
             tenant_id=self.tenant.id,
             actor=self.generation_manager,
         )
-        FacultyContribution.objects.filter(
-            cycle_course=parent,
-            faculty_user=extra_faculty,
-        ).update(quota_snapshot=60)
+        self.assertTrue(
+            FacultyContribution.objects.filter(
+                cycle_course=parent,
+                faculty_user=current_faculty,
+                status=FacultyContribution.Status.DRAFT,
+            ).exists()
+        )
 
-        faculty = self._screen(parent).context["rows"][0]["faculty"]
+        row = self._screen(parent).context["rows"][0]
 
-        self.assertEqual(faculty["required_quota"], 50)
-        self.assertIn("1 faculty require 50", faculty["completion_text"])
-        self.assertIn("1 faculty require 60", faculty["completion_text"])
-        self.assertIn("1 faculty remain incomplete", faculty["completion_text"])
+        self.assertTrue(row["faculty"]["authoritative"])
+        self.assertEqual(row["faculty"]["required_count"], 1)
+        self.assertEqual(row["faculty"]["completed_count"], 0)
+        self.assertEqual(row["faculty"]["incomplete_count"], 1)
+        self.assertEqual(row["generation_status"], "WAITING FOR DEADLINE")
+        self.assertEqual(
+            row["contribution_progress"]["submitted_question_volume"], 50
+        )
+        self.assertEqual(
+            row["contribution_progress"]["submitted_campuses"], ("Cubao",)
+        )
+        self.assertEqual(Question.objects.filter(contribution=historical).count(), 50)
+        self.assertIn(
+            "1 current faculty has not completed their required contribution.",
+            row["action_items"],
+        )
 
     def test_total_campus_and_difficulty_shortages_use_concrete_management_wording(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course(
@@ -498,16 +672,16 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
 
         row = self._screen(parent).context["rows"][0]
 
-        self.assertEqual(row["pool_status"], "NEEDS QUESTIONS")
-        self.assertFalse(row["campus_requirements"][0]["sufficient"])
-        self.assertIn("Needs 10 more usable questions", self._screen(parent).content.decode())
+        self.assertEqual(row["generation_status"], "NEEDS QUESTIONS")
         self.assertIn(
-            "Usable unique question pool needs 10 more questions.",
+            "Add 10 more usable unique questions.",
             row["pool_actions"],
         )
         self.assertTrue(
-            any("difficulty needs" in action for action in row["pool_actions"])
+            any("usable Difficult questions" in action for action in row["pool_actions"])
         )
+        for action in row["action_items"]:
+            self.assertContains(self._screen(parent), action)
 
     def test_exact_solver_infeasibility_and_processing_messages_are_academic_facing(self):
         parent, configuration, _campuses, _offerings = self._automatic_course(
@@ -533,10 +707,10 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
                 {"cycle": parent.cycle_id},
             )
         row = response.context["rows"][0]
-        self.assertEqual(row["pool_status"], "NEEDS QUESTIONS")
+        self.assertEqual(row["generation_status"], "NEEDS QUESTIONS")
         self.assertIn(
-            "Question pool cannot satisfy the required campus and difficulty distribution.",
-            row["action_needed"],
+            "Add usable unique questions that satisfy the required difficulty distribution.",
+            row["action_items"],
         )
 
         CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
@@ -546,11 +720,10 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         )
         error_row = self._screen(parent).context["rows"][0]
         self.assertEqual(
-            error_row["action_needed"],
-            "Automatic processing encountered a system error. Please refer this course "
-            "to the system administrator.",
+            error_row["action_items"],
+            ("Resolve the automatic processing error with the system administrator.",),
         )
-        self.assertNotIn("log", error_row["action_needed"].lower())
+        self.assertNotIn("log", " ".join(error_row["action_items"]).lower())
 
         limit_hit = IdentitySelectionResult(
             feasible=False,
@@ -577,9 +750,8 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
                 {"cycle": parent.cycle_id},
             )
         self.assertIn(
-            "TeacherMate+ could not complete the readiness check within the allowed "
-            "processing limit. Please refer this course to the system administrator.",
-            limit_response.context["rows"][0]["action_needed"],
+            "Resolve the automatic readiness processing limit with the system administrator.",
+            limit_response.context["rows"][0]["action_items"],
         )
 
     def test_require_all_is_faculty_incomplete_while_sufficient_pool_is_warning(self):
@@ -605,7 +777,10 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
 
         warning_row = self._screen(parent).context["rows"][0]
         self.assertEqual(warning_row["generation_status"], "WAITING FOR DEADLINE")
-        self.assertIn("Incomplete faculty are a warning", warning_row["action_needed"])
+        self.assertIn(
+            "1 current faculty has not completed their required contribution.",
+            warning_row["action_items"],
+        )
 
         cycle = parent.cycle
         cycle.automatic_contributor_completion_policy = (
@@ -617,7 +792,10 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         parent.cycle = cycle
         blocker_row = self._screen(parent).context["rows"][0]
         self.assertEqual(blocker_row["generation_status"], "FACULTY INCOMPLETE")
-        self.assertIn("1 of 4 required faculty", blocker_row["action_needed"])
+        self.assertEqual(
+            blocker_row["action_items"],
+            ("1 current faculty has not completed their required contribution.",),
+        )
 
     def test_stale_roster_and_unresolved_blocked_draft_remain_blockers(self):
         parent, _configuration, campuses, offerings = self._automatic_course()
@@ -629,7 +807,11 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         )
         stale_row = self._screen(parent).context["rows"][0]
         self.assertEqual(stale_row["generation_status"], "BLOCKED")
-        self.assertEqual(stale_row["action_needed"], "Synchronize the stale contributor roster.")
+        self.assertEqual(
+            stale_row["action_items"], ("Synchronize the contributor roster.",)
+        )
+        self.assertFalse(stale_row["faculty"]["authoritative"])
+        self.assertIsNone(stale_row["faculty"]["required_count"])
 
         ContributionRosterService.synchronize(
             cycle_course_id=parent.id,
@@ -645,7 +827,109 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         )
         blocked_row = self._screen(parent).context["rows"][0]
         self.assertEqual(blocked_row["generation_status"], "BLOCKED")
-        self.assertIn("Resolve 1 Blocked Draft", blocked_row["action_needed"])
+        self.assertIn(
+            "Resolve 1 Blocked Draft contributor record.", blocked_row["action_items"]
+        )
+
+    def test_initialized_legacy_null_draft_roster_does_not_render_stale(self):
+        parent, _configuration, _campuses, _offerings = self._automatic_course(
+            campus_codes=("CUBAO",),
+            submitted_codes=(),
+        )
+        assignment = FacultyContribution.objects.get(
+            cycle_course=parent
+        ).source_assignment
+        assignment.tenant = None
+        assignment.campus = None
+        assignment.save(update_fields=["tenant", "campus", "updated_at"])
+
+        response = self._screen(parent)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["rows"][0]["faculty"]["roster_current"])
+        self.assertNotContains(response, "Contributor roster has not been initialized.")
+        self.assertNotContains(
+            response,
+            "Contributor roster needs synchronization because the eligible faculty list has changed.",
+        )
+        self.assertNotContains(response, "Synchronize the contributor roster.")
+
+    def test_not_initialized_and_stale_roster_wording_and_actions_are_distinct(self):
+        parent, configuration, campuses, offerings = self.make_stage6_open_course()
+        parent.cycle.processing_mode = ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        parent.cycle.save(update_fields=["processing_mode", "updated_at"])
+        self.add_faculty_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="readiness-uninitialized",
+        )
+
+        uninitialized = self._screen(parent)
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            return_value=self._feasible_selection(),
+        ):
+            uninitialized_print = self.client.get(
+                reverse("departmental_exams:automatic_generation_readiness_print"),
+                {"cycle": parent.cycle_id},
+            )
+
+        self.assertContains(
+            uninitialized,
+            "Contributor roster has not been initialized.",
+        )
+        self.assertContains(
+            uninitialized_print,
+            "Contributor roster has not been initialized.",
+        )
+        self.assertEqual(
+            uninitialized.context["rows"][0]["action_items"][0],
+            "Initialize the contributor roster.",
+        )
+        self.assertNotContains(uninitialized, "Synchronize the contributor roster.")
+        self.assertNotContains(
+            uninitialized,
+            "Contributor roster needs synchronization because the eligible faculty list has changed.",
+        )
+
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.generation_manager,
+        )
+        self.add_faculty_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="readiness-new-staffing",
+        )
+        configuration.refresh_from_db()
+
+        stale = self._screen(parent)
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            return_value=self._feasible_selection(),
+        ):
+            stale_print = self.client.get(
+                reverse("departmental_exams:automatic_generation_readiness_print"),
+                {"cycle": parent.cycle_id},
+            )
+
+        self.assertContains(
+            stale,
+            "Contributor roster needs synchronization because the eligible faculty list has changed.",
+        )
+        self.assertContains(
+            stale_print,
+            "Contributor roster needs synchronization because the eligible faculty list has changed.",
+        )
+        self.assertEqual(
+            stale.context["rows"][0]["action_items"][0],
+            "Synchronize the contributor roster.",
+        )
+        self.assertNotContains(stale, "Contributor roster has not been initialized.")
+        self.assertNotContains(stale, "stale or not initialized")
 
     def test_due_missing_deadline_generated_and_exempt_statuses(self):
         parent, configuration, _campuses, _offerings = self._automatic_course()
@@ -663,7 +947,9 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         )
         missing_row = self._screen(parent).context["rows"][0]
         self.assertEqual(missing_row["generation_status"], "BLOCKED")
-        self.assertEqual(missing_row["action_needed"], "Configure the contribution deadline.")
+        self.assertEqual(
+            missing_row["action_items"], ("Set the contribution deadline.",)
+        )
 
         configuration.refresh_from_db()
         CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
@@ -705,6 +991,8 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         ) as evaluator:
             exempt_row = self._screen(parent).context["rows"][0]
         self.assertEqual(exempt_row["generation_status"], "EXEMPT")
+        self.assertIsNone(exempt_row["contribution_progress"])
+        self.assertEqual(exempt_row["action_items"], ("No generation required.",))
         evaluator.assert_not_called()
 
     def test_rbac_requires_every_campus_honors_global_scope_and_direct_deny(self):
@@ -1163,12 +1451,36 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         self.assertEqual(printed.status_code, 200)
         for key in (
             "campuses",
-            "total_usable_questions",
-            "pool_status",
+            "contribution_progress",
             "generation_status",
-            "action_needed",
+            "status_detail",
+            "action_items",
         ):
             self.assertEqual(screen.context["rows"][0][key], printed.context["rows"][0][key])
+        screen_body = screen.content.decode()
+        print_body = printed.content.decode()
+        headers = (
+            "Authorized Course",
+            "Campuses Offered",
+            "Final Exam Items",
+            "Contribution Progress",
+            "Automatic Exam Generation Status",
+            "Action Needed",
+        )
+        self.assertEqual(screen_body.count('<th scope="col">'), 6)
+        self.assertEqual(print_body.count("<th>"), 6)
+        for header in headers:
+            self.assertIn(header, screen_body)
+            self.assertIn(header, print_body)
+        for removed_header in (
+            "Required Questions per Faculty",
+            "Faculty Completion",
+            "Campus Question Requirements",
+            "Total Usable Questions",
+            "Question Pool Readiness",
+        ):
+            self.assertNotIn(removed_header, screen_body)
+            self.assertNotIn(removed_header, print_body)
         self.assertContains(screen, "Automatic Generation Readiness")
         monitoring = self.client.get(
             reverse("departmental_exams:contributor_monitoring"),

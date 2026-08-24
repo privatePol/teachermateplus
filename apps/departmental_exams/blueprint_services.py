@@ -144,8 +144,7 @@ def live_roster_evidence(inventory) -> str:
                 assignment.id,
                 assignment.faculty_user_id,
                 assignment.offering_id,
-                assignment.tenant_id,
-                assignment.campus_id,
+                *ContributorEligibilityService.source_evidence_scope(assignment),
                 assignment.id in eligible_ids,
             )
             for assignment in inventory.all_sources
@@ -168,7 +167,7 @@ class ContributorRosterReadinessService:
         if not configuration or configuration.contributor_roster_initialized_at is None:
             return ContributorRosterReadiness(
                 current=False,
-                stale_reasons=("Contributor roster is not initialized.",),
+                stale_reasons=("Contributor roster has not been initialized.",),
                 required_active_count=0,
                 submitted_required_count=0,
                 incomplete_active_count=0,
@@ -247,19 +246,25 @@ class ContributorRosterReadinessService:
         all_by_user = defaultdict(dict)
         eligible_by_user = defaultdict(set)
         for assignment in inventory.all_sources:
+            source_tenant_id, source_campus_id = (
+                ContributorEligibilityService.source_evidence_scope(assignment)
+            )
             key = (
                 assignment.id,
                 assignment.offering_id,
-                assignment.tenant_id,
-                assignment.campus_id,
+                source_tenant_id,
+                source_campus_id,
             )
             all_by_user[assignment.faculty_user_id][key] = False
         for assignment in inventory.eligible_sources:
+            source_tenant_id, source_campus_id = (
+                ContributorEligibilityService.source_evidence_scope(assignment)
+            )
             key = (
                 assignment.id,
                 assignment.offering_id,
-                assignment.tenant_id,
-                assignment.campus_id,
+                source_tenant_id,
+                source_campus_id,
             )
             all_by_user[assignment.faculty_user_id][key] = True
             eligible_by_user[assignment.faculty_user_id].add(key)

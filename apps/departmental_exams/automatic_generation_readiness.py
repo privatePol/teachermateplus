@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from urllib.parse import urlencode
 
 from django.core.exceptions import PermissionDenied
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch
 from django.utils import timezone
 
 from .blueprint_services import ContributorRosterReadinessService
@@ -109,9 +109,11 @@ class AutomaticGenerationReadinessReport:
         }
 
     def _load_courses(self, *, course_ids):
-        contribution_queryset = FacultyContribution.objects.select_related(
-            "faculty_user", "source_campus"
-        ).order_by("faculty_user__last_name", "faculty_user__first_name", "id")
+        contribution_queryset = (
+            FacultyContribution.objects.select_related("faculty_user", "source_campus")
+            .annotate(saved_question_count=Count("questions"))
+            .order_by("faculty_user__last_name", "faculty_user__first_name", "id")
+        )
         snapshot_queryset = CycleCourseOffering.objects.select_related("campus").order_by(
             "campus__name", "campus_id", "offering_id"
         )
@@ -246,20 +248,6 @@ class AutomaticGenerationReadinessReport:
 
     @staticmethod
     def _faculty_completion(*, course, configuration, roster):
-        contributions = [
-            contribution
-            for contribution in course.faculty_contributions.all()
-            if contribution.roster_status == FacultyContribution.RosterStatus.ACTIVE
-        ]
-        required = len(contributions)
-        completed = sum(
-            contribution.status == FacultyContribution.Status.SUBMITTED
-            for contribution in contributions
-        )
-        incomplete = required - completed
-        quota_counts = Counter(
-            contribution.quota_snapshot for contribution in contributions
-        )
         effective_quota = (
             configuration.questions_required_per_faculty if configuration else None
         )
@@ -277,30 +265,23 @@ class AutomaticGenerationReadinessReport:
         else:
             quota_display = f"{effective_quota} (source not configured)"
 
-        if not contributions:
-            completion_text = "No required faculty contributors are currently on the roster."
-        elif len(quota_counts) == 1:
-            quota = next(iter(quota_counts))
-            if incomplete:
+        authoritative = bool(roster and roster.current)
+        if authoritative:
+            required = roster.required_active_count
+            completed = roster.submitted_required_count
+            incomplete = roster.incomplete_active_count
+            if required:
                 completion_text = (
-                    f"{completed} of {required} faculty completed their required contribution. "
-                    f"{incomplete} faculty still need to complete {quota} questions."
+                    f"{completed} of {required} current faculty completed their required "
+                    "contribution."
                 )
             else:
                 completion_text = (
-                    f"{completed} of {required} faculty completed the required {quota} questions."
+                    "No required faculty contributors are currently on the roster."
                 )
         else:
-            requirements = "; ".join(
-                f"{count} faculty require {quota}"
-                for quota, count in sorted(quota_counts.items())
-            )
-            completion_text = (
-                f"{completed} of {required} faculty completed their individual requirements. "
-                f"Requirements: {requirements} questions."
-            )
-            if incomplete:
-                completion_text += f" {incomplete} faculty remain incomplete."
+            required = completed = incomplete = None
+            completion_text = "Current faculty completion is unavailable until the roster is current."
 
         return {
             "required_quota": effective_quota,
@@ -310,26 +291,76 @@ class AutomaticGenerationReadinessReport:
             "completed_count": completed,
             "incomplete_count": incomplete,
             "completion_text": completion_text,
+            "authoritative": authoritative,
+            "roster_initialized": bool(
+                configuration
+                and configuration.contributor_roster_initialized_at is not None
+            ),
             "roster_current": bool(roster and roster.current),
+        }
+
+    @staticmethod
+    def _contribution_progress(*, course, configuration, participating_campuses):
+        submitted_contributions = [
+            contribution
+            for contribution in course.faculty_contributions.all()
+            if contribution.status == FacultyContribution.Status.SUBMITTED
+        ]
+        submitted_question_volume = sum(
+            contribution.saved_question_count
+            for contribution in submitted_contributions
+        )
+        participating_by_id = {
+            campus_id: campus_name for campus_id, campus_name in participating_campuses
+        }
+        submitted_campuses = tuple(
+            name
+            for _campus_id, name in sorted(
+                {
+                    contribution.source_campus_id: participating_by_id[
+                        contribution.source_campus_id
+                    ]
+                    for contribution in submitted_contributions
+                    if contribution.saved_question_count
+                    and contribution.source_campus_id in participating_by_id
+                }.items(),
+                key=lambda item: (item[1].casefold(), item[0]),
+            )
+        )
+        effective_quota = (
+            configuration.questions_required_per_faculty if configuration else None
+        )
+        expected_monitoring_volume = (
+            effective_quota * len(participating_by_id)
+            if effective_quota is not None and participating_by_id
+            else None
+        )
+        return {
+            "submitted_question_volume": submitted_question_volume,
+            "expected_monitoring_volume": expected_monitoring_volume,
+            "submitted_campuses": submitted_campuses,
         }
 
     @staticmethod
     def _pool_actions(pool):
         actions = []
+        missing_campus_names = {
+            campus_name
+            for blocker in pool.get("blockers", ())
+            if blocker["code"] == "MISSING_CAMPUS_REPRESENTATION"
+            for campus_name in blocker.get("campus_names", ())
+        }
         for shortage in pool.get("shortages", ()):
             missing = shortage["required"] - shortage["available"]
             if shortage["dimension"] == "campus":
-                actions.append(
-                    f"{shortage['label']} needs {missing} more usable questions."
-                )
+                if shortage["label"] not in missing_campus_names:
+                    actions.append(
+                        f"Add {missing} usable questions from {shortage['label']}."
+                    )
             elif shortage["dimension"] == "difficulty":
-                actions.append(
-                    f"{shortage['label']} difficulty needs {missing} more usable questions."
-                )
+                actions.append(f"Add {missing} usable {shortage['label']} questions.")
             elif shortage["dimension"] == "total":
-                actions.append(
-                    f"Usable unique question pool needs {missing} more questions."
-                )
+                actions.append(f"Add {missing} more usable unique questions.")
         blocker_codes = {item["code"] for item in pool.get("blockers", ())}
         if "CONFIGURATION_MISSING" in blocker_codes:
             actions.append("Configure the course examination.")
@@ -341,12 +372,11 @@ class AutomaticGenerationReadinessReport:
             actions.append("Add at least one participating campus offering snapshot.")
         if "HARD_CONSTRAINTS_INFEASIBLE" in blocker_codes:
             actions.append(
-                "Question pool cannot satisfy the required campus and difficulty distribution."
+                "Add usable unique questions that satisfy the required difficulty distribution."
             )
         if "FEASIBILITY_LIMIT" in blocker_codes:
             actions.append(
-                "TeacherMate+ could not complete the readiness check within the allowed "
-                "processing limit. Please refer this course to the system administrator."
+                "Resolve the automatic readiness processing limit with the system administrator."
             )
         missing_campus_blocker = next(
             (
@@ -358,10 +388,7 @@ class AutomaticGenerationReadinessReport:
         )
         if missing_campus_blocker:
             for campus_name in missing_campus_blocker.get("campus_names", ()):
-                actions.append(
-                    f"{campus_name} currently has no usable submitted questions. "
-                    "Automatic generation is blocked under the configured strict campus policy."
-                )
+                actions.append(f"No usable submitted questions from {campus_name}.")
         if not actions and pool.get("blockers"):
             actions.append(
                 "Resolve the question-pool requirements before automatic generation."
@@ -374,60 +401,49 @@ class AutomaticGenerationReadinessReport:
         for warning in pool.get("warnings", ()):
             if warning["code"] == "MISSING_CAMPUS_REPRESENTATION":
                 for campus_name in warning.get("campus_names", ()):
-                    warnings.append(
-                        f"{campus_name} currently has no usable submitted questions. "
-                        "Automatic generation may proceed using represented campuses "
-                        "under the configured campus policy."
-                    )
-            elif warning.get("message"):
-                warnings.append(warning["message"])
+                    warnings.append(f"No usable submitted questions from {campus_name}.")
         return tuple(dict.fromkeys(warnings))
 
     def _execution_status(self, *, course, configuration, roster, pool, current):
         if course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT:
-            return (
-                "EXEMPT",
-                "No generation is required for this exempt course.",
-            )
+            return "EXEMPT", ("No generation required.",)
         if current:
-            return (
-                "GENERATED",
-                "No action needed. A current generated examination exists.",
-            )
+            return "GENERATED", ("No action needed.",)
         if course.cycle.status != ExaminationCycle.Status.OPEN:
-            return "BLOCKED", "Open the examination cycle before automatic generation."
+            return "BLOCKED", ("Open the examination cycle.",)
         if configuration is None:
-            return "BLOCKED", "Configure the course examination."
+            return "BLOCKED", ("Configure the course examination.",)
         if (
             configuration.questions_required_per_faculty is None
             or configuration.questions_required_per_faculty_source
             not in ("DEFAULT", "OVERRIDE")
         ):
-            return "BLOCKED", "Configure the required questions per faculty."
+            return "BLOCKED", ("Configure the contribution quota.",)
         if configuration.contribution_deadline is None:
-            return "BLOCKED", "Configure the contribution deadline."
+            return "BLOCKED", ("Set the contribution deadline.",)
         if configuration.workflow_status == configuration.WorkflowStatus.DRAFT:
-            return "BLOCKED", "Open the course for faculty contribution."
+            return "BLOCKED", ("Open the course for faculty contribution.",)
         if configuration.workflow_status not in (
             configuration.WorkflowStatus.OPEN,
             configuration.WorkflowStatus.CLOSED,
         ):
-            return "BLOCKED", "Course contribution lifecycle is not ready."
+            return "BLOCKED", ("Resolve the course contribution lifecycle.",)
         if (
             configuration.automatic_processing_status
             == configuration.AutomaticProcessingStatus.ERROR
         ):
-            return (
-                "BLOCKED",
-                "Automatic processing encountered a system error. Please refer this "
-                "course to the system administrator.",
+            return "BLOCKED", (
+                "Resolve the automatic processing error with the system administrator.",
             )
+        if configuration is None:
+            status_detail = ""
+        elif configuration.contributor_roster_initialized_at is None:
+            return "BLOCKED", ("Initialize the contributor roster.",)
         if roster is None or not roster.current:
-            return "BLOCKED", "Synchronize the stale contributor roster."
+            return "BLOCKED", ("Synchronize the contributor roster.",)
         if roster.unresolved_blocked_count:
             count = roster.unresolved_blocked_count
-            return (
-                "BLOCKED",
+            return "BLOCKED", (
                 f"Resolve {count} Blocked Draft contributor record{'s' if count != 1 else ''}.",
             )
         if (
@@ -435,45 +451,42 @@ class AutomaticGenerationReadinessReport:
             == ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL
             and roster.incomplete_active_count
         ):
-            return (
-                "FACULTY INCOMPLETE",
-                (
-                    f"{roster.incomplete_active_count} of "
-                    f"{roster.required_active_count} required faculty contributors "
-                    "still need to complete their contribution."
-                ),
+            count = roster.incomplete_active_count
+            return "FACULTY INCOMPLETE", (
+                f"{count} current faculty {'has' if count == 1 else 'have'} not completed "
+                "their required contribution.",
             )
         if pool.get("invalid_question_count"):
             count = pool["invalid_question_count"]
-            return (
-                "BLOCKED",
-                (
-                    f"Resolve {count} unusable Submitted question row"
-                    f"{'s' if count != 1 else ''}; invalid or unconfirmed rows "
-                    "are excluded from generation."
-                ),
+            return "BLOCKED", (
+                f"Resolve {count} unusable Submitted question row"
+                f"{'s' if count != 1 else ''}.",
             )
         if not pool["ready"]:
             actions = self._pool_actions(pool)
-            return "BLOCKED", " ".join(actions)
+            question_shortage_codes = {
+                "QUESTION_SHORTAGES",
+                "UNIQUE_QUESTION_SHORTAGES",
+                "HARD_CONSTRAINTS_INFEASIBLE",
+            }
+            blocker_codes = {item["code"] for item in pool.get("blockers", ())}
+            status = (
+                "NEEDS QUESTIONS"
+                if blocker_codes and blocker_codes <= question_shortage_codes
+                else "BLOCKED"
+            )
+            return status, actions
         deadline = configuration.active_contribution_deadline
         if deadline is None:
-            return "BLOCKED", "Configure the contribution deadline."
+            return "BLOCKED", ("Set the contribution deadline.",)
         if self.now < deadline:
-            return (
-                "WAITING FOR DEADLINE",
-                "Requirements are complete. Automatic generation will proceed after the contribution deadline.",
-            )
-        return (
-            "READY FOR GENERATION",
-            "No action needed. Requirements are complete and the contribution deadline has arrived.",
-        )
+            return "WAITING FOR DEADLINE", ("Wait for the contribution deadline.",)
+        return "READY FOR GENERATION", ("No action needed.",)
 
     def _row(self, course):
         snapshots = list(course.offering_snapshots.all())
-        campuses = tuple(
-            row[1]
-            for row in sorted(
+        participating_campuses = tuple(
+            sorted(
                 {
                     snapshot.campus_id: snapshot.campus.name
                     for snapshot in snapshots
@@ -481,6 +494,7 @@ class AutomaticGenerationReadinessReport:
                 key=lambda item: (item[1].casefold(), item[0]),
             )
         )
+        campuses = tuple(name for _campus_id, name in participating_campuses)
         configuration = getattr(course, "configuration", None)
         current = next(iter(course.current_generated_revisions), None)
         if course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT:
@@ -489,7 +503,7 @@ class AutomaticGenerationReadinessReport:
             faculty = self._faculty_completion(
                 course=course, configuration=configuration, roster=roster
             )
-            status, action = self._execution_status(
+            status, action_items = self._execution_status(
                 course=course,
                 configuration=configuration,
                 roster=roster,
@@ -501,13 +515,10 @@ class AutomaticGenerationReadinessReport:
                 "campuses": campuses,
                 "configuration": configuration,
                 "faculty": faculty,
-                "campus_requirements": (),
-                "total_usable_questions": None,
-                "pool_status": "Not applicable",
-                "pool_actions": (),
-                "pool_warnings": (),
+                "contribution_progress": None,
                 "generation_status": status,
-                "action_needed": action,
+                "status_detail": "",
+                "action_items": action_items,
             }
 
         pool = Stage6ReadinessService.evaluate_automatic_pool(cycle_course=course)
@@ -521,48 +532,59 @@ class AutomaticGenerationReadinessReport:
         faculty = self._faculty_completion(
             course=course, configuration=configuration, roster=roster
         )
-        campus_requirements = tuple(
-            {
-                **requirement,
-                "shortage": max(
-                    requirement["required"] - requirement["available"], 0
-                ),
-                "sufficient": (
-                    requirement["available"] >= requirement["required"]
-                ),
-            }
-            for requirement in pool.get("campus_requirements", ())
+        contribution_progress = self._contribution_progress(
+            course=course,
+            configuration=configuration,
+            participating_campuses=participating_campuses,
         )
         pool_actions = self._pool_actions(pool)
         pool_warnings = self._pool_warnings(pool)
-        status, action = self._execution_status(
+        status, action_items = self._execution_status(
             course=course,
             configuration=configuration,
             roster=roster,
             pool=pool,
             current=current,
         )
+        action_items = list(action_items)
         if (
             status in ("WAITING FOR DEADLINE", "READY FOR GENERATION")
+            and faculty["authoritative"]
             and faculty["incomplete_count"]
             and course.cycle.automatic_contributor_completion_policy
             == ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL
         ):
-            action += " Incomplete faculty are a warning because the usable pool is sufficient."
-        if pool_warnings:
-            action = " ".join((action, *pool_warnings))
+            count = faculty["incomplete_count"]
+            action_items.append(
+                f"{count} current faculty {'has' if count == 1 else 'have'} not completed "
+                "their required contribution."
+            )
+        action_items.extend(pool_warnings)
+        action_items = tuple(dict.fromkeys(action_items))
+        if configuration is None:
+            status_detail = ""
+        elif configuration.contributor_roster_initialized_at is None:
+            status_detail = "Contributor roster has not been initialized."
+        elif roster is None or not roster.current:
+            status_detail = (
+                "Contributor roster needs synchronization because the eligible faculty "
+                "list has changed."
+            )
+        else:
+            status_detail = ""
         return {
             "cycle_course": course,
             "campuses": campuses,
             "configuration": configuration,
             "faculty": faculty,
-            "campus_requirements": campus_requirements,
-            "total_usable_questions": pool["unique_question_count"],
-            "pool_status": "READY" if pool["ready"] else "NEEDS QUESTIONS",
+            "contribution_progress": contribution_progress,
+            # Technical details remain internal inputs to the single management
+            # status and concise action list; they are not separate report columns.
             "pool_actions": pool_actions,
             "pool_warnings": pool_warnings,
             "generation_status": status,
-            "action_needed": action,
+            "status_detail": status_detail,
+            "action_items": action_items,
         }
 
     def build(self):

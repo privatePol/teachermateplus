@@ -379,6 +379,193 @@ class Stage6ContributionCloseTests(Stage6FixtureMixin, Stage4TestCase):
             )
 
 
+class ContributorRosterEffectiveScopeReadinessTests(Stage6FixtureMixin, Stage4TestCase):
+    def _add_legacy_null_source(self, *, parent, campus, offering, suffix):
+        faculty, assignment = self.add_faculty_source(
+            parent=parent,
+            campus=campus,
+            offering=offering,
+            suffix=suffix,
+        )
+        assignment.tenant = None
+        assignment.campus = None
+        assignment.save(update_fields=["tenant", "campus", "updated_at"])
+        return faculty, assignment
+
+    def test_initialized_legacy_null_draft_roster_is_current(self):
+        parent, configuration, campuses, offerings = self.make_stage6_open_course()
+        _faculty, assignment = self._add_legacy_null_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="legacy-current",
+        )
+
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        configuration.refresh_from_db()
+        contribution = FacultyContribution.objects.get(cycle_course=parent)
+        source = contribution.eligibility_sources.get()
+        readiness = ContributorRosterReadinessService.evaluate(
+            cycle_course=parent,
+            configuration=configuration,
+        )
+
+        self.assertIsNone(assignment.tenant_id)
+        self.assertIsNone(assignment.campus_id)
+        self.assertEqual(source.tenant_id_snapshot, assignment.offering.tenant_id)
+        self.assertEqual(source.campus_id_snapshot, assignment.offering.campus_id)
+        self.assertTrue(readiness.current, readiness.stale_reasons)
+        self.assertEqual(readiness.stale_reasons, ())
+
+    def test_ae105_far_equivalent_submitted_and_three_legacy_null_drafts_are_current(self):
+        parent, configuration, campuses, offerings = self.make_stage6_open_course()
+        for index in range(4):
+            self._add_legacy_null_source(
+                parent=parent,
+                campus=campuses["CUBAO"],
+                offering=offerings["CUBAO"],
+                suffix=f"ae105-far-{index}",
+            )
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        submitted = FacultyContribution.objects.filter(cycle_course=parent).order_by("id").first()
+        submitted.status = FacultyContribution.Status.SUBMITTED
+        submitted.submitted_at = timezone.now()
+        submitted.save(update_fields=["status", "submitted_at", "updated_at"])
+        configuration.refresh_from_db()
+
+        readiness = ContributorRosterReadinessService.evaluate(
+            cycle_course=parent,
+            configuration=configuration,
+        )
+
+        self.assertEqual(
+            FacultyContribution.objects.filter(
+                cycle_course=parent,
+                status=FacultyContribution.Status.DRAFT,
+            ).count(),
+            3,
+        )
+        self.assertTrue(readiness.current, readiness.stale_reasons)
+        self.assertEqual(readiness.required_active_count, 4)
+        self.assertEqual(readiness.submitted_required_count, 1)
+        self.assertEqual(readiness.incomplete_active_count, 3)
+
+    def test_new_eligible_faculty_still_makes_open_roster_stale(self):
+        parent, configuration, campuses, offerings = self.make_stage6_open_course()
+        self._add_legacy_null_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="before-initialize",
+        )
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        self._add_legacy_null_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="after-initialize",
+        )
+        configuration.refresh_from_db()
+
+        readiness = ContributorRosterReadinessService.evaluate(
+            cycle_course=parent,
+            configuration=configuration,
+        )
+
+        self.assertFalse(readiness.current)
+        self.assertIn(
+            "A currently eligible contributor is missing from the roster.",
+            readiness.stale_reasons,
+        )
+
+    def test_submitted_legacy_null_source_remains_frozen_after_staffing_loss(self):
+        parent, configuration, campuses, offerings = self.make_stage6_open_course()
+        _faculty, assignment = self._add_legacy_null_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="submitted-history",
+        )
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        contribution = FacultyContribution.objects.get(cycle_course=parent)
+        contribution.status = FacultyContribution.Status.SUBMITTED
+        contribution.submitted_at = timezone.now()
+        contribution.save(update_fields=["status", "submitted_at", "updated_at"])
+        frozen_source = list(contribution.eligibility_sources.values())
+        assignment.is_active = False
+        assignment.save(update_fields=["is_active", "updated_at"])
+
+        ContributionRosterService.synchronize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        configuration.refresh_from_db()
+        readiness = ContributorRosterReadinessService.evaluate(
+            cycle_course=parent,
+            configuration=configuration,
+        )
+
+        self.assertEqual(frozen_source, list(contribution.eligibility_sources.values()))
+        self.assertTrue(readiness.current, readiness.stale_reasons)
+
+    def test_closed_roster_keeps_frozen_boundary_after_legacy_staffing_change(self):
+        parent, configuration, campuses, offerings = self.make_stage6_open_course()
+        _faculty, assignment = self._add_legacy_null_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="closed-boundary",
+        )
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        contribution = FacultyContribution.objects.get(cycle_course=parent)
+        self.add_questions(contribution)
+        contribution.status = FacultyContribution.Status.SUBMITTED
+        contribution.submitted_at = timezone.now()
+        contribution.save(update_fields=["status", "submitted_at", "updated_at"])
+        configuration.refresh_from_db()
+        closed, _changed = CourseExamConfigurationService.close_contribution(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            user=self.configurer,
+            expected_revision=configuration.revision,
+            expected_roster_revision=configuration.contributor_roster_revision,
+            reason="Freeze the completed legacy contributor boundary.",
+        )
+        assignment.is_active = False
+        assignment.save(update_fields=["is_active", "updated_at"])
+
+        readiness = ContributorRosterReadinessService.evaluate(
+            cycle_course=parent,
+            configuration=closed,
+        )
+
+        self.assertTrue(readiness.current, readiness.stale_reasons)
+        self.assertEqual(readiness.required_active_count, 1)
+        self.assertEqual(readiness.submitted_required_count, 1)
+        self.assertEqual(readiness.live_sha256, "")
+
+
 class Stage6BlockedResolutionTests(Stage6FixtureMixin, Stage4TestCase):
     def _blocked_course(self, *, campus_codes=("CUBAO",)):
         parent, configuration, campuses, offerings = self.make_stage6_open_course(

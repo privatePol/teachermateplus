@@ -6,8 +6,9 @@
   <div><h1 class="h3 mb-1">Automatic Generation Readiness</h1><p class="text-muted mb-0">Aggregate readiness for Automatic Generation only. This report is read-only and never starts generation.</p></div>
   <a class="btn btn-outline-primary" href="{% url 'departmental_exams:automatic_generation_readiness_print' %}{% if filter_query %}?{{ filter_query }}{% endif %}" target="_blank" rel="noopener">Print / Printer-Friendly View</a>
 </div>
+<div class="alert alert-info py-2 my-3">Contribution Progress is for monitoring only and is based on the configured contribution quota and campuses where the course is offered. Automatic generation may proceed with a smaller submitted pool when permitted by the configured generation policy and all readiness requirements are satisfied.</div>
 
-<form method="get" class="card shadow-sm my-3" aria-label="Automatic generation readiness filters">
+<form method="get" class="card shadow-sm mb-3" aria-label="Automatic generation readiness filters">
   <div class="card-body"><div class="row g-3 align-items-end">
     <div class="col-lg-5"><label class="form-label" for="readiness-cycle">Examination Cycle</label><select class="form-select" id="readiness-cycle" name="cycle" required><option value="">Select one authorized cycle</option>{% for cycle in cycle_choices %}<option value="{{ cycle.id }}"{% if cycle.id == selected_cycle_id %} selected{% endif %}>{{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }}</option>{% endfor %}</select></div>
     <div class="col-lg-2"><label class="form-label" for="readiness-period">Period</label><select class="form-select" id="readiness-period" name="period"><option value="">Cycle period</option>{% for value, label in period_choices %}<option value="{{ value }}"{% if value == selected_period %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
@@ -21,20 +22,16 @@
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
     <caption class="caption-top">{{ row_count }} authorized course{{ row_count|pluralize }} in the selected cycle. Generated {{ generated_at|date:"M j, Y g:i A" }}.</caption>
-    <thead class="table-light"><tr><th scope="col">Course</th><th scope="col">Campuses Offered</th><th scope="col">Final Exam Items</th><th scope="col">Required Questions per Faculty</th><th scope="col">Faculty Completion</th><th scope="col">Campus Question Requirements</th><th scope="col">Total Usable Questions</th><th scope="col">Question Pool Readiness</th><th scope="col">Automatic Generation Status</th><th scope="col">Action Needed</th></tr></thead>
+    <thead class="table-light"><tr><th scope="col">Authorized Course</th><th scope="col">Campuses Offered</th><th scope="col">Final Exam Items</th><th scope="col">Contribution Progress</th><th scope="col">Automatic Exam Generation Status</th><th scope="col">Action Needed</th></tr></thead>
     <tbody>
       {% for row in rows %}<tr>
         <td><strong>{{ row.cycle_course.course.code }}</strong><br><span class="small">{{ row.cycle_course.course.title }}</span>{% if row.cycle_course.inclusion_status == 'EXEMPT' %}<br><span class="badge text-bg-warning">EXEMPT</span>{% endif %}</td>
         <td>{% if row.campuses %}{{ row.campuses|join:", " }}{% else %}<span class="text-danger">No participating campus snapshot</span>{% endif %}</td>
         <td>{{ row.configuration.final_item_count|default:"Not configured" }}</td>
-        <td>{{ row.faculty.required_quota_display }}</td>
-        <td>{{ row.faculty.completion_text }}{% if not row.faculty.roster_current and row.cycle_course.inclusion_status == 'INCLUDED' %}<br><span class="text-danger">Contributor roster is stale or not initialized.</span>{% endif %}</td>
-        <td>{% for requirement in row.campus_requirements %}<div class="mb-2"><strong>{{ requirement.label }}</strong><br>Required Questions: {{ requirement.required }}<br>Available Usable Questions: {{ requirement.available }}<br>Status: {% if requirement.sufficient %}<span class="text-success">Sufficient</span>{% else %}<span class="text-danger">Needs {{ requirement.shortage }} more usable questions</span>{% endif %}</div>{% empty %}<span class="text-muted">Not applicable</span>{% endfor %}</td>
-        <td>{% if row.total_usable_questions is None %}<span class="text-muted">Not applicable</span>{% else %}{{ row.total_usable_questions }}{% endif %}</td>
-        <td>{% if row.pool_status == 'READY' %}<span class="badge text-bg-success">READY</span>{% elif row.pool_status == 'NEEDS QUESTIONS' %}<span class="badge text-bg-danger">NEEDS QUESTIONS</span>{% else %}<span class="text-muted">{{ row.pool_status }}</span>{% endif %}{% for warning in row.pool_warnings %}<div class="alert alert-warning small p-2 mt-2 mb-0"><strong>Warning:</strong> {{ warning }}</div>{% endfor %}{% for reason in row.pool_actions %}<div class="small mt-1">{{ reason }}</div>{% endfor %}</td>
-        <td><strong>{{ row.generation_status }}</strong></td>
-        <td>{{ row.action_needed }}</td>
-      </tr>{% empty %}<tr><td colspan="10" class="text-muted">No authorized Automatic Generation courses match the selected cycle and filters.</td></tr>{% endfor %}
+        <td>{% if row.contribution_progress is None %}<span class="text-muted">Not applicable</span>{% elif row.contribution_progress.expected_monitoring_volume is None %}<span class="text-danger">Monitoring quota not configured</span>{% else %}<strong>{{ row.contribution_progress.submitted_question_volume }} / {{ row.contribution_progress.expected_monitoring_volume }} submitted</strong>{% if row.contribution_progress.submitted_campuses %}<div class="small mt-1">Submitted campuses:</div><ul class="small mb-0 ps-3">{% for campus in row.contribution_progress.submitted_campuses %}<li>{{ campus }}</li>{% endfor %}</ul>{% else %}<div class="small mt-1">No campus has submitted questions yet.</div>{% endif %}{% endif %}</td>
+        <td><strong>{{ row.generation_status }}</strong>{% if row.status_detail %}<div class="small text-danger mt-1">{{ row.status_detail }}</div>{% endif %}</td>
+        <td>{% if row.action_items %}<ul class="mb-0 ps-3">{% for item in row.action_items %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<span class="text-muted">No action needed.</span>{% endif %}</td>
+      </tr>{% empty %}<tr><td colspan="6" class="text-muted">No authorized Automatic Generation courses match the selected cycle and filters.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>

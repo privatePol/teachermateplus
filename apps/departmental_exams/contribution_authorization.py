@@ -48,12 +48,20 @@ class ContributorEligibilityService:
     PORTAL_PERMISSION = "faculty_portal.access"
 
     @staticmethod
+    def source_evidence_scope(assignment):
+        """Return the canonical scope persisted with live assignment evidence."""
+        return (
+            assignment.tenant_id or assignment.offering.tenant_id,
+            assignment.campus_id or assignment.offering.campus_id,
+        )
+
+    @staticmethod
     def _effective_scope(assignment):
         """Return the exact assignment scope, including the approved legacy fallback."""
         assignment_scope = (assignment.tenant_id, assignment.campus_id)
         offering_scope = (assignment.offering.tenant_id, assignment.offering.campus_id)
         if assignment_scope == (None, None):
-            return offering_scope
+            return ContributorEligibilityService.source_evidence_scope(assignment)
         if None in assignment_scope or assignment_scope != offering_scope:
             return None
         return assignment_scope

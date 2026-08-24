@@ -19,7 +19,7 @@
     th, td { border: 1px solid #666; padding: 4px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
     th { background: #eee; }
     .status { font-weight: bold; }
-    .requirement { margin-bottom: 5px; }
+    ul { margin: 2px 0 0; padding-left: 14px; }
     .confidentiality { margin-top: 10px; font-size: 8px; color: #444; }
     @page { size: landscape; margin: 8mm; }
     @media print { body { padding: 0; } .toolbar { display: none; } }
@@ -29,22 +29,19 @@
   <div class="toolbar"><button type="button" onclick="window.print()">Print</button></div>
   <h1>Automatic Generation Readiness</h1>
   <p class="meta"><strong>Tenant:</strong> {{ tenant.name }} &nbsp; <strong>Generated:</strong> {{ generated_at|date:"M j, Y g:i A" }} &nbsp; <strong>Authorized courses:</strong> {{ row_count }}</p>
+  <p class="meta">Contribution Progress is for monitoring only and is based on the configured contribution quota and campuses where the course is offered. Automatic generation may proceed with a smaller submitted pool when permitted by the configured generation policy and all readiness requirements are satisfied.</p>
   {% if filters_invalid %}<div class="warning">The submitted filters are malformed, stale, or outside the authorized scope. No readiness data is shown.</div>{% endif %}
   <table>
-    <thead><tr><th>Course</th><th>Campuses Offered</th><th>Final Exam Items</th><th>Required Questions per Faculty</th><th>Faculty Completion</th><th>Campus Question Requirements</th><th>Total Usable Questions</th><th>Question Pool Readiness</th><th>Automatic Generation Status</th><th>Action Needed</th></tr></thead>
+    <thead><tr><th>Authorized Course</th><th>Campuses Offered</th><th>Final Exam Items</th><th>Contribution Progress</th><th>Automatic Exam Generation Status</th><th>Action Needed</th></tr></thead>
     <tbody>
       {% for row in rows %}<tr>
         <td><strong>{{ row.cycle_course.course.code }}</strong><br>{{ row.cycle_course.course.title }}{% if row.cycle_course.inclusion_status == 'EXEMPT' %}<br><strong>EXEMPT</strong>{% endif %}</td>
         <td>{% if row.campuses %}{{ row.campuses|join:", " }}{% else %}No participating campus snapshot{% endif %}</td>
         <td>{{ row.configuration.final_item_count|default:"Not configured" }}</td>
-        <td>{{ row.faculty.required_quota_display }}</td>
-        <td>{{ row.faculty.completion_text }}{% if not row.faculty.roster_current and row.cycle_course.inclusion_status == 'INCLUDED' %} Contributor roster is stale or not initialized.{% endif %}</td>
-        <td>{% for requirement in row.campus_requirements %}<div class="requirement"><strong>{{ requirement.label }}</strong><br>Required Questions: {{ requirement.required }}<br>Available Usable Questions: {{ requirement.available }}<br>Status: {% if requirement.sufficient %}Sufficient{% else %}Needs {{ requirement.shortage }} more usable questions{% endif %}</div>{% empty %}Not applicable{% endfor %}</td>
-        <td>{% if row.total_usable_questions is None %}Not applicable{% else %}{{ row.total_usable_questions }}{% endif %}</td>
-        <td><span class="status">{{ row.pool_status }}</span>{% for warning in row.pool_warnings %}<div class="warning"><strong>Warning:</strong> {{ warning }}</div>{% endfor %}{% for reason in row.pool_actions %}<br>{{ reason }}{% endfor %}</td>
-        <td><span class="status">{{ row.generation_status }}</span></td>
-        <td>{{ row.action_needed }}</td>
-      </tr>{% empty %}<tr><td colspan="10">No authorized Automatic Generation courses match the selected cycle and filters.</td></tr>{% endfor %}
+        <td>{% if row.contribution_progress is None %}Not applicable{% elif row.contribution_progress.expected_monitoring_volume is None %}Monitoring quota not configured{% else %}<strong>{{ row.contribution_progress.submitted_question_volume }} / {{ row.contribution_progress.expected_monitoring_volume }} submitted</strong>{% if row.contribution_progress.submitted_campuses %}<br>Submitted campuses:<ul>{% for campus in row.contribution_progress.submitted_campuses %}<li>{{ campus }}</li>{% endfor %}</ul>{% else %}<br>No campus has submitted questions yet.{% endif %}{% endif %}</td>
+        <td><span class="status">{{ row.generation_status }}</span>{% if row.status_detail %}<br>{{ row.status_detail }}{% endif %}</td>
+        <td>{% if row.action_items %}<ul>{% for item in row.action_items %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}No action needed.{% endif %}</td>
+      </tr>{% empty %}<tr><td colspan="6">No authorized Automatic Generation courses match the selected cycle and filters.</td></tr>{% endfor %}
     </tbody>
   </table>
   <p class="confidentiality">Aggregate report only. Confidential question text, choices, answers, fingerprints, source identifiers, and generation internals are not included.</p>
