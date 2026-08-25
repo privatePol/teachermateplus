@@ -1,0 +1,7 @@
+<section class="readiness-summary" aria-labelledby="report-summary-heading">
+  <h2 id="report-summary-heading">Report Summary</h2>
+  <dl>
+    <div><dt>Total Authorized Courses</dt><dd>{{ report_summary.total }}</dd></div>
+    {% for item in report_summary.items %}<div data-status="{{ item.status }}"><dt>{{ item.label }}</dt><dd>{{ item.count }}</dd></div>{% endfor %}
+  </dl>
+</section>

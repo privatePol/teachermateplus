@@ -1,5 +1,7 @@
-from unittest.mock import patch
+import re
+from collections import Counter
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
@@ -292,6 +294,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         )
 
         headers = (
+            "No.",
             "Authorized Course",
             "Campuses Offered",
             "Final Exam Items",
@@ -307,14 +310,107 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         self.assertContains(printed, "BLOCKED")
         self.assertContains(screen, "Configure the course examination.")
         self.assertContains(printed, "Configure the course examination.")
-        self.assertEqual(screen.content.decode().count('<th scope="col">'), 6)
-        self.assertEqual(printed.content.decode().count("<th>"), 6)
+        self.assertEqual(
+            len(re.findall(r'<th\b[^>]*scope="col"', screen.content.decode())),
+            7,
+        )
+        self.assertEqual(len(re.findall(r"<th\b", printed.content.decode())), 7)
         for header in headers:
             self.assertContains(screen, header)
             self.assertContains(printed, header)
         self.assertEqual(
             CourseExamConfiguration.objects.count(), configuration_count
         )
+
+    def test_layout_numbering_summary_and_filtered_scope_match_screen_print(self):
+        cycle = self.make_cycle(
+            status=ExaminationCycle.Status.OPEN,
+            default_questions_required_per_faculty=50,
+            default_final_item_count=50,
+            default_contribution_deadline=self.future_deadline(),
+            scope_suffix="readiness-layout",
+        )
+        cycle.processing_mode = ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        cycle.save(update_fields=["processing_mode", "updated_at"])
+        first = self.make_course(cycle=cycle, code="LAYOUT-A")
+        second = self.make_course(cycle=cycle, code="LAYOUT-B")
+
+        screen = self.client.get(
+            reverse("departmental_exams:automatic_generation_readiness"),
+            {"cycle": cycle.id},
+        )
+        printed = self.client.get(
+            reverse("departmental_exams:automatic_generation_readiness_print"),
+            {"cycle": cycle.id},
+        )
+
+        self.assertEqual(screen.status_code, 200)
+        self.assertEqual(printed.status_code, 200)
+        expected_counts = Counter(
+            row["generation_status"] for row in screen.context["rows"]
+        )
+        self.assertEqual(screen.context["row_count"], 2)
+        self.assertEqual(screen.context["report_summary"]["total"], 2)
+        self.assertEqual(
+            screen.context["report_summary"], printed.context["report_summary"]
+        )
+        self.assertEqual(
+            [item["label"] for item in screen.context["report_summary"]["items"]],
+            [label for label, _status in AutomaticGenerationReadinessReport.SUMMARY_STATUSES],
+        )
+        self.assertEqual(
+            {
+                item["status"]: item["count"]
+                for item in screen.context["report_summary"]["items"]
+            },
+            {
+                status: expected_counts[status]
+                for _label, status in AutomaticGenerationReadinessReport.SUMMARY_STATUSES
+            },
+        )
+
+        for response, expected_font in ((screen, "font-size: 12px"), (printed, "font-size: 10.5pt")):
+            body = response.content.decode()
+            self.assertEqual(
+                re.findall(r'<td class="readiness-row-number">(\d+)</td>', body),
+                ["1", "2"],
+            )
+            self.assertIn("Report Summary", body)
+            self.assertIn("Total Authorized Courses", body)
+            self.assertIn('data-status="BLOCKED"><dt>Blocked</dt><dd>2</dd>', body)
+            self.assertIn("readiness-final-items", body)
+            self.assertIn("width: 8%; text-align: center;", body)
+            self.assertIn(
+                "th.readiness-final-items { white-space: normal; }", body
+            )
+            self.assertIn(
+                "td.readiness-final-items { white-space: nowrap; }", body
+            )
+            self.assertNotIn(
+                "th.readiness-final-items { white-space: nowrap; }", body
+            )
+            self.assertIn(expected_font, body)
+
+        filtered_screen = self.client.get(
+            reverse("departmental_exams:automatic_generation_readiness"),
+            {"cycle": cycle.id, "course": second.course_id},
+        )
+        filtered_print = self.client.get(
+            reverse("departmental_exams:automatic_generation_readiness_print"),
+            {"cycle": cycle.id, "course": second.course_id},
+        )
+        for response in (filtered_screen, filtered_print):
+            body = response.content.decode()
+            self.assertEqual(
+                re.findall(r'<td class="readiness-row-number">(\d+)</td>', body),
+                ["1"],
+            )
+            self.assertEqual(
+                [row["cycle_course"].id for row in response.context["rows"]],
+                [second.id],
+            )
+            self.assertNotEqual(first.id, second.id)
+            self.assertEqual(response.context["report_summary"]["total"], 1)
 
     def test_non_50_cycle_default_quota_drives_monitoring_progress_and_waiting_status(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course(
@@ -1412,6 +1508,14 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         assignment_snapshot.assert_not_called()
         self.assertEqual(counts_after, counts_before)
         body = response.content.decode()
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            return_value=self._feasible_selection(),
+        ):
+            printed = self.client.get(
+                reverse("departmental_exams:automatic_generation_readiness_print"),
+                {"cycle": parent.cycle_id},
+            )
         for secret in (
             "Readiness confidential question",
             "Private A",
@@ -1420,6 +1524,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             "normalized_fingerprint",
         ):
             self.assertNotIn(secret, body)
+            self.assertNotIn(secret, printed.content.decode())
         self.assertIn("private", response.headers["Cache-Control"])
         self.assertIn("no-store", response.headers["Cache-Control"])
 
@@ -1460,6 +1565,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         screen_body = screen.content.decode()
         print_body = printed.content.decode()
         headers = (
+            "No.",
             "Authorized Course",
             "Campuses Offered",
             "Final Exam Items",
@@ -1467,8 +1573,10 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             "Automatic Exam Generation Status",
             "Action Needed",
         )
-        self.assertEqual(screen_body.count('<th scope="col">'), 6)
-        self.assertEqual(print_body.count("<th>"), 6)
+        self.assertEqual(
+            len(re.findall(r'<th\b[^>]*scope="col"', screen_body)), 7
+        )
+        self.assertEqual(len(re.findall(r"<th\b", print_body)), 7)
         for header in headers:
             self.assertIn(header, screen_body)
             self.assertIn(header, print_body)

@@ -23,6 +23,15 @@ class AutomaticGenerationReadinessReport:
     """Compose aggregate, read-only Automatic Generation management readiness."""
 
     FILTER_PARAMETER_NAMES = ("cycle", "period", "course")
+    SUMMARY_STATUSES = (
+        ("Ready for Generation", "READY FOR GENERATION"),
+        ("Waiting for Deadline", "WAITING FOR DEADLINE"),
+        ("Needs Questions", "NEEDS QUESTIONS"),
+        ("Faculty Incomplete", "FACULTY INCOMPLETE"),
+        ("Blocked", "BLOCKED"),
+        ("Generated", "GENERATED"),
+        ("Exempt", "EXEMPT"),
+    )
 
     def __init__(self, *, tenant_id, user, params, now=None):
         self.tenant_id = tenant_id
@@ -598,5 +607,16 @@ class AutomaticGenerationReadinessReport:
             "rows": rows,
             "row_count": len(rows),
             "status_counts": dict(status_counts),
+            "report_summary": {
+                "total": len(rows),
+                "items": tuple(
+                    {
+                        "label": label,
+                        "status": status,
+                        "count": status_counts[status],
+                    }
+                    for label, status in self.SUMMARY_STATUSES
+                ),
+            },
             "generated_at": timezone.localtime(self.now),
         }
