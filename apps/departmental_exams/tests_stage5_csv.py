@@ -16,8 +16,10 @@ from .contribution_services import (
 from .csv_import import (
     CSV_FILENAME,
     CSV_HEADERS,
+    CSV_SANITIZATION_WARNING,
     QuestionCSVImportService,
     QuestionCSVParser,
+    sanitize_csv_question_text,
 )
 from .models import FacultyContribution, Question, QuestionImportBatch, QuestionImportRow
 from .tests_stage5_contributions import Stage5FixtureMixin
@@ -81,6 +83,15 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
             ],
         )
         self.assertEqual(parsed.data_rows[0].payload, {})
+
+    def assert_shared_service_rejects(self, character):
+        payload = dict(zip(CSV_HEADERS, self.row(f"Question{character}text")))
+        with self.assertRaises(ValidationError) as captured:
+            QuestionPayloadService.validate(payload)
+        self.assertEqual(
+            captured.exception.message_dict["question_text"],
+            [QuestionPayloadService.UNSUPPORTED_CHARACTER_MESSAGE],
+        )
 
     def assert_draft_import_with_deficiency(self, *, difficulty, deficient_code):
         row = self.row(f"Draft {difficulty} CSV question")
@@ -161,8 +172,6 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
         codepoints = (
             0x0001,
             0x0008,
-            0x0009,
-            0x000B,
             0x001F,
             0x007F,
             0x0080,
@@ -173,14 +182,18 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
             with self.subTest(codepoint=f"U+{codepoint:04X}"):
                 self.assert_rejected_question_character(chr(codepoint))
 
-    def test_bidi_controls_and_embedded_bom_are_rejected(self):
+    def test_shared_validator_remains_strict_for_csv_cleaned_characters(self):
+        for codepoint in (0x0009, 0x000B, 0x000C, 0xFEFF):
+            with self.subTest(codepoint=f"U+{codepoint:04X}"):
+                self.assert_shared_service_rejects(chr(codepoint))
+
+    def test_bidi_controls_are_rejected(self):
         codepoints = (
             0x061C,
             0x200E,
             0x200F,
             *range(0x202A, 0x202F),
             *range(0x2066, 0x206A),
-            0xFEFF,
         )
         for codepoint in codepoints:
             with self.subTest(codepoint=f"U+{codepoint:04X}"):
@@ -219,6 +232,160 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
             ),
         )
         self.assertEqual(cleaned["choice_c"], "Lahat ng nabanggit — may saysay")
+
+    def test_csv_sanitizer_applies_only_approved_idempotent_transformations(self):
+        source = "A\tB\r\nC\rD\vE\fF\u00a0 G\u200bH\ufeffI"
+        expected = "A   B\nC\nD\nE\nF  GHI"
+        sanitized = sanitize_csv_question_text(source)
+        self.assertEqual(sanitized, expected)
+        self.assertEqual(sanitize_csv_question_text(sanitized), sanitized)
+
+    def test_csv_sanitizer_preserves_academic_unicode_joiners_and_formatting(self):
+        source = (
+            "ABC Co.             15,000\n\n"
+            "2\U0001d465\u2081 + \U0001d465\u2082 \u2264 100; "
+            "\U0001d467 \u2265 \u22123; \U0001d434 \u2260 \U0001d446; "
+            "\u00b1 \u00d7 \u00f7\n"
+            "\u03a9 caf\u00e9 pi\u00f1ata \u00b2 \u2082 \u2083 "
+            "\u20b1 $ \u20ac A\u200cB\u200dC"
+        )
+        self.assertEqual(sanitize_csv_question_text(source), source)
+        batch = self.create_preview(self.csv_upload([self.row(source)]))
+        staged = batch.rows.get()
+        self.assertEqual(batch.status, QuestionImportBatch.Status.READY)
+        self.assertEqual(staged.payload["question_text"], source)
+        self.assertEqual(staged.warnings, [])
+
+    def test_parsed_text_fields_are_sanitized_before_validation_and_staging(self):
+        row = [
+            "AB\tC\r\nSecond\vThird\fFourth\u00a0 X\u200bY\ufeffZ",
+            "A\tchoice",
+            "B\u00a0choice",
+            "C\u200bchoice",
+            "D\ufeffchoice",
+            "A",
+            "Moderate",
+        ]
+        batch = self.create_preview(self.csv_upload([row]))
+        staged = batch.rows.get()
+        self.assertEqual(batch.status, QuestionImportBatch.Status.READY)
+        self.assertEqual(batch.warning_count, 1)
+        self.assertEqual(
+            staged.warnings,
+            [{"field": "row", "message": CSV_SANITIZATION_WARNING}],
+        )
+        self.assertEqual(
+            staged.payload["question_text"],
+            "AB  C\nSecond\nThird\nFourth  XYZ",
+        )
+        self.assertEqual(staged.payload["choice_a"], "A   choice")
+        self.assertEqual(staged.payload["choice_b"], "B choice")
+        self.assertEqual(staged.payload["choice_c"], "Cchoice")
+        self.assertEqual(staged.payload["choice_d"], "Dchoice")
+
+    def test_repeated_spaces_table_layout_and_meaningful_lf_are_preserved(self):
+        question_text = (
+            "ABC Co. received:\n\n"
+            "Alpha Company.             15,000\n"
+            "Beta, Inc.                 20,000"
+        )
+        batch = self.create_preview(self.csv_upload([self.row(question_text)]))
+        staged = batch.rows.get()
+        self.assertEqual(staged.payload["question_text"], question_text)
+        self.assertEqual(staged.warnings, [])
+
+    def test_csv_sanitation_does_not_remove_security_sensitive_characters(self):
+        codepoints = (
+            0x0000,
+            0x0001,
+            0x001F,
+            0x007F,
+            0x0085,
+            0x009F,
+            0x061C,
+            0x200E,
+            0x200F,
+            0x202A,
+            0x202E,
+            0x2066,
+            0x2069,
+        )
+        for codepoint in codepoints:
+            with self.subTest(codepoint=f"U+{codepoint:04X}"):
+                parsed = QuestionCSVParser.parse(
+                    self.csv_upload([self.row(f"Question{chr(codepoint)}text")])
+                )
+                self.assertGreater(parsed.error_count, 0)
+                self.assertEqual(parsed.data_rows[0].payload, {})
+
+    def test_csv_sanitation_precedes_fingerprinting_and_duplicate_detection(self):
+        Question.objects.create(
+            contribution=self.contribution,
+            question_text="What is linear programming?",
+            choice_a="A",
+            choice_b="B",
+            choice_c="C",
+            choice_d="D",
+            correct_answer="A",
+            difficulty="EASY",
+            position=1,
+        )
+        batch = self.create_preview(
+            self.csv_upload(
+                [
+                    self.row("What is\tlinear programming?"),
+                    self.row("What is   linear programming?"),
+                ]
+            )
+        )
+        rows = list(batch.rows.order_by("row_number"))
+        self.assertEqual(rows[0].fingerprint, rows[1].fingerprint)
+        self.assertEqual(batch.warning_count, 4)
+        self.assertEqual(
+            sum(
+                warning["message"] == CSV_SANITIZATION_WARNING
+                for row in rows
+                for warning in row.warnings
+            ),
+            1,
+        )
+
+    def test_sanitized_preview_content_is_identical_to_persisted_question(self):
+        original = "AB\tC\r\nSecond\u00a0line\u200b\ufeff"
+        batch = self.create_preview(self.csv_upload([self.row(original)]))
+        staged_payload = dict(batch.rows.get().payload)
+        confirmed, changed = QuestionCSVImportService.confirm(
+            token=batch.token,
+            expected_file_sha256=batch.file_sha256,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        question = Question.objects.get(import_batch=confirmed)
+        self.assertTrue(changed)
+        for field_name in (
+            *QuestionPayloadService.TEXT_FIELDS,
+            "correct_answer",
+            "difficulty",
+        ):
+            self.assertEqual(getattr(question, field_name), staged_payload[field_name])
+
+    def test_non_text_fields_and_required_field_rules_are_not_sanitized_away(self):
+        invalid_rows = []
+        missing_choice = self.row("Missing required choice")
+        missing_choice[1] = ""
+        invalid_rows.append(missing_choice)
+        invalid_answer = self.row("Invalid correct answer")
+        invalid_answer[-2] = "A\u200b"
+        invalid_rows.append(invalid_answer)
+        invalid_difficulty = self.row("Invalid difficulty")
+        invalid_difficulty[-1] = "Moderate\ufeff"
+        invalid_rows.append(invalid_difficulty)
+
+        parsed = QuestionCSVParser.parse(self.csv_upload(invalid_rows))
+        self.assertEqual(len(parsed.data_rows), 3)
+        self.assertTrue(all(row.errors for row in parsed.data_rows))
+        self.assertEqual(parsed.warning_count, 0)
 
     def test_wrong_headers_internal_blank_and_trailing_blank_rules(self):
         wrong = self.create_preview(

@@ -41,6 +41,32 @@ CSV_MAX_ROWS = 200
 IMPORT_CHUNK_SIZE = 10
 PREVIEW_LIFETIME = timedelta(minutes=30)
 SHELL_RETENTION = timedelta(days=30)
+CSV_SANITIZATION_WARNING = (
+    "Hidden formatting characters were automatically cleaned from this row."
+)
+
+
+def sanitize_csv_question_text(value):
+    """Clean harmless formatting artifacts from one parsed CSV text field."""
+    sanitized = (value or "").replace("\r\n", "\n").replace("\r", "\n")
+    sanitized = sanitized.replace("\v", "\n").replace("\f", "\n")
+    sanitized = sanitized.expandtabs(4)
+    return (
+        sanitized.replace("\u00a0", " ")
+        .replace("\u200b", "")
+        .replace("\ufeff", "")
+    )
+
+
+def sanitize_csv_question_payload(payload):
+    sanitized = dict(payload)
+    changed = False
+    for field_name in QuestionPayloadService.TEXT_FIELDS:
+        original = payload.get(field_name) or ""
+        cleaned = sanitize_csv_question_text(original)
+        sanitized[field_name] = cleaned
+        changed = changed or cleaned != original
+    return sanitized, changed
 
 
 @dataclass
@@ -172,9 +198,16 @@ class QuestionCSVParser:
                 )
                 continue
             raw_payload = dict(zip(CSV_HEADERS, values))
+            sanitized_payload, sanitation_changed = sanitize_csv_question_payload(
+                raw_payload
+            )
             row = ParsedImportRow(row_number=offset)
+            if sanitation_changed:
+                row.warnings.append(
+                    {"field": "row", "message": CSV_SANITIZATION_WARNING}
+                )
             try:
-                row.payload = QuestionPayloadService.validate(raw_payload)
+                row.payload = QuestionPayloadService.validate(sanitized_payload)
                 row.fingerprint = QuestionPayloadService.question_fingerprint(
                     row.payload["question_text"]
                 )
@@ -190,7 +223,7 @@ class QuestionCSVParser:
                         row.errors.append({"field": "row", "message": str(message)})
                 contains_unsupported_text = any(
                     QuestionPayloadService.has_unsupported_characters(
-                        raw_payload.get(field_name)
+                        sanitized_payload.get(field_name)
                     )
                     for field_name in QuestionPayloadService.TEXT_FIELDS
                 )
@@ -199,7 +232,7 @@ class QuestionCSVParser:
                     if contains_unsupported_text
                     else {
                         field_name: QuestionPayloadService.normalize_text(
-                            raw_payload.get(field_name)
+                            sanitized_payload.get(field_name)
                         )
                         for field_name in CSV_HEADERS
                     }
@@ -304,7 +337,9 @@ class QuestionCSVImportService:
                 ),
             )
         existing_fingerprints = {
-            QuestionPayloadService.question_fingerprint(value)
+            QuestionPayloadService.question_fingerprint(
+                sanitize_csv_question_text(value)
+            )
             for value in Question.objects.filter(
                 contribution__faculty_user=user
             ).values_list("question_text", flat=True)

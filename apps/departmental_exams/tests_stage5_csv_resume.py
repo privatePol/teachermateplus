@@ -167,6 +167,46 @@ class Stage5ResumableCSVImportTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(row_numbers, list(range(2, 23)))
         self.assertEqual(len(row_numbers), len(set(row_numbers)))
 
+    def test_interrupted_resume_persists_identical_sanitized_staged_content(self):
+        stream = io.StringIO(newline="")
+        writer = csv.writer(stream)
+        writer.writerow(
+            (
+                "question_text",
+                "choice_a",
+                "choice_b",
+                "choice_c",
+                "choice_d",
+                "correct_answer",
+                "difficulty",
+            )
+        )
+        rows = [self.row(index) for index in range(1, 12)]
+        rows[-1][0] = "Final\trow\r\nwith\u00a0formatting\u200b\ufeff"
+        writer.writerows(rows)
+        upload = SimpleUploadedFile(
+            "questions.csv",
+            stream.getvalue().encode("utf-8"),
+            content_type="text/csv",
+        )
+        batch = QuestionCSVImportService.create_preview(
+            contribution_id=self.contribution.id,
+            uploaded_file=upload,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=self.contribution.revision,
+        )
+        staged_text = batch.rows.get(row_number=12).payload["question_text"]
+        self.process(batch)
+        completed = self.process(batch)
+        persisted_text = Question.objects.get(
+            import_batch=completed,
+            import_row_number=12,
+        ).question_text
+        self.assertEqual(completed.status, QuestionImportBatch.Status.CONFIRMED)
+        self.assertEqual(persisted_text, staged_text)
+
     def test_worker_interruption_pauses_and_resume_completes(self):
         batch = self.create_preview(11)
         self.process(batch)
@@ -502,6 +542,25 @@ class Stage5ResumableCSVImportTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(preview_response, "data-import-resume-form")
         self.assertContains(preview_response, "data-import-overlay")
         self.assertContains(preview_response, "Start resumable import")
+
+    def test_preview_renders_sanitation_warning_only_for_changed_rows(self):
+        changed = self.create_preview(1, text_prefix="Rendered\twarning")
+        changed_response = self.client.get(
+            reverse("departmental_exams:csv_preview", args=[changed.token])
+        )
+        self.assertContains(
+            changed_response,
+            "Hidden formatting characters were automatically cleaned from this row.",
+        )
+
+        clean = self.create_preview(1, text_prefix="Already clean")
+        clean_response = self.client.get(
+            reverse("departmental_exams:csv_preview", args=[clean.token])
+        )
+        self.assertNotContains(
+            clean_response,
+            "Hidden formatting characters were automatically cleaned from this row.",
+        )
 
     def test_frontend_script_has_upload_measurement_double_submit_and_advisory_unload(self):
         script_path = finders.find("js/departmental_exam_csv_import.js")
