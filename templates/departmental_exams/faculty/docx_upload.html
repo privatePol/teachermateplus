@@ -1,0 +1,33 @@
+{% extends "faculty_portal/base.html" %}
+{% load static %}
+{% block faculty_content %}
+<div data-import-page>
+  <h1 class="h3">Step 1 — Upload Word File</h1>
+  <div class="alert alert-info">
+    Upload a standard macro-free <code>.docx</code> containing typed question numbers, typed choices A-D, <code>Answer:</code>, and <code>Difficulty:</code> paragraphs. Missing answer or difficulty may be fixed in Step 2. Maximum 2 MB and 200 detected questions; the remaining quota is still authoritative.
+    You have {{ saved_count }} of {{ contribution.quota_snapshot }} questions saved, leaving {{ remaining }} slots.
+  </div>
+  <div class="alert alert-warning">
+    V1 rejects legacy or macro-enabled Word files, templates, RTF, ODT, PDF, tables, automatic lists, images, drawings, equations, text boxes, footnotes/endnotes, comments/tracked changes, external links, embedded objects, altChunk, and end-of-document answer keys. It never runs Word, LibreOffice, macros, or external resources.
+  </div>
+  <div class="alert alert-danger" data-import-error role="alert" hidden></div>
+  <form method="post" enctype="multipart/form-data" class="card shadow-sm" data-question-upload-form data-import-mode="docx" data-import-label="Word file" novalidate><div class="card-body">
+    {% csrf_token %}
+    {% for hidden in form.hidden_fields %}{{ hidden }}{% if hidden.errors %}<div class="alert alert-danger">The page state is invalid. Reload and try again.</div>{% endif %}{% endfor %}
+    <label class="form-label" for="{{ form.docx_file.id_for_label }}">{{ form.docx_file.label }}</label>
+    {{ form.docx_file }}
+    <div class="form-text">{{ form.docx_file.help_text }}</div>
+    {% for error in form.docx_file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+    <div class="d-flex gap-2 mt-3"><button class="btn btn-primary" type="submit" data-docx-submit><span class="spinner-border spinner-border-sm me-2" data-docx-submit-spinner aria-hidden="true" hidden></span><span data-docx-submit-label>Detect questions</span></button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Cancel</a></div>
+  </div></form>
+  <div class="alert alert-info mt-3" data-docx-progress-panel role="status" aria-live="polite" aria-atomic="true" hidden>
+    <div class="d-flex align-items-center gap-2 mb-2"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><strong>Processing Word questionnaire...</strong></div>
+    <p class="mb-2" data-import-phase>Uploading Word file...</p>
+    <div class="progress" role="progressbar" aria-label="Word questionnaire processing" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-bar" data-import-progress-bar style="width:0%"></div>
+    </div>
+    <p class="small mb-0 mt-2">TeacherMate+ is checking and preparing a confidential preview. Processing stages are shown without claiming unmeasurable backend percentages.</p>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'js/departmental_exam_csv_import.js' %}"></script>{% endblock %}

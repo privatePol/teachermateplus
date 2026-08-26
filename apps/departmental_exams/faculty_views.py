@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.core.decorators import portal_required
+from apps.core.services.features import FeatureSettingsService
 from apps.tenants.models import Tenant
 
 from .contribution_authorization import (
@@ -26,6 +27,8 @@ from .contribution_forms import (
     ContributionSubmitForm,
     QuestionCSVConfirmForm,
     QuestionCSVUploadForm,
+    QuestionDOCXRowForm,
+    QuestionDOCXUploadForm,
     QuestionDeleteForm,
     QuestionForm,
     QuestionReorderForm,
@@ -37,6 +40,7 @@ from .contribution_services import (
     QuestionMutationService,
 )
 from .csv_import import CSV_FILENAME, QuestionCSVImportService
+from .docx_import import QuestionDOCXImportService
 from .models import FacultyContribution, Question, QuestionImportBatch
 from .questionnaire_printing import (
     FacultyQuestionnairePrintService,
@@ -208,6 +212,9 @@ def _workspace_context(contribution):
             QuestionCSVConfirmForm(initial={"file_sha256": active_import.file_sha256})
             if active_import
             else None
+        ),
+        "docx_import_enabled": FeatureSettingsService.is_departmental_exam_docx_import_enabled(
+            tenant_id=cycle.tenant_id, default=False
         ),
     }
 
@@ -747,6 +754,8 @@ def csv_preview_view(request, token):
         )
     except ContributionExpired as exc:
         return _error_response(request, exc)
+    if batch.source_format != QuestionImportBatch.SourceFormat.CSV:
+        raise Http404
     ContributionAuthorizationService.require_common_read_access(
         user=request.user,
         tenant=batch.contribution.cycle_course.cycle.tenant,
@@ -804,6 +813,8 @@ def csv_error_report_view(request, token):
         )
     except ContributionExpired as exc:
         return _error_response(request, exc)
+    if batch.source_format != QuestionImportBatch.SourceFormat.CSV:
+        raise Http404
     ContributionAuthorizationService.require_common_read_access(
         user=request.user,
         tenant=batch.contribution.cycle_course.cycle.tenant,
@@ -828,6 +839,14 @@ def csv_confirm_view(request, token):
     if not form.is_valid():
         return _error_response(request, default_status=400)
     tenant_id, campus_id = _scope(request)
+    source_format = QuestionImportBatch.objects.filter(
+        token=token,
+        tenant_id=tenant_id,
+        uploading_user=request.user,
+        contribution__faculty_user=request.user,
+    ).values_list("source_format", flat=True).first()
+    if source_format != QuestionImportBatch.SourceFormat.CSV:
+        raise Http404
     is_async = request.headers.get("x-requested-with") == "XMLHttpRequest"
     try:
         if is_async:
@@ -909,6 +928,8 @@ def csv_status_view(request, token):
         )
     except ContributionExpired as exc:
         return _error_response(request, exc)
+    if batch.source_format != QuestionImportBatch.SourceFormat.CSV:
+        raise Http404
     ContributionAuthorizationService.require_common_read_access(
         user=request.user,
         tenant=batch.contribution.cycle_course.cycle.tenant,
@@ -923,6 +944,178 @@ def csv_status_view(request, token):
             "departmental_exams:contribution_workspace",
             args=[batch.contribution_id],
         ),
+    })
+    return JsonResponse(payload)
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def docx_upload_view(request, contribution_id):
+    contribution = _owner_contribution(request, contribution_id)
+    _require_currently_mutable(request, contribution)
+    _require_add_capacity(contribution)
+    tenant_id, campus_id = _scope(request)
+    QuestionDOCXImportService.require_feature(tenant_id=tenant_id)
+    saved_count = contribution.questions.filter(
+        Q(import_batch__isnull=True) | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+    ).count()
+    form = QuestionDOCXUploadForm(
+        request.POST or None, request.FILES or None,
+        initial={"expected_contribution_revision": contribution.revision},
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            batch = QuestionDOCXImportService.create_preview(
+                contribution_id=contribution.id,
+                uploaded_file=form.cleaned_data["docx_file"],
+                user=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
+            )
+        except (ContributionConflict, ValidationError) as exc:
+            return _error_response(request, exc)
+        return redirect("departmental_exams:docx_preview", token=batch.token)
+    return render(request, "departmental_exams/faculty/docx_upload.html", {
+        "form": form, "contribution": contribution, "saved_count": saved_count,
+        "remaining": max(contribution.quota_snapshot - saved_count, 0),
+    }, status=400 if request.method == "POST" else 200)
+
+
+def _docx_owner_batch(request, token):
+    tenant_id, campus_id = _scope(request)
+    batch = QuestionDOCXImportService.owner_batch(
+        token=token, user=request.user, tenant_id=tenant_id
+    )
+    if batch.source_format != QuestionImportBatch.SourceFormat.DOCX:
+        raise Http404
+    QuestionDOCXImportService.require_feature(tenant_id=tenant_id)
+    ContributionAuthorizationService.require_common_read_access(
+        user=request.user,
+        tenant=batch.contribution.cycle_course.cycle.tenant,
+        request_tenant_id=tenant_id,
+        request_campus_id=campus_id,
+    )
+    return batch
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def docx_preview_view(request, token):
+    try:
+        batch = _docx_owner_batch(request, token)
+    except ContributionExpired as exc:
+        return _error_response(request, exc)
+    tenant_id, campus_id = _scope(request)
+    existing_count = batch.contribution.questions.filter(
+        Q(import_batch__isnull=True) | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+    ).count()
+    can_confirm = batch.status in QuestionImportBatch.resumable_statuses() and not batch.error_count
+    if can_confirm:
+        try:
+            ContributionAuthorizationService.require_mutable_locked(
+                contribution=batch.contribution,
+                configuration=batch.contribution.cycle_course.configuration,
+                request_tenant_id=tenant_id,
+                request_campus_id=campus_id,
+            )
+        except PermissionDenied:
+            can_confirm = False
+    return render(request, "departmental_exams/faculty/docx_preview.html", {
+        "batch": batch, "rows": list(batch.rows.all()), "existing_count": existing_count,
+        "remaining": max(batch.contribution.quota_snapshot - existing_count, 0),
+        "can_confirm": can_confirm,
+        "confirm_form": QuestionCSVConfirmForm(initial={"file_sha256": batch.file_sha256}),
+        "import_progress": QuestionDOCXImportService.status_payload(batch),
+    })
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def docx_row_edit_view(request, token, row_number):
+    try:
+        batch = _docx_owner_batch(request, token)
+    except ContributionExpired as exc:
+        return _error_response(request, exc)
+    row = get_object_or_404(batch.rows, row_number=row_number)
+    initial = dict(row.payload)
+    initial["expected_contribution_revision"] = batch.contribution_revision_snapshot
+    form = QuestionDOCXRowForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        tenant_id, campus_id = _scope(request)
+        try:
+            QuestionDOCXImportService.update_staged_row(
+                token=token, row_number=row_number, payload=form.cleaned_data,
+                user=request.user, tenant_id=tenant_id, campus_id=campus_id,
+                expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
+            )
+        except (ContributionConflict, ContributionExpired, ValidationError) as exc:
+            return _error_response(request, exc)
+        messages.success(request, f"Word question {row_number - 1} was revalidated and staged.")
+        return redirect("departmental_exams:docx_preview", token=token)
+    return render(request, "departmental_exams/faculty/docx_row_edit.html", {
+        "batch": batch, "row": row, "form": form,
+    }, status=400 if request.method == "POST" else 200)
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_POST
+def docx_confirm_view(request, token):
+    form = QuestionCSVConfirmForm(request.POST)
+    if not form.is_valid():
+        return _error_response(request, default_status=400)
+    tenant_id, campus_id = _scope(request)
+    source_format = QuestionImportBatch.objects.filter(
+        token=token,
+        tenant_id=tenant_id,
+        uploading_user=request.user,
+        contribution__faculty_user=request.user,
+    ).values_list("source_format", flat=True).first()
+    if source_format != QuestionImportBatch.SourceFormat.DOCX:
+        raise Http404
+    is_async = request.headers.get("x-requested-with") == "XMLHttpRequest"
+    try:
+        method = QuestionDOCXImportService.process_next_chunk if is_async else QuestionDOCXImportService.confirm
+        batch, changed = method(
+            token=token, expected_file_sha256=form.cleaned_data["file_sha256"],
+            user=request.user, tenant_id=tenant_id, campus_id=campus_id, request=request,
+        )
+        if batch.source_format != QuestionImportBatch.SourceFormat.DOCX:
+            raise Http404
+        if is_async:
+            payload = QuestionDOCXImportService.status_payload(batch)
+            payload.update({
+                "status_url": reverse("departmental_exams:docx_status", args=[batch.token]),
+                "resume_url": reverse("departmental_exams:docx_confirm", args=[batch.token]),
+                "workspace_url": reverse("departmental_exams:contribution_workspace", args=[batch.contribution_id]),
+            })
+            return JsonResponse(payload)
+    except (PermissionDenied, ContributionConflict, ContributionExpired, ValidationError) as exc:
+        if not is_async:
+            return _error_response(request, exc)
+        status = 403 if isinstance(exc, PermissionDenied) else 410 if isinstance(exc, ContributionExpired) else 409 if isinstance(exc, ContributionConflict) else 400
+        return JsonResponse({"error": str(exc), "failure_message": str(exc), "completed": False, "can_resume": False, "committed_rows": 0, "total_rows": 0, "percentage": 0}, status=status)
+    messages.success(request, "Word questions imported." if changed else "This Word preview was already imported.")
+    return redirect("departmental_exams:contribution_workspace", contribution_id=batch.contribution_id)
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def docx_status_view(request, token):
+    try:
+        batch = _docx_owner_batch(request, token)
+    except ContributionExpired as exc:
+        return _error_response(request, exc)
+    payload = QuestionDOCXImportService.status_payload(batch)
+    payload.update({
+        "status_url": reverse("departmental_exams:docx_status", args=[batch.token]),
+        "resume_url": reverse("departmental_exams:docx_confirm", args=[batch.token]),
+        "workspace_url": reverse("departmental_exams:contribution_workspace", args=[batch.contribution_id]),
     })
     return JsonResponse(payload)
 

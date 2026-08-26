@@ -1,0 +1,23 @@
+{% extends "faculty_portal/base.html" %}
+{% load static %}
+{% block faculty_content %}
+<div data-import-page data-question-import-controller data-status-url="{% url 'departmental_exams:docx_status' batch.token %}">
+  <h1 class="h3">Step 2 — Review &amp; Fix</h1>
+  <p class="text-muted">This owner-only staged preview expires {{ batch.expires_at|date:"M j, Y g:i A" }}. Edits and final import use server-stored rows; browser-submitted rows are never trusted at confirmation.</p>
+  <div class="row g-2 mb-3"><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.total_rows }}</strong><br>Detected</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.valid_rows }}</strong><br>Valid</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.error_count }}</strong><br>Errors</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ remaining }}</strong><br>Quota remaining</div></div></div></div>
+  {% if batch.error_count %}<div class="alert alert-danger">Fix every staged row error before import. Unsupported document structures require a corrected Word file and a new upload.</div>{% endif %}
+  <div class="alert alert-danger" data-import-error role="alert" hidden></div>
+  {% for row in rows %}
+  <article class="card mb-3"><div class="card-body">
+    <div class="d-flex justify-content-between gap-2"><h2 class="h6">{% if row.row_number > 1 %}Question {{ row.row_number|add:"-1" }}{% else %}File rejection{% endif %}</h2>{% if row.row_number > 1 %}{% if batch.status == 'READY' or batch.status == 'INVALID' %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:docx_row_edit' batch.token row.row_number %}">Edit staged row</a>{% endif %}{% endif %}</div>
+    {% if row.payload.question_text %}<p class="text-break">{{ row.payload.question_text|linebreaksbr }}</p><table class="table table-sm"><tbody><tr><th>A</th><td>{{ row.payload.choice_a|linebreaksbr }}</td></tr><tr><th>B</th><td>{{ row.payload.choice_b|linebreaksbr }}</td></tr><tr><th>C</th><td>{{ row.payload.choice_c|linebreaksbr }}</td></tr><tr><th>D</th><td>{{ row.payload.choice_d|linebreaksbr }}</td></tr></tbody></table><p>Answer {{ row.payload.correct_answer|default:"—" }} · {{ row.payload.difficulty|default:"—" }}</p>{% endif %}
+    {% for error in row.errors %}<div class="alert alert-danger py-2"><strong>{{ error.field }}:</strong> {{ error.message }}</div>{% endfor %}
+    {% for warning in row.warnings %}<div class="alert alert-warning py-2"><strong>Warning:</strong> {{ warning.message }}</div>{% endfor %}
+  </div></article>
+  {% endfor %}
+  {% if can_confirm %}<h2 class="h4">Step 3 — Import Questions</h2><form method="post" action="{% url 'departmental_exams:docx_confirm' batch.token %}" data-import-resume-form>{% csrf_token %}{% for hidden in confirm_form.hidden_fields %}{{ hidden }}{% endfor %}<button class="btn btn-success" type="submit">Import valid staged questions</button></form>{% endif %}
+  <a class="btn btn-link mt-2" href="{% url 'departmental_exams:contribution_workspace' batch.contribution_id %}">Return to Draft Question Workspace</a>
+</div>
+<div class="position-fixed top-0 start-0 w-100 h-100 bg-body bg-opacity-75 d-flex align-items-center justify-content-center p-3" data-import-overlay role="status" hidden style="z-index:1080"><div class="card shadow"><div class="card-body"><p>Importing staged Word questions...</p><div data-import-overlay-progress></div></div></div></div>
+{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'js/departmental_exam_csv_import.js' %}"></script>{% endblock %}

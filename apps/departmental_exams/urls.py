@@ -99,6 +99,31 @@ urlpatterns = [
         name="csv_upload",
     ),
     path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/docx/upload/",
+        faculty_views.docx_upload_view,
+        name="docx_upload",
+    ),
+    path(
+        "faculty/departmental-exams/docx-imports/<uuid:token>/",
+        faculty_views.docx_preview_view,
+        name="docx_preview",
+    ),
+    path(
+        "faculty/departmental-exams/docx-imports/<uuid:token>/rows/<int:row_number>/edit/",
+        faculty_views.docx_row_edit_view,
+        name="docx_row_edit",
+    ),
+    path(
+        "faculty/departmental-exams/docx-imports/<uuid:token>/confirm/",
+        faculty_views.docx_confirm_view,
+        name="docx_confirm",
+    ),
+    path(
+        "faculty/departmental-exams/docx-imports/<uuid:token>/status/",
+        faculty_views.docx_status_view,
+        name="docx_status",
+    ),
+    path(
         "faculty/departmental-exams/imports/<uuid:token>/",
         faculty_views.csv_preview_view,
         name="csv_preview",

@@ -78,6 +78,16 @@ class QuestionCSVConfirmForm(BootstrapFormMixin, forms.Form):
     file_sha256 = forms.CharField(max_length=64, widget=forms.HiddenInput)
 
 
+class QuestionDOCXUploadForm(ContributionRevisionForm):
+    docx_file = forms.FileField(
+        help_text="Word .docx only, maximum 2 MB and 200 detected questions."
+    )
+
+
+class QuestionDOCXRowForm(QuestionForm):
+    expected_question_revision = None
+
+
 class ContributionSubmitForm(ContributionRevisionForm):
     confirm_exact_quota = forms.BooleanField(
         label="I confirm that this contribution is final and will become read-only."

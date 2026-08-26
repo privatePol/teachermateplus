@@ -12,6 +12,7 @@ from django.http import Http404
 from django.utils import timezone
 
 from apps.core.services.audit import AuditService
+from apps.core.services.features import FeatureSettingsService
 
 from .contribution_authorization import (
     ContributionAuthorizationService,
@@ -377,6 +378,7 @@ class QuestionCSVImportService:
             contribution=contribution,
             uploading_user=user,
             status=status,
+            source_format=QuestionImportBatch.SourceFormat.CSV,
             contribution_revision_snapshot=contribution.revision,
             file_sha256=parsed.raw_sha256,
             filename_sha256=parsed.filename_sha256,
@@ -490,6 +492,13 @@ class QuestionCSVImportService:
         ).first()
         if batch is None or batch.file_sha256 != expected_file_sha256:
             raise Http404
+        if (
+            batch.source_format == QuestionImportBatch.SourceFormat.DOCX
+            and not FeatureSettingsService.is_departmental_exam_docx_import_enabled(
+                tenant_id=tenant_id, default=False
+            )
+        ):
+            raise PermissionDenied("Word question import is disabled for this tenant.")
         if batch.status == QuestionImportBatch.Status.CONFIRMED:
             return configuration, contribution, batch, [], [], []
         if batch.status == QuestionImportBatch.Status.FAILED:
@@ -608,7 +617,11 @@ class QuestionCSVImportService:
                     contribution=contribution,
                     position=row_positions[row.row_number],
                     revision=1,
-                    entry_method=Question.EntryMethod.CSV,
+                    entry_method=(
+                        Question.EntryMethod.DOCX
+                        if batch.source_format == QuestionImportBatch.SourceFormat.DOCX
+                        else Question.EntryMethod.CSV
+                    ),
                     import_batch=batch,
                     import_row_number=row.row_number,
                     **payload,
@@ -675,7 +688,11 @@ class QuestionCSVImportService:
                 difficulty_counts.get(question.difficulty, 0) + 1
             )
         AuditService.log_event(
-            action="DE_EXAM_QUESTION_CSV_IMPORTED",
+            action=(
+                "DE_EXAM_QUESTION_DOCX_IMPORTED"
+                if batch.source_format == QuestionImportBatch.SourceFormat.DOCX
+                else "DE_EXAM_QUESTION_CSV_IMPORTED"
+            ),
             portal="FACULTY",
             entity_type="FacultyContribution",
             entity_id=contribution.id,
@@ -686,6 +703,7 @@ class QuestionCSVImportService:
                 "cycle_id": contribution.cycle_course.cycle_id,
                 "cycle_course_id": contribution.cycle_course_id,
                 "batch_id": batch.id,
+                "source_format": batch.source_format,
                 "token_sha256": hashlib.sha256(str(batch.token).encode("ascii")).hexdigest(),
                 "filename_sha256": batch.filename_sha256,
                 "row_count": batch.total_rows,

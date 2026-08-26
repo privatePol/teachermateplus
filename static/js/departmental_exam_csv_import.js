@@ -76,9 +76,57 @@
     }
   };
 
-  const uploadForm = document.querySelector("[data-csv-upload-form]");
+  const uploadForm = document.querySelector("[data-question-upload-form], [data-csv-upload-form]");
   if (uploadForm) {
+    const importLabel = uploadForm.dataset.importLabel || "CSV";
+    const isDocxUpload = uploadForm.dataset.importMode === "docx";
+    const docxPanel = document.querySelector("[data-docx-progress-panel]");
+    const docxSubmit = uploadForm.querySelector("[data-docx-submit]");
+    const docxSubmitSpinner = uploadForm.querySelector("[data-docx-submit-spinner]");
+    const docxSubmitLabel = uploadForm.querySelector("[data-docx-submit-label]");
+    const docxStages = [
+      "Checking file safety...",
+      "Reading questions...",
+      "Validating extracted questions...",
+      "Preparing preview..."
+    ];
+    let docxStageTimer = null;
     let uploading = false;
+
+    const setUploadLocked = active => {
+      if (!isDocxUpload) {
+        lockPage(active);
+        return;
+      }
+      uploadForm.setAttribute("aria-busy", active ? "true" : "false");
+      uploadForm.querySelectorAll("button[type='submit'], input[type='file']").forEach(control => {
+        control.disabled = active;
+      });
+      if (docxPanel) docxPanel.hidden = !active;
+      if (docxSubmitSpinner) docxSubmitSpinner.hidden = !active;
+      if (docxSubmitLabel) docxSubmitLabel.textContent = active ? "Processing Word file..." : "Detect questions";
+    };
+
+    const stopDocxStages = () => {
+      if (docxStageTimer !== null) window.clearInterval(docxStageTimer);
+      docxStageTimer = null;
+    };
+
+    const startDocxStages = phase => {
+      if (!isDocxUpload || !phase) return;
+      stopDocxStages();
+      let stageIndex = 0;
+      phase.textContent = docxStages[stageIndex];
+      docxStageTimer = window.setInterval(() => {
+        if (stageIndex < docxStages.length - 1) {
+          stageIndex += 1;
+          phase.textContent = docxStages[stageIndex];
+        } else {
+          stopDocxStages();
+        }
+      }, 1400);
+    };
+
     uploadForm.addEventListener("submit", event => {
       event.preventDefault();
       if (uploading) return;
@@ -88,17 +136,23 @@
       const phase = document.querySelector("[data-import-phase]");
       const bar = document.querySelector("[data-import-progress-bar]");
       const progress = bar ? bar.closest("[role='progressbar']") : null;
-      lockPage(true);
+      if (isDocxUpload) setUploadLocked(true);
+      else lockPage(true);
       xhr.upload.addEventListener("progress", progressEvent => {
         if (!progressEvent.lengthComputable || !bar) return;
         const percentage = Math.round((progressEvent.loaded / progressEvent.total) * 100);
-        if (phase) phase.textContent = `Uploading CSV... ${percentage}%`;
+        if (phase) phase.textContent = `Uploading ${importLabel}... ${percentage}%`;
         bar.classList.remove("progress-bar-striped", "progress-bar-animated");
         bar.style.width = `${percentage}%`;
         if (progress) progress.setAttribute("aria-valuenow", String(percentage));
       });
       xhr.upload.addEventListener("load", () => {
-        if (phase) phase.textContent = "Validating CSV...";
+        if (isDocxUpload) {
+          startDocxStages(phase);
+        } else if (phase) {
+          if (importLabel === "CSV") phase.textContent = "Validating CSV...";
+          else phase.textContent = `Validating ${importLabel}...`;
+        }
         if (bar) {
           bar.classList.add("progress-bar-striped", "progress-bar-animated");
           bar.style.width = "100%";
@@ -107,23 +161,27 @@
       });
       xhr.addEventListener("load", () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          lockPage(false);
+          stopDocxStages();
+          setUploadLocked(false);
           window.location.assign(xhr.responseURL);
           return;
         }
         uploading = false;
-        lockPage(false);
-        showError("The CSV could not be validated. Review the selected file and try again.");
+        stopDocxStages();
+        setUploadLocked(false);
+        showError(`The ${importLabel} could not be validated. Review the selected file and try again.`);
       });
       xhr.addEventListener("error", () => {
         uploading = false;
-        lockPage(false);
+        stopDocxStages();
+        setUploadLocked(false);
         showError("The connection was interrupted before validation completed. No question import was started.");
       });
       xhr.addEventListener("abort", () => {
         uploading = false;
-        lockPage(false);
-        showError("CSV upload was cancelled safely. No question import was started.");
+        stopDocxStages();
+        setUploadLocked(false);
+        showError(`${importLabel} upload was cancelled safely. No question import was started.`);
       });
       xhr.open((uploadForm.method || "POST").toUpperCase(), uploadForm.action || window.location.href);
       xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");

@@ -3,7 +3,7 @@
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
 {% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
 {% block faculty_content %}
-<div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% url 'departmental_exams:csv_status' active_import.token %}"{% endif %}>
+<div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item active">{{ contribution.cycle_course.course.code }}</li></ol></nav>
 <div class="card shadow-sm mb-3">
   <div class="card-body">
@@ -50,7 +50,7 @@
     <div class="progress mt-2" role="progressbar" aria-label="Persisted question import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ active_import_progress.percentage }}">
       <div class="progress-bar" data-import-progress-bar style="width: {{ active_import_progress.percentage }}%"></div>
     </div>
-    <form method="post" action="{% url 'departmental_exams:csv_confirm' active_import.token %}" data-import-resume-form class="mt-3">
+    <form method="post" action="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_confirm' active_import.token %}{% else %}{% url 'departmental_exams:csv_confirm' active_import.token %}{% endif %}" data-import-resume-form class="mt-3">
       {% csrf_token %}{% for hidden in active_import_form.hidden_fields %}{{ hidden }}{% endfor %}
       <button class="btn btn-primary" type="submit">Resume import</button>
     </form>
@@ -73,6 +73,7 @@
     {% if not quota_reached %}
       <a class="btn btn-primary" href="{% url 'departmental_exams:question_create' contribution.id %}">Add question</a>
       <a class="btn btn-outline-primary" href="{% url 'departmental_exams:csv_upload' contribution.id %}">Upload CSV</a>
+      {% if docx_import_enabled %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:docx_upload' contribution.id %}">Import from Word (.docx)</a>{% endif %}
     {% endif %}
     <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:csv_template' contribution.id %}">Download CSV template</a>
     {% if saved_count == quota %}<a class="btn btn-success" href="{% url 'departmental_exams:contribution_submit' contribution.id %}">Final submission</a>{% endif %}

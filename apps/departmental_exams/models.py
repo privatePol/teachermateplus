@@ -901,6 +901,7 @@ class Question(TimeStampedModel):
     class EntryMethod(models.TextChoices):
         MANUAL = "MANUAL", "Manual"
         CSV = "CSV", "CSV"
+        DOCX = "DOCX", "Word (.docx)"
 
     contribution = models.ForeignKey(FacultyContribution, on_delete=models.PROTECT, related_name="questions")
     question_text = models.TextField(max_length=5000)
@@ -932,7 +933,7 @@ class Question(TimeStampedModel):
                     revision__gte=1,
                     correct_answer__in=["A", "B", "C", "D"],
                     difficulty__in=["EASY", "MODERATE", "DIFFICULT"],
-                    entry_method__in=["MANUAL", "CSV"],
+                    entry_method__in=["MANUAL", "CSV", "DOCX"],
                 ),
                 name="ck_de_question_codes",
             ),
@@ -945,6 +946,10 @@ class Question(TimeStampedModel):
 
 
 class QuestionImportBatch(TimeStampedModel):
+    class SourceFormat(models.TextChoices):
+        CSV = "CSV", "CSV"
+        DOCX = "DOCX", "Word (.docx)"
+
     class Status(models.TextChoices):
         INVALID = "INVALID", "Invalid"
         READY = "READY", "Ready"
@@ -985,6 +990,9 @@ class QuestionImportBatch(TimeStampedModel):
         blank=True,
     )
     status = models.CharField(max_length=10, choices=Status.choices)
+    source_format = models.CharField(
+        max_length=4, choices=SourceFormat.choices, default=SourceFormat.CSV
+    )
     contribution_revision_snapshot = models.PositiveIntegerField()
     file_sha256 = models.CharField(max_length=64)
     filename_sha256 = models.CharField(max_length=64)
@@ -1014,6 +1022,10 @@ class QuestionImportBatch(TimeStampedModel):
     class Meta:
         db_table = "departmental_exam_question_import_batches"
         constraints = [
+            models.CheckConstraint(
+                condition=models.Q(source_format__in=["CSV", "DOCX"]),
+                name="ck_de_batch_source_format",
+            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(status="CONFIRMED", confirmed_at__isnull=False, payload_purged_at__isnull=False)

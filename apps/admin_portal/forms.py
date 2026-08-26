@@ -3453,6 +3453,14 @@ class ConfigurableFeatureSettingForm(forms.Form):
             "contributor completion monitoring for this tenant."
         ),
     )
+    departmental_exam_docx_import_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Word (.docx) Question Import",
+        help_text=(
+            "Allows authorized faculty to upload a bounded .docx file, review and fix "
+            "server-staged questions, and import them into the existing Draft Question Workspace."
+        ),
+    )
     student_academic_intervention_tracking_enabled = forms.BooleanField(
         required=False,
         label="Enable Student Academic Intervention Tracking",
