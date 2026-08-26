@@ -45,13 +45,113 @@ DOCX_MAIN_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument."
     "wordprocessingml.document.main+xml"
 )
+DOCX_RELATIONSHIP_BASE = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+)
+RELATIONSHIP_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9._-]*$")
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+W14 = "{http://schemas.microsoft.com/office/word/2010/wordml}"
 R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 PKG_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 CT = "{http://schemas.openxmlformats.org/package/2006/content-types}"
 M = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
 MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
+
+DOCX_NOTE_PARTS = {
+    "footnote": {
+        "member_name": "word/footnotes.xml",
+        "root_tag": f"{W}footnotes",
+        "record_tag": f"{W}footnote",
+        "content_type": (
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.footnotes+xml"
+        ),
+        "relationship_type": f"{DOCX_RELATIONSHIP_BASE}/footnotes",
+        "relationship_target": "footnotes.xml",
+    },
+    "endnote": {
+        "member_name": "word/endnotes.xml",
+        "root_tag": f"{W}endnotes",
+        "record_tag": f"{W}endnote",
+        "content_type": (
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.endnotes+xml"
+        ),
+        "relationship_type": f"{DOCX_RELATIONSHIP_BASE}/endnotes",
+        "relationship_target": "endnotes.xml",
+    },
+}
+
+DEFAULT_NOTE_RECORDS = {
+    ("-1", "separator"): f"{W}separator",
+    ("0", "continuationSeparator"): f"{W}continuationSeparator",
+}
+
+NOTE_ROOT_ATTRIBUTES = {f"{MC}Ignorable"}
+NOTE_PARAGRAPH_ATTRIBUTES = {
+    f"{W}rsidR",
+    f"{W}rsidRDefault",
+    f"{W}rsidP",
+    f"{W}rsidRPr",
+    f"{W14}paraId",
+    f"{W14}textId",
+}
+NOTE_RUN_ATTRIBUTES = {f"{W}rsidR", f"{W}rsidRPr", f"{W}rsidDel"}
+NOTE_PARAGRAPH_PROPERTIES = {
+    f"{W}pStyle": {f"{W}val"},
+    f"{W}spacing": {
+        f"{W}before",
+        f"{W}beforeLines",
+        f"{W}beforeAutospacing",
+        f"{W}after",
+        f"{W}afterLines",
+        f"{W}afterAutospacing",
+        f"{W}line",
+        f"{W}lineRule",
+    },
+    f"{W}ind": {
+        f"{W}left",
+        f"{W}leftChars",
+        f"{W}right",
+        f"{W}rightChars",
+        f"{W}hanging",
+        f"{W}hangingChars",
+        f"{W}firstLine",
+        f"{W}firstLineChars",
+        f"{W}start",
+        f"{W}startChars",
+        f"{W}end",
+        f"{W}endChars",
+    },
+    f"{W}jc": {f"{W}val"},
+    f"{W}contextualSpacing": {f"{W}val"},
+}
+NOTE_RUN_PROPERTIES = {
+    f"{W}rStyle": {f"{W}val"},
+    f"{W}rFonts": {
+        f"{W}ascii",
+        f"{W}hAnsi",
+        f"{W}eastAsia",
+        f"{W}cs",
+        f"{W}hint",
+    },
+    **{
+        f"{W}{name}": {f"{W}val"}
+        for name in (
+            "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike",
+            "dstrike", "outline", "shadow", "emboss", "imprint", "noProof",
+            "snapToGrid", "vanish", "specVanish", "sz", "szCs", "vertAlign",
+        )
+    },
+    f"{W}color": {
+        f"{W}val", f"{W}themeColor", f"{W}themeTint", f"{W}themeShade",
+    },
+    f"{W}u": {
+        f"{W}val", f"{W}color", f"{W}themeColor", f"{W}themeTint", f"{W}themeShade",
+    },
+    f"{W}lang": {f"{W}val", f"{W}eastAsia", f"{W}bidi"},
+}
 
 QUESTION_RE = re.compile(r"^\s*(\d{1,3})[.)] (.+)$", re.DOTALL)
 CHOICE_RE = re.compile(r"^\s*([A-Da-d])[.)] (.+)$", re.DOTALL)
@@ -152,27 +252,269 @@ class QuestionDOCXParser:
             raise DOCXPackageError("The Word package contains an unsafe member path.")
 
     @classmethod
+    def _content_type_part_name(cls, part_name):
+        if (
+            not part_name
+            or part_name != part_name.strip()
+            or not part_name.startswith("/")
+            or part_name.startswith("//")
+            or any(marker in part_name for marker in ("\\", "?", "#", "%"))
+        ):
+            raise DOCXPackageError(
+                "The Word package contains a malformed content-type PartName."
+            )
+        member_name = part_name[1:]
+        if any(part in {"", ".", ".."} for part in member_name.split("/")):
+            raise DOCXPackageError(
+                "The Word package contains a malformed content-type PartName."
+            )
+        cls._validate_member_name(member_name)
+        if (
+            member_name.endswith("/")
+            or str(PurePosixPath(member_name)) != member_name
+            or member_name == "[Content_Types].xml"
+        ):
+            raise DOCXPackageError(
+                "The Word package contains a malformed content-type PartName."
+            )
+        return member_name
+
+    @staticmethod
+    def _relationship_source_part(relationship_part):
+        if relationship_part == "_rels/.rels":
+            return ""
+        path = PurePosixPath(relationship_part)
+        if (
+            path.parent.name != "_rels"
+            or not path.name.endswith(".rels")
+            or path.name == ".rels"
+        ):
+            raise DOCXPackageError(
+                "The Word package contains a malformed relationships part name."
+            )
+        source_name = path.name[:-5]
+        return str(path.parent.parent / source_name)
+
+    @classmethod
+    def _resolve_relationship_target(cls, relationship_part, target):
+        if (
+            not target
+            or target != target.strip()
+            or "\\" in target
+            or target.startswith("/")
+            or any(marker in target for marker in ("?", "#", "%", "://"))
+        ):
+            raise DOCXPackageError(
+                "The Word package contains an unsafe relationship target."
+            )
+        target_path = PurePosixPath(target)
+        if (
+            target_path.is_absolute()
+            or ".." in target_path.parts
+            or any(":" in part for part in target_path.parts)
+        ):
+            raise DOCXPackageError(
+                "The Word package contains an unsafe relationship target."
+            )
+        source_part = cls._relationship_source_part(relationship_part)
+        resolved = PurePosixPath(source_part).parent / target_path
+        resolved_name = str(resolved)
+        cls._validate_member_name(resolved_name)
+        return resolved_name
+
+    @staticmethod
+    def _validate_note_attributes(element, allowed_attributes, *, label):
+        if not set(element.attrib).issubset(allowed_attributes):
+            raise DOCXPackageError(
+                f"The Word {label} part contains unexpected semantic metadata."
+            )
+
+    @classmethod
+    def _validate_note_properties(cls, element, allowed_properties, *, label):
+        seen = set()
+        for child in list(element):
+            if child.tag not in allowed_properties or child.tag in seen or list(child):
+                raise DOCXPackageError(
+                    f"The Word {label} part contains unexpected semantic content."
+                )
+            seen.add(child.tag)
+            cls._validate_note_attributes(
+                child,
+                allowed_properties[child.tag],
+                label=label,
+            )
+
+    @classmethod
+    def _validate_default_note_part(cls, package, *, label, config):
+        member_name = config["member_name"]
+        root = cls._safe_xml(
+            cls._read_bounded(package, member_name),
+            member_name=member_name,
+        )
+        if root.tag != config["root_tag"] or not list(root):
+            raise DOCXPackageError(
+                f"The Word {label} part is not standard default separator metadata."
+            )
+        cls._validate_note_attributes(root, NOTE_ROOT_ATTRIBUTES, label=label)
+        if any(
+            (node.text and node.text.strip()) or (node.tail and node.tail.strip())
+            for node in root.iter()
+        ):
+            raise DOCXPackageError(
+                f"Actual {label} text is not supported in Word import V1."
+            )
+
+        seen_records = set()
+        for record in list(root):
+            if record.tag != config["record_tag"]:
+                raise DOCXPackageError(
+                    f"The Word {label} part contains unexpected semantic content."
+                )
+            if set(record.attrib) != {f"{W}id", f"{W}type"}:
+                raise DOCXPackageError(
+                    f"The Word {label} part contains unexpected semantic metadata."
+                )
+            record_key = (record.get(f"{W}id"), record.get(f"{W}type"))
+            expected_marker = DEFAULT_NOTE_RECORDS.get(record_key)
+            if expected_marker is None or record_key in seen_records:
+                raise DOCXPackageError(
+                    f"Actual or non-default {label} records are not supported in Word import V1."
+                )
+            seen_records.add(record_key)
+
+            record_children = list(record)
+            if len(record_children) != 1 or record_children[0].tag != f"{W}p":
+                raise DOCXPackageError(
+                    f"The Word {label} separator has an unexpected structure."
+                )
+            paragraph = record_children[0]
+            cls._validate_note_attributes(
+                paragraph,
+                NOTE_PARAGRAPH_ATTRIBUTES,
+                label=label,
+            )
+            paragraph_children = list(paragraph)
+            if paragraph_children and paragraph_children[0].tag == f"{W}pPr":
+                paragraph_properties = paragraph_children.pop(0)
+                cls._validate_note_attributes(
+                    paragraph_properties,
+                    set(),
+                    label=label,
+                )
+                cls._validate_note_properties(
+                    paragraph_properties,
+                    NOTE_PARAGRAPH_PROPERTIES,
+                    label=label,
+                )
+            if len(paragraph_children) != 1 or paragraph_children[0].tag != f"{W}r":
+                raise DOCXPackageError(
+                    f"The Word {label} separator has an unexpected structure."
+                )
+            run = paragraph_children[0]
+            cls._validate_note_attributes(run, NOTE_RUN_ATTRIBUTES, label=label)
+            run_children = list(run)
+            if run_children and run_children[0].tag == f"{W}rPr":
+                run_properties = run_children.pop(0)
+                cls._validate_note_attributes(run_properties, set(), label=label)
+                cls._validate_note_properties(
+                    run_properties,
+                    NOTE_RUN_PROPERTIES,
+                    label=label,
+                )
+            if (
+                len(run_children) != 1
+                or run_children[0].tag != expected_marker
+                or run_children[0].attrib
+                or list(run_children[0])
+            ):
+                raise DOCXPackageError(
+                    f"The Word {label} separator has unexpected semantic content."
+                )
+
+    @classmethod
+    def _validate_note_parts(cls, package, names):
+        for label, config in DOCX_NOTE_PARTS.items():
+            if config["member_name"] in names:
+                cls._validate_default_note_part(
+                    package,
+                    label=label,
+                    config=config,
+                )
+
+    @classmethod
     def _validate_relationships(cls, package, names):
         office_document_targets = []
+        note_relationships = {label: [] for label in DOCX_NOTE_PARTS}
+        relationship_types = {
+            config["relationship_type"]: (label, config)
+            for label, config in DOCX_NOTE_PARTS.items()
+        }
+        folded_relationship_types = {
+            relationship_type.casefold(): relationship_type
+            for relationship_type in relationship_types
+        }
         for name in sorted(item for item in names if item.lower().endswith(".rels")):
             root = cls._safe_xml(cls._read_bounded(package, name), member_name=name)
-            for relationship in root.findall(f"{PKG_REL}Relationship"):
-                if (relationship.get("TargetMode") or "").upper() == "EXTERNAL":
-                    raise DOCXPackageError("External relationships are not supported.")
-                rel_type = (relationship.get("Type") or "").lower()
-                target = relationship.get("Target") or ""
+            if root.tag != f"{PKG_REL}Relationships":
+                raise DOCXPackageError(
+                    "The Word package contains a malformed relationships part."
+                )
+            relationships = list(root)
+            seen_ids = set()
+            for relationship in relationships:
+                if relationship.tag != f"{PKG_REL}Relationship":
+                    raise DOCXPackageError(
+                        "The Word package contains a malformed relationships part."
+                    )
+                relationship_id = relationship.get("Id")
                 if (
-                    not target
-                    or "\\" in target
-                    or target.startswith("/")
-                    or ".." in PurePosixPath(target.split("#", 1)[0]).parts
-                    or "://" in target
+                    not relationship_id
+                    or relationship_id != relationship_id.strip()
+                    or not RELATIONSHIP_ID_RE.fullmatch(relationship_id)
                 ):
-                    raise DOCXPackageError("The Word package contains an unsafe relationship target.")
-                if name == "_rels/.rels" and rel_type.endswith("/officedocument"):
-                    office_document_targets.append(target)
+                    raise DOCXPackageError(
+                        "Every Word package relationship must have a valid non-empty Id."
+                    )
+                if relationship_id in seen_ids:
+                    raise DOCXPackageError(
+                        "The Word package contains duplicate relationship Id values."
+                    )
+                seen_ids.add(relationship_id)
+
+            for relationship in relationships:
+                target_mode = relationship.get("TargetMode")
+                if target_mode and target_mode != "Internal":
+                    if target_mode.casefold() == "external":
+                        raise DOCXPackageError("External relationships are not supported.")
+                    raise DOCXPackageError(
+                        "The Word package contains an invalid relationship target mode."
+                    )
+                rel_type = relationship.get("Type") or ""
+                target = relationship.get("Target") or ""
+                resolved_target = cls._resolve_relationship_target(name, target)
+                if name == "_rels/.rels" and rel_type.lower().endswith("/officedocument"):
+                    office_document_targets.append(resolved_target)
+                folded_rel_type = rel_type.casefold()
+                if (
+                    folded_rel_type in folded_relationship_types
+                    and rel_type not in relationship_types
+                ):
+                    raise DOCXPackageError(
+                        "Word footnote/endnote relationships must use the exact standard case-sensitive type."
+                    )
+                if rel_type in relationship_types:
+                    label, config = relationship_types[rel_type]
+                    if (
+                        name != "word/_rels/document.xml.rels"
+                        or resolved_target != config["member_name"]
+                    ):
+                        raise DOCXPackageError(
+                            f"The Word {label} part does not use its standard internal relationship."
+                        )
+                    note_relationships[label].append(resolved_target)
+                    continue
                 if any(
-                    marker in rel_type
+                    marker in folded_rel_type
                     for marker in (
                         "image", "oleobject", "package", "activex", "afchunk", "chart",
                         "header", "footer", "footnotes", "endnotes", "comments",
@@ -186,23 +528,125 @@ class QuestionDOCXParser:
             raise DOCXPackageError(
                 "The Word package does not identify exactly one standard main document part."
             )
+        for label, config in DOCX_NOTE_PARTS.items():
+            expected_count = 1 if config["member_name"] in names else 0
+            if len(note_relationships[label]) != expected_count:
+                raise DOCXPackageError(
+                    f"The Word {label} part does not use exactly one standard internal relationship."
+                )
 
     @classmethod
-    def _validate_content_types(cls, package):
+    def _validate_content_types(cls, package, names):
         root = cls._safe_xml(
             cls._read_bounded(package, "[Content_Types].xml"),
             member_name="[Content_Types].xml",
         )
-        main_types = []
+        if root.tag != f"{CT}Types" or root.attrib:
+            raise DOCXPackageError(
+                "The Word package contains a malformed content-type map."
+            )
+        defaults = {}
+        overrides = {}
         for declaration in list(root):
-            content_type = (declaration.get("ContentType") or "").lower()
-            part_name = (declaration.get("PartName") or "").lower()
-            if declaration.tag == f"{CT}Override" and part_name == "/word/document.xml":
-                main_types.append(content_type)
+            raw_content_type = declaration.get("ContentType") or ""
+            if (
+                not raw_content_type
+                or raw_content_type != raw_content_type.strip()
+            ):
+                raise DOCXPackageError(
+                    "The Word package contains a malformed content-type declaration."
+                )
+            content_type = raw_content_type.casefold()
+            if declaration.tag == f"{CT}Default":
+                if set(declaration.attrib) != {"Extension", "ContentType"}:
+                    raise DOCXPackageError(
+                        "The Word package contains a malformed content-type Default."
+                    )
+                extension = declaration.get("Extension") or ""
+                if (
+                    extension != extension.strip()
+                    or not re.fullmatch(r"[A-Za-z0-9]+", extension)
+                ):
+                    raise DOCXPackageError(
+                        "The Word package contains a malformed content-type Default."
+                    )
+                extension_key = extension.casefold()
+                if extension_key in defaults:
+                    raise DOCXPackageError(
+                        "The Word package contains duplicate content-type Default declarations."
+                    )
+                defaults[extension_key] = content_type
+            elif declaration.tag == f"{CT}Override":
+                if set(declaration.attrib) != {"PartName", "ContentType"}:
+                    raise DOCXPackageError(
+                        "The Word package contains a malformed content-type Override."
+                    )
+                member_name = cls._content_type_part_name(
+                    declaration.get("PartName") or ""
+                )
+                if member_name in overrides:
+                    raise DOCXPackageError(
+                        "The Word package contains duplicate content-type Override declarations."
+                    )
+                overrides[member_name] = content_type
+            else:
+                raise DOCXPackageError(
+                    "The Word package contains a malformed content-type map."
+                )
             if any(marker in content_type for marker in ("macroenabled", "vba", "activex", "oleobject")):
                 raise DOCXPackageError("Macro-enabled, VBA, ActiveX, and OLE Word packages are not supported.")
-        if main_types != [DOCX_MAIN_CONTENT_TYPE]:
+
+        missing_override_parts = set(overrides) - names
+        if missing_override_parts:
+            raise DOCXPackageError(
+                "The Word package contains a content-type Override for a missing part."
+            )
+
+        effective_types = {}
+        for member_name in sorted(
+            name
+            for name in names
+            if name != "[Content_Types].xml" and not name.endswith("/")
+        ):
+            content_type = overrides.get(member_name)
+            if content_type is None:
+                leaf_name = PurePosixPath(member_name).name
+                extension = (
+                    leaf_name.rsplit(".", 1)[1].casefold()
+                    if "." in leaf_name and not leaf_name.endswith(".")
+                    else ""
+                )
+                content_type = defaults.get(extension)
+            if content_type is None:
+                raise DOCXPackageError(
+                    "The Word package does not define an unambiguous content type for every part."
+                )
+            effective_types[member_name] = content_type
+
+        if effective_types.get("word/document.xml") != DOCX_MAIN_CONTENT_TYPE:
             raise DOCXPackageError("The upload is not a standard macro-free Word .docx document.")
+        official_note_types = {
+            config["content_type"].casefold(): (label, config)
+            for label, config in DOCX_NOTE_PARTS.items()
+        }
+        for member_name, content_type in effective_types.items():
+            note_config = official_note_types.get(content_type)
+            if note_config is None:
+                continue
+            label, config = note_config
+            if member_name != config["member_name"]:
+                raise DOCXPackageError(
+                    f"The official Word {label} content type is allowed only on its canonical part."
+                )
+        for label, config in DOCX_NOTE_PARTS.items():
+            member_name = config["member_name"]
+            if (
+                member_name in names
+                and effective_types.get(member_name) != config["content_type"].casefold()
+            ):
+                raise DOCXPackageError(
+                    f"The Word {label} part does not use its standard content type."
+                )
 
     @classmethod
     def _open_validated_package(cls, raw):
@@ -249,13 +693,37 @@ class QuestionDOCXParser:
             package.close()
             raise DOCXPackageError("The upload is missing required Word document parts.")
         lowered = {name.lower() for name in names}
+        for config in DOCX_NOTE_PARTS.values():
+            member_name = config["member_name"]
+            if member_name.lower() in lowered and member_name not in names:
+                package.close()
+                raise DOCXPackageError(
+                    "The Word package uses a non-standard note-part name."
+                )
+        allowed_note_members = {
+            config["member_name"].lower()
+            for config in DOCX_NOTE_PARTS.values()
+        }
+        if any(
+            (
+                name.startswith("word/footnotes")
+                or name.startswith("word/endnotes")
+                or name.endswith("/footnotes.xml.rels")
+                or name.endswith("/endnotes.xml.rels")
+            )
+            and name not in allowed_note_members
+            for name in lowered
+        ):
+            package.close()
+            raise DOCXPackageError(
+                "Only standard default Word footnote/endnote parts are supported."
+            )
         if any(
             marker in name
             for name in lowered
             for marker in (
                 "vbaproject", "activex", "embeddings/", "word/media/", "word/charts/",
-                "word/header", "word/footer", "word/footnotes", "word/endnotes",
-                "word/comments",
+                "word/header", "word/footer", "word/comments",
             )
         ):
             package.close()
@@ -456,7 +924,8 @@ class QuestionDOCXParser:
         try:
             package, names = cls._open_validated_package(raw)
             with package:
-                cls._validate_content_types(package)
+                cls._validate_content_types(package, names)
+                cls._validate_note_parts(package, names)
                 cls._validate_relationships(package, names)
                 rows = cls._rows_from_paragraphs(cls._document_paragraphs(package))
         except (DOCXPackageError, RuntimeError, zipfile.BadZipFile) as exc:

@@ -30,7 +30,40 @@ PACKAGE_RELS = """<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>{extra}
 </Relationships>"""
+DOCUMENT_RELS = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+{relationships}
+</Relationships>"""
 MAIN_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+WORDPROCESSINGML = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+WORD_RELATIONSHIPS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+NOTE_PARTS = {
+    "footnote": {
+        "member_name": "word/footnotes.xml",
+        "root_name": "footnotes",
+        "record_name": "footnote",
+        "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml",
+        "relationship_type": f"{WORD_RELATIONSHIPS}/footnotes",
+        "relationship_target": "footnotes.xml",
+    },
+    "endnote": {
+        "member_name": "word/endnotes.xml",
+        "root_name": "endnotes",
+        "record_name": "endnote",
+        "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml",
+        "relationship_type": f"{WORD_RELATIONSHIPS}/endnotes",
+        "relationship_target": "endnotes.xml",
+    },
+}
+VALID_QUESTION_PARAGRAPHS = (
+    "1. Compatibility check?",
+    "A. One",
+    "B. Two",
+    "C. Three",
+    "D. Four",
+    "Answer: A",
+    "Difficulty: Moderate",
+)
 
 
 def paragraph(text):
@@ -68,6 +101,95 @@ def make_docx(
     )
 
 
+def default_note_xml(kind, *, extra=""):
+    config = NOTE_PARTS[kind]
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<w:{config["root_name"]}
+    xmlns:w="{WORDPROCESSINGML}"
+    xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="w14">
+  <w:{config["record_name"]} w:id="-1" w:type="separator">
+    <w:p w14:paraId="10000001" w14:textId="77777777" w:rsidR="00112233" w:rsidRDefault="00112233">
+      <w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>
+      <w:r><w:separator/></w:r>
+    </w:p>
+  </w:{config["record_name"]}>
+  <w:{config["record_name"]} w:id="0" w:type="continuationSeparator">
+    <w:p w14:paraId="10000002" w14:textId="77777777" w:rsidR="00112233" w:rsidRDefault="00112233">
+      <w:pPr><w:spacing w:after="0"/></w:pPr>
+      <w:r><w:continuationSeparator/></w:r>
+    </w:p>
+  </w:{config["record_name"]}>
+  {extra}
+</w:{config["root_name"]}>'''
+
+
+def note_content_type_override(kind, *, member_name=None, content_type=None):
+    config = NOTE_PARTS[kind]
+    return (
+        f'<Override PartName="/{member_name or config["member_name"]}" '
+        f'ContentType="{content_type or config["content_type"]}"/>'
+    )
+
+
+def note_relationship(kind, *, relationship_id="rId1", target=None, rel_type=None):
+    config = NOTE_PARTS[kind]
+    id_attribute = (
+        "" if relationship_id is None else f' Id="{relationship_id}"'
+    )
+    return (
+        f'<Relationship{id_attribute} '
+        f'Type="{rel_type or config["relationship_type"]}" '
+        f'Target="{target or config["relationship_target"]}"/>'
+    )
+
+
+def make_note_docx(
+    note_parts,
+    *,
+    paragraphs=VALID_QUESTION_PARAGRAPHS,
+    document_override=None,
+    relationship_kinds=None,
+    content_type_kinds=None,
+    relationships_override=None,
+    content_types_extra="",
+):
+    relationship_kinds = (
+        tuple(note_parts)
+        if relationship_kinds is None
+        else tuple(relationship_kinds)
+    )
+    content_type_kinds = (
+        tuple(note_parts)
+        if content_type_kinds is None
+        else tuple(content_type_kinds)
+    )
+    content_types_extra = "".join(
+        note_content_type_override(kind)
+        for kind in content_type_kinds
+    ) + content_types_extra
+    relationships = relationships_override if relationships_override is not None else "".join(
+        note_relationship(kind, relationship_id=f"rId{index + 1}")
+        for index, kind in enumerate(relationship_kinds)
+    )
+    members = [
+        (NOTE_PARTS[kind]["member_name"], xml)
+        for kind, xml in note_parts.items()
+    ]
+    if relationships:
+        members.append((
+            "word/_rels/document.xml.rels",
+            DOCUMENT_RELS.format(relationships=relationships),
+        ))
+    return make_docx(
+        paragraphs,
+        content_types_extra=content_types_extra,
+        extra_members=members,
+        document_override=document_override,
+    )
+
+
 class DOCXParserTests(SimpleTestCase):
     def assert_file_rejected(self, upload, text=None):
         parsed = QuestionDOCXParser.parse(upload)
@@ -76,6 +198,279 @@ class DOCXParserTests(SimpleTestCase):
         self.assertEqual(parsed.data_rows, [])
         if text:
             self.assertIn(text, parsed.rows[0].errors[0]["message"])
+
+    def test_accepts_default_footnote_separator_metadata_only(self):
+        parsed = QuestionDOCXParser.parse(make_note_docx({
+            "footnote": default_note_xml("footnote"),
+        }))
+        self.assertEqual(parsed.error_count, 0)
+        self.assertEqual(len(parsed.data_rows), 1)
+
+    def test_accepts_default_endnote_separator_metadata_only(self):
+        parsed = QuestionDOCXParser.parse(make_note_docx({
+            "endnote": default_note_xml("endnote"),
+        }))
+        self.assertEqual(parsed.error_count, 0)
+        self.assertEqual(len(parsed.data_rows), 1)
+
+    def test_accepts_both_default_footnote_and_endnote_separator_metadata(self):
+        parsed = QuestionDOCXParser.parse(make_note_docx({
+            "footnote": default_note_xml("footnote"),
+            "endnote": default_note_xml("endnote"),
+        }))
+        self.assertEqual(parsed.error_count, 0)
+        self.assertEqual(len(parsed.data_rows), 1)
+
+    def test_rejects_actual_faculty_authored_footnote(self):
+        actual_note = (
+            '<w:footnote w:id="1"><w:p><w:r>'
+            '<w:footnoteRef/><w:t>Faculty note</w:t>'
+            '</w:r></w:p></w:footnote>'
+        )
+        self.assert_file_rejected(
+            make_note_docx({
+                "footnote": default_note_xml("footnote", extra=actual_note),
+            }),
+            "Actual footnote text",
+        )
+
+    def test_rejects_actual_faculty_authored_endnote(self):
+        actual_note = (
+            '<w:endnote w:id="1"><w:p><w:r>'
+            '<w:endnoteRef/><w:t>Faculty note</w:t>'
+            '</w:r></w:p></w:endnote>'
+        )
+        self.assert_file_rejected(
+            make_note_docx({
+                "endnote": default_note_xml("endnote", extra=actual_note),
+            }),
+            "Actual endnote text",
+        )
+
+    def test_rejects_footnote_and_endnote_references_from_document_content(self):
+        for kind, reference_name, message in (
+            ("footnote", "footnoteReference", "Footnotes"),
+            ("endnote", "endnoteReference", "Endnotes"),
+        ):
+            with self.subTest(kind=kind):
+                body = (
+                    f'<w:p><w:r><w:t>1. Compatibility</w:t>'
+                    f'<w:{reference_name} w:id="1"/></w:r></w:p>'
+                    + "".join(paragraph(item) for item in VALID_QUESTION_PARAGRAPHS[1:])
+                )
+                self.assert_file_rejected(
+                    make_note_docx(
+                        {kind: default_note_xml(kind)},
+                        document_override=word_document(body),
+                    ),
+                    message,
+                )
+
+    def test_rejects_malformed_and_unexpected_note_part_content(self):
+        malformed = f'<w:footnotes xmlns:w="{WORDPROCESSINGML}"><w:footnote'
+        self.assert_file_rejected(
+            make_note_docx({"footnote": malformed}),
+            "unsafe or malformed XML in word/footnotes.xml",
+        )
+
+        unexpected_record = (
+            '<w:footnote w:id="1" w:type="continuationNotice">'
+            '<w:p><w:r><w:continuationSeparator/></w:r></w:p>'
+            '</w:footnote>'
+        )
+        self.assert_file_rejected(
+            make_note_docx({
+                "footnote": default_note_xml("footnote", extra=unexpected_record),
+            }),
+            "non-default footnote records",
+        )
+
+        unexpected_negative_id = default_note_xml("footnote").replace(
+            'w:id="-1"',
+            'w:id="-2"',
+            1,
+        )
+        self.assert_file_rejected(
+            make_note_docx({"footnote": unexpected_negative_id}),
+            "non-default footnote records",
+        )
+
+        unexpected_semantics = default_note_xml("endnote").replace(
+            "<w:separator/>",
+            "<w:drawing/>",
+            1,
+        )
+        self.assert_file_rejected(
+            make_note_docx({"endnote": unexpected_semantics}),
+            "unexpected semantic content",
+        )
+
+    def test_rejects_note_parts_without_exact_content_type_and_relationship(self):
+        footnotes = {"footnote": default_note_xml("footnote")}
+        self.assert_file_rejected(
+            make_note_docx(footnotes, content_type_kinds=()),
+            "standard content type",
+        )
+        self.assert_file_rejected(
+            make_note_docx(footnotes, relationship_kinds=()),
+            "exactly one standard internal relationship",
+        )
+
+    def test_rejects_official_note_content_types_on_alternate_parts(self):
+        authored_footnote = default_note_xml(
+            "footnote",
+            extra=(
+                '<w:footnote w:id="1"><w:p><w:r>'
+                '<w:footnoteRef/><w:t>Faculty note</w:t>'
+                '</w:r></w:p></w:footnote>'
+            ),
+        )
+        for kind, member_name, xml in (
+            ("footnote", "word/notes/footnotes.xml", authored_footnote),
+            ("endnote", "word/notes/endnotes.xml", default_note_xml("endnote")),
+        ):
+            with self.subTest(kind=kind, member_name=member_name):
+                self.assert_file_rejected(
+                    make_docx(
+                        VALID_QUESTION_PARAGRAPHS,
+                        content_types_extra=note_content_type_override(
+                            kind,
+                            member_name=member_name,
+                        ),
+                        extra_members=[(member_name, xml)],
+                    ),
+                    "only on its canonical part",
+                )
+
+    def test_rejects_official_note_content_type_supplied_by_default(self):
+        default_declaration = (
+            '<Default Extension="fnote" '
+            f'ContentType="{NOTE_PARTS["footnote"]["content_type"]}"/>'
+        )
+        self.assert_file_rejected(
+            make_docx(
+                VALID_QUESTION_PARAGRAPHS,
+                content_types_extra=default_declaration,
+                extra_members=[
+                    ("customXml/renamed.fnote", default_note_xml("footnote")),
+                ],
+            ),
+            "only on its canonical part",
+        )
+
+    def test_rejects_case_altered_canonical_note_part_path(self):
+        member_name = "WORD/footnotes.xml"
+        self.assert_file_rejected(
+            make_docx(
+                VALID_QUESTION_PARAGRAPHS,
+                content_types_extra=note_content_type_override(
+                    "footnote",
+                    member_name=member_name,
+                ),
+                extra_members=[(member_name, default_note_xml("footnote"))],
+            ),
+            "non-standard note-part name",
+        )
+
+    def test_rejects_note_relationships_to_alternate_targets(self):
+        for kind, target in (
+            ("footnote", "notes/footnotes.xml"),
+            ("endnote", "notes/endnotes.xml"),
+        ):
+            with self.subTest(kind=kind):
+                self.assert_file_rejected(
+                    make_note_docx(
+                        {kind: default_note_xml(kind)},
+                        relationships_override=note_relationship(kind, target=target),
+                    ),
+                    "standard internal relationship",
+                )
+
+    def test_rejects_duplicate_relationship_ids_before_semantic_use(self):
+        relationships = (
+            note_relationship("footnote", relationship_id="rId1")
+            + note_relationship("endnote", relationship_id="rId1")
+        )
+        self.assert_file_rejected(
+            make_note_docx(
+                {
+                    "footnote": default_note_xml("footnote"),
+                    "endnote": default_note_xml("endnote"),
+                },
+                relationships_override=relationships,
+            ),
+            "duplicate relationship Id",
+        )
+
+    def test_rejects_missing_and_blank_relationship_ids(self):
+        for relationship_id in (None, ""):
+            with self.subTest(relationship_id=relationship_id):
+                self.assert_file_rejected(
+                    make_note_docx(
+                        {"footnote": default_note_xml("footnote")},
+                        relationships_override=note_relationship(
+                            "footnote",
+                            relationship_id=relationship_id,
+                        ),
+                    ),
+                    "valid non-empty Id",
+                )
+
+    def test_rejects_case_altered_official_note_relationship_types(self):
+        for kind, suffix in (("footnote", "FOOTNOTES"), ("endnote", "Endnotes")):
+            with self.subTest(kind=kind):
+                altered_type = f"{WORD_RELATIONSHIPS}/{suffix}"
+                self.assert_file_rejected(
+                    make_note_docx(
+                        {kind: default_note_xml(kind)},
+                        relationships_override=note_relationship(
+                            kind,
+                            rel_type=altered_type,
+                        ),
+                    ),
+                    "exact standard case-sensitive type",
+                )
+
+    def test_rejects_duplicate_and_conflicting_content_type_overrides(self):
+        canonical_override = note_content_type_override("footnote")
+        conflicting_override = note_content_type_override(
+            "footnote",
+            content_type="application/xml",
+        )
+        for duplicate in (canonical_override, conflicting_override):
+            with self.subTest(duplicate=duplicate):
+                self.assert_file_rejected(
+                    make_note_docx(
+                        {"footnote": default_note_xml("footnote")},
+                        content_types_extra=duplicate,
+                    ),
+                    "duplicate content-type Override",
+                )
+
+    def test_rejects_malformed_content_type_part_name(self):
+        self.assert_file_rejected(
+            make_docx(
+                VALID_QUESTION_PARAGRAPHS,
+                content_types_extra=note_content_type_override(
+                    "footnote",
+                    member_name="word/notes/../footnotes.xml",
+                ),
+            ),
+            "malformed content-type PartName",
+        )
+
+    def test_rejects_duplicate_semantic_note_relationships(self):
+        relationships = (
+            note_relationship("footnote", relationship_id="rId1")
+            + note_relationship("footnote", relationship_id="rId2")
+        )
+        self.assert_file_rejected(
+            make_note_docx(
+                {"footnote": default_note_xml("footnote")},
+                relationships_override=relationships,
+            ),
+            "exactly one standard internal relationship",
+        )
 
     def test_valid_one_and_multiple_questions_preserve_unicode_spaces_and_lines(self):
         parsed = QuestionDOCXParser.parse(make_docx([
