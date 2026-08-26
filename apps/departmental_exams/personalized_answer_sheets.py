@@ -18,6 +18,7 @@ from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 
 from .contribution_authorization import ContributionAuthorizationService
+from .exam_units import resolve_examination_unit
 from .models import (
     CycleCourse,
     CycleCourseOffering,
@@ -111,17 +112,22 @@ class PersonalizedAnswerSheetService:
     def _validate_offering_scope(*, release, offering):
         cycle_course = release.cycle_course
         cycle = cycle_course.cycle
+        unit = resolve_examination_unit(cycle_course)
+        matching_member = next(
+            (member for member in unit.members if member.course_id == offering.course_id),
+            None,
+        )
         if (
             offering.tenant_id != cycle.tenant_id
             or offering.campus_id is None
-            or offering.course_id != cycle_course.course_id
+            or matching_member is None
             or offering.academic_year_id != cycle.academic_year_id
             or offering.term_id != cycle.term_id
             or not offering.is_active
             or offering.status != CourseOffering.Status.OPEN
             or not offering.campus.is_active
             or not CycleCourseOffering.objects.filter(
-                cycle_course=cycle_course,
+                cycle_course=matching_member,
                 offering=offering,
                 campus_id=offering.campus_id,
             ).exists()
@@ -251,15 +257,16 @@ class PersonalizedAnswerSheetService:
             pk=cycle_course_id,
             cycle_id=cycle_id,
         )
+        unit = resolve_examination_unit(locked_course, for_update=True)
         locked_release = QuestionnairePrintRelease.objects.select_for_update().filter(
             pk=release_id,
-            cycle_course=locked_course,
+            cycle_course=unit.primary,
         ).first()
         if locked_release is None:
             raise PermissionDenied("Questionnaire print release is unavailable.")
         ExamGenerationRevision.objects.select_for_update().get(
             pk=locked_release.generation_revision_id,
-            cycle_course=locked_course,
+            cycle_course=unit.primary,
         )
         locked_contribution = (
             FacultyContribution.objects.select_for_update()

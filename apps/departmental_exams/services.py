@@ -1142,6 +1142,72 @@ class DepartmentalExamAuthorizationService:
                 == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
             )
         }
+        # An active equivalency group is one authorization unit.  Every input
+        # member receives the full member-campus union so a primary-only grant
+        # cannot expose or mutate shared examination state through a list/view
+        # path that uses this set-based map.
+        from .models import ExamCourseEquivalencyMembership
+
+        input_ids = set(result)
+        group_ids = set(
+            ExamCourseEquivalencyMembership.objects.filter(
+                cycle_course_id__in=input_ids,
+                active_marker=1,
+                group__is_active=True,
+            ).values_list("group_id", flat=True)
+        )
+        if group_ids:
+            grouped_rows = list(
+                ExamCourseEquivalencyMembership.objects.filter(
+                    group_id__in=group_ids,
+                    active_marker=1,
+                    group__is_active=True,
+                )
+                .select_related("group__cycle", "group__primary_cycle_course", "cycle_course__cycle")
+                .prefetch_related("cycle_course__offering_snapshots")
+                .order_by("group_id", "cycle_course_id")
+            )
+            rows_by_group = {}
+            for row in grouped_rows:
+                rows_by_group.setdefault(row.group_id, []).append(row)
+            grouped_input_ids = {
+                row.cycle_course_id for row in grouped_rows if row.cycle_course_id in input_ids
+            }
+            for course_id in grouped_input_ids:
+                automatic_scopes.pop(course_id, None)
+            for rows in rows_by_group.values():
+                group = rows[0].group
+                members = tuple(row.cycle_course for row in rows)
+                member_ids = {member.id for member in members}
+                valid = (
+                    group.primary_cycle_course_id in member_ids
+                    and all(member.cycle_id == group.cycle_id for member in members)
+                    and all(
+                        member.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+                        for member in members
+                    )
+                    and group.cycle.tenant_id == tenant_id
+                    and group.cycle.processing_mode
+                    == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                )
+                if not valid:
+                    continue
+                campus_ids = tuple(
+                    sorted(
+                        {
+                            campus_id
+                            for member in members
+                            for campus_id in cls.participating_campus_ids(member)
+                        }
+                    )
+                )
+                inclusion_status = CycleCourse.InclusionStatus.INCLUDED
+                for member in members:
+                    if member.id in input_ids:
+                        automatic_scopes[member.id] = {
+                            "inclusion_status": inclusion_status,
+                            "campus_ids": campus_ids,
+                        }
         scoped_result = cls.automatic_scope_permission_map(
             user=user,
             tenant_id=tenant_id,
@@ -1359,11 +1425,41 @@ class DepartmentalExamAuthorizationService:
 
     @classmethod
     def has_automatic_course_permission(cls, *, user, cycle_course, permissions):
-        tenant_id = cycle_course.cycle.tenant_id
+        from .exam_units import resolve_examination_unit
+
+        try:
+            unit = resolve_examination_unit(cycle_course)
+        except (ValidationError, CycleCourse.DoesNotExist):
+            return False
+        return cls.has_automatic_courses_permission(
+            user=user,
+            cycle=unit.primary.cycle,
+            courses=unit.members,
+            permissions=permissions,
+        )
+
+    @classmethod
+    def has_automatic_courses_permission(
+        cls, *, user, cycle, courses, permissions, require_included=True
+    ):
+        """Authorize one complete Automatic examination unit campus union."""
+
+        courses = tuple(courses)
+        tenant_id = cycle.tenant_id
         if (
-            cycle_course.cycle.processing_mode
+            not courses
+            or cycle.processing_mode
             != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-            or cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
+            or any(
+                course.cycle_id != cycle.id
+                or course.cycle.tenant_id != tenant_id
+                or (
+                    require_included
+                    and course.inclusion_status
+                    != CycleCourse.InclusionStatus.INCLUDED
+                )
+                for course in courses
+            )
         ):
             return False
         try:
@@ -1372,8 +1468,16 @@ class DepartmentalExamAuthorizationService:
             return False
         if not user or not user.is_authenticated or not user.is_active:
             return False
-        permission_codes = tuple(permissions)
-        campus_ids = cls.participating_campus_ids(cycle_course)
+        permission_codes = tuple(dict.fromkeys(permissions))
+        campus_ids = tuple(
+            sorted(
+                {
+                    campus_id
+                    for course in courses
+                    for campus_id in cls.participating_campus_ids(course)
+                }
+            )
+        )
         if not campus_ids:
             return False
         return all(
@@ -1388,6 +1492,21 @@ class DepartmentalExamAuthorizationService:
             )
             for campus_id in campus_ids
         )
+
+    @classmethod
+    def require_automatic_courses_permission(
+        cls, *, user, cycle, courses, permissions, require_included=True
+    ):
+        if not cls.has_automatic_courses_permission(
+            user=user,
+            cycle=cycle,
+            courses=courses,
+            permissions=permissions,
+            require_included=require_included,
+        ):
+            raise PermissionDenied(
+                "You do not have automatic examination authority for every participating campus."
+            )
 
     @classmethod
     def require_automatic_course_permission(

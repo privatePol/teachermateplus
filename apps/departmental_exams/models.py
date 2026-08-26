@@ -1,10 +1,106 @@
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from django.core.exceptions import ValidationError
 from django.db import models, router
 from django.utils import timezone
 
 from apps.core.models import ActivatableModel, TimeStampedModel
+
+
+_EQUIVALENCY_LIFECYCLE_CAPABILITY = object()
+_equivalency_lifecycle_capability = ContextVar(
+    "equivalency_lifecycle_capability",
+    default=None,
+)
+
+
+@contextmanager
+def _equivalency_lifecycle_service_scope():
+    """Permit lifecycle writes only inside the validated equivalency service."""
+
+    reset_token = _equivalency_lifecycle_capability.set(
+        _EQUIVALENCY_LIFECYCLE_CAPABILITY
+    )
+    try:
+        yield
+    finally:
+        _equivalency_lifecycle_capability.reset(reset_token)
+
+
+def _equivalency_lifecycle_write_allowed():
+    return (
+        _equivalency_lifecycle_capability.get()
+        is _EQUIVALENCY_LIFECYCLE_CAPABILITY
+    )
+
+
+class _EquivalencyLifecycleQuerySet(models.QuerySet):
+    lifecycle_fields = frozenset()
+    lifecycle_label = "Equivalency lifecycle"
+
+    def _reject_untrusted_fields(self, fields):
+        protected = self.lifecycle_fields.intersection(fields)
+        if protected and not _equivalency_lifecycle_write_allowed():
+            raise ValidationError(
+                f"{self.lifecycle_label} changes must use the protected equivalency service."
+            )
+
+    def update(self, **kwargs):
+        self._reject_untrusted_fields(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._reject_untrusted_fields(fields)
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, objs, **kwargs):
+        if objs and not _equivalency_lifecycle_write_allowed():
+            raise ValidationError(
+                f"{self.lifecycle_label} creation must use the protected equivalency service."
+            )
+        return super().bulk_create(objs, **kwargs)
+
+
+class _ExamCourseEquivalencyGroupQuerySet(_EquivalencyLifecycleQuerySet):
+    lifecycle_label = "Equivalency group lifecycle"
+    lifecycle_fields = frozenset(
+        {
+            "cycle",
+            "cycle_id",
+            "is_active",
+            "primary_cycle_course",
+            "primary_cycle_course_id",
+            "retired_by",
+            "retired_by_id",
+            "retired_at",
+            "retirement_reason",
+        }
+    )
+
+
+class _ExamCourseEquivalencyMembershipQuerySet(_EquivalencyLifecycleQuerySet):
+    lifecycle_label = "Equivalency membership lifecycle"
+    lifecycle_fields = frozenset(
+        {
+            "group",
+            "group_id",
+            "cycle_course",
+            "cycle_course_id",
+            "active_marker",
+            "added_by",
+            "added_by_id",
+            "removed_by",
+            "removed_by_id",
+            "removed_at",
+        }
+    )
+
+    def delete(self):
+        raise ValidationError(
+            "Equivalency membership history cannot be deleted through the ORM."
+        )
 
 
 def normalize_contribution_deadline_to_minute(value):
@@ -151,6 +247,304 @@ class CycleCourse(TimeStampedModel):
                 raise ValidationError("Exempt courses require the actor and time of the exemption.")
         elif self.exemption_category or exemption_reason:
             raise ValidationError("Included courses cannot retain active exemption details.")
+
+
+class ExamCourseEquivalencyGroup(TimeStampedModel, ActivatableModel):
+    objects = _ExamCourseEquivalencyGroupQuerySet.as_manager()
+
+    _LIFECYCLE_FIELD_ATTNAMES = {
+        "cycle": "cycle_id",
+        "is_active": "is_active",
+        "primary_cycle_course": "primary_cycle_course_id",
+        "retired_by": "retired_by_id",
+        "retired_at": "retired_at",
+        "retirement_reason": "retirement_reason",
+    }
+
+    cycle = models.ForeignKey(
+        ExaminationCycle,
+        on_delete=models.PROTECT,
+        related_name="course_equivalency_groups",
+    )
+    name = models.CharField(max_length=255)
+    primary_cycle_course = models.ForeignKey(
+        CycleCourse,
+        on_delete=models.PROTECT,
+        related_name="primary_equivalency_groups",
+    )
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="created_exam_course_equivalency_groups",
+    )
+    updated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="updated_exam_course_equivalency_groups",
+    )
+    retired_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="retired_exam_course_equivalency_groups",
+        null=True,
+        blank=True,
+    )
+    retired_at = models.DateTimeField(null=True, blank=True)
+    retirement_reason = models.CharField(max_length=500, blank=True, default="")
+
+    class Meta:
+        db_table = "departmental_exam_course_equivalency_groups"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cycle", "name"],
+                name="uq_de_equiv_group_cycle_name",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        is_active=True,
+                        retired_by__isnull=True,
+                        retired_at__isnull=True,
+                        retirement_reason="",
+                    )
+                    | (
+                        models.Q(
+                            is_active=False,
+                            retired_by__isnull=False,
+                            retired_at__isnull=False,
+                        )
+                        & ~models.Q(retirement_reason="")
+                    )
+                ),
+                name="ck_de_equiv_group_lifecycle",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["cycle", "is_active"],
+                name="idx_de_equiv_group_active",
+            )
+        ]
+
+    def clean(self):
+        self.name = " ".join((self.name or "").split())
+        self.retirement_reason = " ".join((self.retirement_reason or "").split())
+        if not self.name:
+            raise ValidationError({"name": "A shared examination name is required."})
+        if (
+            self.cycle_id
+            and self.primary_cycle_course_id
+            and self.primary_cycle_course.cycle_id != self.cycle_id
+        ):
+            raise ValidationError(
+                {"primary_cycle_course": "Primary course must belong to the selected cycle."}
+            )
+        if self.is_active:
+            if self.retired_by_id or self.retired_at or self.retirement_reason:
+                raise ValidationError("An active equivalency group cannot retain retirement details.")
+        elif (
+            not self.retired_by_id
+            or not self.retired_at
+            or not 10 <= len(self.retirement_reason) <= 500
+        ):
+            raise ValidationError(
+                "A retired equivalency group requires an actor, time, and reason of 10 to 500 characters."
+            )
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        persisted = None
+        if self.pk:
+            persisted = type(self)._base_manager.filter(pk=self.pk).values(
+                *self._LIFECYCLE_FIELD_ATTNAMES.values()
+            ).first()
+        if persisted is None:
+            if not _equivalency_lifecycle_write_allowed():
+                raise ValidationError(
+                    "Create equivalency groups through the protected equivalency service."
+                )
+            if not self.is_active:
+                raise ValidationError(
+                    "Equivalency groups must be created active and retired through the protected service."
+                )
+        else:
+            saved_fields = None if update_fields is None else set(update_fields)
+            changed_lifecycle_fields = {
+                field_name
+                for field_name, attname in self._LIFECYCLE_FIELD_ATTNAMES.items()
+                if (
+                    saved_fields is None
+                    or field_name in saved_fields
+                    or attname in saved_fields
+                )
+                and persisted[attname] != getattr(self, attname)
+            }
+            if (
+                "is_active" in changed_lifecycle_fields
+                and persisted["is_active"] is False
+                and self.is_active
+            ):
+                raise ValidationError("A retired equivalency group cannot be reactivated.")
+            if (
+                changed_lifecycle_fields
+                and not _equivalency_lifecycle_write_allowed()
+            ):
+                raise ValidationError(
+                    "Equivalency group lifecycle changes must use the protected equivalency service."
+                )
+            if (
+                "is_active" in changed_lifecycle_fields
+                and persisted["is_active"] is True
+                and not self.is_active
+            ):
+                self.retirement_reason = " ".join(
+                    (self.retirement_reason or "").split()
+                )
+                if (
+                    not self.retired_by_id
+                    or not self.retired_at
+                    or not 10 <= len(self.retirement_reason) <= 500
+                ):
+                    raise ValidationError(
+                        "Retire equivalency groups through the protected retirement service."
+                    )
+                if self.memberships.filter(active_marker=1).exists():
+                    raise ValidationError(
+                        "An equivalency group cannot be retired while active memberships remain."
+                    )
+        return super().save(*args, **kwargs)
+
+
+class ExamCourseEquivalencyMembership(TimeStampedModel):
+    objects = _ExamCourseEquivalencyMembershipQuerySet.as_manager()
+
+    _LIFECYCLE_FIELD_ATTNAMES = {
+        "group": "group_id",
+        "cycle_course": "cycle_course_id",
+        "active_marker": "active_marker",
+        "added_by": "added_by_id",
+        "removed_by": "removed_by_id",
+        "removed_at": "removed_at",
+    }
+
+    group = models.ForeignKey(
+        ExamCourseEquivalencyGroup,
+        on_delete=models.PROTECT,
+        related_name="memberships",
+    )
+    cycle_course = models.ForeignKey(
+        CycleCourse,
+        on_delete=models.PROTECT,
+        related_name="equivalency_memberships",
+    )
+    # MariaDB permits multiple NULL values in this scoped uniqueness rule.
+    # The active membership uses 1; removed historical memberships use NULL.
+    active_marker = models.PositiveSmallIntegerField(null=True, blank=True, default=1)
+    added_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="added_exam_course_equivalency_memberships",
+    )
+    removed_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="removed_exam_course_equivalency_memberships",
+        null=True,
+        blank=True,
+    )
+    removed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "departmental_exam_course_equivalency_memberships"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "cycle_course"],
+                name="uq_de_equiv_member_group_course",
+            ),
+            models.UniqueConstraint(
+                fields=["cycle_course", "active_marker"],
+                name="uq_de_equiv_member_active_course",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        active_marker=1,
+                        removed_by__isnull=True,
+                        removed_at__isnull=True,
+                    )
+                    | models.Q(
+                        active_marker__isnull=True,
+                        removed_by__isnull=False,
+                        removed_at__isnull=False,
+                    )
+                ),
+                name="ck_de_equiv_member_lifecycle",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["group", "active_marker", "cycle_course"],
+                name="idx_de_equiv_member_group",
+            )
+        ]
+
+    def clean(self):
+        if (
+            self.group_id
+            and self.cycle_course_id
+            and self.cycle_course.cycle_id != self.group.cycle_id
+        ):
+            raise ValidationError(
+                {"cycle_course": "Member course must belong to the equivalency cycle."}
+            )
+        if self.active_marker == 1:
+            if self.removed_by_id or self.removed_at:
+                raise ValidationError("Active equivalency membership cannot be removed.")
+            if self.group_id and not self.group.is_active:
+                raise ValidationError("Inactive equivalency groups cannot retain active members.")
+        elif self.active_marker is None:
+            if not self.removed_by_id or not self.removed_at:
+                raise ValidationError("Removed equivalency membership requires actor and time.")
+        else:
+            raise ValidationError({"active_marker": "Active marker must be 1 or null."})
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        persisted = None
+        if self.pk:
+            persisted = type(self)._base_manager.filter(pk=self.pk).values(
+                *self._LIFECYCLE_FIELD_ATTNAMES.values()
+            ).first()
+        if persisted is None:
+            if not _equivalency_lifecycle_write_allowed():
+                raise ValidationError(
+                    "Create equivalency memberships through the protected equivalency service."
+                )
+        else:
+            saved_fields = None if update_fields is None else set(update_fields)
+            changed_lifecycle_fields = {
+                field_name
+                for field_name, attname in self._LIFECYCLE_FIELD_ATTNAMES.items()
+                if (
+                    saved_fields is None
+                    or field_name in saved_fields
+                    or attname in saved_fields
+                )
+                and persisted[attname] != getattr(self, attname)
+            }
+            if (
+                changed_lifecycle_fields
+                and not _equivalency_lifecycle_write_allowed()
+            ):
+                raise ValidationError(
+                    "Equivalency membership lifecycle changes must use the protected equivalency service."
+                )
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Equivalency membership history cannot be deleted through the ORM."
+        )
 
 
 class CycleCourseOffering(TimeStampedModel):
@@ -1481,9 +1875,20 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
             cycle_course = revision.cycle_course
             cycle = cycle_course.cycle
             offering = self.course_offering
+            from .exam_units import resolve_examination_unit
+
+            unit = resolve_examination_unit(cycle_course)
+            matching_member = next(
+                (
+                    member
+                    for member in unit.members
+                    if member.course_id == offering.course_id
+                ),
+                None,
+            )
             if (
                 offering.tenant_id != cycle.tenant_id
-                or offering.course_id != cycle_course.course_id
+                or matching_member is None
                 or offering.academic_year_id != cycle.academic_year_id
                 or offering.term_id != cycle.term_id
                 or offering.campus_id is None
@@ -1492,7 +1897,7 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
                     "Generation revision and course offering scope must match."
                 )
             elif not CycleCourseOffering.objects.filter(
-                cycle_course=cycle_course,
+                cycle_course=matching_member,
                 offering=offering,
                 campus_id=offering.campus_id,
             ).exists():

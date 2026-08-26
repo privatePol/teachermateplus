@@ -1,11 +1,30 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-08-25
+Last updated by Codex: 2026-08-26
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+### Course Equivalency Independent-Review Blocker Remediation
+- Date/gate/baseline: 2026-08-26 implementation/remediation plus focused validation in `D:\teachermateplus-exam-course-equivalency`, branch `feat/exam-course-equivalency`, unchanged full HEAD and local `origin/main` tracking ref `8438ac2b25ae1187695444b5d2279a238da2900d`. The existing uncommitted equivalency implementation was preserved and amended in place; `D:\teachermateplus` was not inspected or modified.
+- Completed: centralized complete-unit campus-union authorization in the existing `DepartmentalExamAuthorizationService`. Existing permission meanings, GLOBAL/NULL scope, feature gating, and direct-DENY precedence are preserved. Group create/replace/retire, Automatic regeneration/reopen, generated-output access, questionnaire release/revoke, Answer Key release/revoke, set-based list/summary authorization, and Automatic Generation Readiness now fail closed when any member campus is unauthorized or membership crosses the unit boundary.
+- Readiness: `AutomaticGenerationReadinessReport` now authorizes lightweight unit scope before loading combined data, expands selected members to their full unit, emits one deterministic primary row, uses only the primary current-generation state, aggregates member campus/roster/Submitted progress once, and calls pool feasibility once. Ordinary singleton rows and filter fail-closed behavior remain unchanged. A final bounded-query regression was fixed by resolving ordinary rows without per-course membership probes and caching grouped resolution.
+- Retirement: added `ExamCourseEquivalencyService.retire_group()` with deterministic locks, complete-unit authorization, OPEN/Automatic lifecycle checks, generation/questionnaire/Answer Key/automatic-processing freezes, 10-500 character reason, atomic historical membership removal, active-marker clearing, group actor/time/reason evidence, and existing audit logging. Model and database lifecycle checks prevent incomplete retirement evidence; model save guards prevent direct retirement/reactivation. After retirement, members resolve as ordinary singleton courses and may join a new valid group. No contribution, question, course, offering, enrollment, or Grade Book row is moved or rewritten.
+- Migration impact: modified only the unapplied new `departmental_exams.0021_examcourseequivalencygroup_and_more` migration. It still creates only the two new equivalency tables; retirement adds nullable `retired_by`/`retired_at`, `retirement_reason`, and one group lifecycle check. There is no data migration, seed, backfill, or existing-table ownership change. It remains unapplied to every normal database in this gate.
+- Exact remediation files: `CHANGE_LOG.md`; `HANDOFF.md`; `TEACHERMATEPLUS_CONTEXT.md`; `apps/departmental_exams/services.py`; `automatic_generation_readiness.py`; `generation_readiness.py`; `models.py`; new `exam_units.py`; new `migrations/0021_examcourseequivalencygroup_and_more.py`; and new `tests_exam_course_equivalency.py`.
+- Validation: equivalency plus complete Automatic Generation Readiness passed 83/83, zero failures/skips. Adjacent Stage 6 generation/regeneration, questionnaire release, Answer Key release, personalized answer sheets, and four Automatic workflow regressions passed 85/85 with one expected SQLite concurrency skip; one CSRF warning was emitted by the intentional missing-CSRF negative test. The final post-guard equivalency rerun passed 46/46. The earlier full readiness run found one query-growth failure (`77 <= 76` false); the scoped cache/singleton fix passed its exact 1/1 rerun and then the final 83/83 run. `git diff --check` exited zero with only LF-to-CRLF notices; `python -B manage.py check --no-color` reported zero issues; `makemigrations --check --dry-run --no-color` reported `No changes detected`; and read-only `migrate --plan --no-color` exited zero and listed the expected nine `departmental_exams.0021` operations. No migration was applied.
+- Pending/risks/next step: no browser smoke, MariaDB/InnoDB concurrency proof, broad full-repository suite, migration application, group seed, commit, push, deploy, or restart is authorized or performed. Next gate should be an independent read-only diff/security review, followed only by separately authorized migration/controlled group creation and release gates.
+
+### Minimal Departmental Exam Course Equivalency
+- Date/gate/baseline: 2026-08-25 implementation/remediation plus focused validation in clean isolated `D:\teachermateplus-exam-course-equivalency`, branch `feat/exam-course-equivalency`, unchanged full HEAD and fetched `origin/main` `8438ac2b25ae1187695444b5d2279a238da2900d`. The protected dirty `D:\teachermateplus` checkout remained on `feat/departmental-exam-builder-stage5-8` at `7b53ba85a7f38e445b772bf009403b2d06419233` with its exact pre-existing status preserved, including `logs/system.log`.
+- Completed architecture: added backend-only equivalency group/membership models and a transactionally locked service/resolver. Groups require an explicit shared name, record-driven primary, at least two deterministic active members, OPEN Automatic lifecycle, INCLUDED/same-cycle scope, compatible effective configurations, unique active membership, and no generation/release state before membership changes. No course-code/title inference, hardcoded NCBA pair, data move/copy, UI, menu, URL, Course Master, Grade Book, enrollment, assignment, PINNACLE, QR, or Manual Review redesign was added.
+- Runtime behavior: grouped readiness combines member Submitted pools, source-audit rows, contributor obligations, normalized logical duplicates, and the union of member campus snapshots, then applies final count, 30/50/20 difficulty, AVAILABLE_WITH_WARNING/STRICT, and Set A/B feasibility once. Membership plus every member configuration revision enters the input fingerprint. Deadline processing and Automatic summary deduplicate the unit; close/reopen updates all member configurations atomically. Generation locks in deterministic cycle/group/member/input order and produces one primary-owned revision with one Set A/B pair; secondary revisions fail closed. Questionnaire/Answer Key access maps eligible secondary contributions to the primary release, and personalized sheets validate the original secondary offering through its same-unit `CycleCourseOffering` snapshot without changing ownership.
+- Schema/migration: new additive `apps/departmental_exams/migrations/0021_examcourseequivalencygroup_and_more.py` creates `departmental_exam_course_equivalency_groups` and `departmental_exam_course_equivalency_memberships`, actor/timestamp/lifecycle fields, cycle-active and group-active indexes, unique cycle/name and group/member rules, one-active-membership-per-`CycleCourse`, and active/removed lifecycle consistency. It contains no data migration, seed pair, or backfill and remains unapplied to the normal database.
+- Changed files: `CHANGE_LOG.md`; `HANDOFF.md`; `TEACHERMATEPLUS_CONTEXT.md`; `apps/departmental_exams/models.py`; new `exam_units.py`; new migration `0021_examcourseequivalencygroup_and_more.py`; `generation_readiness.py`; `generation_services.py`; `automatic_workflow.py`; `questionnaire_printing.py`; `answer_key_release.py`; `personalized_answer_sheets.py`; and new `tests_exam_course_equivalency.py`.
+- Validation: final focused equivalency suite passed 29/29 in 114.005s with zero failures/skips. Existing ordinary Automatic reopen tests passed 2/2 in 18.080s. The affected six-module regression run discovered 146 tests and completed 143 passes, two failures, and one expected SQLite skip in 3211.627s; the feature-induced `process_due` fault-isolation/query issue was fixed and its exact regression plus grouped worker dedup passed on rerun. The remaining `test_query_bound_for_multiple_draft_courses_and_campuses` reaches and passes its query-bound assertion, then fails only a stale recommended-action text expectation; the untouched detached `origin/main` worktree reproduces the identical wording failure, so unrelated production wording was not changed. Grouped summary passes. Final `git diff --check` exited zero with LF/CRLF notices only; `python -B manage.py check` reported zero issues; `makemigrations --check --dry-run --no-color` reported `No changes detected`; and read-only `migrate --plan --no-color` exited zero with 819 lines and listed only the expected `departmental_exams.0021` equivalency operations from this feature.
+- Pending/risks/next step: no live/disposable MariaDB concurrency run, authenticated browser smoke, full repository suite, controlled creation of the two approved NCBA groups, migration application, or production data verification was performed. SQLite plus deterministic lock-order and uniqueness tests are not claimed as InnoDB scheduling proof. Next perform an independent read-only diff/security/concurrency review, then a separately authorized controlled group-creation/data-verification gate after migration deployment. No staging, commit, push, deployment, restart, normal-database mutation, log edit, `.env`/credential/secret access, or protected-worktree edit occurred.
+
 ### Faculty Question CSV String Sanitation
 - Date/gate/baseline: 2026-08-25 implementation/remediation in the clean isolated worktree `D:\teachermateplus-question-csv-string-sanitization`, branch `fix/question-csv-string-sanitization`, exact starting/current HEAD `9fa205806e523609aaa965f5e3e0445058a0d6ac` from freshly fetched `origin/main`. The protected dirty `D:\teachermateplus` worktree was not modified. No staging, commit, push, deployment, restart, normal-database migration, data cleanup, or existing-question rewrite occurred.
 - Completed: added a pure idempotent CSV-only sanitizer for parsed `question_text` and Choices A-D. TAB uses four-column expansion; CRLF/CR, vertical tab, and form feed become LF; NBSP becomes ASCII space; zero-width space and embedded BOM are removed. Repeated spaces, table alignment, meaningful/blank lines, academic Unicode, ZWNJ/ZWJ, and existing edge trim remain intact. Raw CSV/header structure is untouched, `correct_answer`/`difficulty` retain their existing validation, and the strict shared control/surrogate/bidi validator is unchanged.
@@ -3705,3 +3724,66 @@ Do not run this command in production. It refuses when `DEBUG=False`, but TEST d
 ### Exact Next Steps
 1. Inspect the complete diff and final repository status at the next review/commit gate.
 2. Obtain a separate authorization before applying the migration, committing, pushing, deploying, restarting, or changing excluded documentation.
+
+## 2026-08-26 - Exam course equivalency lifecycle hardening
+
+### Completed
+- Replaced the caller-set retirement flag with a task-local private capability used only around validated `ExamCourseEquivalencyService` writes.
+- Added model and QuerySet guards for group and membership lifecycle changes, including bulk updates and physical membership deletion.
+- Verified group QuerySet deletion remains blocked by membership `PROTECT` relationships.
+- Added regressions for direct lifecycle mutation, retirement, regrouping, freeze boundaries, audit rollback, and ownership preservation.
+
+### Changed Files This Session
+- `apps/departmental_exams/models.py`
+- `apps/departmental_exams/exam_units.py`
+- `apps/departmental_exams/tests_exam_course_equivalency.py`
+- `HANDOFF.md`
+
+### Validation Performed
+- `python -B manage.py check --no-color` - passed, no issues.
+- `python -B manage.py makemigrations --check --dry-run --no-color` - passed, no changes detected; migration `0021` was not changed.
+- `python -B manage.py migrate --plan --no-color` - passed; plan inspected only, with no migration applied.
+- Full equivalency module - 57 passed, 0 failed, 0 skipped.
+- Lifecycle-only matrix - 18 passed, 0 failed, 0 skipped.
+- Combined equivalency/readiness matrix - 94 passed, 0 failed, 0 skipped.
+- Affected generation/release matrix - 85 passed, 0 failed, 1 expected SQLite concurrency skip.
+- `git diff --check` - passed; only line-ending conversion warnings were emitted.
+
+### Known Issues / Risks
+- Protection covers normal Django model and ORM paths; it does not claim protection against raw SQL, database administrators, or intentional use of private internals.
+- No normal database migration, manual browser smoke test, commit, push, deploy, or restart was performed.
+
+### Exact Next Steps
+1. Perform the separately authorized independent diff review and commit-readiness gate.
+2. Apply migration `0021` only under a separately authorized migration gate.
+
+## 2026-08-26 - Exam course equivalency cycle immutability remediation
+
+### Completed
+- Added `cycle` and `cycle_id` to the existing group lifecycle protection so an equivalency group remains permanently bound to its creation cycle through model save, QuerySet update, and bulk update paths.
+- Preserved the existing private lifecycle capability and authorized create/replace/retire services without adding a second mutation mechanism.
+- Added focused regressions for direct cycle and cycle-ID saves, `update_fields`, QuerySet updates, bulk update, authorized creation/replace/retire, and group/membership bulk-create rejection.
+
+### Changed Files This Session
+- `apps/departmental_exams/models.py`
+- `apps/departmental_exams/tests_exam_course_equivalency.py`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
+
+### Validation Performed
+- `git diff --check` - passed with only existing LF-to-CRLF notices.
+- `python -B manage.py check --no-color` - passed, no issues.
+- `python -B manage.py makemigrations --check --dry-run --no-color` - passed, no changes detected; migration `0021` was unchanged.
+- `python -B manage.py migrate --plan --no-color` - exited zero and listed the same nine expected `departmental_exams.0021` operations; no migration was applied.
+- Ten newly added focused regressions - 10/10 passed in 24.424s.
+- Full equivalency module - 67/67 passed in 204.871s, with zero failures/skips.
+- Lifecycle-focused block - 28/28 passed in 68.087s, with zero failures/skips.
+
+### Known Issues / Risks
+- No migration change is expected because this remediation changes only model/QuerySet runtime guards and tests.
+- No normal database migration, commit, push, deploy, or restart is authorized in this gate.
+
+### Exact Next Steps
+1. Perform a new independent read-only review of the cycle-immutability remediation.
+2. If approved, proceed only under a separately authorized commit-preparation gate; apply migration `0021` only under its own migration gate.

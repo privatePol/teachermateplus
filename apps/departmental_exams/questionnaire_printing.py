@@ -12,6 +12,7 @@ from apps.core.services.audit import AuditService
 from apps.core.services.settings import SystemSettingService
 
 from .contribution_authorization import ContributionAuthorizationService
+from .exam_units import resolve_examination_unit
 from .models import (
     CycleCourse,
     ExamGenerationRevision,
@@ -403,7 +404,11 @@ class FacultyQuestionnairePrintService:
     def available_options(*, contributions, now=None):
         contributions = tuple(contributions)
         now = now or timezone.now()
-        course_ids = {row.cycle_course_id for row in contributions}
+        primary_by_contribution = {
+            row.id: resolve_examination_unit(row.cycle_course).primary.id
+            for row in contributions
+        }
+        course_ids = set(primary_by_contribution.values())
         releases = {
             row.cycle_course_id: row
             for row in QuestionnairePrintRelease.objects.filter(
@@ -417,7 +422,7 @@ class FacultyQuestionnairePrintService:
         }
         options = {}
         for contribution in contributions:
-            release = releases.get(contribution.cycle_course_id)
+            release = releases.get(primary_by_contribution[contribution.id])
             if not release or not ContributionAuthorizationService.has_retained_current_print_eligibility(
                 contribution=contribution
             ):
@@ -441,6 +446,7 @@ class FacultyQuestionnairePrintService:
         normalized_set = (set_code or "").upper()
         if normalized_set not in GeneratedExamSet.SetCode.values:
             raise Http404("Questionnaire set does not exist.")
+        primary_course = resolve_examination_unit(contribution.cycle_course).primary
         try:
             release = QuestionnairePrintRelease.objects.select_related(
                 "cycle_course__cycle__tenant",
@@ -450,9 +456,9 @@ class FacultyQuestionnairePrintService:
                 "generation_revision",
             ).get(
                 pk=release_id,
-                cycle_course=contribution.cycle_course,
+                cycle_course=primary_course,
                 cycle_course__cycle__tenant_id=contribution.cycle_course.cycle.tenant_id,
-                generation_revision__cycle_course=contribution.cycle_course,
+                generation_revision__cycle_course=primary_course,
             )
         except QuestionnairePrintRelease.DoesNotExist as exc:
             raise PermissionDenied("Questionnaire print release is unavailable.") from exc

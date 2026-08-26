@@ -12,9 +12,11 @@ from django.db.models import Prefetch
 from .blueprint_services import (
     STAGE6_CYCLE_NOT_OPEN_CODE,
     STAGE6_CYCLE_NOT_OPEN_MESSAGE,
+    ContributorRosterReadiness,
     ContributorRosterReadinessService,
     stage6_cycle_is_open,
 )
+from .exam_units import resolve_examination_unit
 from .contribution_services import QuestionPayloadService
 from .generation_algorithms import (
     AllocationError,
@@ -201,18 +203,22 @@ def _assignment_context_snapshot(contribution):
 
 def _assessed_submitted_question_pool(
     *,
-    cycle_course,
+    cycle_course=None,
+    cycle_courses=None,
     participating_codes=None,
     participating_campus_ids=None,
     include_source_audit=True,
 ):
+    if (cycle_course is None) == (cycle_courses is None):
+        raise ValueError("Provide exactly one course or examination-unit member list.")
+    member_courses = (cycle_course,) if cycle_course is not None else tuple(cycle_courses)
     if (participating_codes is None) == (participating_campus_ids is None):
         raise ValueError(
             "Provide exactly one participating-campus identity representation."
         )
     submitted_questions = list(
         Question.objects.filter(
-            contribution__cycle_course=cycle_course,
+            contribution__cycle_course__in=member_courses,
             contribution__status=FacultyContribution.Status.SUBMITTED,
         )
         .select_related(
@@ -370,6 +376,72 @@ class Stage6ReadinessService:
         if code not in {item["code"] for item in warnings}:
             warnings.append({"code": code, "message": message, **details})
 
+    @staticmethod
+    def evaluate_examination_unit_roster(*, unit):
+        configurations = {
+            row.cycle_course_id: row
+            for row in CourseExamConfiguration.objects.filter(
+                cycle_course_id__in=unit.member_ids
+            )
+        }
+        if any(member.id not in configurations for member in unit.members):
+            return None
+        member_rosters = tuple(
+            (
+                member.id,
+                ContributorRosterReadinessService.evaluate(
+                    cycle_course=member,
+                    configuration=configurations[member.id],
+                ),
+            )
+            for member in unit.members
+        )
+        if not unit.grouped:
+            return member_rosters[0][1]
+        return ContributorRosterReadiness(
+            current=all(row.current for _member_id, row in member_rosters),
+            stale_reasons=tuple(
+                dict.fromkeys(
+                    reason
+                    for _member_id, row in member_rosters
+                    for reason in row.stale_reasons
+                )
+            ),
+            required_active_count=sum(
+                row.required_active_count for _member_id, row in member_rosters
+            ),
+            submitted_required_count=sum(
+                row.submitted_required_count for _member_id, row in member_rosters
+            ),
+            incomplete_active_count=sum(
+                row.incomplete_active_count for _member_id, row in member_rosters
+            ),
+            blocked_draft_count=sum(
+                row.blocked_draft_count for _member_id, row in member_rosters
+            ),
+            unresolved_blocked_count=sum(
+                row.unresolved_blocked_count for _member_id, row in member_rosters
+            ),
+            boundary_sha256=_sha256_json(
+                [
+                    {
+                        "cycle_course_id": member_id,
+                        "boundary_sha256": row.boundary_sha256,
+                    }
+                    for member_id, row in member_rosters
+                ]
+            ),
+            live_sha256=_sha256_json(
+                [
+                    {
+                        "cycle_course_id": member_id,
+                        "live_sha256": row.live_sha256,
+                    }
+                    for member_id, row in member_rosters
+                ]
+            ),
+        )
+
     @classmethod
     def evaluate(cls, *, cycle_course):
         _problem, report = cls.build_problem(cycle_course=cycle_course)
@@ -405,6 +477,9 @@ class Stage6ReadinessService:
         automatic_max_states=None,
         question_pool_only=False,
     ):
+        unit = resolve_examination_unit(cycle_course)
+        cycle_course = unit.primary
+        unit_members = unit.members
         blockers = []
         warnings = []
         shortages = []
@@ -449,9 +524,7 @@ class Stage6ReadinessService:
 
         roster = None
         if configuration is not None and not question_pool_only:
-            roster = ContributorRosterReadinessService.evaluate(
-                cycle_course=cycle_course, configuration=configuration
-            )
+            roster = cls.evaluate_examination_unit_roster(unit=unit)
             if not roster.current:
                 cls._block(
                     blockers,
@@ -497,10 +570,11 @@ class Stage6ReadinessService:
         automatic_participating_ids = ()
         participating_codes = ()
         if automatic_flat_mode:
-            for campus_id, campus_name in cycle_course.offering_snapshots.order_by(
-                "campus_id", "id"
-            ).values_list("campus_id", "campus__name"):
-                automatic_campus_labels.setdefault(campus_id, campus_name)
+            for member in unit_members:
+                for campus_id, campus_name in member.offering_snapshots.order_by(
+                    "campus_id", "id"
+                ).values_list("campus_id", "campus__name"):
+                    automatic_campus_labels.setdefault(campus_id, campus_name)
             automatic_participating_ids = tuple(automatic_campus_labels)
             if not automatic_participating_ids:
                 cls._block(
@@ -566,7 +640,7 @@ class Stage6ReadinessService:
             invalid_question_count,
             source_audit_questions,
         ) = _assessed_submitted_question_pool(
-            cycle_course=cycle_course,
+            cycle_courses=unit_members,
             include_source_audit=not question_pool_only,
             **pool_kwargs,
         )
@@ -926,6 +1000,11 @@ class Stage6ReadinessService:
                         "tenant_id": cycle_course.cycle.tenant_id,
                         "cycle_id": cycle_course.cycle_id,
                         "cycle_course_id": cycle_course.id,
+                        **(
+                            {"examination_unit": unit.fingerprint_metadata()}
+                            if unit.grouped
+                            else {}
+                        ),
                         "configuration_revision": configuration.revision,
                         "purpose": "automatic-readiness",
                     },
@@ -1024,6 +1103,12 @@ class Stage6ReadinessService:
             "solver_states": solver_result.states_explored if solver_result else 0,
             "solver_limit_hit": solver_result.limit_hit if solver_result else False,
         }
+        if unit.grouped:
+            report["examination_unit"] = {
+                "group_id": unit.group.id,
+                "primary_cycle_course_id": unit.primary.id,
+                "member_cycle_course_ids": unit.member_ids,
+            }
         if question_pool_only:
             # Aggregate reporting stops after exact feasibility.  Do not assemble
             # a confidential GenerationProblem or generation-source snapshots.
@@ -1187,6 +1272,25 @@ class Stage6ReadinessService:
                     )
                 ],
             }
+            if unit.grouped:
+                member_configurations = {
+                    row.cycle_course_id: row
+                    for row in CourseExamConfiguration.objects.filter(
+                        cycle_course_id__in=unit.member_ids
+                    )
+                }
+                fingerprint_payload["examination_unit"] = {
+                    **unit.fingerprint_metadata(),
+                    "member_configurations": [
+                        {
+                            "cycle_course_id": member.id,
+                            "configuration_revision": member_configurations[
+                                member.id
+                            ].revision,
+                        }
+                        for member in unit.members
+                    ],
+                }
             if automatic_flat_mode:
                 fingerprint_payload["structure_mode"] = "AUTOMATIC_FLAT"
                 fingerprint_payload["automatic_dedupe_policy"] = "normalized-text-v3"

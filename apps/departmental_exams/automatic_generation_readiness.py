@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from urllib.parse import urlencode
 
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Prefetch
 from django.utils import timezone
 
-from .blueprint_services import ContributorRosterReadinessService
+from .exam_units import ExaminationUnit, resolve_examination_unit
 from .generation_readiness import Stage6ReadinessService
 from .models import (
     CycleCourse,
     CycleCourseOffering,
+    ExamCourseEquivalencyMembership,
     ExamGenerationRevision,
     ExaminationCycle,
     FacultyContribution,
@@ -46,33 +47,17 @@ class AutomaticGenerationReadinessReport:
                 ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
             ),
         )
-        scope_rows = CycleCourseOffering.objects.filter(
-            cycle_course__in=base,
-        ).values_list(
-            "cycle_course_id",
-            "cycle_course__inclusion_status",
-            "campus_id",
-        )
-        course_scopes = defaultdict(
-            lambda: {"inclusion_status": None, "campus_ids": set()}
-        )
-        for course_id, inclusion_status, campus_id in scope_rows:
-            course_scopes[course_id]["inclusion_status"] = inclusion_status
-            course_scopes[course_id]["campus_ids"].add(campus_id)
-
         permission = DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
-        permission_map = (
-            DepartmentalExamAuthorizationService.automatic_scope_permission_map(
-                user=self.user,
-                tenant_id=self.tenant_id,
-                course_scopes=course_scopes,
-                permissions=(permission,),
-                # Included rows use downstream generation-management authority;
-                # EXEMPT rows use the status-independent inclusion authority.  For
-                # the same permission/campus scopes, both resolve through this
-                # shared status-independent map.
-                require_included=False,
-            )
+        scoped_courses = list(
+            base.select_related("cycle").prefetch_related("offering_snapshots")
+        )
+        permission_map = DepartmentalExamAuthorizationService._automatic_permission_map(
+            user=self.user,
+            courses=scoped_courses,
+            permissions=(permission,),
+            # Ordinary EXEMPT rows retain their status-independent visibility;
+            # active equivalency groups are valid only when every member is Included.
+            require_included=False,
         )
         authorized_course_ids = {
             course_id
@@ -118,6 +103,23 @@ class AutomaticGenerationReadinessReport:
         }
 
     def _load_courses(self, *, course_ids):
+        selected_ids = tuple(course_ids)
+        group_ids = tuple(
+            ExamCourseEquivalencyMembership.objects.filter(
+                cycle_course_id__in=selected_ids,
+                active_marker=1,
+                group__is_active=True,
+            ).values_list("group_id", flat=True)
+        )
+        expanded_ids = set(selected_ids)
+        if group_ids:
+            expanded_ids.update(
+                ExamCourseEquivalencyMembership.objects.filter(
+                    group_id__in=group_ids,
+                    active_marker=1,
+                    group__is_active=True,
+                ).values_list("cycle_course_id", flat=True)
+            )
         contribution_queryset = (
             FacultyContribution.objects.select_related("faculty_user", "source_campus")
             .annotate(saved_question_count=Count("questions"))
@@ -132,7 +134,7 @@ class AutomaticGenerationReadinessReport:
         ).only("id", "cycle_course_id", "revision_number", "status", "current_marker")
         return list(
             CycleCourse.objects.filter(
-                pk__in=course_ids,
+                pk__in=expanded_ids,
                 cycle__tenant_id=self.tenant_id,
                 cycle__processing_mode=(
                     ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
@@ -156,6 +158,48 @@ class AutomaticGenerationReadinessReport:
                 ),
             )
             .order_by("course__code", "course_id")
+        )
+
+    @staticmethod
+    def _examination_units(*, courses, selected_ids):
+        courses_by_id = {course.id: course for course in courses}
+        group_by_course_id = dict(
+            ExamCourseEquivalencyMembership.objects.filter(
+                cycle_course_id__in=selected_ids,
+                active_marker=1,
+                group__is_active=True,
+            ).values_list("cycle_course_id", "group_id")
+        )
+        resolved_by_group_id = {}
+        units = {}
+        for selected_id in selected_ids:
+            requested = courses_by_id.get(selected_id)
+            if requested is None:
+                continue
+            group_id = group_by_course_id.get(selected_id)
+            if group_id is None:
+                resolved = ExaminationUnit(primary=requested, members=(requested,))
+            else:
+                resolved = resolved_by_group_id.get(group_id)
+                if resolved is None:
+                    resolved = resolve_examination_unit(requested)
+                    resolved_by_group_id[group_id] = resolved
+            unit = ExaminationUnit(
+                primary=courses_by_id[resolved.primary.id],
+                members=tuple(courses_by_id[member.id] for member in resolved.members),
+                group=resolved.group,
+                memberships=resolved.memberships,
+            )
+            units[(unit.group.id if unit.grouped else None, unit.primary.id)] = unit
+        return tuple(
+            sorted(
+                units.values(),
+                key=lambda unit: (
+                    unit.primary.course.code.casefold(),
+                    unit.primary.course_id,
+                    unit.primary.id,
+                ),
+            )
         )
 
     @staticmethod
@@ -309,10 +353,11 @@ class AutomaticGenerationReadinessReport:
         }
 
     @staticmethod
-    def _contribution_progress(*, course, configuration, participating_campuses):
+    def _contribution_progress(*, unit, configuration, participating_campuses):
         submitted_contributions = [
             contribution
-            for contribution in course.faculty_contributions.all()
+            for member in unit.members
+            for contribution in member.faculty_contributions.all()
             if contribution.status == FacultyContribution.Status.SUBMITTED
         ]
         submitted_question_volume = sum(
@@ -492,8 +537,13 @@ class AutomaticGenerationReadinessReport:
             return "WAITING FOR DEADLINE", ("Wait for the contribution deadline.",)
         return "READY FOR GENERATION", ("No action needed.",)
 
-    def _row(self, course):
-        snapshots = list(course.offering_snapshots.all())
+    def _row(self, unit):
+        course = unit.primary
+        snapshots = [
+            snapshot
+            for member in unit.members
+            for snapshot in member.offering_snapshots.all()
+        ]
         participating_campuses = tuple(
             sorted(
                 {
@@ -532,9 +582,7 @@ class AutomaticGenerationReadinessReport:
 
         pool = Stage6ReadinessService.evaluate_automatic_pool(cycle_course=course)
         roster = (
-            ContributorRosterReadinessService.evaluate(
-                cycle_course=course, configuration=configuration
-            )
+            Stage6ReadinessService.evaluate_examination_unit_roster(unit=unit)
             if configuration is not None
             else None
         )
@@ -542,7 +590,7 @@ class AutomaticGenerationReadinessReport:
             course=course, configuration=configuration, roster=roster
         )
         contribution_progress = self._contribution_progress(
-            course=course,
+            unit=unit,
             configuration=configuration,
             participating_campuses=participating_campuses,
         )
@@ -599,8 +647,10 @@ class AutomaticGenerationReadinessReport:
     def build(self):
         authorized_scope = self._authorized_scope()
         scope = self._filtered_scope(authorized_scope)
-        courses = self._load_courses(course_ids=scope.pop("course_ids"))
-        rows = [self._row(course) for course in courses]
+        selected_ids = tuple(scope.pop("course_ids"))
+        courses = self._load_courses(course_ids=selected_ids)
+        units = self._examination_units(courses=courses, selected_ids=selected_ids)
+        rows = [self._row(unit) for unit in units]
         status_counts = Counter(row["generation_status"] for row in rows)
         return {
             **scope,

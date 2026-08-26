@@ -20,9 +20,11 @@ from .generation_readiness import (
     resolve_automatic_generation_max_states,
 )
 from .generation_services import ExamGenerationService
+from .exam_units import ExaminationUnit, resolve_examination_unit
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
+    ExamCourseEquivalencyMembership,
     ExamGenerationRevision,
     ExaminationCycle,
     FacultyContribution,
@@ -517,6 +519,11 @@ class AutomaticExamDeadlineService:
     @classmethod
     def process_course(cls, *, cycle_course_id, tenant_id, now=None, max_states=None):
         now = now or timezone.now()
+        requested_course = CycleCourse.objects.select_related("cycle", "course").get(
+            pk=cycle_course_id,
+            cycle__tenant_id=tenant_id,
+        )
+        cycle_course_id = resolve_examination_unit(requested_course).primary.id
         preparation = cls._close_due_intake(
             cycle_course_id=cycle_course_id,
             tenant_id=tenant_id,
@@ -641,6 +648,14 @@ class AutomaticExamDeadlineService:
             cycle_course_id=cycle_course_id,
             tenant_id=tenant_id,
         )
+        unit = resolve_examination_unit(course, for_update=True)
+        configurations = {
+            row.cycle_course_id: row
+            for row in CourseExamConfiguration.objects.select_for_update()
+            .filter(cycle_course_id__in=unit.member_ids)
+            .order_by("cycle_course_id")
+        }
+        configuration = configurations.get(unit.primary.id)
         if not FeatureSettingsService.is_departmental_exam_builder_enabled(
             tenant_id=tenant_id
         ):
@@ -669,25 +684,40 @@ class AutomaticExamDeadlineService:
                 "Contribution deadline has not arrived.",
             )
         if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN:
-            configuration.workflow_status = CourseExamConfiguration.WorkflowStatus.CLOSED
-            configuration.closed_at = now
-            configuration.closed_by = None
-            configuration.revision += 1
-            configuration.save(
-                update_fields=[
-                    "workflow_status",
-                    "closed_at",
-                    "closed_by",
-                    "revision",
-                    "updated_at",
-                ]
-            )
-            cls._audit(
-                action="DE_EXAM_CONTRIBUTION_AUTOMATICALLY_CLOSED",
-                course=course,
-                configuration=configuration,
-                metadata={"deadline": deadline},
-            )
+            for member in unit.members:
+                member_configuration = configurations[member.id]
+                member_configuration.workflow_status = (
+                    CourseExamConfiguration.WorkflowStatus.CLOSED
+                )
+                member_configuration.closed_at = now
+                member_configuration.closed_by = None
+                member_configuration.revision += 1
+                member_configuration.save(
+                    update_fields=[
+                        "workflow_status",
+                        "closed_at",
+                        "closed_by",
+                        "revision",
+                        "updated_at",
+                    ]
+                )
+                cls._audit(
+                    action="DE_EXAM_CONTRIBUTION_AUTOMATICALLY_CLOSED",
+                    course=member,
+                    configuration=member_configuration,
+                    metadata={
+                        "deadline": deadline,
+                        **(
+                            {
+                                "equivalency_primary_cycle_course_id": (
+                                    unit.primary.id
+                                )
+                            }
+                            if unit.grouped
+                            else {}
+                        ),
+                    },
+                )
         elif configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.CLOSED:
             cls._record_status(
                 course=course,
@@ -720,12 +750,24 @@ class AutomaticExamDeadlineService:
             .values_list("id", "cycle__tenant_id")
             .order_by("id")
         )
+        primary_by_candidate = dict(
+            ExamCourseEquivalencyMembership.objects.filter(
+                cycle_course_id__in=[course_id for course_id, _tenant_id in candidates],
+                active_marker=1,
+                group__is_active=True,
+            ).values_list("cycle_course_id", "group__primary_cycle_course_id")
+        )
         results = []
+        processed_primary_ids = set()
         for course_id, tenant_id in candidates:
+            primary_id = primary_by_candidate.get(course_id, course_id)
             try:
+                if primary_id in processed_primary_ids:
+                    continue
+                processed_primary_ids.add(primary_id)
                 results.append(
                     cls.process_course(
-                        cycle_course_id=course_id,
+                        cycle_course_id=primary_id,
                         tenant_id=tenant_id,
                         now=now,
                         max_states=max_states,
@@ -735,18 +777,18 @@ class AutomaticExamDeadlineService:
                 logger.error(
                     "Automatic departmental-exam processing failed for tenant=%s course=%s error_type=%s.",
                     tenant_id,
-                    course_id,
+                    primary_id,
                     exc.__class__.__name__,
                 )
                 failure_result = AutomaticProcessingResult(
-                    course_id,
+                    primary_id,
                     "ERROR",
                     exc.__class__.__name__,
                     "Course processing failed; inspect the secured application log.",
                 )
                 try:
                     exempt_result = cls._record_error(
-                        cycle_course_id=course_id,
+                        cycle_course_id=primary_id,
                         tenant_id=tenant_id,
                         code=exc.__class__.__name__,
                         now=now,
@@ -757,7 +799,7 @@ class AutomaticExamDeadlineService:
                     logger.error(
                         "Automatic departmental-exam error recording failed for tenant=%s course=%s original_error_type=%s recording_error_type=%s.",
                         tenant_id,
-                        course_id,
+                        primary_id,
                         exc.__class__.__name__,
                         record_exc.__class__.__name__,
                     )
@@ -809,13 +851,27 @@ class AutomaticContributionReopenService:
             cycle_course_id=cycle_course_id,
             tenant_id=tenant_id,
         )
+        unit = resolve_examination_unit(course, for_update=True)
+        course = unit.primary
+        configurations = {
+            row.cycle_course_id: row
+            for row in CourseExamConfiguration.objects.select_for_update()
+            .filter(cycle_course_id__in=unit.member_ids)
+            .order_by("cycle_course_id")
+        }
+        configuration = configurations.get(course.id)
         DepartmentalExamAuthorizationService.require_generation_management(
             user=actor,
             cycle_course=course,
         )
         if cycle.status != ExaminationCycle.Status.OPEN:
             raise ValidationError("Only an Open cycle permits contribution reopen.")
-        if configuration is None or configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.CLOSED:
+        if configuration is None or any(
+            configurations.get(member.id) is None
+            or configurations[member.id].workflow_status
+            != CourseExamConfiguration.WorkflowStatus.CLOSED
+            for member in unit.members
+        ):
             raise ValidationError("Only a closed automatic contribution intake may be reopened.")
         if configuration.revision != expected_revision:
             raise CourseExamConfigurationConflict(
@@ -827,9 +883,13 @@ class AutomaticContributionReopenService:
 
         revisions = list(
             ExamGenerationRevision.objects.select_for_update()
-            .filter(cycle_course=course)
+            .filter(cycle_course_id__in=unit.member_ids)
             .order_by("revision_number")
         )
+        if any(row.cycle_course_id != course.id for row in revisions):
+            raise ValidationError(
+                "Secondary equivalency members cannot own generation revisions."
+            )
         current = next((row for row in revisions if row.current_marker == 1), None)
         if current and current.status == ExamGenerationRevision.Status.LOCKED:
             raise ValidationError("A permanently locked manual examination cannot be reopened.")
@@ -845,54 +905,64 @@ class AutomaticContributionReopenService:
                 metadata={"stale_after_reopen": True},
             )
 
-        before_revision = configuration.revision
-        configuration.workflow_status = CourseExamConfiguration.WorkflowStatus.OPEN
-        configuration.closed_at = None
-        configuration.closed_by = None
-        configuration.reopened_contribution_deadline = normalized_deadline
-        configuration.revision += 1
-        configuration.automatic_processing_status = ""
-        configuration.automatic_processing_code = ""
-        configuration.automatic_processed_at = None
-        configuration.save(
-            update_fields=[
-                "workflow_status",
-                "closed_at",
-                "closed_by",
-                "reopened_contribution_deadline",
-                "revision",
-                "automatic_processing_status",
-                "automatic_processing_code",
-                "automatic_processed_at",
-                "updated_at",
-            ]
-        )
-        ContributionRosterService._synchronize_locked(
-            cycle_course=course,
-            configuration=configuration,
-            actor=actor,
-            request=request,
-            initializing=False,
-        )
-        AuditService.log_event(
-            action="DE_EXAM_CONTRIBUTION_REOPENED",
-            portal="ADMIN",
-            entity_type="CourseExamConfiguration",
-            entity_id=configuration.id,
-            actor=actor,
-            tenant=tenant_id,
-            metadata={
-                "cycle_id": cycle.id,
-                "cycle_course_id": course.id,
-                "previous_configuration_revision": before_revision,
-                "resulting_configuration_revision": configuration.revision,
-                "new_deadline": normalized_deadline,
-                "superseded_generation_revision": (
-                    current.revision_number if current else None
-                ),
-            },
-            request=request,
-        )
+        for member in unit.members:
+            member_configuration = configurations[member.id]
+            before_revision = member_configuration.revision
+            member_configuration.workflow_status = (
+                CourseExamConfiguration.WorkflowStatus.OPEN
+            )
+            member_configuration.closed_at = None
+            member_configuration.closed_by = None
+            member_configuration.reopened_contribution_deadline = normalized_deadline
+            member_configuration.revision += 1
+            member_configuration.automatic_processing_status = ""
+            member_configuration.automatic_processing_code = ""
+            member_configuration.automatic_processed_at = None
+            member_configuration.save(
+                update_fields=[
+                    "workflow_status",
+                    "closed_at",
+                    "closed_by",
+                    "reopened_contribution_deadline",
+                    "revision",
+                    "automatic_processing_status",
+                    "automatic_processing_code",
+                    "automatic_processed_at",
+                    "updated_at",
+                ]
+            )
+            ContributionRosterService._synchronize_locked(
+                cycle_course=member,
+                configuration=member_configuration,
+                actor=actor,
+                request=request,
+                initializing=False,
+            )
+            AuditService.log_event(
+                action="DE_EXAM_CONTRIBUTION_REOPENED",
+                portal="ADMIN",
+                entity_type="CourseExamConfiguration",
+                entity_id=member_configuration.id,
+                actor=actor,
+                tenant=tenant_id,
+                metadata={
+                    "cycle_id": cycle.id,
+                    "cycle_course_id": member.id,
+                    **(
+                        {"equivalency_primary_cycle_course_id": course.id}
+                        if unit.grouped
+                        else {}
+                    ),
+                    "previous_configuration_revision": before_revision,
+                    "resulting_configuration_revision": member_configuration.revision,
+                    "new_deadline": normalized_deadline,
+                    "superseded_generation_revision": (
+                        current.revision_number if current else None
+                    ),
+                },
+                request=request,
+            )
+        configuration = configurations[course.id]
         return configuration
 
 
@@ -930,18 +1000,47 @@ class AutomaticGenerationSummaryService:
             )
             .order_by("course__code", "course_id")
         )
+        grouped_course_ids = set(
+            ExamCourseEquivalencyMembership.objects.filter(
+                cycle_course_id__in=[course.id for course in courses],
+                active_marker=1,
+                group__is_active=True,
+            ).values_list("cycle_course_id", flat=True)
+        )
         generated = []
         not_generated = []
         exempt = []
         last_processed_at = None
-        for course in courses:
+        summarized_primary_ids = set()
+        for requested_course in courses:
+            unit = (
+                resolve_examination_unit(requested_course)
+                if requested_course.id in grouped_course_ids
+                else ExaminationUnit(
+                    primary=requested_course,
+                    members=(requested_course,),
+                )
+            )
+            if unit.primary.id in summarized_primary_ids:
+                continue
+            summarized_primary_ids.add(unit.primary.id)
+            course = unit.primary
             campuses = tuple(
                 dict.fromkeys(
                     snapshot.campus.name
-                    for snapshot in course.offering_snapshots.all()
+                    for member in unit.members
+                    for snapshot in member.offering_snapshots.all()
                 )
             )
-            contributions = list(course.faculty_contributions.all())
+            contributions = (
+                list(
+                    FacultyContribution.objects.filter(
+                        cycle_course_id__in=unit.member_ids
+                    ).order_by("cycle_course_id", "id")
+                )
+                if unit.grouped
+                else list(course.faculty_contributions.all())
+            )
             configuration = getattr(course, "configuration", None)
             if configuration and configuration.automatic_processed_at:
                 last_processed_at = max(

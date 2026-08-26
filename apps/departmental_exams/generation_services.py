@@ -13,6 +13,7 @@ from apps.core.services.audit import AuditService
 
 from .blueprint_services import Stage6Conflict, require_stage6_open_cycle
 from .contribution_services import Stage5LockService
+from .exam_units import resolve_examination_unit
 from .generation_algorithms import (
     confidential_hmac_rank,
     order_selected_blocks,
@@ -30,6 +31,7 @@ from .generation_readiness import (
 )
 from .models import (
     BlockedContributionResolution,
+    CourseExamConfiguration,
     CycleCourse,
     ExamBlueprint,
     ExamGenerationRevision,
@@ -76,9 +78,28 @@ class ExamGenerationService:
 
     @classmethod
     def _lock_generation_inputs(cls, *, cycle_course_id, tenant_id):
+        requested_course = (
+            CycleCourse.objects.select_related("cycle", "course")
+            .filter(pk=cycle_course_id, cycle__tenant_id=tenant_id)
+            .first()
+        )
+        if requested_course is None:
+            raise Http404
+        ExaminationCycle.objects.select_for_update().get(pk=requested_course.cycle_id)
+        unit = resolve_examination_unit(requested_course, for_update=True)
         cycle, course, configuration = Stage5LockService.lock_cycle_course(
-            cycle_course_id=cycle_course_id,
+            cycle_course_id=unit.primary.id,
             tenant_id=tenant_id,
+        )
+        members = tuple(
+            CycleCourse.objects.select_for_update()
+            .filter(id__in=unit.member_ids)
+            .order_by("id")
+        )
+        list(
+            CourseExamConfiguration.objects.select_for_update()
+            .filter(cycle_course_id__in=unit.member_ids)
+            .order_by("cycle_course_id")
         )
         blueprint = None
         if (
@@ -114,7 +135,7 @@ class ExamGenerationService:
             )
         contributions = list(
             FacultyContribution.objects.select_for_update()
-            .filter(cycle_course=course)
+            .filter(cycle_course__in=members)
             .order_by("id")
         )
         list(
@@ -124,19 +145,26 @@ class ExamGenerationService:
         )
         list(
             BlockedContributionResolution.objects.select_for_update()
-            .filter(cycle_course=course)
+            .filter(cycle_course__in=members)
             .order_by("id")
         )
         list(
             Question.objects.select_for_update()
-            .filter(contribution__cycle_course=course)
+            .filter(contribution__cycle_course__in=members)
             .order_by("id")
         )
         revisions = list(
             ExamGenerationRevision.objects.select_for_update()
-            .filter(cycle_course=course)
+            .filter(cycle_course_id__in=unit.member_ids)
             .order_by("id")
         )
+        secondary_revision_ids = [
+            row.id for row in revisions if row.cycle_course_id != course.id
+        ]
+        if secondary_revision_ids:
+            raise GenerationConflict(
+                "Secondary equivalency members cannot own generation revisions."
+            )
         return cycle, course, configuration, blueprint, revisions
 
     @staticmethod
@@ -636,6 +664,7 @@ class ExamGenerationService:
 
     @staticmethod
     def current_for_course(*, cycle_course):
+        cycle_course = resolve_examination_unit(cycle_course).primary
         return (
             ExamGenerationRevision.objects.filter(
                 cycle_course=cycle_course,
