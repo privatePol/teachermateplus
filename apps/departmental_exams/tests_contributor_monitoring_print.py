@@ -192,18 +192,57 @@ class ContributorMonitoringPrintTests(Stage5FixtureMixin, Stage4TestCase):
         ]
         self.assertEqual(
             headers,
-            ["Contributor", "Campus", "Section", "Progress"] * 2,
+            ["Contributor", "Campus", "Section", "Progress", "Workflow"] * 2,
         )
         self.assertNotContains(response, "<th>Sources</th>", html=True)
         self.assertNotContains(response, "valid / 0 invalid")
-        self.assertNotIn("<th>Workflow</th>", html)
         self.assertNotIn("<th>Roster</th>", html)
         self.assertNotIn("<th>Deadline</th>", html)
         self.assertNotIn("Blocked Draft Resolution", html)
+        self.assertContains(
+            response,
+            '<tr><td colspan="5">No contributor records.</td></tr>',
+            html=True,
+        )
         report_second = next(
             course for course in response.context["courses"] if course.id == second.id
         )
         self.assertEqual(report_second.represented_offering_count, 1)
+
+    def test_workflow_uses_authoritative_status_not_numerical_progress(self):
+        Question.objects.bulk_create(
+            [
+                Question(
+                    contribution=self.contribution,
+                    question_text=f"Question {position}",
+                    choice_a="A",
+                    choice_b="B",
+                    choice_c="C",
+                    choice_d="D",
+                    correct_answer="A",
+                    difficulty=Question.Difficulty.EASY,
+                    position=position,
+                )
+                for position in range(1, 51)
+            ]
+        )
+        self.client.force_login(self.configurer)
+
+        draft_response = self.client.get(self.url)
+
+        self.assertContains(draft_response, "50 / 50 (100%)")
+        self.assertContains(draft_response, "<td>Draft</td>", html=True)
+        self.assertNotContains(draft_response, "<td>Submitted</td>", html=True)
+
+        self.contribution.status = FacultyContribution.Status.SUBMITTED
+        self.contribution.submitted_at = timezone.now()
+        self.contribution.save(update_fields=["status", "submitted_at", "updated_at"])
+
+        submitted_response = self.client.get(self.url)
+
+        self.assertContains(submitted_response, "50 / 50 (100%)")
+        self.assertContains(submitted_response, "<td>Submitted</td>", html=True)
+        self.assertNotContains(submitted_response, "<td>Draft</td>", html=True)
 
     def test_campus_and_section_use_only_current_exact_assignment_sources(self):
         first_offering = self.parent.offering_snapshots.select_related(

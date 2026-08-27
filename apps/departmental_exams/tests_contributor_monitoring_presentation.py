@@ -155,7 +155,10 @@ class ContributorMonitoringPresentationTests(Stage5FixtureMixin, Stage4TestCase)
                 flags=re.DOTALL,
             )
         ]
-        self.assertEqual(print_headers, ["Contributor", "Campus", "Section", "Progress"])
+        self.assertEqual(
+            print_headers,
+            ["Contributor", "Campus", "Section", "Progress", "Workflow"],
+        )
 
         action_response = self.client.get(
             reverse(
