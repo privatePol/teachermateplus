@@ -3,7 +3,7 @@ import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import Http404
@@ -14,6 +14,7 @@ from django.utils import timezone
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 
+from .contribution_forms import QuestionDOCXRowForm
 from .docx_import import QuestionDOCXImportService, QuestionDOCXParser
 from .models import FacultyContribution, Question, QuestionImportBatch, QuestionImportRow
 from .stage4_test_support import Stage4TestCase
@@ -35,6 +36,10 @@ DOCUMENT_RELS = """<?xml version="1.0" encoding="UTF-8"?>
 {relationships}
 </Relationships>"""
 MAIN_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+CORE_PROPERTIES_TYPE = "application/vnd.openxmlformats-package.core-properties+xml"
+CORE_PROPERTIES_RELATIONSHIP = (
+    "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"
+)
 WORDPROCESSINGML = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 WORD_RELATIONSHIPS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 NOTE_PARTS = {
@@ -472,6 +477,38 @@ class DOCXParserTests(SimpleTestCase):
             "exactly one standard internal relationship",
         )
 
+    def test_accepts_standard_package_core_properties_relationship(self):
+        parsed = QuestionDOCXParser.parse(make_docx(
+            VALID_QUESTION_PARAGRAPHS,
+            content_types_extra=(
+                '<Override PartName="/docProps/core.xml" '
+                f'ContentType="{CORE_PROPERTIES_TYPE}"/>'
+            ),
+            rels_extra=(
+                '<Relationship Id="rId2" '
+                f'Type="{CORE_PROPERTIES_RELATIONSHIP}" '
+                'Target="docProps/core.xml"/>'
+            ),
+            extra_members=[(
+                "docProps/core.xml",
+                '<cp:coreProperties '
+                'xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"/>',
+            )],
+        ))
+        self.assertEqual(parsed.error_count, 0)
+        self.assertEqual(len(parsed.data_rows), 1)
+
+    def test_rejects_actual_embedded_package_relationship_type(self):
+        embedded_package = (
+            '<Relationship Id="rId2" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" '
+            'Target="customXml/item1.xml"/>'
+        )
+        self.assert_file_rejected(
+            make_docx(VALID_QUESTION_PARAGRAPHS, rels_extra=embedded_package),
+            "embedded packages",
+        )
+
     def test_valid_one_and_multiple_questions_preserve_unicode_spaces_and_lines(self):
         parsed = QuestionDOCXParser.parse(make_docx([
             "1. What  is π?\nKeep this line.", "A. 3", "B. 3.  14", "C. 4", "D. 5", "Answer: B", "Difficulty: Moderate",
@@ -481,7 +518,9 @@ class DOCXParserTests(SimpleTestCase):
         self.assertEqual(len(parsed.data_rows), 2)
         self.assertEqual(parsed.data_rows[0].payload["question_text"], "What  is π?\nKeep this line.")
         self.assertEqual(parsed.data_rows[0].payload["choice_b"], "3.  14")
+        self.assertEqual(parsed.data_rows[0].payload["difficulty"], Question.Difficulty.MODERATE)
         self.assertEqual(parsed.data_rows[1].payload["question_text"], "Ano ang résumé?")
+        self.assertEqual(parsed.data_rows[1].payload["difficulty"], Question.Difficulty.EASY)
 
     def test_rejects_symbol_font_run_instead_of_silently_dropping_it(self):
         body = (
@@ -574,6 +613,18 @@ class DOCXParserTests(SimpleTestCase):
         self.assertTrue({"correct_answer", "difficulty"}.issubset(fields))
         self.assertEqual(parsed.data_rows[0].payload["question_text"], "Missing metadata?")
 
+    def test_missing_difficulty_only_reaches_editable_preview_without_default(self):
+        parsed = QuestionDOCXParser.parse(make_docx([
+            "1. Difficulty will be selected during review?",
+            "A. One", "B. Two", "C. Three", "D. Four", "Answer: A",
+        ]))
+        self.assertEqual(len(parsed.data_rows), 1)
+        row = parsed.data_rows[0]
+        fields = {item["field"] for item in row.errors}
+        self.assertEqual(fields, {"difficulty"})
+        self.assertEqual(row.payload["correct_answer"], "A")
+        self.assertEqual(row.payload["difficulty"], "")
+
     def test_shared_answer_difficulty_and_choice_validation_remains_authoritative(self):
         parsed = QuestionDOCXParser.parse(make_docx([
             "1. Invalid fields", "A. Same", "B. Same", "C. Three", "D. Four",
@@ -640,6 +691,46 @@ class DOCXParserTests(SimpleTestCase):
         self.assert_file_rejected(make_docx(["Answer Key:", "1. B"]), "Answer keys")
 
 
+class DOCXRowFormTests(SimpleTestCase):
+    @staticmethod
+    def payload(**overrides):
+        payload = {
+            "expected_contribution_revision": 1,
+            "question_text": "Choose a difficulty explicitly.",
+            "choice_a": "Alpha",
+            "choice_b": "Beta",
+            "choice_c": "Gamma",
+            "choice_d": "Delta",
+            "correct_answer": "A",
+            "difficulty": "",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_difficulty_choices_start_with_required_blank_prompt(self):
+        form = QuestionDOCXRowForm(
+            initial={"expected_contribution_revision": 1, "difficulty": ""}
+        )
+        self.assertEqual(
+            list(form.fields["difficulty"].choices),
+            [
+                ("", "Select difficulty"),
+                (Question.Difficulty.EASY, "Easy"),
+                (Question.Difficulty.MODERATE, "Moderate"),
+                (Question.Difficulty.DIFFICULT, "Difficult"),
+            ],
+        )
+        self.assertTrue(form.fields["difficulty"].required)
+        self.assertFalse(QuestionDOCXRowForm(data=self.payload()).is_valid())
+
+    def test_each_authoritative_difficulty_requires_and_preserves_explicit_selection(self):
+        for difficulty in Question.Difficulty.values:
+            with self.subTest(difficulty=difficulty):
+                form = QuestionDOCXRowForm(data=self.payload(difficulty=difficulty))
+                self.assertTrue(form.is_valid(), form.errors)
+                self.assertEqual(form.cleaned_data["difficulty"], difficulty)
+
+
 class DOCXImportServiceTests(Stage5FixtureMixin, Stage4TestCase):
     def setUp(self):
         super().setUp()
@@ -690,6 +781,53 @@ class DOCXImportServiceTests(Stage5FixtureMixin, Stage4TestCase):
         )
         self.assertEqual(batch.status, QuestionImportBatch.Status.READY)
         self.assertEqual(row.errors, [])
+
+    def test_missing_difficulty_edit_requires_explicit_selection(self):
+        batch = self.preview([
+            "1. Select difficulty during review?", "A. One", "B. Two",
+            "C. Three", "D. Four", "Answer: A",
+        ])
+        self.client.force_login(self.faculty)
+        edit_url = reverse(
+            "departmental_exams:docx_row_edit", args=[batch.token, 2]
+        )
+        response = self.client.get(edit_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, '<option value="" selected>Select difficulty</option>', html=True
+        )
+        self.assertNotContains(
+            response, '<option value="EASY" selected>Easy</option>', html=True
+        )
+
+        rejected = self.client.post(edit_url, {
+            "expected_contribution_revision": self.contribution.revision,
+            "question_text": "Select difficulty during review?",
+            "choice_a": "One", "choice_b": "Two", "choice_c": "Three",
+            "choice_d": "Four", "correct_answer": "A", "difficulty": "",
+        })
+        self.assertEqual(rejected.status_code, 400)
+        self.assertContains(rejected, "This field is required", status_code=400)
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, QuestionImportBatch.Status.INVALID)
+
+    def test_missing_difficulty_cannot_be_confirmed_or_imported(self):
+        batch = self.preview([
+            "1. Import must remain blocked?", "A. One", "B. Two",
+            "C. Three", "D. Four", "Answer: A",
+        ])
+        self.assertEqual(batch.status, QuestionImportBatch.Status.INVALID)
+        with self.assertRaisesMessage(
+            ValidationError, "Only a valid resumable preview can be imported."
+        ):
+            QuestionDOCXImportService.confirm(
+                token=batch.token,
+                expected_file_sha256=batch.file_sha256,
+                user=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+            )
+        self.assertFalse(Question.objects.filter(import_batch=batch).exists())
 
     def test_import_uses_docx_provenance_positions_revision_cleanup_and_remains_draft(self):
         paragraphs = self.valid_paragraphs(1, "First") + self.valid_paragraphs(2, "Second")

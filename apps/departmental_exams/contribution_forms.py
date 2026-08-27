@@ -86,6 +86,10 @@ class QuestionDOCXUploadForm(ContributionRevisionForm):
 
 class QuestionDOCXRowForm(QuestionForm):
     expected_question_revision = None
+    difficulty = forms.ChoiceField(
+        choices=(("", "Select difficulty"), *Question.Difficulty.choices),
+        required=True,
+    )
 
 
 class ContributionSubmitForm(ContributionRevisionForm):

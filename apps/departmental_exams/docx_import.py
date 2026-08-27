@@ -513,8 +513,9 @@ class QuestionDOCXParser:
                         )
                     note_relationships[label].append(resolved_target)
                     continue
+                relationship_kind = folded_rel_type.rstrip("/").rsplit("/", 1)[-1]
                 if any(
-                    marker in folded_rel_type
+                    marker in relationship_kind
                     for marker in (
                         "image", "oleobject", "package", "activex", "afchunk", "chart",
                         "header", "footer", "footnotes", "endnotes", "comments",

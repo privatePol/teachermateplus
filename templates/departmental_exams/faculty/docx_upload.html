@@ -4,11 +4,11 @@
 <div data-import-page>
   <h1 class="h3">Step 1 — Upload Word File</h1>
   <div class="alert alert-info">
-    Upload a standard macro-free <code>.docx</code> containing typed question numbers, typed choices A-D, <code>Answer:</code>, and <code>Difficulty:</code> paragraphs. Missing answer or difficulty may be fixed in Step 2. Maximum 2 MB and 200 detected questions; the remaining quota is still authoritative.
+    Upload a standard macro-free <code>.docx</code> containing typed question numbers, typed choices A-D, and <code>Answer:</code> paragraphs. <code>Difficulty:</code> may be included in the file or selected in Step 2; no default is inferred. Missing answer or difficulty must be fixed before import. Maximum 2 MB and 200 detected questions; the remaining quota is still authoritative.
     You have {{ saved_count }} of {{ contribution.quota_snapshot }} questions saved, leaving {{ remaining }} slots.
   </div>
   <div class="alert alert-warning">
-    V1 rejects legacy or macro-enabled Word files, templates, RTF, ODT, PDF, tables, automatic lists, images, drawings, equations, text boxes, footnotes/endnotes, comments/tracked changes, external links, embedded objects, altChunk, and end-of-document answer keys. It never runs Word, LibreOffice, macros, or external resources.
+    V1 rejects legacy or macro-enabled Word files, templates, RTF, ODT, PDF, tables, automatic lists, images, drawings, equations, text boxes, authored footnotes/endnotes, comments/tracked changes, external links, embedded objects, altChunk, and end-of-document answer keys. It never runs Word, LibreOffice, macros, or external resources.
   </div>
   <div class="alert alert-danger" data-import-error role="alert" hidden></div>
   <form method="post" enctype="multipart/form-data" class="card shadow-sm" data-question-upload-form data-import-mode="docx" data-import-label="Word file" novalidate><div class="card-body">
