@@ -2,6 +2,8 @@ import importlib.util
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DJANGO_ENV = os.getenv("DJANGO_ENV", "local").lower()
@@ -12,6 +14,17 @@ def env_bool(name, default=False):
     if value is None:
         return default
     return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def env_positive_int(name, default):
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ImproperlyConfigured(f"{name} must be a positive integer.") from exc
+    if value <= 0:
+        raise ImproperlyConfigured(f"{name} must be a positive integer.")
+    return value
 
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-this-in-production")
@@ -137,6 +150,10 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = os.getenv("DJANGO_TIME_ZONE", "Asia/Manila")
+DEPARTMENTAL_EXAM_AUTOMATIC_COURSE_TIMEOUT_SECONDS = env_positive_int(
+    "DEPARTMENTAL_EXAM_AUTOMATIC_COURSE_TIMEOUT_SECONDS",
+    300,
+)
 USE_I18N = True
 USE_TZ = True
 

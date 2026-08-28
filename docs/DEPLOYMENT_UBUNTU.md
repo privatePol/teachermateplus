@@ -739,6 +739,7 @@ sudo -u teachermateplus crontab -l
 
 Current scheduled jobs:
 
+- `process_departmental_exam_deadlines` (every five minutes under `flock`; each examination-unit primary runs in a spawned child with `DEPARTMENTAL_EXAM_AUTOMATIC_COURSE_TIMEOUT_SECONDS`, default `300`. Invalid or non-positive values stop application startup. A timed-out child is terminated, then force-killed after a short grace if necessary; the parent records a content-safe terminal timeout and continues with later courses.)
 - `auto_lock_period_deadlines`
 - `auto_lapse_correction_windows`
 - `queue_period_reminders`

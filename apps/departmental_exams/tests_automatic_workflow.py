@@ -1,11 +1,13 @@
 from unittest.mock import patch
 from io import StringIO
 from collections import Counter
+import multiprocessing
+import time
 from time import perf_counter
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
@@ -28,6 +30,12 @@ from .automatic_workflow import (
     AutomaticExamDeadlineService,
     AutomaticGenerationSummaryService,
     AutomaticProcessingResult,
+)
+from .automatic_processing_isolation import (
+    AUTOMATIC_PROCESSING_TIMEOUT_CODE,
+    ProcessIsolatedAutomaticCourseRunner,
+    WallClockProcessController,
+    resolve_automatic_course_timeout_seconds,
 )
 from .approval_services import ExamApprovalLockService
 from .blueprint_services import (
@@ -1655,6 +1663,259 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertEqual([item.status for item in results], ["ERROR", "GENERATED"])
         self.assertEqual(logger_error.call_count, 2)
 
+    def test_process_due_persists_timeout_and_continues_to_next_course(self):
+        first, first_configuration, _campuses, _offerings = (
+            self.make_stage6_open_course()
+        )
+        second = self.make_course(cycle=first.cycle, code="S6-NEXT")
+        second_configuration = self.make_configuration(
+            second,
+            workflow=CourseExamConfiguration.WorkflowStatus.OPEN,
+            opened_at=timezone.now(),
+        )
+        self._automatic(first)
+        now = timezone.now()
+        CourseExamConfiguration.objects.filter(
+            pk__in=(first_configuration.pk, second_configuration.pk)
+        ).update(contribution_deadline=now - timezone.timedelta(minutes=1))
+        self.assertIsNone(
+            AutomaticExamDeadlineService._close_due_intake(
+                cycle_course_id=first.id,
+                tenant_id=self.tenant.id,
+                now=now,
+            )
+        )
+
+        class FakeConnection:
+            def close(self):
+                return None
+
+        class HangingProcess:
+            def __init__(self, *, name):
+                self.name = name
+                self.exitcode = None
+                self.alive = False
+                self.terminated = False
+                self.closed = False
+
+            def start(self):
+                self.alive = True
+
+            def join(self, _timeout):
+                return None
+
+            def is_alive(self):
+                return self.alive
+
+            def terminate(self):
+                self.terminated = True
+                self.exitcode = -15
+                self.alive = False
+
+            def kill(self):
+                self.exitcode = -9
+                self.alive = False
+
+            def close(self):
+                self.closed = True
+
+        class HangingContext:
+            def __init__(self):
+                self.process = None
+
+            @staticmethod
+            def Pipe(*, duplex):
+                assert duplex is False
+                return FakeConnection(), FakeConnection()
+
+            def Process(self, *, target, args, kwargs, name):
+                self.process = HangingProcess(name=name)
+                return self.process
+
+        hanging_context = HangingContext()
+        timeout_runner = ProcessIsolatedAutomaticCourseRunner(
+            timeout_seconds=0.1,
+            termination_grace_seconds=0.1,
+            context=hanging_context,
+        )
+
+        processed_ids = []
+
+        def processor(*, cycle_course_id, tenant_id, now, max_states):
+            processed_ids.append(cycle_course_id)
+            if cycle_course_id == first.id:
+                return timeout_runner(
+                    cycle_course_id=cycle_course_id,
+                    tenant_id=tenant_id,
+                    now=now,
+                    max_states=max_states,
+                )
+            return AutomaticProcessingResult(
+                cycle_course_id,
+                "GENERATED",
+                "GENERATED",
+                "Set A and Set B generated.",
+                1,
+            )
+
+        results = AutomaticExamDeadlineService.process_due(
+            now=now,
+            course_processor=processor,
+        )
+
+        first_configuration.refresh_from_db()
+        self.assertEqual(processed_ids, [first.id, second.id])
+        self.assertEqual(
+            [result.code for result in results],
+            [AUTOMATIC_PROCESSING_TIMEOUT_CODE, "GENERATED"],
+        )
+        self.assertEqual(
+            first_configuration.workflow_status,
+            CourseExamConfiguration.WorkflowStatus.CLOSED,
+        )
+        self.assertEqual(
+            first_configuration.automatic_processing_status,
+            CourseExamConfiguration.AutomaticProcessingStatus.ERROR,
+        )
+        self.assertEqual(
+            first_configuration.automatic_processing_code,
+            AUTOMATIC_PROCESSING_TIMEOUT_CODE,
+        )
+        self.assertEqual(first_configuration.automatic_processed_at, now)
+        self.assertFalse(
+            ExamGenerationRevision.objects.filter(cycle_course=first).exists()
+        )
+        self.assertFalse(
+            GeneratedExamSet.objects.filter(
+                generation_revision__cycle_course=first
+            ).exists()
+        )
+        self.assertTrue(hanging_context.process.terminated)
+        self.assertFalse(hanging_context.process.is_alive())
+        self.assertTrue(hanging_context.process.closed)
+
+    def test_closed_terminal_rows_are_not_reprocessed_until_lifecycle_reset(self):
+        parent, configuration, _problem = self._ready_automatic_course()
+        processed_at = timezone.now()
+
+        for status, code in (
+            (
+                CourseExamConfiguration.AutomaticProcessingStatus.BLOCKED,
+                "QUESTION_SHORTAGES",
+            ),
+            (
+                CourseExamConfiguration.AutomaticProcessingStatus.ERROR,
+                AUTOMATIC_PROCESSING_TIMEOUT_CODE,
+            ),
+            (
+                CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED,
+                "CURRENT_GENERATION_EXISTS",
+            ),
+        ):
+            with self.subTest(status=status):
+                CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
+                    workflow_status=CourseExamConfiguration.WorkflowStatus.CLOSED,
+                    automatic_processing_status=status,
+                    automatic_processing_code=code,
+                    automatic_processed_at=processed_at,
+                )
+                with patch.object(
+                    AutomaticExamDeadlineService,
+                    "process_course",
+                    side_effect=AssertionError("terminal course was reprocessed"),
+                ) as process_course:
+                    results = AutomaticExamDeadlineService.process_due(now=processed_at)
+                self.assertEqual(results, [])
+                process_course.assert_not_called()
+
+    def test_wall_clock_controller_terminates_slow_child_without_orphan(self):
+        child_name = "departmental-exam-timeout-regression"
+        controller = WallClockProcessController(
+            timeout_seconds=0.1,
+            termination_grace_seconds=1,
+            context=multiprocessing.get_context("spawn"),
+        )
+        started = perf_counter()
+
+        outcome = controller.run(
+            target=time.sleep,
+            args=(30,),
+            name=child_name,
+        )
+
+        self.assertTrue(outcome.timed_out)
+        self.assertIsNotNone(outcome.exitcode)
+        self.assertLess(perf_counter() - started, 10)
+        self.assertNotIn(
+            child_name,
+            {child.name for child in multiprocessing.active_children()},
+        )
+
+    def test_wall_clock_controller_force_kills_child_that_ignores_terminate(self):
+        class ResistantProcess:
+            name = "departmental-exam-resistant-child"
+            exitcode = None
+
+            def __init__(self):
+                self.alive = False
+                self.terminated = False
+                self.killed = False
+                self.closed = False
+
+            def start(self):
+                self.alive = True
+
+            def join(self, _timeout):
+                return None
+
+            def is_alive(self):
+                return self.alive
+
+            def terminate(self):
+                self.terminated = True
+
+            def kill(self):
+                self.killed = True
+                self.exitcode = -9
+                self.alive = False
+
+            def close(self):
+                self.closed = True
+
+        class ResistantContext:
+            def __init__(self):
+                self.process = ResistantProcess()
+
+            def Process(self, **_kwargs):
+                return self.process
+
+        context = ResistantContext()
+        controller = WallClockProcessController(
+            timeout_seconds=0.1,
+            termination_grace_seconds=0.1,
+            context=context,
+        )
+
+        outcome = controller.run(target=time.sleep, args=(30,))
+
+        self.assertTrue(outcome.timed_out)
+        self.assertTrue(context.process.terminated)
+        self.assertTrue(context.process.killed)
+        self.assertFalse(context.process.is_alive())
+        self.assertTrue(context.process.closed)
+
+    def test_timeout_configuration_defaults_and_rejects_invalid_values(self):
+        self.assertEqual(
+            settings.DEPARTMENTAL_EXAM_AUTOMATIC_COURSE_TIMEOUT_SECONDS,
+            300,
+        )
+        self.assertEqual(resolve_automatic_course_timeout_seconds(), 300)
+        for invalid in (0, -1, "invalid", float("inf"), True):
+            with self.subTest(invalid=invalid), override_settings(
+                DEPARTMENTAL_EXAM_AUTOMATIC_COURSE_TIMEOUT_SECONDS=invalid
+            ), self.assertRaises(ImproperlyConfigured):
+                resolve_automatic_course_timeout_seconds()
+
     def test_command_finishes_all_courses_and_exits_nonzero_on_error(self):
         results = [
             AutomaticProcessingResult(
@@ -1684,7 +1945,50 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         output = stdout.getvalue()
         self.assertIn("course=11 status=ERROR code=RuntimeError", output)
         self.assertIn("course=22 status=GENERATED code=GENERATED R1", output)
+        self.assertIn("timeouts=0", output)
         self.assertNotIn("isolated failure", output)
+
+    def test_command_reports_timeout_count_after_later_course(self):
+        results = [
+            AutomaticProcessingResult(
+                11,
+                "ERROR",
+                AUTOMATIC_PROCESSING_TIMEOUT_CODE,
+                (
+                    "Automatic generation exceeded the per-course processing time "
+                    "limit. Administrator review is required."
+                ),
+            ),
+            AutomaticProcessingResult(
+                22,
+                "GENERATED",
+                "GENERATED",
+                "Set A and Set B generated.",
+                1,
+            ),
+        ]
+        stdout = StringIO()
+        with patch.object(
+            AutomaticExamDeadlineService,
+            "process_due",
+            return_value=results,
+        ) as process_due, self.assertRaises(CommandError):
+            call_command(
+                "process_departmental_exam_deadlines",
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        self.assertIn(
+            f"course=11 status=ERROR code={AUTOMATIC_PROCESSING_TIMEOUT_CODE}",
+            output,
+        )
+        self.assertIn("course=22 status=GENERATED code=GENERATED R1", output)
+        self.assertIn("error=1 generated=1 timeouts=1", output)
+        self.assertIsInstance(
+            process_due.call_args.kwargs["course_processor"],
+            ProcessIsolatedAutomaticCourseRunner,
+        )
 
     def test_solver_failure_does_not_rollback_automatic_close(self):
         parent, configuration, _campuses, _offerings = self.make_stage6_open_course()
@@ -1768,6 +2072,9 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         r1 = ExamGenerationRevision.objects.get(revision_number=1)
         self.assertEqual((r1.status, r1.current_marker), ("SUPERSEDED", None))
         self.assertEqual(reopened.workflow_status, "OPEN")
+        self.assertEqual(reopened.automatic_processing_status, "")
+        self.assertEqual(reopened.automatic_processing_code, "")
+        self.assertIsNone(reopened.automatic_processed_at)
         self.assertEqual(
             set(
                 FacultyContribution.objects.filter(
@@ -1970,6 +2277,36 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                 row = response.context["not_generated"][0]
                 self.assertEqual(row["status"], status.title())
                 self.assertIn(expected_reason, row["reason"])
+
+    def test_persisted_timeout_has_distinct_summary_reason_and_recommendation(self):
+        parent, configuration, _problem = self._ready_automatic_course(
+            clear_manual_assignment=False
+        )
+        CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
+            automatic_processing_status=(
+                CourseExamConfiguration.AutomaticProcessingStatus.ERROR
+            ),
+            automatic_processing_code=AUTOMATIC_PROCESSING_TIMEOUT_CODE,
+            automatic_processed_at=timezone.now(),
+        )
+
+        with patch.object(
+            Stage6ReadinessService,
+            "evaluate_automatic_pool",
+            side_effect=AssertionError("timeout row reassessed the live pool"),
+        ):
+            summary = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
+
+        row = summary["not_generated"][0]
+        self.assertEqual(row["blocker_code"], AUTOMATIC_PROCESSING_TIMEOUT_CODE)
+        self.assertEqual(
+            row["reason"],
+            "Automatic generation exceeded the per-course processing time limit.",
+        )
+        self.assertEqual(
+            row["recommended_action"],
+            "Administrator review is required before reopening contributions for retry.",
+        )
 
     def test_unprocessed_closed_summary_uses_aggregate_non_exact_assessment(self):
         parent, _configuration, _problem = self._ready_automatic_course(

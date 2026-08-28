@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 
+from .automatic_processing_isolation import AUTOMATIC_PROCESSING_TIMEOUT_CODE
 from .contribution_authorization import ContributorEligibilityService
 from .contribution_services import ContributionRosterService, Stage5LockService
 from .generation_readiness import (
@@ -393,6 +394,9 @@ def readiness_recommendation(report):
         "UNIQUE_QUESTION_SHORTAGES": "Obtain enough unique usable Submitted questions.",
         "HARD_CONSTRAINTS_INFEASIBLE": "Review the eligible pool and required allocation constraints.",
         "FEASIBILITY_LIMIT": "Contact an administrator to review the solver limit.",
+        AUTOMATIC_PROCESSING_TIMEOUT_CODE: (
+            "Administrator review is required before reopening contributions for retry."
+        ),
         "PROCESSING_ERROR": "Review the secured processor log, correct the failure, and rerun deadline processing.",
     }.get(code, "Review the readiness details and correct the blocking input.")
 
@@ -735,8 +739,15 @@ class AutomaticExamDeadlineService:
         return None
 
     @classmethod
-    def process_due(cls, *, now=None, max_states=None):
+    def process_due(
+        cls,
+        *,
+        now=None,
+        max_states=None,
+        course_processor=None,
+    ):
         now = now or timezone.now()
+        course_processor = course_processor or cls.process_course
         candidates = list(
             CycleCourse.objects.filter(
                 cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
@@ -757,16 +768,38 @@ class AutomaticExamDeadlineService:
                 group__is_active=True,
             ).values_list("cycle_course_id", "group__primary_cycle_course_id")
         )
-        results = []
-        processed_primary_ids = set()
+        ordered_candidates = []
+        seen_primary_ids = set()
         for course_id, tenant_id in candidates:
             primary_id = primary_by_candidate.get(course_id, course_id)
+            if primary_id in seen_primary_ids:
+                continue
+            seen_primary_ids.add(primary_id)
+            ordered_candidates.append((primary_id, tenant_id))
+        # Reopen and eligible Open-cycle Restore clear these fields explicitly.
+        # Until then, a Closed terminal row is an operator-visible final result,
+        # not permission to repeat the expensive solver every five minutes.
+        terminal_primary_ids = set(
+            CourseExamConfiguration.objects.filter(
+                cycle_course_id__in=[
+                    course_id for course_id, _tenant_id in ordered_candidates
+                ],
+                workflow_status=CourseExamConfiguration.WorkflowStatus.CLOSED,
+                automatic_processing_status__in=(
+                    CourseExamConfiguration.AutomaticProcessingStatus.BLOCKED,
+                    CourseExamConfiguration.AutomaticProcessingStatus.ERROR,
+                    CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED,
+                ),
+                automatic_processed_at__isnull=False,
+            ).values_list("cycle_course_id", flat=True)
+        )
+        results = []
+        for primary_id, tenant_id in ordered_candidates:
+            if primary_id in terminal_primary_ids:
+                continue
             try:
-                if primary_id in processed_primary_ids:
-                    continue
-                processed_primary_ids.add(primary_id)
                 results.append(
-                    cls.process_course(
+                    course_processor(
                         cycle_course_id=primary_id,
                         tenant_id=tenant_id,
                         now=now,
@@ -774,37 +807,60 @@ class AutomaticExamDeadlineService:
                     )
                 )
             except Exception as exc:  # per-course fault isolation is intentional
-                logger.error(
-                    "Automatic departmental-exam processing failed for tenant=%s course=%s error_type=%s.",
-                    tenant_id,
-                    primary_id,
-                    exc.__class__.__name__,
-                )
-                failure_result = AutomaticProcessingResult(
-                    primary_id,
-                    "ERROR",
-                    exc.__class__.__name__,
-                    "Course processing failed; inspect the secured application log.",
-                )
-                try:
-                    exempt_result = cls._record_error(
+                results.append(
+                    cls.record_processing_failure(
                         cycle_course_id=primary_id,
                         tenant_id=tenant_id,
                         code=exc.__class__.__name__,
+                        message=(
+                            "Course processing failed; inspect the secured application log."
+                        ),
                         now=now,
                     )
-                    if exempt_result is not None:
-                        failure_result = exempt_result
-                except Exception as record_exc:
-                    logger.error(
-                        "Automatic departmental-exam error recording failed for tenant=%s course=%s original_error_type=%s recording_error_type=%s.",
-                        tenant_id,
-                        primary_id,
-                        exc.__class__.__name__,
-                        record_exc.__class__.__name__,
-                    )
-                results.append(failure_result)
+                )
         return results
+
+    @classmethod
+    def record_processing_failure(
+        cls,
+        *,
+        cycle_course_id,
+        tenant_id,
+        code,
+        message,
+        now,
+    ):
+        safe_code = str(code)[:64]
+        logger.error(
+            "Automatic departmental-exam processing failed for tenant=%s course=%s error_type=%s.",
+            tenant_id,
+            cycle_course_id,
+            safe_code,
+        )
+        failure_result = AutomaticProcessingResult(
+            cycle_course_id,
+            "ERROR",
+            safe_code,
+            message,
+        )
+        try:
+            exempt_result = cls._record_error(
+                cycle_course_id=cycle_course_id,
+                tenant_id=tenant_id,
+                code=safe_code,
+                now=now,
+            )
+            if exempt_result is not None:
+                failure_result = exempt_result
+        except Exception as record_exc:
+            logger.error(
+                "Automatic departmental-exam error recording failed for tenant=%s course=%s original_error_type=%s recording_error_type=%s.",
+                tenant_id,
+                cycle_course_id,
+                safe_code,
+                record_exc.__class__.__name__,
+            )
+        return failure_result
 
     @classmethod
     @transaction.atomic
@@ -1006,6 +1062,9 @@ class AutomaticGenerationSummaryService:
         "FEASIBILITY_LIMIT": (
             "The deterministic feasibility state limit was reached."
         ),
+        AUTOMATIC_PROCESSING_TIMEOUT_CODE: (
+            "Automatic generation exceeded the per-course processing time limit."
+        ),
         "HARD_CONSTRAINTS_INFEASIBLE": (
             "Two equivalent sets could not satisfy the required questionnaire allocation."
         ),
@@ -1017,6 +1076,21 @@ class AutomaticGenerationSummaryService:
             configuration.automatic_processing_status
             == CourseExamConfiguration.AutomaticProcessingStatus.ERROR
         ):
+            if (
+                configuration.automatic_processing_code
+                == AUTOMATIC_PROCESSING_TIMEOUT_CODE
+            ):
+                return {
+                    "blockers": [
+                        {
+                            "code": AUTOMATIC_PROCESSING_TIMEOUT_CODE,
+                            "message": cls._PERSISTED_BLOCKER_MESSAGES[
+                                AUTOMATIC_PROCESSING_TIMEOUT_CODE
+                            ],
+                        }
+                    ],
+                    "processing_code": configuration.automatic_processing_code,
+                }
             return {
                 "blockers": [
                     {
