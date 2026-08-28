@@ -1843,6 +1843,162 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             )
         self.assertEqual(client.get(url).status_code, 403)
 
+    def test_generated_summary_uses_current_persisted_revision_without_solver(self):
+        parent, _configuration, problem = self._ready_automatic_course(
+            clear_manual_assignment=False
+        )
+        self._process_with_proved_selection(parent=parent, problem=problem)
+        r1 = ExamGenerationRevision.objects.get(cycle_course=parent)
+        fresh_problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        with patch.object(
+            Stage6ReadinessService,
+            "build_problem",
+            wraps=Stage6ReadinessService.build_problem,
+        ) as authoritative_readiness, patch(
+            "apps.departmental_exams.generation_services."
+            "solve_automatic_identity_aware_two_sets",
+            return_value=self._proved_selection_for(
+                parent=parent,
+                problem=fresh_problem,
+            ),
+        ) as authoritative_solver:
+            outcome = ExamGenerationService.generate(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+                actor=self.generation_manager,
+                expected_current_revision=r1.revision_number,
+                expected_input_fingerprint=r1.source_input_fingerprint,
+                request_token="summary-authoritative-regeneration-token",
+                regeneration=True,
+            )
+        self.assertTrue(authoritative_readiness.called)
+        authoritative_solver.assert_called_once()
+        current = outcome.revision
+        persisted_audit = current.source_audit_snapshot
+
+        client = Client()
+        client.force_login(self.generation_manager)
+        url = reverse(
+            "departmental_exams:automatic_generation_summary",
+            args=[parent.cycle_id],
+        )
+        with patch.object(
+            Stage6ReadinessService,
+            "build_problem",
+            side_effect=AssertionError("summary GET rebuilt a GenerationProblem"),
+        ), patch(
+            "apps.departmental_exams.generation_readiness."
+            "solve_automatic_identity_aware_two_sets",
+            side_effect=AssertionError("summary GET invoked the exact solver"),
+        ) as summary_solver:
+            response = client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        summary_solver.assert_not_called()
+        row = response.context["generated"][0]
+        self.assertEqual(row["revision"], current)
+        self.assertEqual(
+            row["pool_metrics"],
+            {
+                "submitted": persisted_audit.submitted_count,
+                "unique": persisted_audit.unique_logical_count,
+                "redundant": persisted_audit.redundant_copy_count,
+            },
+        )
+        self.assertEqual(
+            row["regeneration_input_fingerprint"],
+            current.source_input_fingerprint,
+        )
+        self.assertEqual(
+            row["regeneration_form"].initial["input_fingerprint"],
+            current.source_input_fingerprint,
+        )
+        self.assertEqual(
+            [revision.id for revision in row["course"].current_generated_revisions],
+            [current.id],
+        )
+        self.assertNotEqual(r1.id, current.id)
+
+    def test_persisted_blocked_and_error_summary_rows_bypass_live_readiness(self):
+        parent, configuration, _problem = self._ready_automatic_course(
+            clear_manual_assignment=False
+        )
+        client = Client()
+        client.force_login(self.generation_manager)
+        url = reverse(
+            "departmental_exams:automatic_generation_summary",
+            args=[parent.cycle_id],
+        )
+
+        for status, code, expected_reason in (
+            (
+                CourseExamConfiguration.AutomaticProcessingStatus.BLOCKED,
+                "UNIQUE_QUESTION_SHORTAGES",
+                "deduplicated Submitted pool had aggregate shortages",
+            ),
+            (
+                CourseExamConfiguration.AutomaticProcessingStatus.ERROR,
+                "RuntimeError",
+                "Automatic generation failed during processing",
+            ),
+        ):
+            with self.subTest(status=status):
+                CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
+                    automatic_processing_status=status,
+                    automatic_processing_code=code,
+                    automatic_processed_at=timezone.now(),
+                )
+                with patch.object(
+                    Stage6ReadinessService,
+                    "build_problem",
+                    side_effect=AssertionError("processed row rebuilt readiness"),
+                ), patch.object(
+                    Stage6ReadinessService,
+                    "evaluate_automatic_pool",
+                    side_effect=AssertionError("processed row reassessed the live pool"),
+                ), patch(
+                    "apps.departmental_exams.generation_readiness."
+                    "solve_automatic_identity_aware_two_sets",
+                    side_effect=AssertionError("processed row invoked the exact solver"),
+                ) as solver:
+                    response = client.get(url)
+                self.assertEqual(response.status_code, 200)
+                solver.assert_not_called()
+                row = response.context["not_generated"][0]
+                self.assertEqual(row["status"], status.title())
+                self.assertIn(expected_reason, row["reason"])
+
+    def test_unprocessed_closed_summary_uses_aggregate_non_exact_assessment(self):
+        parent, _configuration, _problem = self._ready_automatic_course(
+            clear_manual_assignment=False
+        )
+        client = Client()
+        client.force_login(self.generation_manager)
+        url = reverse(
+            "departmental_exams:automatic_generation_summary",
+            args=[parent.cycle_id],
+        )
+        with patch.object(
+            Stage6ReadinessService,
+            "evaluate_automatic_pool",
+            wraps=Stage6ReadinessService.evaluate_automatic_pool,
+        ) as aggregate_assessment, patch(
+            "apps.departmental_exams.generation_readiness."
+            "solve_automatic_identity_aware_two_sets",
+            side_effect=AssertionError("summary GET invoked exact feasibility"),
+        ) as exact_solver:
+            response = client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        exact_solver.assert_not_called()
+        aggregate_assessment.assert_called_once_with(
+            cycle_course=parent,
+            exact_feasibility=False,
+        )
+
     def test_configurer_alone_cannot_view_automatic_generated_content(self):
         parent, _configuration, problem = self._ready_automatic_course(
             clear_manual_assignment=False
@@ -2488,3 +2644,68 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             f"legacy_auth_many={len(legacy_many_queries)} "
             f"set_auth_many={len(set_many_queries)}"
         )
+
+    def test_generated_summary_query_growth_is_bounded_and_solver_count_is_zero(self):
+        def make_generated_cycle(*, suffix, count):
+            cycle = self.make_cycle(
+                status=ExaminationCycle.Status.OPEN,
+                default_questions_required_per_faculty=50,
+                default_final_item_count=50,
+                default_contribution_deadline=self.future_deadline(),
+                scope_suffix=suffix,
+            )
+            cycle.processing_mode = ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            cycle.save(update_fields=["processing_mode", "updated_at"])
+            for index in range(count):
+                parent = self.make_course(
+                    cycle=cycle,
+                    code=f"GENERATED-QUERY-{suffix}-{index}",
+                )
+                configuration = self.make_configuration(parent)
+                revision = ExamGenerationRevision.objects.create(
+                    cycle_course=parent,
+                    revision_number=1,
+                    status=ExamGenerationRevision.Status.GENERATED,
+                    current_marker=1,
+                    source_input_fingerprint=f"{index + 1:064x}",
+                    algorithm_version="summary-query-regression",
+                    generated_by=None,
+                    generation_trigger=(
+                        ExamGenerationRevision.GenerationTrigger.AUTOMATIC
+                    ),
+                    configuration_revision_snapshot=configuration.revision,
+                    blueprint_revision_snapshot=1,
+                    roster_boundary_snapshot=f"{index + 11:064x}",
+                    final_item_count_snapshot=configuration.final_item_count,
+                    request_token_digest=f"{index + 21:064x}",
+                    minimum_overlap=0,
+                    proportional_score=0,
+                    contributors_represented=0,
+                    squared_contributor_concentration=0,
+                )
+                GenerationSourceAuditSnapshot.objects.create(
+                    generation_revision=revision,
+                    schema_version="summary-query-regression",
+                    logical_identity_version="summary-query-regression",
+                    submitted_count=50,
+                    eligible_count=50,
+                    unique_logical_count=50,
+                    redundant_copy_count=0,
+                )
+            return cycle
+
+        one = make_generated_cycle(suffix="one", count=1)
+        many = make_generated_cycle(suffix="many", count=8)
+        with patch(
+            "apps.departmental_exams.generation_readiness."
+            "solve_automatic_identity_aware_two_sets",
+            side_effect=AssertionError("summary service invoked exact generation"),
+        ) as solver:
+            with CaptureQueriesContext(connection) as one_queries:
+                AutomaticGenerationSummaryService.build(cycle=one)
+            with CaptureQueriesContext(connection) as many_queries:
+                summary = AutomaticGenerationSummaryService.build(cycle=many)
+
+        solver.assert_not_called()
+        self.assertEqual(summary["generated_count"], 8)
+        self.assertLessEqual(len(many_queries), len(one_queries) + 1)

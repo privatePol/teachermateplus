@@ -967,6 +967,143 @@ class AutomaticContributionReopenService:
 
 
 class AutomaticGenerationSummaryService:
+    _PERSISTED_BLOCKER_MESSAGES = {
+        "CONFIGURATION_NOT_OPEN": (
+            "Course configuration was not open for automatic deadline processing."
+        ),
+        "CONFIGURATION_MISSING": "Course examination configuration is required.",
+        "FINAL_COUNT_INVALID": "Final item count must be from 50 to 75.",
+        "DIFFICULTY_POLICY_INVALID": (
+            "Difficulty configuration must be exactly 30/50/20."
+        ),
+        "CONTRIBUTION_NOT_CLOSED": "Faculty contribution must be Closed.",
+        "ROSTER_STALE": (
+            "The contributor roster was stale when automatic processing ran."
+        ),
+        "ACTIVE_CONTRIBUTORS_INCOMPLETE": (
+            "Currently required Active contributors had not all Submitted."
+        ),
+        "BLOCKED_DRAFTS_UNRESOLVED": (
+            "Current Blocked Draft contributions required explicit resolution."
+        ),
+        "CAMPUS_PARTICIPATION_MISSING": (
+            "At least one participating campus snapshot is required."
+        ),
+        "CAMPUS_CODE_INVALID": "Participating campus evidence was invalid.",
+        "ELIGIBLE_POOL_INVALID": (
+            "Submitted question rows with invalid payload or frozen campus evidence "
+            "were excluded."
+        ),
+        "MISSING_CAMPUS_REPRESENTATION": (
+            "At least one participating campus had no usable unique Submitted questions."
+        ),
+        "QUESTION_SHORTAGES": (
+            "The eligible Submitted pool had aggregate shortages."
+        ),
+        "UNIQUE_QUESTION_SHORTAGES": (
+            "The deduplicated Submitted pool had aggregate shortages."
+        ),
+        "FEASIBILITY_LIMIT": (
+            "The deterministic feasibility state limit was reached."
+        ),
+        "HARD_CONSTRAINTS_INFEASIBLE": (
+            "Two equivalent sets could not satisfy the required questionnaire allocation."
+        ),
+    }
+
+    @classmethod
+    def _persisted_processing_report(cls, configuration):
+        if (
+            configuration.automatic_processing_status
+            == CourseExamConfiguration.AutomaticProcessingStatus.ERROR
+        ):
+            return {
+                "blockers": [
+                    {
+                        "code": "PROCESSING_ERROR",
+                        "message": "Automatic generation failed during processing.",
+                    }
+                ],
+                "processing_code": configuration.automatic_processing_code,
+            }
+        code = configuration.automatic_processing_code or "AUTOMATIC_PROCESSING_BLOCKED"
+        return {
+            "blockers": [
+                {
+                    "code": code,
+                    "message": cls._PERSISTED_BLOCKER_MESSAGES.get(
+                        code,
+                        "Automatic generation did not produce a current questionnaire.",
+                    ),
+                }
+            ],
+            "processing_code": configuration.automatic_processing_code,
+        }
+
+    @staticmethod
+    def _generated_warnings(*, cycle, unit, current, audit_snapshot, common):
+        warnings = []
+        if audit_snapshot is not None and audit_snapshot.redundant_copy_count:
+            warnings.append(
+                {
+                    "code": "REDUNDANT_DUPLICATE_QUESTIONS",
+                    "message": (
+                        f"{audit_snapshot.submitted_count} submitted \u2022 "
+                        f"{audit_snapshot.unique_logical_count} unique \u2022 "
+                        f"{audit_snapshot.redundant_copy_count} duplicate copies "
+                        "automatically ignored."
+                    ),
+                }
+            )
+
+        expected_campuses = {
+            snapshot.campus_id: snapshot.campus.name
+            for member in unit.members
+            for snapshot in member.offering_snapshots.all()
+        }
+        represented_campus_ids = {
+            item.source_campus_id
+            for generated_set in current.generated_sets.all()
+            for item in generated_set.items.all()
+        }
+        missing_campus_names = tuple(
+            expected_campuses[campus_id]
+            for campus_id in sorted(expected_campuses)
+            if campus_id not in represented_campus_ids
+        )
+        if (
+            missing_campus_names
+            and cycle.automatic_campus_contribution_policy
+            == ExaminationCycle.AutomaticCampusContributionPolicy.AVAILABLE_WITH_WARNING
+        ):
+            warnings.append(
+                {
+                    "code": "MISSING_CAMPUS_REPRESENTATION",
+                    "message": (
+                        "No usable unique Submitted questions represent: "
+                        + ", ".join(missing_campus_names)
+                        + ". Feasible allocation used represented campuses only."
+                    ),
+                }
+            )
+
+        if (
+            common["eligible_contributors"] > common["submitted_contributors"]
+            and cycle.automatic_contributor_completion_policy
+            == ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL
+        ):
+            warnings.append(
+                {
+                    "code": "ACTIVE_CONTRIBUTORS_INCOMPLETE",
+                    "message": (
+                        f'{common["submitted_contributors"]} / '
+                        f'{common["eligible_contributors"]} active contributors '
+                        "Final Submitted; generation used the sufficient Submitted pool."
+                    ),
+                }
+            )
+        return tuple(warnings)
+
     @classmethod
     def build(cls, *, cycle, now=None, cycle_course_ids=None):
         if (
@@ -986,8 +1123,11 @@ class AutomaticGenerationSummaryService:
                 "faculty_contributions",
                 Prefetch(
                     "generation_revisions",
-                    queryset=ExamGenerationRevision.objects.select_related(
-                        "generated_by"
+                    queryset=ExamGenerationRevision.objects.filter(
+                        current_marker=1,
+                        status=ExamGenerationRevision.Status.GENERATED,
+                    ).select_related(
+                        "generated_by", "source_audit_snapshot"
                     ).prefetch_related(
                         Prefetch(
                             "generated_sets",
@@ -996,6 +1136,7 @@ class AutomaticGenerationSummaryService:
                             ).order_by("set_code"),
                         )
                     ),
+                    to_attr="current_generated_revisions",
                 ),
             )
             .order_by("course__code", "course_id")
@@ -1012,15 +1153,30 @@ class AutomaticGenerationSummaryService:
         exempt = []
         last_processed_at = None
         summarized_primary_ids = set()
+        courses_by_id = {course.id: course for course in courses}
+        resolved_units_by_member_id = {}
         for requested_course in courses:
-            unit = (
-                resolve_examination_unit(requested_course)
-                if requested_course.id in grouped_course_ids
-                else ExaminationUnit(
-                    primary=requested_course,
-                    members=(requested_course,),
-                )
-            )
+            unit = resolved_units_by_member_id.get(requested_course.id)
+            if unit is None:
+                if requested_course.id in grouped_course_ids:
+                    resolved = resolve_examination_unit(requested_course)
+                    members = tuple(
+                        courses_by_id.get(member.id, member)
+                        for member in resolved.members
+                    )
+                    unit = ExaminationUnit(
+                        primary=courses_by_id.get(resolved.primary.id, resolved.primary),
+                        members=members,
+                        group=resolved.group,
+                        memberships=resolved.memberships,
+                    )
+                    for member in members:
+                        resolved_units_by_member_id[member.id] = unit
+                else:
+                    unit = ExaminationUnit(
+                        primary=requested_course,
+                        members=(requested_course,),
+                    )
             if unit.primary.id in summarized_primary_ids:
                 continue
             summarized_primary_ids.add(unit.primary.id)
@@ -1032,14 +1188,16 @@ class AutomaticGenerationSummaryService:
                     for snapshot in member.offering_snapshots.all()
                 )
             )
-            contributions = (
-                list(
-                    FacultyContribution.objects.filter(
-                        cycle_course_id__in=unit.member_ids
-                    ).order_by("cycle_course_id", "id")
-                )
-                if unit.grouped
-                else list(course.faculty_contributions.all())
+            contributions = sorted(
+                (
+                    contribution
+                    for member in unit.members
+                    for contribution in member.faculty_contributions.all()
+                ),
+                key=lambda contribution: (
+                    contribution.cycle_course_id,
+                    contribution.id,
+                ),
             )
             configuration = getattr(course, "configuration", None)
             if configuration and configuration.automatic_processed_at:
@@ -1049,15 +1207,8 @@ class AutomaticGenerationSummaryService:
                         (last_processed_at, configuration.automatic_processed_at),
                     )
                 )
-            current = next(
-                (
-                    row
-                    for row in course.generation_revisions.all()
-                    if row.current_marker == 1
-                    and row.status == ExamGenerationRevision.Status.GENERATED
-                ),
-                None,
-            )
+            current_rows = getattr(course, "current_generated_revisions", ())
+            current = current_rows[0] if current_rows else None
             common = {
                 "course": course,
                 "campuses": campuses,
@@ -1126,9 +1277,7 @@ class AutomaticGenerationSummaryService:
                             ),
                         }
                     )
-                current_problem, current_readiness = Stage6ReadinessService.build_problem(
-                    cycle_course=course
-                )
+                audit_snapshot = getattr(current, "source_audit_snapshot", None)
                 generated.append(
                     {
                         **common,
@@ -1136,16 +1285,32 @@ class AutomaticGenerationSummaryService:
                         "set_a_generated": "A" in sets,
                         "set_b_generated": "B" in sets,
                         "actual_set_counts": tuple(actual_set_counts),
-                        "warnings": current_readiness.get("warnings", ()),
+                        "warnings": cls._generated_warnings(
+                            cycle=cycle,
+                            unit=unit,
+                            current=current,
+                            audit_snapshot=audit_snapshot,
+                            common=common,
+                        ),
                         "pool_metrics": {
-                            "submitted": current_readiness.get("submitted_question_count"),
-                            "unique": current_readiness.get("unique_question_count"),
-                            "redundant": current_readiness.get("duplicate_question_count"),
+                            "submitted": (
+                                audit_snapshot.submitted_count
+                                if audit_snapshot is not None
+                                else None
+                            ),
+                            "unique": (
+                                audit_snapshot.unique_logical_count
+                                if audit_snapshot is not None
+                                else None
+                            ),
+                            "redundant": (
+                                audit_snapshot.redundant_copy_count
+                                if audit_snapshot is not None
+                                else None
+                            ),
                         },
                         "regeneration_input_fingerprint": (
-                            current_problem.input_fingerprint
-                            if current_problem is not None
-                            else ""
+                            current.source_input_fingerprint
                         ),
                     }
                 )
@@ -1177,15 +1342,13 @@ class AutomaticGenerationSummaryService:
             elif (
                 configuration.automatic_processing_status
                 == CourseExamConfiguration.AutomaticProcessingStatus.ERROR
+                or (
+                    configuration.automatic_processing_status
+                    and configuration.workflow_status
+                    == CourseExamConfiguration.WorkflowStatus.CLOSED
+                )
             ):
-                report = {
-                    "blockers": [
-                        {
-                            "code": "PROCESSING_ERROR",
-                            "message": "Automatic generation failed during processing.",
-                        }
-                    ]
-                }
+                report = cls._persisted_processing_report(configuration)
                 status = configuration.get_automatic_processing_status_display()
             elif (
                 configuration.workflow_status
@@ -1223,7 +1386,10 @@ class AutomaticGenerationSummaryService:
                 }
                 status = "Automatic processing"
             else:
-                report = Stage6ReadinessService.evaluate(cycle_course=course)
+                report = Stage6ReadinessService.evaluate_automatic_pool(
+                    cycle_course=course,
+                    exact_feasibility=False,
+                )
                 status = (
                     configuration.get_automatic_processing_status_display()
                     if configuration.automatic_processing_status

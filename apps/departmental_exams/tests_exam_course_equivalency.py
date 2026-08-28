@@ -434,8 +434,22 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
 
     def test_automatic_summary_reports_group_primary_once(self):
         fixture = self._ready_group()
-        summary = AutomaticGenerationSummaryService.build(cycle=fixture["cycle"])
+        with patch.object(
+            Stage6ReadinessService,
+            "evaluate_automatic_pool",
+            wraps=Stage6ReadinessService.evaluate_automatic_pool,
+        ) as aggregate_assessment, patch(
+            "apps.departmental_exams.generation_readiness."
+            "solve_automatic_identity_aware_two_sets",
+            side_effect=AssertionError("summary invoked exact equivalency feasibility"),
+        ) as exact_solver:
+            summary = AutomaticGenerationSummaryService.build(cycle=fixture["cycle"])
         rows = summary["not_generated"]
+        exact_solver.assert_not_called()
+        self.assertEqual(aggregate_assessment.call_count, 1)
+        self.assertFalse(
+            aggregate_assessment.call_args.kwargs["exact_feasibility"]
+        )
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["course"].id, fixture["primary"].id)
         self.assertEqual(rows[0]["eligible_contributors"], 3)
