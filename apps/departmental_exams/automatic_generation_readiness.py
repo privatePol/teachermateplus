@@ -25,7 +25,7 @@ class AutomaticGenerationReadinessReport:
 
     FILTER_PARAMETER_NAMES = ("cycle", "period", "course")
     SUMMARY_STATUSES = (
-        ("Ready for Generation", "READY FOR GENERATION"),
+        ("Exact Feasibility Pending", "EXACT FEASIBILITY PENDING"),
         ("Waiting for Deadline", "WAITING FOR DEADLINE"),
         ("Needs Questions", "NEEDS QUESTIONS"),
         ("Faculty Incomplete", "FACULTY INCOMPLETE"),
@@ -458,7 +458,7 @@ class AutomaticGenerationReadinessReport:
                     warnings.append(f"No usable submitted questions from {campus_name}.")
         return tuple(dict.fromkeys(warnings))
 
-    def _execution_status(self, *, course, configuration, roster, pool, current):
+    def _pre_roster_status(self, *, course, configuration, current):
         if course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT:
             return "EXEMPT", ("No generation required.",)
         if current:
@@ -489,10 +489,23 @@ class AutomaticGenerationReadinessReport:
             return "BLOCKED", (
                 "Resolve the automatic processing error with the system administrator.",
             )
-        if configuration is None:
-            status_detail = ""
-        elif configuration.contributor_roster_initialized_at is None:
+        if configuration.contributor_roster_initialized_at is None:
             return "BLOCKED", ("Initialize the contributor roster.",)
+        deadline = configuration.active_contribution_deadline
+        if deadline is None:
+            return "BLOCKED", ("Set the contribution deadline.",)
+        if self.now < deadline:
+            return "WAITING FOR DEADLINE", ("Wait for the contribution deadline.",)
+        return None, ()
+
+    def _execution_status(self, *, course, configuration, roster, pool, current):
+        preliminary_status, preliminary_actions = self._pre_roster_status(
+            course=course,
+            configuration=configuration,
+            current=current,
+        )
+        if preliminary_status not in (None, "WAITING FOR DEADLINE"):
+            return preliminary_status, preliminary_actions
         if roster is None or not roster.current:
             return "BLOCKED", ("Synchronize the contributor roster.",)
         if roster.unresolved_blocked_count:
@@ -510,13 +523,15 @@ class AutomaticGenerationReadinessReport:
                 f"{count} current faculty {'has' if count == 1 else 'have'} not completed "
                 "their required contribution.",
             )
+        if pool is None:
+            return preliminary_status, preliminary_actions
         if pool.get("invalid_question_count"):
             count = pool["invalid_question_count"]
             return "BLOCKED", (
                 f"Resolve {count} unusable Submitted question row"
                 f"{'s' if count != 1 else ''}.",
             )
-        if not pool["ready"]:
+        if not pool.get("aggregate_requirements_met", pool["ready"]):
             actions = self._pool_actions(pool)
             question_shortage_codes = {
                 "QUESTION_SHORTAGES",
@@ -530,12 +545,11 @@ class AutomaticGenerationReadinessReport:
                 else "BLOCKED"
             )
             return status, actions
-        deadline = configuration.active_contribution_deadline
-        if deadline is None:
-            return "BLOCKED", ("Set the contribution deadline.",)
-        if self.now < deadline:
-            return "WAITING FOR DEADLINE", ("Wait for the contribution deadline.",)
-        return "READY FOR GENERATION", ("No action needed.",)
+        if preliminary_status == "WAITING FOR DEADLINE":
+            return preliminary_status, preliminary_actions
+        return "EXACT FEASIBILITY PENDING", (
+            "Aggregate requirements met \u2014 exact generation feasibility pending.",
+        )
 
     def _row(self, unit):
         course = unit.primary
@@ -580,19 +594,79 @@ class AutomaticGenerationReadinessReport:
                 "action_items": action_items,
             }
 
-        pool = Stage6ReadinessService.evaluate_automatic_pool(cycle_course=course)
-        roster = (
-            Stage6ReadinessService.evaluate_examination_unit_roster(unit=unit)
-            if configuration is not None
-            else None
-        )
-        faculty = self._faculty_completion(
-            course=course, configuration=configuration, roster=roster
-        )
         contribution_progress = self._contribution_progress(
             unit=unit,
             configuration=configuration,
             participating_campuses=participating_campuses,
+        )
+        preliminary_status, preliminary_actions = self._pre_roster_status(
+            course=course,
+            configuration=configuration,
+            current=current,
+        )
+        if preliminary_status not in (None, "WAITING FOR DEADLINE"):
+            roster = None
+            faculty = self._faculty_completion(
+                course=course,
+                configuration=configuration,
+                roster=roster,
+            )
+            if (
+                configuration is not None
+                and configuration.contributor_roster_initialized_at is None
+                and preliminary_actions == ("Initialize the contributor roster.",)
+            ):
+                status_detail = "Contributor roster has not been initialized."
+            else:
+                status_detail = ""
+            return {
+                "cycle_course": course,
+                "campuses": campuses,
+                "configuration": configuration,
+                "faculty": faculty,
+                "contribution_progress": contribution_progress,
+                "pool_actions": (),
+                "pool_warnings": (),
+                "generation_status": preliminary_status,
+                "status_detail": status_detail,
+                "action_items": preliminary_actions,
+            }
+
+        roster = Stage6ReadinessService.evaluate_examination_unit_roster(unit=unit)
+        faculty = self._faculty_completion(
+            course=course, configuration=configuration, roster=roster
+        )
+        roster_status, roster_actions = self._execution_status(
+            course=course,
+            configuration=configuration,
+            roster=roster,
+            pool=None,
+            current=current,
+        )
+        if roster_status not in (None, "WAITING FOR DEADLINE"):
+            if roster is None or not roster.current:
+                status_detail = (
+                    "Contributor roster needs synchronization because the eligible faculty "
+                    "list has changed."
+                )
+            else:
+                status_detail = ""
+            return {
+                "cycle_course": course,
+                "campuses": campuses,
+                "configuration": configuration,
+                "faculty": faculty,
+                "contribution_progress": contribution_progress,
+                "pool_actions": (),
+                "pool_warnings": (),
+                "generation_status": roster_status,
+                "status_detail": status_detail,
+                "action_items": roster_actions,
+            }
+
+        pool = Stage6ReadinessService.evaluate_automatic_pool(
+            cycle_course=course,
+            exact_feasibility=False,
         )
         pool_actions = self._pool_actions(pool)
         pool_warnings = self._pool_warnings(pool)
@@ -605,7 +679,7 @@ class AutomaticGenerationReadinessReport:
         )
         action_items = list(action_items)
         if (
-            status in ("WAITING FOR DEADLINE", "READY FOR GENERATION")
+            status in ("WAITING FOR DEADLINE", "EXACT FEASIBILITY PENDING")
             and faculty["authoritative"]
             and faculty["incomplete_count"]
             and course.cycle.automatic_contributor_completion_policy

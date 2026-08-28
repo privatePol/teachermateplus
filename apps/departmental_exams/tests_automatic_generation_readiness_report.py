@@ -17,7 +17,6 @@ from apps.rbac.models import Permission, Role, RolePermission, UserPermission, U
 
 from .automatic_workflow import AutomaticExamDeadlineService
 from .automatic_generation_readiness import AutomaticGenerationReadinessReport
-from .blueprint_services import ContributorRosterReadinessService
 from .contribution_selectors import ContributionMonitoringSelector
 from .contribution_services import ContributionRosterService
 from .generation_algorithms import IdentitySelectionResult
@@ -232,13 +231,9 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
 
     def _screen(self, parent, **params):
         values = {"cycle": parent.cycle_id, **params}
-        with patch(
-            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
-            return_value=self._feasible_selection(),
-        ):
-            return self.client.get(
-                reverse("departmental_exams:automatic_generation_readiness"), values
-            )
+        return self.client.get(
+            reverse("departmental_exams:automatic_generation_readiness"), values
+        )
 
     @staticmethod
     def _feasible_selection():
@@ -481,12 +476,27 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             return_value=self._feasible_selection(),
         ):
             pool = Stage6ReadinessService.evaluate_automatic_pool(cycle_course=parent)
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            side_effect=AssertionError(
+                "Aggregate evaluation must not invoke the exact solver."
+            ),
+        ) as exact_solver:
+            aggregate_pool = Stage6ReadinessService.evaluate_automatic_pool(
+                cycle_course=parent,
+                exact_feasibility=False,
+            )
         problem, execution_readiness = Stage6ReadinessService.build_problem(
             cycle_course=parent
         )
 
         self.assertTrue(pool["ready"], pool["blockers"])
         self.assertEqual(pool["status"], "READY")
+        exact_solver.assert_not_called()
+        self.assertFalse(aggregate_pool["ready"])
+        self.assertTrue(aggregate_pool["aggregate_requirements_met"])
+        self.assertFalse(aggregate_pool["exact_feasibility_evaluated"])
+        self.assertEqual(aggregate_pool["status"], "AGGREGATE SUFFICIENT")
         self.assertIsNone(problem)
         self.assertIn(
             "CONTRIBUTION_NOT_CLOSED",
@@ -766,8 +776,15 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             position__gt=40,
         ).delete()
 
-        row = self._screen(parent).context["rows"][0]
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            side_effect=AssertionError(
+                "Aggregate shortages must not invoke the exact solver."
+            ),
+        ) as exact_solver:
+            row = self._screen(parent).context["rows"][0]
 
+        exact_solver.assert_not_called()
         self.assertEqual(row["generation_status"], "NEEDS QUESTIONS")
         self.assertIn(
             "Add 10 more usable unique questions.",
@@ -779,35 +796,37 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         for action in row["action_items"]:
             self.assertContains(self._screen(parent), action)
 
-    def test_exact_solver_infeasibility_and_processing_messages_are_academic_facing(self):
+    def test_aggregate_sufficient_screen_and_print_are_pending_without_exact_solver(self):
         parent, configuration, _campuses, _offerings = self._automatic_course(
             campus_codes=("CUBAO",), quota=50
         )
-        infeasible = IdentitySelectionResult(
-            feasible=False,
-            limit_hit=False,
-            states_explored=1,
-            set_a_block_ids=(),
-            set_b_block_ids=(),
-            overlap=0,
-            proportional_score=0,
-            contributors_represented=0,
-            squared_contributor_concentration=0,
+        CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
+            reopened_contribution_deadline=timezone.now()
+            - timezone.timedelta(minutes=1)
         )
         with patch(
             "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
-            return_value=infeasible,
-        ):
-            response = self.client.get(
-                reverse("departmental_exams:automatic_generation_readiness"),
+            side_effect=AssertionError("Readiness GET must not invoke the exact solver."),
+        ) as exact_solver:
+            screen = self._screen(parent)
+            printed = self.client.get(
+                reverse("departmental_exams:automatic_generation_readiness_print"),
                 {"cycle": parent.cycle_id},
             )
-        row = response.context["rows"][0]
-        self.assertEqual(row["generation_status"], "NEEDS QUESTIONS")
+        exact_solver.assert_not_called()
+        row = screen.context["rows"][0]
+        self.assertEqual(row["generation_status"], "EXACT FEASIBILITY PENDING")
         self.assertIn(
-            "Add usable unique questions that satisfy the required difficulty distribution.",
+            "Aggregate requirements met \u2014 exact generation feasibility pending.",
             row["action_items"],
         )
+        for response in (screen, printed):
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(
+                response,
+                "Aggregate requirements met \u2014 exact generation feasibility pending.",
+            )
+            self.assertNotContains(response, "READY FOR GENERATION")
 
         CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
             automatic_processing_status=(
@@ -820,35 +839,6 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             ("Resolve the automatic processing error with the system administrator.",),
         )
         self.assertNotIn("log", " ".join(error_row["action_items"]).lower())
-
-        limit_hit = IdentitySelectionResult(
-            feasible=False,
-            limit_hit=True,
-            states_explored=1,
-            set_a_block_ids=(),
-            set_b_block_ids=(),
-            overlap=0,
-            proportional_score=0,
-            contributors_represented=0,
-            squared_contributor_concentration=0,
-        )
-        CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
-            automatic_processing_status=(
-                CourseExamConfiguration.AutomaticProcessingStatus.BLOCKED
-            )
-        )
-        with patch(
-            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
-            return_value=limit_hit,
-        ):
-            limit_response = self.client.get(
-                reverse("departmental_exams:automatic_generation_readiness"),
-                {"cycle": parent.cycle_id},
-            )
-        self.assertIn(
-            "Resolve the automatic readiness processing limit with the system administrator.",
-            limit_response.context["rows"][0]["action_items"],
-        )
 
     def test_require_all_is_faculty_incomplete_while_sufficient_pool_is_warning(self):
         parent, _configuration, campuses, offerings = self._automatic_course()
@@ -1034,18 +1024,26 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             - timezone.timedelta(minutes=1)
         )
         due_row = self._screen(parent).context["rows"][0]
-        self.assertEqual(due_row["generation_status"], "READY FOR GENERATION")
+        self.assertEqual(due_row["generation_status"], "EXACT FEASIBILITY PENDING")
+        self.assertIn(
+            "Aggregate requirements met \u2014 exact generation feasibility pending.",
+            due_row["action_items"],
+        )
 
         CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
             reopened_contribution_deadline=None,
             contribution_deadline=None,
             contribution_deadline_source=None,
         )
-        missing_row = self._screen(parent).context["rows"][0]
+        with patch.object(
+            Stage6ReadinessService, "evaluate_automatic_pool"
+        ) as missing_evaluator:
+            missing_row = self._screen(parent).context["rows"][0]
         self.assertEqual(missing_row["generation_status"], "BLOCKED")
         self.assertEqual(
             missing_row["action_items"], ("Set the contribution deadline.",)
         )
+        missing_evaluator.assert_not_called()
 
         configuration.refresh_from_db()
         CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
@@ -1069,8 +1067,12 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             contributors_represented=3,
             squared_contributor_concentration=0,
         )
-        generated_row = self._screen(parent).context["rows"][0]
+        with patch.object(
+            Stage6ReadinessService, "evaluate_automatic_pool"
+        ) as generated_evaluator:
+            generated_row = self._screen(parent).context["rows"][0]
         self.assertEqual(generated_row["generation_status"], "GENERATED")
+        generated_evaluator.assert_not_called()
 
         ExamGenerationRevision.objects.all().delete()
         CycleCourse.objects.filter(pk=parent.pk).update(
@@ -1090,6 +1092,88 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         self.assertIsNone(exempt_row["contribution_progress"])
         self.assertEqual(exempt_row["action_items"], ("No generation required.",))
         evaluator.assert_not_called()
+
+    def test_lifecycle_roster_contributor_and_blocked_draft_rows_skip_pool_evaluation(
+        self,
+    ):
+        parent, configuration, campuses, offerings = self._automatic_course(
+            campus_codes=("CUBAO",), quota=50
+        )
+
+        ExaminationCycle.objects.filter(pk=parent.cycle_id).update(
+            status=ExaminationCycle.Status.DRAFT
+        )
+        with patch.object(
+            Stage6ReadinessService, "evaluate_automatic_pool"
+        ) as lifecycle_evaluator:
+            lifecycle_row = self._screen(parent).context["rows"][0]
+        self.assertEqual(lifecycle_row["generation_status"], "BLOCKED")
+        self.assertEqual(
+            lifecycle_row["action_items"], ("Open the examination cycle.",)
+        )
+        lifecycle_evaluator.assert_not_called()
+
+        ExaminationCycle.objects.filter(pk=parent.cycle_id).update(
+            status=ExaminationCycle.Status.OPEN,
+            automatic_contributor_completion_policy=(
+                ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL
+            ),
+        )
+        extra_faculty, assignment = self.add_faculty_source(
+            parent=parent,
+            campus=campuses["CUBAO"],
+            offering=offerings["CUBAO"],
+            suffix="performance-hotfix",
+        )
+        with patch.object(
+            Stage6ReadinessService, "evaluate_automatic_pool"
+        ) as stale_evaluator:
+            stale_row = self._screen(parent).context["rows"][0]
+        self.assertEqual(stale_row["generation_status"], "BLOCKED")
+        self.assertEqual(
+            stale_row["action_items"], ("Synchronize the contributor roster.",)
+        )
+        stale_evaluator.assert_not_called()
+
+        ContributionRosterService.synchronize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.generation_manager,
+        )
+        self.assertTrue(
+            FacultyContribution.objects.filter(
+                cycle_course=parent,
+                faculty_user=extra_faculty,
+                status=FacultyContribution.Status.DRAFT,
+            ).exists()
+        )
+        with patch.object(
+            Stage6ReadinessService, "evaluate_automatic_pool"
+        ) as contributor_evaluator:
+            contributor_row = self._screen(parent).context["rows"][0]
+        self.assertEqual(contributor_row["generation_status"], "FACULTY INCOMPLETE")
+        contributor_evaluator.assert_not_called()
+
+        ExaminationCycle.objects.filter(pk=parent.cycle_id).update(
+            automatic_contributor_completion_policy=(
+                ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL
+            )
+        )
+        assignment.is_active = False
+        assignment.save(update_fields=["is_active", "updated_at"])
+        ContributionRosterService.synchronize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.generation_manager,
+        )
+        configuration.refresh_from_db()
+        with patch.object(
+            Stage6ReadinessService, "evaluate_automatic_pool"
+        ) as draft_evaluator:
+            draft_row = self._screen(parent).context["rows"][0]
+        self.assertEqual(draft_row["generation_status"], "BLOCKED")
+        self.assertIn("Blocked Draft", " ".join(draft_row["action_items"]))
+        draft_evaluator.assert_not_called()
 
     def test_rbac_requires_every_campus_honors_global_scope_and_direct_deny(self):
         parent, _configuration, campuses, _offerings = self._automatic_course()
@@ -1528,7 +1612,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         self.assertIn("private", response.headers["Cache-Control"])
         self.assertIn("no-store", response.headers["Cache-Control"])
 
-    def test_screen_print_parity_and_one_feasibility_evaluation_per_course(self):
+    def test_screen_print_parity_and_one_aggregate_evaluation_per_course(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course()
         with patch.object(
             Stage6ReadinessService,
@@ -1537,21 +1621,19 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         ) as evaluator:
             screen = self._screen(parent)
         self.assertEqual(evaluator.call_count, 1)
+        self.assertIs(evaluator.call_args.kwargs["exact_feasibility"], False)
 
         with patch.object(
             Stage6ReadinessService,
             "evaluate_automatic_pool",
             wraps=Stage6ReadinessService.evaluate_automatic_pool,
         ) as evaluator:
-            with patch(
-                "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
-                return_value=self._feasible_selection(),
-            ):
-                printed = self.client.get(
-                    reverse("departmental_exams:automatic_generation_readiness_print"),
-                    {"cycle": parent.cycle_id},
-                )
+            printed = self.client.get(
+                reverse("departmental_exams:automatic_generation_readiness_print"),
+                {"cycle": parent.cycle_id},
+            )
         self.assertEqual(evaluator.call_count, 1)
+        self.assertIs(evaluator.call_args.kwargs["exact_feasibility"], False)
         self.assertEqual(screen.status_code, 200)
         self.assertEqual(printed.status_code, 200)
         for key in (
@@ -1596,7 +1678,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         )
         self.assertContains(monitoring, "Automatic Generation Readiness")
 
-    def test_query_count_is_bounded_while_evaluation_remains_once_per_visible_course(self):
+    def test_query_count_is_bounded_and_multi_course_report_never_exact_solves(self):
         cycle = self.make_cycle(
             status=ExaminationCycle.Status.OPEN,
             default_questions_required_per_faculty=60,
@@ -1608,14 +1690,24 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         cycle.save(update_fields=["processing_mode", "updated_at"])
         first = self.make_course(cycle=cycle, code="READY-QUERY-A")
         second = self.make_course(cycle=cycle, code="READY-QUERY-B")
+        configurations = []
         for course in (first, second):
-            self.make_configuration(
-                course,
-                quota=60,
-                quota_source="DEFAULT",
-                workflow=CourseExamConfiguration.WorkflowStatus.OPEN,
-                opened_at=timezone.now(),
+            configurations.append(
+                self.make_configuration(
+                    course,
+                    quota=60,
+                    quota_source="DEFAULT",
+                    workflow=CourseExamConfiguration.WorkflowStatus.OPEN,
+                    opened_at=timezone.now(),
+                )
             )
+        CourseExamConfiguration.objects.filter(
+            pk__in=[configuration.pk for configuration in configurations]
+        ).update(
+            contributor_roster_initialized_at=timezone.now(),
+            contributor_roster_initialized_by=self.generation_manager,
+            contributor_roster_revision=1,
+        )
         pool = {
             "ready": True,
             "blockers": [],
@@ -1635,8 +1727,15 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         with patch.object(
             Stage6ReadinessService, "evaluate_automatic_pool", return_value=pool
         ) as evaluator, patch.object(
-            ContributorRosterReadinessService, "evaluate", return_value=roster
-        ):
+            Stage6ReadinessService,
+            "evaluate_examination_unit_roster",
+            return_value=roster,
+        ), patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            side_effect=AssertionError(
+                "Multi-course report must not invoke the exact solver."
+            ),
+        ) as exact_solver:
             with CaptureQueriesContext(connection) as one_queries:
                 one = self.client.get(
                     url, {"cycle": cycle.id, "course": first.course_id}
@@ -1646,6 +1745,13 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             with CaptureQueriesContext(connection) as two_queries:
                 two = self.client.get(url, {"cycle": cycle.id})
             self.assertEqual(evaluator.call_count, 2)
+            self.assertTrue(
+                all(
+                    call.kwargs["exact_feasibility"] is False
+                    for call in evaluator.call_args_list
+                )
+            )
+            exact_solver.assert_not_called()
 
         self.assertEqual(one.status_code, 200)
         self.assertEqual(two.status_code, 200)

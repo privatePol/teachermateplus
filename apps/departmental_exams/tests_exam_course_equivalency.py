@@ -878,7 +878,7 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             {"Main", "North", "Third Campus"},
         )
 
-    def test_readiness_report_runs_solver_once_and_uses_primary_generation_state(self):
+    def test_readiness_report_skips_solver_and_uses_primary_generation_state(self):
         fixture = self._ready_group()
         revision = self._revision(fixture["primary"], token="r" * 64)
         with patch(
@@ -894,7 +894,7 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
                 user=self.admin,
                 params={},
             ).build()
-        self.assertEqual(solver.call_count, 1)
+        solver.assert_not_called()
         self.assertEqual(report["row_count"], 1)
         self.assertEqual(report["rows"][0]["generation_status"], "GENERATED")
         self.assertEqual(report["rows"][0]["cycle_course"].id, revision.cycle_course_id)

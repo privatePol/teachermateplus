@@ -448,12 +448,18 @@ class Stage6ReadinessService:
         return report
 
     @classmethod
-    def evaluate_automatic_pool(cls, *, cycle_course, automatic_max_states=None):
-        """Evaluate current usable Automatic questions without deadline/lifecycle gates.
+    def evaluate_automatic_pool(
+        cls,
+        *,
+        cycle_course,
+        automatic_max_states=None,
+        exact_feasibility=True,
+    ):
+        """Evaluate current usable Automatic questions without operational gates.
 
-        The same pool assessment, allocations, logical duplicate grouping, and exact
-        two-set solver used by ``build_problem()`` remain authoritative.  Only the
-        operational gates that cannot change question-pool feasibility are omitted.
+        Pool assessment, allocations, and logical duplicate grouping are shared with
+        ``build_problem()``.  Exact Set A/B feasibility remains the default for
+        authoritative callers; management reports can stop at aggregate sufficiency.
         """
         if (
             cycle_course.cycle.processing_mode
@@ -466,6 +472,7 @@ class Stage6ReadinessService:
             cycle_course=cycle_course,
             automatic_max_states=automatic_max_states,
             question_pool_only=True,
+            exact_feasibility=exact_feasibility,
         )
         return report
 
@@ -476,7 +483,12 @@ class Stage6ReadinessService:
         cycle_course,
         automatic_max_states=None,
         question_pool_only=False,
+        exact_feasibility=True,
     ):
+        if not exact_feasibility and not question_pool_only:
+            raise ValidationError(
+                "Exact feasibility can be skipped only for question-pool reporting."
+            )
         unit = resolve_examination_unit(cycle_course)
         cycle_course = unit.primary
         unit_members = unit.members
@@ -487,6 +499,10 @@ class Stage6ReadinessService:
             cycle_course.cycle.processing_mode
             == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         )
+        if not exact_feasibility and not automatic_flat_mode:
+            raise ValidationError(
+                "Exact feasibility can be skipped only for Automatic question-pool reporting."
+            )
         configuration = CourseExamConfiguration.objects.filter(
             cycle_course=cycle_course
         ).first()
@@ -910,7 +926,9 @@ class Stage6ReadinessService:
             "QUESTION_SHORTAGES",
             "UNIQUE_QUESTION_SHORTAGES",
         }
-        if not ({item["code"] for item in blockers} & structural_codes):
+        if exact_feasibility and not (
+            {item["code"] for item in blockers} & structural_codes
+        ):
             campus_order = tuple(campus_quotas)
             difficulty_order = ("EASY", "MODERATE", "DIFFICULT")
             section_order = tuple(section_quotas)
@@ -1042,12 +1060,20 @@ class Stage6ReadinessService:
                     ),
                 )
 
+        aggregate_requirements_met = not blockers
+        ready = aggregate_requirements_met and bool(
+            solver_result and solver_result.feasible
+        )
         report = {
-            "ready": not blockers,
+            "ready": ready,
             "status": (
                 "READY"
-                if not blockers
-                else "NEEDS QUESTIONS" if question_pool_only else "BLOCKED"
+                if ready
+                else (
+                    "AGGREGATE SUFFICIENT"
+                    if aggregate_requirements_met
+                    else "NEEDS QUESTIONS" if question_pool_only else "BLOCKED"
+                )
             ),
             "blockers": blockers,
             "warnings": warnings,
@@ -1092,6 +1118,10 @@ class Stage6ReadinessService:
             "duplicate_question_count": duplicate_question_count,
             "automatic_pool": automatic_flat_mode,
             "question_pool_only": question_pool_only,
+            "aggregate_requirements_met": aggregate_requirements_met,
+            "exact_feasibility_evaluated": bool(
+                exact_feasibility and solver_result is not None
+            ),
             "contributor_counts": {
                 "required_active": roster.required_active_count if roster else 0,
                 "submitted_required": roster.submitted_required_count if roster else 0,
@@ -1110,8 +1140,9 @@ class Stage6ReadinessService:
                 "member_cycle_course_ids": unit.member_ids,
             }
         if question_pool_only:
-            # Aggregate reporting stops after exact feasibility.  Do not assemble
-            # a confidential GenerationProblem or generation-source snapshots.
+            # Report-only callers do not assemble a confidential GenerationProblem
+            # or generation-source snapshots. Aggregate callers also stop before
+            # exact Set A/B feasibility search.
             return None, report
         problem = None
         if not blockers and solver_result and solver_result.feasible:
