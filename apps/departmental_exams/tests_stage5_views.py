@@ -331,7 +331,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(workspace, ">Upload CSV<")
         self.assertContains(workspace, ">Download CSV template<")
 
-    def test_workspace_shows_distribution_and_submission_returns_concrete_deficiencies(self):
+    def test_workspace_warns_and_submission_allows_complete_mismatched_distribution(self):
         self.fill_questions(50)
         workspace_url = reverse(
             "departmental_exams:contribution_workspace",
@@ -350,37 +350,33 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             "There is no contributor reopen or grace-period override.",
         )
         self.assertNotContains(submit_page, "is permanent in Stage 5")
-        self.assertContains(submit_page, "text-danger")
+        self.assertContains(submit_page, "Preferred Difficulty Distribution")
+        self.assertContains(submit_page, "text-warning")
         self.assertContains(
             submit_page,
-            "Cannot submit yet. The difficulty distribution does not meet the required mix.",
+            "Your difficulty mix differs from the preferred target shown above.",
         )
         self.assertContains(
             submit_page,
-            "Click the Cancel button to return to your draft/imported questions",
+            "You may still Final Submit when the required valid question count is complete.",
         )
-        self.assertContains(
-            submit_page,
-            "edit the questions’ difficulty levels",
-        )
-
         workspace = self.client.get(workspace_url)
         self.assertEqual(workspace.status_code, 200)
-        self.assertContains(workspace, "Difficulty Distribution")
+        self.assertContains(workspace, "Preferred Difficulty Distribution")
         self.assertContains(workspace, "50 / 15")
         self.assertContains(workspace, "0 / 25")
         self.assertContains(workspace, "0 / 10")
         self.assertContains(
             workspace,
-            "Difficulty distribution does not meet the required mix. Reclassify "
-            "your draft questions&#x27; difficulty levels to meet the required Easy, "
-            "Moderate, and Difficult counts before Final Submission.",
+            "Difficulty distribution differs from the preferred target. Reclassify "
+            "your draft questions&#x27; difficulty levels to meet the preferred Easy, "
+            "Moderate, and Difficult counts if practical.",
         )
         self.assertNotContains(workspace, "Needs 25 more Moderate questions")
         self.assertContains(workspace, f'href="{submit_url}"')
         self.assertContains(
             workspace,
-            "Adjust the difficulty distribution before Final Submission.",
+            "Your mix differs from the preferred target; Final Submission is still allowed.",
         )
 
         response = self.client.post(
@@ -390,40 +386,11 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
                 "confirm_exact_quota": "on",
             },
         )
-        self.assertEqual(response.status_code, 400)
-        self.assertTemplateUsed(
-            response, "departmental_exams/faculty/contribution_submit.html"
-        )
-        self.assertContains(response, "Cannot submit yet.", status_code=400)
-        self.assertContains(
-            response,
-            "Easy: 50 of 15 required.",
-            status_code=400,
-        )
-        self.assertContains(
-            response,
-            "Moderate: 0 of 25 required.",
-            status_code=400,
-        )
-        self.assertContains(
-            response,
-            "Difficult: 0 of 10 required.",
-            status_code=400,
-        )
-        self.assertContains(
-            response,
-            "Click the Cancel button to return to your draft/imported questions",
-            status_code=400,
-        )
-        self.assertContains(
-            response,
-            "edit the questions’ difficulty levels",
-            status_code=400,
-        )
+        self.assertEqual(response.status_code, 302)
         self.contribution.refresh_from_db()
-        self.assertEqual(self.contribution.status, FacultyContribution.Status.DRAFT)
+        self.assertEqual(self.contribution.status, FacultyContribution.Status.SUBMITTED)
 
-    def test_workspace_reclassifies_excess_moderate_to_easy_in_red(self):
+    def test_workspace_reclassifies_excess_moderate_to_easy_as_warning(self):
         questions = self.fill_questions(50)
         difficulties = (
             [Question.Difficulty.EASY] * 14
@@ -447,9 +414,9 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(workspace, "10 / 10")
         self.assertContains(
             workspace,
-            '<p class="mb-0 text-danger">Difficulty distribution does not meet '
-            "the required mix. Reclassify 1 excess Moderate question to Easy "
-            "before Final Submission.</p>",
+            '<p class="mb-0 text-warning">Difficulty distribution differs from '
+            "the preferred target. Reclassify 1 excess Moderate question to Easy "
+            "if practical before Final Submission.</p>",
             html=True,
         )
         self.assertNotContains(workspace, "Needs 1 more Easy question")

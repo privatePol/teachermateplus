@@ -227,6 +227,74 @@ class AutomaticGenerationAuditTests(Stage6BGenerationFixtureMixin, Stage4TestCas
             self.assertNotIn("fingerprint", metadata)
             self.assertNotIn("hmac", metadata)
 
+    def test_budget_exhausted_difficulty_warning_reports_best_found_not_closest(self):
+        generated_set = GeneratedExamSet.objects.get(
+            generation_revision=self.revision,
+            set_code=GeneratedExamSet.SetCode.A,
+        )
+        easy_item = GeneratedExamItem.objects.filter(
+            generated_set=generated_set,
+            difficulty_snapshot=Question.Difficulty.EASY,
+        ).first()
+        source_snapshot = GenerationSourceQuestionSnapshot.objects.get(
+            audit_snapshot__generation_revision=self.revision,
+            source_question_id_snapshot=easy_item.source_question_id,
+        )
+        adjusted_digest = AutomaticGenerationAuditService._digest(
+            {
+                "source_id": easy_item.source_question_id,
+                "revision": easy_item.source_question_revision,
+                "question_text": easy_item.question_text_snapshot,
+                "choices": easy_item.choices_snapshot,
+                "correct_answer": easy_item.correct_answer_snapshot,
+                "difficulty": Question.Difficulty.MODERATE,
+            }
+        )
+        GeneratedExamItem.objects.filter(pk=easy_item.pk).update(
+            difficulty_snapshot=Question.Difficulty.MODERATE,
+            source_question_digest=adjusted_digest,
+        )
+        GenerationSourceQuestionSnapshot.objects.filter(pk=source_snapshot.pk).update(
+            difficulty_snapshot=Question.Difficulty.MODERATE,
+            source_question_digest=adjusted_digest,
+        )
+        actual = dict(generated_set.difficulty_quotas_snapshot)
+        actual[Question.Difficulty.EASY] -= 1
+        actual[Question.Difficulty.MODERATE] += 1
+        GeneratedExamSet.objects.filter(pk=generated_set.pk).update(
+            difficulty_quotas_snapshot=actual
+        )
+        generation_event = AuditLog.objects.get(
+            action="DE_EXAM_GENERATED",
+            entity_type="ExamGenerationRevision",
+            entity_id=str(self.revision.id),
+        )
+        metadata = dict(generation_event.metadata_json)
+        metadata["difficulty_actual"] = {
+            **metadata.get("difficulty_actual", {}),
+            GeneratedExamSet.SetCode.A: actual,
+        }
+        metadata["difficulty_optimality_proved"] = False
+        metadata["difficulty_optimization_limit_hit"] = True
+        AuditLog.objects.filter(pk=generation_event.pk).update(
+            metadata_json=metadata
+        )
+
+        run = self._run_from_page()
+        finding = self._findings(run)["SET_A_DIFFICULTY_DISTRIBUTION"]
+
+        self.assertEqual(run.status, AutomaticGenerationAuditRun.Status.WARNING)
+        self.assertEqual(finding["status"], "WARNING")
+        self.assertIn("within the processing budget", finding["message"])
+        self.assertIn("best valid difficulty mix found", finding["message"])
+        self.assertNotIn("closest", finding["message"].lower())
+        self.assertTrue(
+            finding["metrics"]["difficulty_optimization_limit_hit"]
+        )
+        self.assertFalse(
+            finding["metrics"]["difficulty_optimality_proved"]
+        )
+
     def test_unauthorized_and_direct_denied_auditors_fail_closed(self):
         unauthorized = Client()
         unauthorized.force_login(self.configurer)

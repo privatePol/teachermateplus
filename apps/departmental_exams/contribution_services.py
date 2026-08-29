@@ -49,7 +49,7 @@ class ContributionDifficultyDistributionService:
 
     @staticmethod
     def _reclassification_guidance(*, deficient, surplus):
-        prefix = "Difficulty distribution does not meet the required mix."
+        prefix = "Difficulty distribution differs from the preferred target."
         if (
             len(deficient) == 1
             and len(surplus) == 1
@@ -60,12 +60,11 @@ class ContributionDifficultyDistributionService:
             return (
                 f"{prefix} Reclassify {count} excess {surplus[0]['label']} "
                 f"question{'s' if count != 1 else ''} to {deficient[0]['label']} "
-                "before Final Submission."
+                "if practical before Final Submission."
             )
         return (
             f"{prefix} Reclassify your draft questions' difficulty levels to meet "
-            "the required Easy, Moderate, and Difficult counts before Final "
-            "Submission."
+            "the preferred Easy, Moderate, and Difficult counts if practical."
         )
 
     @classmethod
@@ -109,13 +108,12 @@ class ContributionDifficultyDistributionService:
                 )
                 guidance = f"Needs {needs} before Final Submission."
             submission_guidance = (
-                "Cannot submit yet. The difficulty distribution does not meet the "
-                "required mix. Click the Cancel button to return to your draft/imported "
-                "questions, then edit the questions’ difficulty levels to meet the "
-                "required Easy, Moderate, and Difficult counts."
+                "Your difficulty mix differs from the preferred target shown above. "
+                "You may still Final Submit when the required valid question count is "
+                "complete."
             )
         else:
-            guidance = "Difficulty requirements met for Final Submission."
+            guidance = "Preferred difficulty target achieved."
             submission_guidance = guidance
 
         submission_details = " ".join(
@@ -129,9 +127,7 @@ class ContributionDifficultyDistributionService:
             "guidance": guidance,
             "submission_guidance": submission_guidance,
             "submission_error": (
-                f"Cannot submit yet. {submission_details} Click the Cancel button to "
-                "return to your draft/imported questions and edit the questions’ "
-                "difficulty levels to meet the required distribution."
+                f"Preferred difficulty target differs. {submission_details}"
             ),
         }
 
@@ -974,8 +970,6 @@ class QuestionMutationService:
             quota=contribution.quota_snapshot,
             configuration=configuration,
         )
-        if not difficulty_distribution["compliant"]:
-            raise ContributionDifficultyDeficient(difficulty_distribution)
         before_revision = contribution.revision
         contribution.status = FacultyContribution.Status.SUBMITTED
         contribution.submitted_at = timezone.now()
@@ -990,6 +984,11 @@ class QuestionMutationService:
                 "quota": contribution.quota_snapshot,
                 "question_count": len(questions),
                 "difficulty_counts": dict(difficulty_counts),
+                "difficulty_target": {
+                    row["code"]: row["required"]
+                    for row in difficulty_distribution["rows"]
+                },
+                "difficulty_target_met": difficulty_distribution["compliant"],
                 "revision_before": before_revision,
                 "revision_after": contribution.revision,
             },

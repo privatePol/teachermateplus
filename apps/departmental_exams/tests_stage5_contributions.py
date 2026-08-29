@@ -20,7 +20,6 @@ from .contribution_authorization import (
     ContributorEligibilityService,
 )
 from .contribution_services import (
-    ContributionDifficultyDeficient,
     ContributionDifficultyDistributionService,
     ContributionRosterService,
     QuestionMutationService,
@@ -1311,7 +1310,7 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(replay.pk, submitted.pk)
         self.assertEqual(AuditLog.objects.filter(action="DE_EXAM_CONTRIBUTION_SUBMITTED").count(), 1)
 
-    def test_submission_blocks_each_deficient_category_and_surplus_does_not_compensate(self):
+    def test_submission_allows_complete_valid_count_when_difficulty_differs(self):
         questions = self.fill_difficulty_counts(
             {
                 Question.Difficulty.EASY: 15,
@@ -1319,62 +1318,39 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
                 Question.Difficulty.DIFFICULT: 10,
             }
         )
-        scenarios = (
-            (
-                {"EASY": 14, "MODERATE": 26, "DIFFICULT": 10},
-                "Easy: 14 of 15 required.",
-            ),
-            (
-                {"EASY": 16, "MODERATE": 24, "DIFFICULT": 10},
-                "Moderate: 24 of 25 required.",
-            ),
-            (
-                {"EASY": 16, "MODERATE": 25, "DIFFICULT": 9},
-                "Difficult: 9 of 10 required.",
-            ),
+        counts = {"EASY": 14, "MODERATE": 26, "DIFFICULT": 10}
+        difficulties = [
+            difficulty
+            for difficulty in Question.Difficulty.values
+            for _index in range(counts[difficulty])
+        ]
+        for question, difficulty in zip(questions, difficulties):
+            question.difficulty = difficulty
+        Question.objects.bulk_update(questions, ["difficulty"])
+
+        submitted, changed = QuestionMutationService.submit(
+            contribution_id=self.contribution.id,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=self.contribution.revision,
         )
 
-        for counts, expected_message in scenarios:
-            with self.subTest(counts=counts):
-                difficulties = [
-                    difficulty
-                    for difficulty in Question.Difficulty.values
-                    for _index in range(counts[difficulty])
-                ]
-                for question, difficulty in zip(questions, difficulties):
-                    question.difficulty = difficulty
-                Question.objects.bulk_update(questions, ["difficulty"])
-
-                with self.assertRaises(ContributionDifficultyDeficient) as captured:
-                    QuestionMutationService.submit(
-                        contribution_id=self.contribution.id,
-                        user=self.faculty,
-                        tenant_id=self.tenant.id,
-                        campus_id=self.campus.id,
-                        expected_contribution_revision=self.contribution.revision,
-                    )
-
-                self.assertIn(expected_message, captured.exception.messages[0])
-                self.contribution.refresh_from_db()
-                self.assertEqual(
-                    self.contribution.status, FacultyContribution.Status.DRAFT
-                )
-
-        self.assertFalse(
-            AuditLog.objects.filter(
-                action="DE_EXAM_CONTRIBUTION_SUBMITTED"
-            ).exists()
-        )
+        self.assertTrue(changed)
+        self.assertEqual(submitted.status, FacultyContribution.Status.SUBMITTED)
+        audit = AuditLog.objects.get(action="DE_EXAM_CONTRIBUTION_SUBMITTED")
+        self.assertFalse(audit.metadata_json["difficulty_target_met"])
+        self.assertEqual(audit.metadata_json["difficulty_counts"], counts)
 
     def test_draft_guidance_reclassifies_dynamic_single_surplus_to_single_deficit(self):
         scenarios = (
             (
                 {"EASY": 14, "MODERATE": 26, "DIFFICULT": 10},
-                "Reclassify 1 excess Moderate question to Easy before Final Submission.",
+                "Reclassify 1 excess Moderate question to Easy if practical before Final Submission.",
             ),
             (
                 {"EASY": 17, "MODERATE": 25, "DIFFICULT": 8},
-                "Reclassify 2 excess Easy questions to Difficult before Final Submission.",
+                "Reclassify 2 excess Easy questions to Difficult if practical before Final Submission.",
             ),
         )
 
@@ -1393,7 +1369,7 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
 
                 self.assertEqual(
                     distribution["guidance"],
-                    "Difficulty distribution does not meet the required mix. "
+                    "Difficulty distribution differs from the preferred target. "
                     + expected_guidance,
                 )
 
@@ -1416,9 +1392,9 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
 
         self.assertEqual(
             distribution["guidance"],
-            "Difficulty distribution does not meet the required mix. Reclassify "
-            "your draft questions' difficulty levels to meet the required Easy, "
-            "Moderate, and Difficult counts before Final Submission.",
+            "Difficulty distribution differs from the preferred target. Reclassify "
+            "your draft questions' difficulty levels to meet the preferred Easy, "
+            "Moderate, and Difficult counts if practical.",
         )
         self.assertNotIn("Reclassify 2 excess Moderate", distribution["guidance"])
 

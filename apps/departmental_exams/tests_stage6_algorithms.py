@@ -1,5 +1,7 @@
 from collections import Counter
+from itertools import combinations
 from time import perf_counter
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -625,6 +627,409 @@ class Stage6IdentityAwareSelectionTests(SimpleTestCase):
             len(set(result.set_a_block_ids).intersection(result.set_b_block_ids)),
             1,
         )
+
+
+class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
+    secret = "production-shape-secret"
+    campuses = ("C1", "C2", "C3")
+    campus_quotas = {"C1": 17, "C2": 17, "C3": 16}
+    difficulty_quotas = {"EASY": 15, "MODERATE": 25, "DIFFICULT": 10}
+
+    @staticmethod
+    def _review_counterexample_blocks():
+        rows = {
+            "logical:0": (
+                ("C1", "MODERATE", "question:1"),
+                ("C1", "EASY", "question:2"),
+            ),
+            "logical:1": (
+                ("C2", "EASY", "question:3"),
+                ("C1", "MODERATE", "question:4"),
+            ),
+            "logical:2": (("C1", "MODERATE", "question:5"),),
+            "logical:3": (("C2", "MODERATE", "question:6"),),
+            "logical:4": (
+                ("C1", "EASY", "question:7"),
+                ("C2", "MODERATE", "question:8"),
+            ),
+            "logical:5": (("C2", "EASY", "question:9"),),
+        }
+        blocks = []
+        source_id = 1
+        for contributor_id, (logical_id, alternatives) in enumerate(
+            rows.items(), start=1
+        ):
+            for campus, difficulty, block_id in alternatives:
+                blocks.append(
+                    IdentityBlock(
+                        block_id=block_id,
+                        vector=(1,),
+                        members=(
+                            IdentityMember(
+                                source_id,
+                                contributor_id,
+                                campus,
+                                difficulty,
+                                0,
+                            ),
+                        ),
+                        logical_group_id=logical_id,
+                    )
+                )
+                source_id += 1
+        return tuple(blocks)
+
+    def _assert_review_counterexample_hard_constraints(self, *, result, blocks):
+        by_id = {str(block.block_id): block for block in blocks}
+        self.assertEqual(result.overlap, 0)
+        self.assertEqual(
+            set(result.set_a_block_ids).intersection(result.set_b_block_ids), set()
+        )
+        self.assertEqual(
+            {
+                by_id[block_id].logical_group_id
+                for block_id in result.set_a_block_ids
+            }.intersection(
+                {
+                    by_id[block_id].logical_group_id
+                    for block_id in result.set_b_block_ids
+                }
+            ),
+            set(),
+        )
+        for selected in (result.set_a_block_ids, result.set_b_block_ids):
+            self.assertEqual(len(selected), 3)
+            self.assertEqual(
+                Counter(by_id[block_id].members[0].campus for block_id in selected),
+                Counter({"C1": 2, "C2": 1}),
+            )
+            self.assertEqual(
+                len(
+                    {
+                        by_id[block_id].logical_group_id
+                        for block_id in selected
+                    }
+                ),
+                3,
+            )
+
+    @staticmethod
+    def _exhaustive_review_counterexample_optimum(blocks):
+        feasible_sets = []
+        target = {"EASY": 2, "MODERATE": 1}
+        for selected in combinations(blocks, 3):
+            if Counter(
+                block.members[0].campus for block in selected
+            ) != Counter({"C1": 2, "C2": 1}):
+                continue
+            logical_ids = {block.logical_group_id for block in selected}
+            if len(logical_ids) != 3:
+                continue
+            counts = Counter(block.members[0].difficulty for block in selected)
+            deviation = sum(
+                abs(counts[difficulty] - amount)
+                for difficulty, amount in target.items()
+            )
+            feasible_sets.append((logical_ids, deviation))
+        return min(
+            deviation_a + deviation_b
+            for logical_a, deviation_a in feasible_sets
+            for logical_b, deviation_b in feasible_sets
+            if logical_a.isdisjoint(logical_b)
+        )
+
+    def test_review_counterexample_proves_minimum_combined_deviation_two(self):
+        blocks = self._review_counterexample_blocks()
+        result = solve_automatic_identity_aware_two_sets(
+            margins=(3,),
+            blocks=blocks,
+            campus_quotas={"C1": 2, "C2": 1},
+            difficulty_quotas={"EASY": 2, "MODERATE": 1},
+            secret="review-counterexample-secret",
+            hmac_context={"review_case": "minimum-deviation"},
+            max_states=100_000,
+            optimize_soft=True,
+        )
+
+        self.assertTrue(result.feasible, result)
+        self.assertFalse(result.limit_hit)
+        self.assertFalse(result.optimization_limit_hit)
+        self.assertTrue(result.difficulty_optimality_proved)
+        exhaustive_optimum = self._exhaustive_review_counterexample_optimum(blocks)
+        self.assertEqual(exhaustive_optimum, 2)
+        self.assertEqual(result.difficulty_deviation, exhaustive_optimum)
+        self._assert_review_counterexample_hard_constraints(
+            result=result, blocks=blocks
+        )
+
+    def test_review_counterexample_small_budget_keeps_hard_valid_best_found(self):
+        blocks = self._review_counterexample_blocks()
+        result = solve_automatic_identity_aware_two_sets(
+            margins=(3,),
+            blocks=blocks,
+            campus_quotas={"C1": 2, "C2": 1},
+            difficulty_quotas={"EASY": 2, "MODERATE": 1},
+            secret="review-counterexample-secret",
+            hmac_context={"review_case": "budget-exhaustion"},
+            max_states=1,
+            optimize_soft=True,
+        )
+
+        self.assertTrue(result.feasible, result)
+        self.assertFalse(result.limit_hit)
+        self.assertTrue(result.optimization_limit_hit)
+        self.assertFalse(result.difficulty_optimality_proved)
+        self._assert_review_counterexample_hard_constraints(
+            result=result, blocks=blocks
+        )
+
+    @staticmethod
+    def _target_template():
+        cells = (
+            ("C1", "EASY", 5),
+            ("C1", "MODERATE", 9),
+            ("C1", "DIFFICULT", 3),
+            ("C2", "EASY", 5),
+            ("C2", "MODERATE", 8),
+            ("C2", "DIFFICULT", 4),
+            ("C3", "EASY", 5),
+            ("C3", "MODERATE", 8),
+            ("C3", "DIFFICULT", 3),
+        )
+        return tuple(
+            (campus, difficulty)
+            for campus, difficulty, count in cells
+            for _index in range(count)
+        )
+
+    def _shape(self, *, unique_count, submitted_count):
+        template = self._target_template()
+        rows = []
+        for logical_index in range(unique_count):
+            campus, difficulty = template[logical_index % len(template)]
+            rows.append(
+                [
+                    campus,
+                    difficulty,
+                    f"logical:{logical_index}",
+                ]
+            )
+        source_id = 1
+        blocks = []
+        for campus, difficulty, logical_id in rows:
+            blocks.append(
+                IdentityBlock(
+                    block_id=f"question:{source_id}",
+                    vector=(1,),
+                    members=(
+                        IdentityMember(
+                            source_id,
+                            (source_id % 7) + 1,
+                            campus,
+                            difficulty,
+                            0,
+                        ),
+                    ),
+                    logical_group_id=logical_id,
+                )
+            )
+            source_id += 1
+        for duplicate_index in range(submitted_count - unique_count):
+            source = blocks[duplicate_index % unique_count]
+            member = source.members[0]
+            alternate_campus = self.campuses[
+                (self.campuses.index(member.campus) + 1) % len(self.campuses)
+            ]
+            blocks.append(
+                IdentityBlock(
+                    block_id=f"question:{source_id}",
+                    vector=(1,),
+                    members=(
+                        IdentityMember(
+                            source_id,
+                            (source_id % 7) + 1,
+                            alternate_campus,
+                            member.difficulty,
+                            0,
+                        ),
+                    ),
+                    logical_group_id=source.logical_group_id,
+                )
+            )
+            source_id += 1
+        return tuple(blocks)
+
+    def _solve_shape(self, *, unique_count, submitted_count):
+        blocks = self._shape(
+            unique_count=unique_count,
+            submitted_count=submitted_count,
+        )
+        started = perf_counter()
+        result = solve_automatic_identity_aware_two_sets(
+            margins=(50,),
+            blocks=blocks,
+            campus_quotas=self.campus_quotas,
+            difficulty_quotas=self.difficulty_quotas,
+            secret=self.secret,
+            hmac_context={"shape": (unique_count, submitted_count)},
+            max_states=1_000_000,
+        )
+        elapsed = perf_counter() - started
+        self.assertTrue(result.feasible, result)
+        self.assertFalse(result.limit_hit)
+        self.assertLess(elapsed, 30)
+        by_id = {str(block.block_id): block for block in blocks}
+        for selected in (result.set_a_block_ids, result.set_b_block_ids):
+            self.assertEqual(len(selected), 50)
+            self.assertEqual(
+                Counter(by_id[block_id].members[0].campus for block_id in selected),
+                Counter(self.campus_quotas),
+            )
+            self.assertEqual(
+                len({by_id[block_id].logical_group_id for block_id in selected}),
+                50,
+            )
+        return result, blocks, elapsed
+
+    def test_fm322_like_150_submitted_102_unique_completes_quickly(self):
+        result, _blocks, elapsed = self._solve_shape(
+            unique_count=102,
+            submitted_count=150,
+        )
+        self.assertEqual(result.overlap, 0)
+        self.assertTrue(result.difficulty_target_met)
+        print(f"AUTOMATIC_SHAPE FM322 elapsed={elapsed:.6f}s")
+
+    def test_ge213_like_150_submitted_98_unique_uses_two_overlap(self):
+        result, _blocks, elapsed = self._solve_shape(
+            unique_count=98,
+            submitted_count=150,
+        )
+        self.assertEqual(result.overlap, 2)
+        print(f"AUTOMATIC_SHAPE GE213 elapsed={elapsed:.6f}s")
+
+    def test_fm311_like_150_submitted_101_unique_completes_quickly(self):
+        result, _blocks, elapsed = self._solve_shape(
+            unique_count=101,
+            submitted_count=150,
+        )
+        self.assertEqual(result.overlap, 0)
+        self.assertTrue(result.difficulty_target_met)
+        print(f"AUTOMATIC_SHAPE FM311 elapsed={elapsed:.6f}s")
+
+    def test_is313_like_impossible_target_uses_proved_closest_mix(self):
+        mix = (
+            (("C1", "EASY"), 11),
+            (("C1", "MODERATE"), 12),
+            (("C1", "DIFFICULT"), 2),
+            (("C2", "EASY"), 11),
+            (("C2", "MODERATE"), 11),
+            (("C2", "DIFFICULT"), 3),
+        )
+        one_set = tuple(cell for cell, count in mix for _index in range(count))
+        blocks = tuple(
+            IdentityBlock(
+                block_id=f"question:{index + 1}",
+                vector=(1,),
+                members=(
+                    IdentityMember(
+                        index + 1,
+                        (index % 5) + 1,
+                        campus,
+                        difficulty,
+                        0,
+                    ),
+                ),
+                logical_group_id=f"logical:{index + 1}",
+            )
+            for index, (campus, difficulty) in enumerate(one_set + one_set)
+        )
+        started = perf_counter()
+        result = solve_automatic_identity_aware_two_sets(
+            margins=(50,),
+            blocks=blocks,
+            campus_quotas={"C1": 25, "C2": 25},
+            difficulty_quotas=self.difficulty_quotas,
+            secret=self.secret,
+            hmac_context={"shape": "is313"},
+            max_states=1_000_000,
+        )
+        elapsed = perf_counter() - started
+        self.assertTrue(result.feasible, result)
+        self.assertEqual(result.overlap, 0)
+        self.assertFalse(result.difficulty_target_met)
+        self.assertTrue(result.difficulty_optimality_proved)
+        self.assertEqual(result.difficulty_deviation, 28)
+        by_id = {str(block.block_id): block for block in blocks}
+        combined = Counter(
+            by_id[block_id].members[0].difficulty
+            for selected in (result.set_a_block_ids, result.set_b_block_ids)
+            for block_id in selected
+        )
+        self.assertEqual(
+            combined,
+            Counter({"EASY": 44, "MODERATE": 46, "DIFFICULT": 10}),
+        )
+        repeated = solve_automatic_identity_aware_two_sets(
+            margins=(50,),
+            blocks=blocks,
+            campus_quotas={"C1": 25, "C2": 25},
+            difficulty_quotas=self.difficulty_quotas,
+            secret=self.secret,
+            hmac_context={"shape": "is313"},
+            max_states=1_000_000,
+        )
+        self.assertEqual(repeated.set_a_block_ids, result.set_a_block_ids)
+        self.assertEqual(repeated.set_b_block_ids, result.set_b_block_ids)
+        self.assertLess(elapsed, 30)
+        print(f"AUTOMATIC_SHAPE IS313 elapsed={elapsed:.6f}s")
+
+    def test_definitive_fast_path_infeasibility_does_not_use_generic_recursion(self):
+        blocks = tuple(
+            IdentityBlock(
+                block_id=f"question:{index}",
+                vector=(1,),
+                members=(IdentityMember(index, index, "C1", "EASY", 0),),
+                logical_group_id=f"logical:{index}",
+            )
+            for index in range(1, 4)
+        )
+        with patch(
+            "apps.departmental_exams.generation_algorithms.solve_identity_aware_two_sets",
+            side_effect=AssertionError("generic recursion must not run"),
+        ) as generic:
+            result = solve_automatic_identity_aware_two_sets(
+                margins=(2,),
+                blocks=blocks,
+                campus_quotas={"C1": 1, "C2": 1},
+                difficulty_quotas={"EASY": 2},
+                secret=self.secret,
+                hmac_context={"shape": "infeasible"},
+                max_states=100,
+            )
+        self.assertFalse(result.feasible)
+        self.assertFalse(result.limit_hit)
+        generic.assert_not_called()
+
+    def test_budget_exhaustion_is_distinct_from_proved_infeasibility(self):
+        result = solve_automatic_identity_aware_two_sets(
+            margins=(1,),
+            blocks=(
+                IdentityBlock(
+                    block_id="question:1",
+                    vector=(1,),
+                    members=(IdentityMember(1, 1, "C1", "EASY", 0),),
+                    logical_group_id="logical:1",
+                ),
+            ),
+            campus_quotas={"C1": 1},
+            difficulty_quotas={"EASY": 1},
+            secret=self.secret,
+            hmac_context={"shape": "budget"},
+            max_states=0,
+        )
+        self.assertFalse(result.feasible)
+        self.assertTrue(result.limit_hit)
 
     def test_automatic_impossible_positive_overlap_stays_infeasible(self):
         blocks = tuple(

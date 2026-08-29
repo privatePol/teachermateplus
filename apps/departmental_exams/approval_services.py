@@ -177,8 +177,13 @@ class GeneratedExamIntegrityService:
         normalized_problem_section = {
             str(key): int(value) for key, value in problem.section_quotas.items()
         }
+        automatic_mode = (
+            revision.cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        )
         source_sets = []
         aggregate = None
+        difficulty_by_set = {}
         for generated_set in generated_sets:
             items = items_by_set[generated_set.id]
             expected_count = revision.final_item_count_snapshot
@@ -202,7 +207,10 @@ class GeneratedExamIntegrityService:
             )
             if (
                 campus_snapshot != normalized_problem_campus
-                or difficulty_snapshot != normalized_problem_difficulty
+                or (
+                    not automatic_mode
+                    and difficulty_snapshot != normalized_problem_difficulty
+                )
                 or section_snapshot != normalized_problem_section
             ):
                 raise ApprovalConflict("Generated quota snapshots do not match current inputs.")
@@ -257,17 +265,27 @@ class GeneratedExamIntegrityService:
             source_sets.append(set(source_ids))
             this_aggregate = {
                 "campus_counts": campus_snapshot,
-                "difficulty_counts": difficulty_snapshot,
                 "section_counts": section_snapshot,
             }
             if aggregate is not None and this_aggregate != aggregate:
                 raise ApprovalConflict("Set A and Set B quota evidence is inconsistent.")
             aggregate = this_aggregate
+            difficulty_by_set[generated_set.set_code] = difficulty_snapshot
 
         overlap = len(source_sets[0].intersection(source_sets[1]))
         if overlap != revision.minimum_overlap:
             raise ApprovalConflict("Generated overlap evidence is inconsistent.")
-        return {**aggregate, "overlap_count": overlap}
+        difficulty_counts = (
+            difficulty_by_set
+            if automatic_mode
+            else difficulty_by_set.get("A", {})
+        )
+        return {
+            **aggregate,
+            "difficulty_counts": difficulty_counts,
+            "difficulty_target": normalized_problem_difficulty,
+            "overlap_count": overlap,
+        }
 
 
 class ExamApprovalLockService:

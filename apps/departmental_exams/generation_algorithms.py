@@ -115,6 +115,10 @@ class IdentitySelectionResult:
     proportional_score: int | None = None
     contributors_represented: int = 0
     squared_contributor_concentration: int = 0
+    difficulty_deviation: int | None = None
+    difficulty_target_met: bool = False
+    difficulty_optimality_proved: bool = False
+    optimization_limit_hit: bool = False
 
 
 def confidential_hmac_rank(*, secret, domain: str, context) -> int:
@@ -2022,131 +2026,662 @@ def solve_automatic_identity_aware_two_sets(
     max_states,
     optimize_soft=False,
 ):
-    """Find the minimum-overlap Automatic selection with a hard-feasible gate.
+    """Select Automatic Set A/B with hard campus margins and soft difficulty.
 
-    The identity-aware selector is authoritative for both readiness and output.
-    The assignment fast path keeps campus/difficulty proportionality and stable
-    HMAC ordering deterministic. Contributor metrics are descriptive on the
-    hard path. Output may attempt the existing soft objectives afterward, but
-    exhausting that bounded refinement returns the proved hard selection.
+    Hard feasibility is a tri-state, capacity-pruned assignment proof:
+    feasible, exhaustively infeasible at the tested overlap, or state-budget
+    exhausted.  It never materializes campus-by-difficulty contingency tables.
+
+    For the minimum hard-feasible overlap, difficulty refinement exhaustively
+    tests lower-deviation difficulty allocations until the minimum combined
+    Set A/B deviation is proved or the shared state budget is exhausted.
+    Candidate allocations and their hard-feasible witnesses are visited
+    deterministically using:
+
+    1. total absolute Easy/Moderate/Difficult deviation across Set A and Set B;
+    2. campus-by-difficulty proportional score within each allocation;
+    3. confidential HMAC rank and canonical block identities.
+
+    The configured difficulty vector is therefore preferred, never a hard
+    generation margin.  A proved hard selection remains usable if only the
+    optional difficulty proof exhausts its remaining budget.
     """
     margins = tuple(int(value) for value in margins)
-    if not margins or margins[0] < 0:
-        return IdentitySelectionResult(False, False, 0)
-    logical_ids = {
-        str(block.logical_group_id)
-        for block in blocks
-        if block.logical_group_id is not None
-    }
-    if any(
-        block.size != 1 or block.logical_group_id is None
-        for block in blocks
-    ):
+    blocks = tuple(blocks)
+    total = margins[0] if margins else -1
+    max_states = int(max_states)
+    if total < 0 or max_states < 1:
+        return IdentitySelectionResult(False, max_states < 1, 0)
+    if any(block.size != 1 or block.logical_group_id is None for block in blocks):
         raise ValueError("Automatic logical selections must be singleton blocks.")
-    minimum_possible_overlap = max(0, 2 * margins[0] - len(logical_ids))
-    for campus, quota in campus_quotas.items():
-        available_groups = len(
-            {
-                str(block.logical_group_id)
-                for block in blocks
-                if block.members[0].campus == campus
-            }
-        )
-        minimum_possible_overlap = max(
-            minimum_possible_overlap,
-            2 * int(quota) - available_groups,
-        )
-    for difficulty, quota in difficulty_quotas.items():
-        available_groups = len(
-            {
-                str(block.logical_group_id)
-                for block in blocks
-                if block.members[0].difficulty == difficulty
-            }
-        )
-        minimum_possible_overlap = max(
-            minimum_possible_overlap,
-            2 * int(quota) - available_groups,
-        )
-    states_explored = 0
-    hard_selection = None
-    for overlap in range(minimum_possible_overlap, margins[0] + 1):
-        remaining_states = int(max_states) - states_explored
-        if remaining_states <= 0:
-            return IdentitySelectionResult(False, True, states_explored)
-        candidate = solve_identity_aware_two_sets(
-            margins=margins,
-            blocks=blocks,
-            minimum_overlap=overlap,
-            campus_quotas=campus_quotas,
-            difficulty_quotas=difficulty_quotas,
-            secret=secret,
-            hmac_context={**dict(hmac_context), "minimum_overlap": overlap},
-            max_states=remaining_states,
-            stop_at_first_feasible=True,
-        )
-        states_explored += candidate.states_explored
-        if candidate.limit_hit:
-            return IdentitySelectionResult(False, True, states_explored)
-        if candidate.feasible:
-            hard_selection = IdentitySelectionResult(
-                feasible=True,
-                limit_hit=False,
-                states_explored=states_explored,
-                set_a_block_ids=candidate.set_a_block_ids,
-                set_b_block_ids=candidate.set_b_block_ids,
-                overlap=candidate.overlap,
-                proportional_score=candidate.proportional_score,
-                contributors_represented=candidate.contributors_represented,
-                squared_contributor_concentration=(
-                    candidate.squared_contributor_concentration
-                ),
+
+    campus_order = tuple(campus_quotas)
+    difficulty_order = tuple(difficulty_quotas)
+    logical_groups = {
+        logical_id: tuple(sorted(rows, key=lambda row: str(row.block_id)))
+        for logical_id, rows in sorted(
+            (
+                (logical_id, [
+                    block
+                    for block in blocks
+                    if str(block.logical_group_id) == logical_id
+                ])
+                for logical_id in sorted(
+                    {str(block.logical_group_id) for block in blocks}
+                )
             )
-            break
-    if hard_selection is None or not optimize_soft:
-        return hard_selection or IdentitySelectionResult(
-            False, False, states_explored
+        )
+    }
+    ordered_groups = tuple(logical_groups.values())
+    group_count = len(ordered_groups)
+    if sum(int(value) for value in campus_quotas.values()) != total:
+        raise ValueError("Automatic campus quotas must equal the set item count.")
+    if sum(int(value) for value in difficulty_quotas.values()) != total:
+        raise ValueError("Automatic difficulty targets must equal the set item count.")
+
+    groups_by_campus = {
+        campus: sum(
+            any(block.members[0].campus == campus for block in rows)
+            for rows in ordered_groups
+        )
+        for campus in campus_order
+    }
+    minimum_possible_overlap = max(0, 2 * total - group_count)
+    for campus, quota in campus_quotas.items():
+        minimum_possible_overlap = max(
+            minimum_possible_overlap,
+            2 * int(quota) - groups_by_campus[campus],
+        )
+    if minimum_possible_overlap > total:
+        return IdentitySelectionResult(False, False, 0)
+
+    states_explored = 0
+    optimization_limit_hit = False
+    rank_limit = (1 << 256) * (2 * total + 1)
+
+    def shared_campus_allocations(overlap):
+        """Yield only overlap allocations that fit real campus capacity."""
+        campus_lower = {
+            campus: max(
+                0,
+                2 * int(campus_quotas[campus]) - groups_by_campus[campus],
+            )
+            for campus in campus_order
+        }
+        suffix_lower = [0] * (len(campus_order) + 1)
+        suffix_upper = [0] * (len(campus_order) + 1)
+        for position in range(len(campus_order) - 1, -1, -1):
+            campus = campus_order[position]
+            suffix_lower[position] = (
+                suffix_lower[position + 1] + campus_lower[campus]
+            )
+            suffix_upper[position] = suffix_upper[position + 1] + min(
+                int(campus_quotas[campus]), groups_by_campus[campus]
+            )
+
+        def build(position, remaining, prefix):
+            if position == len(campus_order):
+                if remaining == 0:
+                    yield prefix
+                return
+            campus = campus_order[position]
+            lower = max(
+                campus_lower[campus],
+                remaining - suffix_upper[position + 1],
+            )
+            upper = min(
+                remaining,
+                int(campus_quotas[campus]),
+                groups_by_campus[campus],
+                remaining - suffix_lower[position + 1],
+            )
+            for amount in range(lower, upper + 1):
+                yield from build(position + 1, remaining - amount, prefix + (amount,))
+
+        yield from build(0, overlap, ())
+
+    def selection_metrics(set_a, set_b):
+        by_id = {str(block.block_id): block for block in blocks}
+        counts_by_set = []
+        cell_counts_by_set = []
+        contributor_counts = {}
+        for selected in (set_a, set_b):
+            difficulty_counts = {key: 0 for key in difficulty_order}
+            cell_counts = {}
+            for block_id in selected:
+                member = by_id[block_id].members[0]
+                difficulty_counts[member.difficulty] = (
+                    difficulty_counts.get(member.difficulty, 0) + 1
+                )
+                cell = (member.campus, member.difficulty)
+                cell_counts[cell] = cell_counts.get(cell, 0) + 1
+                contributor_counts[member.contributor_id] = (
+                    contributor_counts.get(member.contributor_id, 0) + 1
+                )
+            counts_by_set.append(difficulty_counts)
+            cell_counts_by_set.append(cell_counts)
+        deviation = sum(
+            abs(counts[key] - int(difficulty_quotas[key]))
+            for counts in counts_by_set
+            for key in difficulty_order
+        )
+        proportional = sum(
+            proportional_campus_difficulty_score(
+                total=total,
+                campus_quotas=campus_quotas,
+                difficulty_quotas=difficulty_quotas,
+                cell_counts=cell_counts,
+            )
+            for cell_counts in cell_counts_by_set
+        )
+        represented = len(contributor_counts)
+        concentration = sum(value * value for value in contributor_counts.values())
+        return deviation, proportional, represented, concentration, counts_by_set
+
+    def assignment_for(
+        *,
+        overlap,
+        shared_counts,
+        difficulty_costs,
+        target_table=None,
+        target_table_b=None,
+        shared_cells=None,
+    ):
+        """Solve one capacity-feasible campus allocation by rectangular Hungarian."""
+        nonlocal states_explored
+        states_explored += 1
+        if states_explored > max_states:
+            raise FeasibilityLimitExceeded
+        slots = []
+        if target_table is None:
+            for position, campus in enumerate(campus_order):
+                shared = shared_counts[position]
+                slots.extend(("X", campus, None) for _ in range(shared))
+                slots.extend(
+                    ("A", campus, None)
+                    for _ in range(int(campus_quotas[campus]) - shared)
+                )
+                slots.extend(
+                    ("B", campus, None)
+                    for _ in range(int(campus_quotas[campus]) - shared)
+                )
+        else:
+            target_table_b = target_table if target_table_b is None else target_table_b
+            for campus in campus_order:
+                for difficulty in difficulty_order:
+                    cell = (campus, difficulty)
+                    shared = int((shared_cells or {}).get(cell, 0))
+                    target_a = int(target_table[cell])
+                    target_b = int(target_table_b[cell])
+                    slots.extend(("X", campus, difficulty) for _ in range(shared))
+                    slots.extend(
+                        ("A", campus, difficulty)
+                        for _ in range(target_a - shared)
+                    )
+                    slots.extend(
+                        ("B", campus, difficulty)
+                        for _ in range(target_b - shared)
+                    )
+        if len(slots) > group_count:
+            return None
+
+        costs = []
+        chosen_ids = []
+        row_cache = {}
+        for set_code, campus, required_difficulty in slots:
+            row_key = (set_code, campus, required_difficulty)
+            cached_row = row_cache.get(row_key)
+            if cached_row is None:
+                row_costs = []
+                row_ids = []
+                selection_state = {"A": "A", "B": "B", "X": "BOTH"}[
+                    set_code
+                ]
+                for rows in ordered_groups:
+                    choices = []
+                    for block in rows:
+                        member = block.members[0]
+                        if member.campus != campus:
+                            continue
+                        if (
+                            required_difficulty is not None
+                            and member.difficulty != required_difficulty
+                        ):
+                            continue
+                        coefficient = (
+                            difficulty_costs["A"].get(member.difficulty, 0)
+                            + difficulty_costs["B"].get(member.difficulty, 0)
+                            if set_code == "X"
+                            else difficulty_costs[set_code].get(member.difficulty, 0)
+                        )
+                        rank = confidential_hmac_rank(
+                            secret=secret,
+                            domain=SELECTION_HMAC_DOMAIN,
+                            context={
+                                **dict(hmac_context),
+                                "minimum_overlap": overlap,
+                                "block_identity": block.block_id,
+                                "selection_state": selection_state,
+                            },
+                        )
+                        choices.append(
+                            (coefficient * rank_limit + rank, str(block.block_id))
+                        )
+                    if choices:
+                        cost, block_id = min(choices)
+                        row_costs.append(cost)
+                        row_ids.append(block_id)
+                    else:
+                        row_costs.append(None)
+                        row_ids.append(None)
+                cached_row = (row_costs, row_ids)
+                row_cache[row_key] = cached_row
+            row_costs, row_ids = cached_row
+            if not any(value is not None for value in row_costs):
+                return None
+            costs.append(row_costs)
+            chosen_ids.append(row_ids)
+
+        row_count = len(slots)
+        column_count = group_count
+        infinity = rank_limit * (10 * total + 1)
+        numeric_costs = [
+            [infinity if value is None else value for value in row]
+            for row in costs
+        ]
+        u = [0] * (row_count + 1)
+        v = [0] * (column_count + 1)
+        p = [0] * (column_count + 1)
+        way = [0] * (column_count + 1)
+        for row_index in range(1, row_count + 1):
+            p[0] = row_index
+            column = 0
+            minimums = [None] * (column_count + 1)
+            used = [False] * (column_count + 1)
+            while True:
+                used[column] = True
+                active_row = p[column]
+                delta = None
+                next_column = 0
+                for candidate_column in range(1, column_count + 1):
+                    if used[candidate_column]:
+                        continue
+                    reduced = (
+                        numeric_costs[active_row - 1][candidate_column - 1]
+                        - u[active_row]
+                        - v[candidate_column]
+                    )
+                    if (
+                        minimums[candidate_column] is None
+                        or reduced < minimums[candidate_column]
+                    ):
+                        minimums[candidate_column] = reduced
+                        way[candidate_column] = column
+                    if delta is None or minimums[candidate_column] < delta:
+                        delta = minimums[candidate_column]
+                        next_column = candidate_column
+                if delta is None or delta >= infinity:
+                    return None
+                for candidate_column in range(column_count + 1):
+                    if used[candidate_column]:
+                        u[p[candidate_column]] += delta
+                        v[candidate_column] -= delta
+                    elif candidate_column:
+                        minimums[candidate_column] -= delta
+                column = next_column
+                if p[column] == 0:
+                    break
+            while True:
+                previous = way[column]
+                p[column] = p[previous]
+                column = previous
+                if column == 0:
+                    break
+
+        assigned = [None] * row_count
+        for column in range(1, column_count + 1):
+            if p[column]:
+                assigned[p[column] - 1] = column - 1
+        if any(column is None for column in assigned):
+            return None
+        set_a = []
+        set_b = []
+        hmac_total = 0
+        for row_index, group_index in enumerate(assigned):
+            if numeric_costs[row_index][group_index] >= infinity:
+                return None
+            block_id = chosen_ids[row_index][group_index]
+            set_code = slots[row_index][0]
+            hmac_total += numeric_costs[row_index][group_index] % rank_limit
+            if set_code in ("A", "X"):
+                set_a.append(block_id)
+            if set_code in ("B", "X"):
+                set_b.append(block_id)
+        canonical_a = tuple(sorted(set_a))
+        canonical_b = tuple(sorted(set_b))
+        deviation, proportional, represented, concentration, counts = selection_metrics(
+            canonical_a, canonical_b
+        )
+        return {
+            "set_a": canonical_a,
+            "set_b": canonical_b,
+            "deviation": deviation,
+            "proportional": proportional,
+            "represented": represented,
+            "concentration": concentration,
+            "hmac": hmac_total,
+            "counts": counts,
+        }
+
+    zero_costs = {
+        "A": {key: 0 for key in difficulty_order},
+        "B": {key: 0 for key in difficulty_order},
+    }
+    hard_candidate = None
+    hard_overlap = None
+    try:
+        for overlap in range(minimum_possible_overlap, total + 1):
+            for shared_counts in shared_campus_allocations(overlap):
+                candidate = assignment_for(
+                    overlap=overlap,
+                    shared_counts=shared_counts,
+                    difficulty_costs=zero_costs,
+                )
+                if candidate is not None:
+                    hard_candidate = candidate
+                    hard_overlap = overlap
+                    break
+            if hard_candidate is not None:
+                break
+    except FeasibilityLimitExceeded:
+        return IdentitySelectionResult(False, True, states_explored)
+    if hard_candidate is None:
+        return IdentitySelectionResult(False, False, states_explored)
+
+    best = hard_candidate
+    # Aggregate availability supplies a safe global lower bound. Reaching it
+    # proves that no hard-feasible selection can improve total L1 deviation.
+    lower_bound = 0
+    for difficulty in difficulty_order:
+        available = sum(
+            any(block.members[0].difficulty == difficulty for block in rows)
+            for rows in ordered_groups
+        )
+        maximum_occurrences = available + min(hard_overlap, available)
+        lower_bound += 2 * max(
+            0, 2 * int(difficulty_quotas[difficulty]) - maximum_occurrences
         )
 
-    remaining_states = int(max_states) - states_explored
-    if remaining_states <= 0:
-        return hard_selection
-    optimized = solve_identity_aware_two_sets(
-        margins=margins,
-        blocks=blocks,
-        minimum_overlap=hard_selection.overlap,
-        campus_quotas=campus_quotas,
-        difficulty_quotas=difficulty_quotas,
-        secret=secret,
-        hmac_context=dict(hmac_context),
-        max_states=min(remaining_states, 100),
-    )
-    if optimized.feasible:
-        return IdentitySelectionResult(
-            feasible=True,
-            limit_hit=False,
-            states_explored=states_explored + optimized.states_explored,
-            set_a_block_ids=optimized.set_a_block_ids,
-            set_b_block_ids=optimized.set_b_block_ids,
-            overlap=optimized.overlap,
-            proportional_score=optimized.proportional_score,
-            contributors_represented=optimized.contributors_represented,
-            squared_contributor_concentration=(
-                optimized.squared_contributor_concentration
-            ),
+    difficulty_optimality_proved = best["deviation"] == lower_bound
+    if not difficulty_optimality_proved:
+        cell_order = tuple(
+            (campus, difficulty)
+            for campus in campus_order
+            for difficulty in difficulty_order
         )
+        cell_capacity = {
+            cell: sum(
+                any(
+                    (block.members[0].campus, block.members[0].difficulty) == cell
+                    for block in rows
+                )
+                for rows in ordered_groups
+            )
+            for cell in cell_order
+        }
+
+        available_by_difficulty = {
+            difficulty: sum(
+                any(block.members[0].difficulty == difficulty for block in rows)
+                for rows in ordered_groups
+            )
+            for difficulty in difficulty_order
+        }
+
+        def consume_optimization_state():
+            nonlocal states_explored
+            states_explored += 1
+            if states_explored > max_states:
+                raise FeasibilityLimitExceeded
+
+        def row_allocations(total_needed, limits, position=0, prefix=()):
+            if position == len(limits) - 1:
+                if total_needed <= limits[position]:
+                    yield prefix + (total_needed,)
+                return
+            for amount in range(min(total_needed, limits[position]) + 1):
+                yield from row_allocations(
+                    total_needed - amount,
+                    limits,
+                    position + 1,
+                    prefix + (amount,),
+                )
+
+        @lru_cache(maxsize=None)
+        def tables_for_counts(counts):
+            tables = []
+
+            def build(campus_index, remaining, cells):
+                if campus_index == len(campus_order):
+                    if not any(remaining):
+                        consume_optimization_state()
+                        table = dict(cells)
+                        tables.append(
+                            (
+                                proportional_campus_difficulty_score(
+                                    total=total,
+                                    campus_quotas=campus_quotas,
+                                    difficulty_quotas=difficulty_quotas,
+                                    cell_counts=table,
+                                ),
+                                tuple(int(table[cell]) for cell in cell_order),
+                                table,
+                            )
+                        )
+                    return
+                campus = campus_order[campus_index]
+                limits = tuple(
+                    min(
+                        remaining[position],
+                        cell_capacity[(campus, difficulty)],
+                    )
+                    for position, difficulty in enumerate(difficulty_order)
+                )
+                if sum(limits) < int(campus_quotas[campus]):
+                    return
+                for row in row_allocations(int(campus_quotas[campus]), limits):
+                    next_remaining = tuple(
+                        remaining[position] - row[position]
+                        for position in range(len(difficulty_order))
+                    )
+                    next_cells = dict(cells)
+                    for position, difficulty in enumerate(difficulty_order):
+                        next_cells[(campus, difficulty)] = row[position]
+                    build(campus_index + 1, next_remaining, next_cells)
+
+            build(0, tuple(int(value) for value in counts), {})
+            tables.sort(key=lambda item: (item[0], item[1]))
+            return tuple(tables)
+
+        def shared_cell_allocations(table_a, table_b):
+            lower = tuple(
+                max(
+                    0,
+                    int(table_a[cell])
+                    + int(table_b[cell])
+                    - cell_capacity[cell],
+                )
+                for cell in cell_order
+            )
+            upper = tuple(
+                min(int(table_a[cell]), int(table_b[cell]))
+                for cell in cell_order
+            )
+            if sum(lower) > hard_overlap or sum(upper) < hard_overlap:
+                return
+            suffix_lower = [0] * (len(cell_order) + 1)
+            suffix_upper = [0] * (len(cell_order) + 1)
+            for position in range(len(cell_order) - 1, -1, -1):
+                suffix_lower[position] = suffix_lower[position + 1] + lower[position]
+                suffix_upper[position] = suffix_upper[position + 1] + upper[position]
+
+            def build(position, remaining, values):
+                if position == len(cell_order):
+                    if remaining == 0:
+                        consume_optimization_state()
+                        yield {
+                            cell: values[index]
+                            for index, cell in enumerate(cell_order)
+                        }
+                    return
+                start = max(
+                    lower[position], remaining - suffix_upper[position + 1]
+                )
+                stop = min(
+                    upper[position], remaining - suffix_lower[position + 1]
+                )
+                for amount in range(start, stop + 1):
+                    yield from build(
+                        position + 1,
+                        remaining - amount,
+                        values + (amount,),
+                    )
+
+            yield from build(0, hard_overlap, ())
+
+        def difficulty_count_vectors():
+            values = []
+
+            def build(position, remaining, prefix):
+                if position == len(difficulty_order) - 1:
+                    counts = prefix + (remaining,)
+                    if any(
+                        counts[index] > available_by_difficulty[difficulty]
+                        for index, difficulty in enumerate(difficulty_order)
+                    ):
+                        return
+                    deviation = sum(
+                        abs(
+                            counts[index]
+                            - int(difficulty_quotas[difficulty])
+                        )
+                        for index, difficulty in enumerate(difficulty_order)
+                    )
+                    consume_optimization_state()
+                    values.append((deviation, counts))
+                    return
+                for amount in range(remaining + 1):
+                    build(position + 1, remaining - amount, prefix + (amount,))
+
+            build(0, total, ())
+            values.sort(key=lambda item: (item[0], item[1]))
+            return tuple(values)
+
+        def candidate_for_counts(counts_a, counts_b):
+            tables_a = tables_for_counts(counts_a)
+            tables_b = tables_for_counts(counts_b)
+            if not tables_a or not tables_b:
+                return None
+            pair_heap = [
+                (score_a + tables_b[0][0], index_a, 0)
+                for index_a, (score_a, _key_a, _table_a) in enumerate(tables_a)
+            ]
+            heapq.heapify(pair_heap)
+            while pair_heap:
+                _pair_score, index_a, index_b = heapq.heappop(pair_heap)
+                next_b = index_b + 1
+                if next_b < len(tables_b):
+                    heapq.heappush(
+                        pair_heap,
+                        (
+                            tables_a[index_a][0] + tables_b[next_b][0],
+                            index_a,
+                            next_b,
+                        ),
+                    )
+                consume_optimization_state()
+                table_a = tables_a[index_a][2]
+                table_b = tables_b[index_b][2]
+                for shared_cells in shared_cell_allocations(table_a, table_b):
+                    candidate = assignment_for(
+                        overlap=hard_overlap,
+                        shared_counts=(),
+                        difficulty_costs=zero_costs,
+                        target_table=table_a,
+                        target_table_b=table_b,
+                        shared_cells=shared_cells,
+                    )
+                    if candidate is not None:
+                        return candidate
+            return None
+
+        try:
+            count_vectors = difficulty_count_vectors()
+            count_pair_heap = []
+            if count_vectors:
+                for index_a, (deviation_a, _counts_a) in enumerate(count_vectors):
+                    combined = deviation_a + count_vectors[0][0]
+                    if combined < best["deviation"]:
+                        heapq.heappush(count_pair_heap, (combined, index_a, 0))
+
+            while count_pair_heap:
+                combined_deviation, index_a, index_b = heapq.heappop(
+                    count_pair_heap
+                )
+                if combined_deviation >= best["deviation"]:
+                    break
+                next_b = index_b + 1
+                if next_b < len(count_vectors):
+                    next_deviation = (
+                        count_vectors[index_a][0]
+                        + count_vectors[next_b][0]
+                    )
+                    if next_deviation < best["deviation"]:
+                        heapq.heappush(
+                            count_pair_heap,
+                            (next_deviation, index_a, next_b),
+                        )
+                consume_optimization_state()
+                if combined_deviation < lower_bound:
+                    continue
+                counts_a = count_vectors[index_a][1]
+                counts_b = count_vectors[index_b][1]
+                if any(
+                    counts_a[position] + counts_b[position]
+                    > available_by_difficulty[difficulty]
+                    + min(hard_overlap, available_by_difficulty[difficulty])
+                    for position, difficulty in enumerate(difficulty_order)
+                ):
+                    continue
+                candidate = candidate_for_counts(counts_a, counts_b)
+                if candidate is not None:
+                    best = candidate
+                    difficulty_optimality_proved = True
+                    break
+            else:
+                difficulty_optimality_proved = True
+            if (
+                count_pair_heap
+                and count_pair_heap[0][0] >= best["deviation"]
+            ):
+                difficulty_optimality_proved = True
+        except FeasibilityLimitExceeded:
+            optimization_limit_hit = True
+
     return IdentitySelectionResult(
         feasible=True,
         limit_hit=False,
-        states_explored=states_explored + optimized.states_explored,
-        set_a_block_ids=hard_selection.set_a_block_ids,
-        set_b_block_ids=hard_selection.set_b_block_ids,
-        overlap=hard_selection.overlap,
-        proportional_score=hard_selection.proportional_score,
-        contributors_represented=hard_selection.contributors_represented,
-        squared_contributor_concentration=(
-            hard_selection.squared_contributor_concentration
-        ),
+        states_explored=states_explored,
+        set_a_block_ids=best["set_a"],
+        set_b_block_ids=best["set_b"],
+        overlap=hard_overlap,
+        proportional_score=best["proportional"],
+        contributors_represented=best["represented"],
+        squared_contributor_concentration=best["concentration"],
+        difficulty_deviation=best["deviation"],
+        difficulty_target_met=best["deviation"] == 0,
+        difficulty_optimality_proved=difficulty_optimality_proved,
+        optimization_limit_hit=optimization_limit_hit,
     )
 
 

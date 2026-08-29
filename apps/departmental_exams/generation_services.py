@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -335,16 +336,11 @@ class ExamGenerationService:
         }
         if automatic_mode:
             configured_limit = automatic_state_budget
-            selection = solve_automatic_identity_aware_two_sets(
-                margins=problem.margins,
-                blocks=problem.blocks,
-                campus_quotas=problem.campus_quotas,
-                difficulty_quotas=problem.difficulty_quotas,
-                secret=settings.SECRET_KEY,
-                hmac_context=hmac_context,
-                max_states=configured_limit,
-                optimize_soft=True,
-            )
+            selection = problem.automatic_selection
+            if selection is None:
+                raise GenerationConflict(
+                    "The authoritative automatic selection is unavailable."
+                )
         else:
             configured_limit = int(
                 max_states
@@ -412,15 +408,34 @@ class ExamGenerationService:
 
         selected_block_ids_by_set = {}
         ordered_members_by_set = {}
+        difficulty_counts_by_set = {}
         for set_code, selected_ids in (
             (GeneratedExamSet.SetCode.A, selection.set_a_block_ids),
             (GeneratedExamSet.SetCode.B, selection.set_b_block_ids),
         ):
+            if automatic_mode:
+                selected_by_id = {
+                    str(block.block_id): block for block in problem.blocks
+                }
+                difficulty_snapshot = dict(
+                    Counter(
+                        member.difficulty
+                        for block_id in selected_ids
+                        for member in selected_by_id[str(block_id)].members
+                    )
+                )
+                difficulty_snapshot = {
+                    code: difficulty_snapshot.get(code, 0)
+                    for code in problem.difficulty_quotas
+                }
+            else:
+                difficulty_snapshot = problem.difficulty_quotas
+            difficulty_counts_by_set[set_code] = dict(difficulty_snapshot)
             generated_set = GeneratedExamSet.objects.create(
                 generation_revision=revision,
                 set_code=set_code,
                 campus_quotas_snapshot=problem.campus_quotas,
-                difficulty_quotas_snapshot=problem.difficulty_quotas,
+                difficulty_quotas_snapshot=difficulty_snapshot,
                 section_quotas_snapshot={
                     str(section_id): quota
                     for section_id, quota in problem.section_quotas.items()
@@ -492,6 +507,20 @@ class ExamGenerationService:
                 ).hexdigest(),
                 "regeneration_reason_length": len(reason),
             }
+        selection_metadata = {}
+        if automatic_mode:
+            selection_metadata = {
+                "difficulty_target": dict(problem.difficulty_quotas),
+                "difficulty_actual": difficulty_counts_by_set,
+                "difficulty_deviation": selection.difficulty_deviation,
+                "difficulty_target_met": selection.difficulty_target_met,
+                "difficulty_optimality_proved": (
+                    selection.difficulty_optimality_proved
+                ),
+                "difficulty_optimization_limit_hit": (
+                    selection.optimization_limit_hit
+                ),
+            }
         if current is not None:
             cls._audit(
                 action="DE_EXAM_GENERATION_SUPERSEDED",
@@ -508,7 +537,7 @@ class ExamGenerationService:
             revision=revision,
             actor=actor,
             request=request,
-            metadata=reason_metadata,
+            metadata={**reason_metadata, **selection_metadata},
         )
         return GenerationOutcome(revision=revision)
 

@@ -1,6 +1,7 @@
 from unittest.mock import patch
 from io import StringIO
 from collections import Counter
+from dataclasses import replace
 import multiprocessing
 import time
 from time import perf_counter
@@ -401,6 +402,54 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         ).delete()
         return retained
 
+    def _two_campus_one_submitted_shape(
+        self, *, parent, submitted_question_count=50
+    ):
+        snapshots = list(
+            parent.offering_snapshots.select_related("campus")
+            .order_by("campus_id", "id")
+        )
+        submitted_snapshot, draft_snapshot, removed_snapshot = snapshots
+        CycleCourseOffering.objects.filter(
+            cycle_course=parent,
+            campus_id=removed_snapshot.campus_id,
+        ).delete()
+        Question.objects.filter(
+            contribution__cycle_course=parent,
+            contribution__source_campus_id=removed_snapshot.campus_id,
+        ).delete()
+        draft = FacultyContribution.objects.get(
+            cycle_course=parent,
+            source_campus_id=draft_snapshot.campus_id,
+        )
+        Question.objects.filter(contribution=draft).delete()
+        FacultyContribution.objects.filter(pk=draft.pk).update(
+            status=FacultyContribution.Status.DRAFT,
+            submitted_at=None,
+        )
+        submitted_questions = list(
+            Question.objects.filter(
+                contribution__cycle_course=parent,
+                contribution__source_campus_id=submitted_snapshot.campus_id,
+            ).order_by("id")
+        )
+        Question.objects.filter(
+            pk__in=[
+                question.id
+                for question in submitted_questions[submitted_question_count:]
+            ]
+        ).delete()
+        self._set_automatic_policies(
+            parent,
+            campus_policy=(
+                ExaminationCycle.AutomaticCampusContributionPolicy.AVAILABLE_WITH_WARNING
+            ),
+            contributor_policy=(
+                ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL
+            ),
+        )
+        return submitted_snapshot, draft_snapshot
+
     def _four_active_two_submitted_course(self):
         parent, configuration, _problem = self._ready_automatic_course()
         draft = (
@@ -628,15 +677,62 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
     def test_due_ready_course_without_department_or_reviewer_generates_once(self):
         parent, configuration, problem = self._ready_automatic_course()
         first = self._process_with_proved_selection(parent=parent, problem=problem)
-        second = AutomaticExamDeadlineService.process_course(
-            cycle_course_id=parent.id,
-            tenant_id=self.tenant.id,
-        )
         revision = ExamGenerationRevision.objects.get()
+        before_revision = tuple(
+            ExamGenerationRevision.objects.filter(pk=revision.pk).values()
+        )
+        before_sets = tuple(
+            GeneratedExamSet.objects.filter(generation_revision=revision)
+            .order_by("id")
+            .values()
+        )
+        before_items = tuple(
+            GeneratedExamItem.objects.filter(
+                generated_set__generation_revision=revision
+            )
+            .order_by("id")
+            .values()
+        )
+        with patch.object(
+            Stage6ReadinessService,
+            "build_problem",
+            side_effect=AssertionError("current generation must return before solver work"),
+        ) as readiness, patch(
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
+            side_effect=AssertionError("current generation must not be regenerated"),
+        ) as solver:
+            second = AutomaticExamDeadlineService.process_course(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+            )
+        readiness.assert_not_called()
+        solver.assert_not_called()
         self.assertEqual(first.status, "GENERATED")
         self.assertEqual(second.code, "CURRENT_GENERATION_EXISTS")
         self.assertEqual(ExamGenerationRevision.objects.count(), 1)
         self.assertEqual(revision.revision_number, 1)
+        self.assertEqual(
+            tuple(ExamGenerationRevision.objects.filter(pk=revision.pk).values()),
+            before_revision,
+        )
+        self.assertEqual(
+            tuple(
+                GeneratedExamSet.objects.filter(generation_revision=revision)
+                .order_by("id")
+                .values()
+            ),
+            before_sets,
+        )
+        self.assertEqual(
+            tuple(
+                GeneratedExamItem.objects.filter(
+                    generated_set__generation_revision=revision
+                )
+                .order_by("id")
+                .values()
+            ),
+            before_items,
+        )
         self.assertEqual(
             revision.generation_trigger,
             ExamGenerationRevision.GenerationTrigger.AUTOMATIC,
@@ -748,6 +844,67 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             "MISSING_CAMPUS_REPRESENTATION",
             {item["code"] for item in summary["generated"][0]["warnings"]},
         )
+
+    def test_is316_like_one_submitted_campus_generates_with_warning(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        submitted_snapshot, draft_snapshot = self._two_campus_one_submitted_shape(
+            parent=parent
+        )
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        warnings = {item["code"]: item for item in readiness["warnings"]}
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertEqual(problem.campus_quotas, {submitted_snapshot.campus_id: 50})
+        self.assertIn("MISSING_CAMPUS_REPRESENTATION", warnings)
+        self.assertIn(
+            draft_snapshot.campus.name,
+            warnings["MISSING_CAMPUS_REPRESENTATION"]["message"],
+        )
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+        self.assertEqual(result.status, "GENERATED")
+        summary_warnings = {
+            item["code"]
+            for item in AutomaticGenerationSummaryService.build(
+                cycle=parent.cycle
+            )["generated"][0]["warnings"]
+        }
+        self.assertIn("MISSING_CAMPUS_REPRESENTATION", summary_warnings)
+        self.assertIn("ACTIVE_CONTRIBUTORS_INCOMPLETE", summary_warnings)
+
+    def test_is317_like_one_submitted_campus_keeps_true_total_shortage_blocker(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        _submitted_snapshot, draft_snapshot = self._two_campus_one_submitted_shape(
+            parent=parent,
+            submitted_question_count=49,
+        )
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        self.assertIsNone(problem)
+        self.assertFalse(readiness["ready"])
+        self.assertEqual(
+            [item["code"] for item in readiness["blockers"]],
+            ["QUESTION_SHORTAGES"],
+        )
+        warning = next(
+            item
+            for item in readiness["warnings"]
+            if item["code"] == "MISSING_CAMPUS_REPRESENTATION"
+        )
+        self.assertIn(draft_snapshot.campus.name, warning["message"])
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+        self.assertEqual(result.status, "BLOCKED")
+        self.assertEqual(result.code, "QUESTION_SHORTAGES")
 
     def test_strict_policy_preserves_missing_campus_blocker(self):
         parent, _configuration, _problem = self._ready_automatic_course()
@@ -937,16 +1094,12 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             },
             {123_456},
         )
-        self.assertEqual(generation_solver.call_count, 1)
-        self.assertEqual(
-            generation_solver.call_args.kwargs["max_states"],
-            123_456,
-        )
+        generation_solver.assert_not_called()
         self.assertEqual(GeneratedExamSet.objects.count(), 2)
         self.assertEqual(GeneratedExamItem.objects.count(), 100)
 
     @override_settings(DEPARTMENTAL_EXAM_GENERATION_MAX_STATES=1)
-    def test_automatic_very_low_state_budget_blocks_readiness_consistently(self):
+    def test_automatic_very_low_state_budget_succeeds_when_first_state_proves_feasible(self):
         parent, _configuration, _problem = self._ready_automatic_course()
         questions = list(
             Question.objects.filter(contribution__cycle_course=parent).order_by("id")
@@ -972,16 +1125,13 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                 tenant_id=self.tenant.id,
             )
 
-        self.assertIsNone(problem)
-        self.assertTrue(readiness["solver_limit_hit"])
-        self.assertIn(
-            "FEASIBILITY_LIMIT",
-            {blocker["code"] for blocker in readiness["blockers"]},
-        )
+        self.assertIsNotNone(problem)
+        self.assertFalse(readiness["solver_limit_hit"])
+        self.assertTrue(readiness["ready"], readiness["blockers"])
         self.assertEqual(readiness["unique_question_count"], 50)
         self.assertEqual(readiness["duplicate_question_count"], 100)
-        self.assertEqual(result.status, "BLOCKED")
-        self.assertEqual(result.code, "FEASIBILITY_LIMIT")
+        self.assertEqual(result.status, "GENERATED")
+        self.assertEqual(result.code, "GENERATED")
         self.assertEqual(
             {
                 call.kwargs["max_states"]
@@ -990,7 +1140,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             {1},
         )
         generation_solver.assert_not_called()
-        self.assertFalse(ExamGenerationRevision.objects.exists())
+        self.assertTrue(ExamGenerationRevision.objects.exists())
 
     def test_automatic_without_blueprint_builds_flat_problem_and_generates_sets(self):
         parent, _configuration, _problem = self._ready_automatic_course()
@@ -1445,19 +1595,122 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             tenant_id=self.tenant.id,
         )
 
-        self.assertIsNone(problem)
+        self.assertIsNotNone(problem)
+        self.assertTrue(readiness["ready"], readiness["blockers"])
         self.assertIn(
-            "UNIQUE_QUESTION_SHORTAGES",
-            {blocker["code"] for blocker in readiness["blockers"]},
+            "PREFERRED_DIFFICULTY_UNAVAILABLE",
+            {warning["code"] for warning in readiness["warnings"]},
         )
         self.assertIn(
             {"dimension": "difficulty", "label": "Moderate", "required": 25, "available": 22},
             readiness["shortages"],
         )
+        self.assertEqual(result.code, "GENERATED")
+        self.assertTrue(ExamGenerationRevision.objects.exists())
+        generated_sets = list(GeneratedExamSet.objects.order_by("set_code"))
+        self.assertEqual(len(generated_sets), 2)
+        actual_by_set = {}
+        for generated_set in generated_sets:
+            actual = Counter(
+                generated_set.items.values_list("difficulty_snapshot", flat=True)
+            )
+            actual_by_set[generated_set.set_code] = dict(actual)
+            self.assertEqual(generated_set.difficulty_quotas_snapshot, dict(actual))
+            self.assertNotEqual(
+                generated_set.difficulty_quotas_snapshot,
+                {"EASY": 15, "MODERATE": 25, "DIFFICULT": 10},
+            )
+
+        summary = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
+        generated_summary = summary["generated"][0]
         self.assertEqual(
-            result.message,
-            "Insufficient Moderate questions: 22 available / 25 required",
+            generated_summary["target_difficulty"],
+            {"EASY": 15, "MODERATE": 25, "DIFFICULT": 10},
         )
+        self.assertEqual(
+            {
+                row["set_code"]: row["difficulty"]
+                for row in generated_summary["actual_set_counts"]
+            },
+            actual_by_set,
+        )
+        difficulty_warning = next(
+            warning
+            for warning in generated_summary["warnings"]
+            if warning["code"] == "PREFERRED_DIFFICULTY_UNAVAILABLE"
+        )
+        self.assertFalse(difficulty_warning["difficulty_optimality_proved"])
+        self.assertTrue(
+            difficulty_warning["difficulty_optimization_limit_hit"]
+        )
+        self.assertIn("within the processing budget", difficulty_warning["message"])
+        self.assertIn("best valid difficulty mix found", difficulty_warning["message"])
+        self.assertNotIn("closest", difficulty_warning["message"].lower())
+
+    def test_automatic_soft_optimization_exhaustion_generates_and_reports_best_found(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        moderate = list(
+            Question.objects.filter(
+                contribution__cycle_course=parent,
+                difficulty=Question.Difficulty.MODERATE,
+            ).order_by("id")
+        )
+        retained = moderate[:23]
+        Question.objects.filter(
+            pk__in=[question.id for question in moderate[23:]]
+        ).delete()
+        Question.objects.filter(pk=retained[-1].pk).update(
+            question_text=retained[0].question_text
+        )
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertFalse(problem.automatic_selection.difficulty_target_met)
+        exhausted_selection = replace(
+            problem.automatic_selection,
+            difficulty_optimality_proved=False,
+            optimization_limit_hit=True,
+        )
+
+        with patch(
+            "apps.departmental_exams.generation_readiness."
+            "solve_automatic_identity_aware_two_sets",
+            return_value=exhausted_selection,
+        ):
+            result = AutomaticExamDeadlineService.process_course(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+            )
+
+        self.assertEqual(result.status, "GENERATED")
+        revision = ExamGenerationRevision.objects.get(cycle_course=parent)
+        generation_event = AuditLog.objects.get(
+            action="DE_EXAM_GENERATED",
+            entity_type="ExamGenerationRevision",
+            entity_id=str(revision.id),
+        )
+        self.assertFalse(
+            generation_event.metadata_json["difficulty_optimality_proved"]
+        )
+        self.assertTrue(
+            generation_event.metadata_json["difficulty_optimization_limit_hit"]
+        )
+        warning = next(
+            item
+            for item in AutomaticGenerationSummaryService.build(
+                cycle=parent.cycle
+            )["generated"][0]["warnings"]
+            if item["code"] == "PREFERRED_DIFFICULTY_UNAVAILABLE"
+        )
+        self.assertEqual(
+            warning["message"],
+            "The preferred difficulty target could not be fully optimized within "
+            "the processing budget. The best valid difficulty mix found was used.",
+        )
+        self.assertTrue(warning["difficulty_optimization_limit_hit"])
+        self.assertFalse(warning["difficulty_optimality_proved"])
+        self.assertNotIn("closest", warning["message"].lower())
 
     def test_manual_generation_keeps_duplicate_rows_in_its_existing_pool(self):
         parent, _problem = self.ready_generation_course()
@@ -2182,7 +2435,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                 regeneration=True,
             )
         self.assertTrue(authoritative_readiness.called)
-        authoritative_solver.assert_called_once()
+        authoritative_solver.assert_not_called()
         current = outcome.revision
         persisted_audit = current.source_audit_snapshot
 
@@ -2935,7 +3188,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertLessEqual(len(many_queries), len(one_queries) + 1)
         self.assertEqual(
             many_summary["not_generated"][0]["recommended_action"],
-            "Open contributions / complete course configuration.",
+            "Complete the course configuration and open contributions before automatic generation can proceed.",
         )
 
         one_courses = list(

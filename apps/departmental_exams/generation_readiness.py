@@ -24,6 +24,7 @@ from .generation_algorithms import (
     FeasibilityResult,
     IdentityBlock,
     IdentityMember,
+    IdentitySelectionResult,
     allocate_campuses,
     allocate_difficulties,
     solve_automatic_identity_aware_two_sets,
@@ -147,6 +148,7 @@ class GenerationProblem:
     minimum_overlap: int
     source_audit_questions: tuple[GenerationSourceQuestion, ...]
     logical_identity_version: str
+    automatic_selection: IdentitySelectionResult | None = None
 
 
 def _generation_question_source_digest(question):
@@ -890,7 +892,28 @@ class Stage6ReadinessService:
             available = available_by_section[section_id]
             if available < required:
                 shortages.append({"dimension": "section", "label": section_labels.get(section_id, "Section"), "required": required, "available": available})
-        if shortages:
+        hard_shortages = [
+            item
+            for item in shortages
+            if not (automatic_flat_mode and item["dimension"] == "difficulty")
+        ]
+        difficulty_shortages = [
+            item
+            for item in shortages
+            if automatic_flat_mode and item["dimension"] == "difficulty"
+        ]
+        if difficulty_shortages:
+            cls._warn(
+                warnings,
+                "PREFERRED_DIFFICULTY_UNAVAILABLE",
+                (
+                    "Preferred difficulty distribution cannot be fully achieved from "
+                    "the eligible Submitted pool. Automatic generation will optimize "
+                    "the best valid mix within the processing budget."
+                ),
+                shortages=tuple(difficulty_shortages),
+            )
+        if hard_shortages:
             if automatic_flat_mode and duplicate_question_count:
                 cls._block(
                     blockers,
@@ -901,6 +924,7 @@ class Stage6ReadinessService:
                 cls._block(blockers, "QUESTION_SHORTAGES", "The eligible Submitted pool has aggregate shortages.")
 
         solver_result = None
+        automatic_selection = None
         margins = ()
         question_vectors = {}
         identity_blocks = []
@@ -948,7 +972,14 @@ class Stage6ReadinessService:
                 return (
                     1,
                     *(1 if campus_key == key else 0 for key in campus_order),
-                    *(1 if question.difficulty == key else 0 for key in difficulty_order),
+                    *(
+                        ()
+                        if automatic_flat_mode
+                        else tuple(
+                            1 if question.difficulty == key else 0
+                            for key in difficulty_order
+                        )
+                    ),
                     *(1 if section_key == key else 0 for key in section_order),
                 )
 
@@ -980,7 +1011,11 @@ class Stage6ReadinessService:
             margins = (
                 final_count,
                 *(campus_quotas[key] for key in campus_order),
-                *(difficulty_quotas[key] for key in difficulty_order),
+                *(
+                    ()
+                    if automatic_flat_mode
+                    else tuple(difficulty_quotas[key] for key in difficulty_order)
+                ),
                 *(section_quotas[key] for key in section_order),
             )
             if automatic_flat_mode:
@@ -1029,6 +1064,7 @@ class Stage6ReadinessService:
                     max_states=resolve_automatic_generation_max_states(
                         automatic_max_states
                     ),
+                    optimize_soft=True,
                 )
                 solver_result = FeasibilityResult(
                     feasible=automatic_selection.feasible,
@@ -1054,11 +1090,59 @@ class Stage6ReadinessService:
                     blockers,
                     "HARD_CONSTRAINTS_INFEASIBLE",
                     (
-                        "Two equivalent sets cannot satisfy the required questionnaire allocation across campus, difficulty, and item-count constraints."
+                        "Two equivalent sets cannot satisfy the required hard questionnaire allocation across campus and item-count constraints."
                         if automatic_flat_mode
                         else "Two equivalent sets cannot satisfy all hard margins and scenario bundles."
                     ),
                 )
+            elif (
+                automatic_flat_mode
+                and automatic_selection is not None
+                and not automatic_selection.difficulty_target_met
+            ):
+                warning = next(
+                    (
+                        item
+                        for item in warnings
+                        if item["code"] == "PREFERRED_DIFFICULTY_UNAVAILABLE"
+                    ),
+                    None,
+                )
+                if automatic_selection.optimization_limit_hit:
+                    message = (
+                        "The preferred difficulty target could not be fully optimized "
+                        "within the processing budget. The best valid difficulty mix "
+                        "found was used."
+                    )
+                elif automatic_selection.difficulty_optimality_proved:
+                    message = (
+                        "Preferred difficulty distribution cannot be fully achieved "
+                        "from the eligible Submitted pool. The closest feasible "
+                        "difficulty mix will be used."
+                    )
+                else:
+                    message = (
+                        "Preferred difficulty distribution cannot be fully achieved. "
+                        "A hard-valid deterministic difficulty mix will be used."
+                    )
+                evidence = {
+                    "deviation": automatic_selection.difficulty_deviation,
+                    "optimum_proved": (
+                        automatic_selection.difficulty_optimality_proved
+                    ),
+                    "optimization_limit_hit": (
+                        automatic_selection.optimization_limit_hit
+                    ),
+                }
+                if warning is None:
+                    cls._warn(
+                        warnings,
+                        "PREFERRED_DIFFICULTY_UNAVAILABLE",
+                        message,
+                        **evidence,
+                    )
+                else:
+                    warning.update(message=message, **evidence)
 
         aggregate_requirements_met = not blockers
         ready = aggregate_requirements_met and bool(
@@ -1132,6 +1216,26 @@ class Stage6ReadinessService:
             "minimum_overlap": solver_result.minimum_overlap if solver_result else None,
             "solver_states": solver_result.states_explored if solver_result else 0,
             "solver_limit_hit": solver_result.limit_hit if solver_result else False,
+            "difficulty_deviation": (
+                automatic_selection.difficulty_deviation
+                if automatic_selection is not None
+                else None
+            ),
+            "difficulty_target_met": (
+                automatic_selection.difficulty_target_met
+                if automatic_selection is not None
+                else None
+            ),
+            "difficulty_optimality_proved": (
+                automatic_selection.difficulty_optimality_proved
+                if automatic_selection is not None
+                else None
+            ),
+            "difficulty_optimization_limit_hit": (
+                automatic_selection.optimization_limit_hit
+                if automatic_selection is not None
+                else False
+            ),
         }
         if unit.grouped:
             report["examination_unit"] = {
@@ -1355,6 +1459,9 @@ class Stage6ReadinessService:
                     AUTOMATIC_LOGICAL_IDENTITY_VERSION
                     if automatic_flat_mode
                     else MANUAL_LOGICAL_IDENTITY_VERSION
+                ),
+                automatic_selection=(
+                    automatic_selection if automatic_flat_mode else None
                 ),
             )
         return problem, report

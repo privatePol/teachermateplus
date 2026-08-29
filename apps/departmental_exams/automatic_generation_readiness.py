@@ -412,7 +412,10 @@ class AutomaticGenerationReadinessReport:
                         f"Add {missing} usable questions from {shortage['label']}."
                     )
             elif shortage["dimension"] == "difficulty":
-                actions.append(f"Add {missing} usable {shortage['label']} questions.")
+                actions.append(
+                    f"If practical, add {missing} usable {shortage['label']} questions "
+                    "to better match the preferred mix."
+                )
             elif shortage["dimension"] == "total":
                 actions.append(f"Add {missing} more usable unique questions.")
         blocker_codes = {item["code"] for item in pool.get("blockers", ())}
@@ -426,7 +429,7 @@ class AutomaticGenerationReadinessReport:
             actions.append("Add at least one participating campus offering snapshot.")
         if "HARD_CONSTRAINTS_INFEASIBLE" in blocker_codes:
             actions.append(
-                "Add usable unique questions that satisfy the required difficulty distribution."
+                "Add usable unique questions that satisfy the hard campus and item-count allocation."
             )
         if "FEASIBILITY_LIMIT" in blocker_codes:
             actions.append(

@@ -10,9 +10,11 @@ from django.db.models import Prefetch
 from django.http import Http404
 from django.utils import timezone
 
+from apps.auditlog.models import AuditLog
 from apps.core.services.audit import AuditService
 
 from .approval_services import GeneratedExamIntegrityService
+from .generation_algorithms import allocate_difficulties
 from .generation_readiness import AUTOMATIC_LOGICAL_IDENTITY_VERSION
 from .models import (
     AutomaticGenerationAuditRun,
@@ -162,6 +164,22 @@ class AutomaticGenerationAuditService:
         all_items = items_by_code["A"] + items_by_code["B"]
         findings = []
         expected_count = revision.final_item_count_snapshot
+        generation_event = (
+            AuditLog.objects.filter(
+                tenant_id=revision.cycle_course.cycle.tenant_id,
+                entity_type="ExamGenerationRevision",
+                entity_id=str(revision.id),
+                action__in=("DE_EXAM_GENERATED", "DE_EXAM_REGENERATED"),
+            )
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        optimization_evidence = (
+            generation_event.metadata_json
+            if generation_event is not None
+            and isinstance(generation_event.metadata_json, dict)
+            else {}
+        )
 
         for code in ("A", "B"):
             generated_set = set_by_code.get(code)
@@ -272,18 +290,67 @@ class AutomaticGenerationAuditService:
                 field="difficulty_snapshot",
             )
             difficulty_order = ("EASY", "MODERATE", "DIFFICULT")
+            target_difficulty = allocate_difficulties(expected_count)
+            target_matches = actual_difficulty == target_difficulty
+            automatic_mode = (
+                revision.cycle_course.cycle.processing_mode
+                == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            )
+            difficulty_status = (
+                "FAIL"
+                if not difficulty_ok
+                else "WARNING"
+                if automatic_mode and not target_matches
+                else "PASS"
+            )
+            optimum_proved = (
+                optimization_evidence.get("difficulty_optimality_proved") is True
+            )
+            optimization_limit_hit = (
+                optimization_evidence.get("difficulty_optimization_limit_hit")
+                is True
+            )
+            if difficulty_ok and not target_matches:
+                if optimization_limit_hit:
+                    difficulty_message = (
+                        "The preferred difficulty target could not be fully optimized "
+                        "within the processing budget. The best valid difficulty mix "
+                        f"found for Set {code} was "
+                        f"{cls._format_distribution(actual_difficulty, difficulty_order)}."
+                    )
+                elif optimum_proved:
+                    difficulty_message = (
+                        f"Set {code} used the closest feasible difficulty mix "
+                        f"{cls._format_distribution(actual_difficulty, difficulty_order)} "
+                        "instead of the preferred target "
+                        f"{cls._format_distribution(target_difficulty, difficulty_order)}."
+                    )
+                else:
+                    difficulty_message = (
+                        f"Set {code} actual difficulty distribution "
+                        f"{cls._format_distribution(actual_difficulty, difficulty_order)} "
+                        "differs from the preferred target; optimization proof evidence "
+                        "is unavailable."
+                    )
+            elif difficulty_ok:
+                difficulty_message = (
+                    f"Set {code} achieved the preferred difficulty target "
+                    f"{cls._format_distribution(target_difficulty, difficulty_order)}."
+                )
+            else:
+                difficulty_message = (
+                    f"Set {code} difficulty snapshot does not match persisted items."
+                )
             findings.append(
                 cls._finding(
                     f"SET_{code}_DIFFICULTY_DISTRIBUTION",
-                    "PASS" if difficulty_ok else "FAIL",
-                    (
-                        f"Set {code} difficulty distribution matches "
-                        f"{cls._format_distribution(expected_difficulty, difficulty_order)}."
-                        if difficulty_ok
-                        else f"Set {code} difficulty distribution does not match its persisted target."
-                    ),
+                    difficulty_status,
+                    difficulty_message,
                     actual=actual_difficulty,
-                    expected=expected_difficulty or {},
+                    target=target_difficulty,
+                    persisted=expected_difficulty or {},
+                    difficulty_optimality_proved=optimum_proved,
+                    difficulty_optimization_limit_hit=optimization_limit_hit,
                 )
             )
             expected_campus = cls._normalize_quota(

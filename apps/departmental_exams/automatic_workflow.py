@@ -10,12 +10,14 @@ from django.db.models import Prefetch
 from django.http import Http404
 from django.utils import timezone
 
+from apps.auditlog.models import AuditLog
 from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 
 from .automatic_processing_isolation import AUTOMATIC_PROCESSING_TIMEOUT_CODE
 from .contribution_authorization import ContributorEligibilityService
 from .contribution_services import ContributionRosterService, Stage5LockService
+from .generation_algorithms import allocate_difficulties
 from .generation_readiness import (
     Stage6ReadinessService,
     resolve_automatic_generation_max_states,
@@ -1115,7 +1117,15 @@ class AutomaticGenerationSummaryService:
         }
 
     @staticmethod
-    def _generated_warnings(*, cycle, unit, current, audit_snapshot, common):
+    def _generated_warnings(
+        *,
+        cycle,
+        unit,
+        current,
+        audit_snapshot,
+        common,
+        optimization_evidence,
+    ):
         warnings = []
         if audit_snapshot is not None and audit_snapshot.redundant_copy_count:
             warnings.append(
@@ -1176,6 +1186,51 @@ class AutomaticGenerationSummaryService:
                     ),
                 }
             )
+        target_difficulty = allocate_difficulties(current.final_item_count_snapshot)
+        actual_difficulty = {}
+        for generated_set in current.generated_sets.all():
+            counts = {key: 0 for key in target_difficulty}
+            for item in generated_set.items.all():
+                counts[item.difficulty_snapshot] = (
+                    counts.get(item.difficulty_snapshot, 0) + 1
+                )
+            actual_difficulty[generated_set.set_code] = counts
+        if any(
+            counts != target_difficulty for counts in actual_difficulty.values()
+        ):
+            optimum_proved = (
+                optimization_evidence.get("difficulty_optimality_proved") is True
+            )
+            optimization_limit_hit = (
+                optimization_evidence.get("difficulty_optimization_limit_hit")
+                is True
+            )
+            if optimization_limit_hit:
+                message = (
+                    "The preferred difficulty target could not be fully optimized "
+                    "within the processing budget. The best valid difficulty mix "
+                    "found was used."
+                )
+            elif optimum_proved:
+                message = (
+                    "Preferred difficulty target differs from the actual generated "
+                    "mix; the closest feasible difficulty mix was used."
+                )
+            else:
+                message = (
+                    "Preferred difficulty target differs from the actual generated "
+                    "mix; a hard-valid deterministic mix was used."
+                )
+            warnings.append(
+                {
+                    "code": "PREFERRED_DIFFICULTY_UNAVAILABLE",
+                    "message": message,
+                    "target": target_difficulty,
+                    "actual": actual_difficulty,
+                    "difficulty_optimality_proved": optimum_proved,
+                    "difficulty_optimization_limit_hit": optimization_limit_hit,
+                }
+            )
         return tuple(warnings)
 
     @classmethod
@@ -1215,6 +1270,23 @@ class AutomaticGenerationSummaryService:
             )
             .order_by("course__code", "course_id")
         )
+        current_revision_ids = [
+            revision.id
+            for course in courses
+            for revision in getattr(course, "current_generated_revisions", ())
+        ]
+        optimization_evidence_by_revision = {}
+        if current_revision_ids:
+            generation_events = AuditLog.objects.filter(
+                tenant_id=cycle.tenant_id,
+                entity_type="ExamGenerationRevision",
+                entity_id__in=[str(value) for value in current_revision_ids],
+                action__in=("DE_EXAM_GENERATED", "DE_EXAM_REGENERATED"),
+            ).order_by("created_at", "id")
+            for event in generation_events:
+                optimization_evidence_by_revision[int(event.entity_id)] = (
+                    event.metadata_json or {}
+                )
         grouped_course_ids = set(
             ExamCourseEquivalencyMembership.objects.filter(
                 cycle_course_id__in=[course.id for course in courses],
@@ -1342,6 +1414,17 @@ class AutomaticGenerationSummaryService:
                                 campus_row["total"]
                                 for campus_row in campus_counts.values()
                             ),
+                            "difficulty": {
+                                "EASY": sum(
+                                    row["easy"] for row in campus_counts.values()
+                                ),
+                                "MODERATE": sum(
+                                    row["moderate"] for row in campus_counts.values()
+                                ),
+                                "DIFFICULT": sum(
+                                    row["difficult"] for row in campus_counts.values()
+                                ),
+                            },
                             "campuses": tuple(
                                 campus_counts[key]
                                 for key in sorted(
@@ -1359,12 +1442,18 @@ class AutomaticGenerationSummaryService:
                         "set_a_generated": "A" in sets,
                         "set_b_generated": "B" in sets,
                         "actual_set_counts": tuple(actual_set_counts),
+                        "target_difficulty": allocate_difficulties(
+                            current.final_item_count_snapshot
+                        ),
                         "warnings": cls._generated_warnings(
                             cycle=cycle,
                             unit=unit,
                             current=current,
                             audit_snapshot=audit_snapshot,
                             common=common,
+                            optimization_evidence=(
+                                optimization_evidence_by_revision.get(current.id, {})
+                            ),
                         ),
                         "pool_metrics": {
                             "submitted": (
