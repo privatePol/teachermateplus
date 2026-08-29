@@ -308,6 +308,7 @@ class ContributionRosterService:
                             offering_id_snapshot=assignment.offering_id,
                             tenant_id_snapshot=source_tenant_id,
                             campus_id_snapshot=source_campus_id,
+                            eligibility_proven_at=now if current else None,
                             is_current=current,
                             invalidated_at=None if current else now,
                         )
@@ -321,6 +322,10 @@ class ContributionRosterService:
                 if source.is_current != current:
                     source.is_current = current
                     source.invalidated_at = None if current else now
+                    changed = True
+                    material_evidence_changed = True
+                if current and source.eligibility_proven_at is None:
+                    source.eligibility_proven_at = now
                     changed = True
                     material_evidence_changed = True
                 if changed:
@@ -393,7 +398,13 @@ class ContributionRosterService:
         if source_updates:
             FacultyContributionEligibilitySource.objects.bulk_update(
                 source_updates,
-                ["assignment", "is_current", "invalidated_at", "updated_at"],
+                [
+                    "assignment",
+                    "eligibility_proven_at",
+                    "is_current",
+                    "invalidated_at",
+                    "updated_at",
+                ],
                 batch_size=cls.BATCH_SIZE,
             )
         if contribution_updates:
@@ -650,6 +661,7 @@ class QuestionMutationService:
             tenant_id=tenant_id,
         )
         ContributionAuthorizationService.require_mutable_locked(
+            user=user,
             contribution=contribution,
             configuration=configuration,
             request_tenant_id=tenant_id,
@@ -937,6 +949,7 @@ class QuestionMutationService:
         if contribution.status == FacultyContribution.Status.SUBMITTED:
             return contribution, False
         ContributionAuthorizationService.require_mutable_locked(
+            user=user,
             contribution=contribution,
             configuration=configuration,
             request_tenant_id=tenant_id,

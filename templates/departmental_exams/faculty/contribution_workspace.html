@@ -58,6 +58,8 @@
   <div class="alert alert-danger" data-import-error role="alert" hidden></div>
 {% elif contribution.status == 'SUBMITTED' %}
   <div class="alert alert-success"><strong>Submitted and read-only.</strong> Submitted {{ contribution.submitted_at|date:"M j, Y g:i A" }}. Your questions remain visible to you, but no further changes are allowed.</div>
+{% elif reopened_draft %}
+  <div class="alert alert-info"><strong>Reopened Draft.</strong> An authorized administrator reopened this existing Draft until the deadline shown above. Historical assignment and roster status remain unchanged.</div>
 {% elif contribution.roster_status == 'BLOCKED' %}
   <div class="alert alert-warning"><strong>This Draft is blocked and read-only.</strong> Your current teaching-assignment eligibility is no longer valid. Your saved content remains private and visible here; contact an authorized administrator.</div>
 {% elif live_eligibility_read_only %}

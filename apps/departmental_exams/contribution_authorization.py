@@ -15,6 +15,7 @@ from apps.rbac.models import UserPermission, UserRole
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
+    ExamGenerationRevision,
     FacultyContribution,
     QuestionImportBatch,
 )
@@ -349,6 +350,9 @@ class ContributorEligibilityService:
 
 
 class ContributionAuthorizationService:
+    LIVE_AUTHORITY = "LIVE"
+    REOPENED_DRAFT_AUTHORITY = "REOPENED_DRAFT"
+
     @staticmethod
     def require_no_active_import(*, contribution):
         if QuestionImportBatch.objects.filter(
@@ -399,6 +403,96 @@ class ContributionAuthorizationService:
             contribution=contribution,
             assignments=inventory.eligible_sources,
         )
+
+    @classmethod
+    def has_authorized_reopened_existing_draft_authority(
+        cls,
+        *,
+        user,
+        contribution,
+        configuration,
+        request_tenant_id,
+        request_campus_id,
+        now=None,
+    ):
+        """Return whether retained history authorizes this reopened Draft.
+
+        Reopen deliberately does not make a historical teaching assignment live
+        again. The durable source snapshots establish the original scoped
+        relationship while current user, tenant, campus RBAC, lifecycle, deadline,
+        and full-equivalency generation state remain authoritative.
+        """
+        cycle_course = contribution.cycle_course
+        cycle = cycle_course.cycle
+        now = now or timezone.now()
+        if (
+            not user
+            or user != contribution.faculty_user
+            or contribution.status != FacultyContribution.Status.DRAFT
+            or cycle.status != cycle.Status.OPEN
+            or cycle.processing_mode != cycle.ProcessingMode.AUTOMATIC_GENERATION
+            or cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
+            or configuration is None
+            or configuration.cycle_course_id != cycle_course.id
+            or configuration.workflow_status
+            != CourseExamConfiguration.WorkflowStatus.OPEN
+            or configuration.reopened_contribution_deadline is None
+            or configuration.active_contribution_deadline
+            != configuration.reopened_contribution_deadline
+            or now >= configuration.reopened_contribution_deadline
+            or not 50 <= contribution.quota_snapshot <= 75
+        ):
+            return False
+        try:
+            cls.require_common_read_access(
+                user=user,
+                tenant=cycle.tenant,
+                request_tenant_id=request_tenant_id,
+                request_campus_id=request_campus_id,
+            )
+        except PermissionDenied:
+            return False
+
+        valid_offering_scopes = {
+            (snapshot.offering_id, snapshot.campus_id)
+            for snapshot in cycle_course.offering_snapshots.all()
+            if (
+                snapshot.campus.is_active
+                and snapshot.campus.tenant_id == cycle.tenant_id
+                and snapshot.offering.tenant_id == cycle.tenant_id
+                and snapshot.offering.campus_id == snapshot.campus_id
+                and snapshot.offering.course_id == cycle_course.course_id
+                and snapshot.offering.academic_year_id == cycle.academic_year_id
+                and snapshot.offering.term_id == cycle.term_id
+            )
+        }
+        authorized_historical_scope = any(
+            source.eligibility_proven_at is not None
+            and source.tenant_id_snapshot == cycle.tenant_id
+            and (source.offering_id_snapshot, source.campus_id_snapshot)
+            in valid_offering_scopes
+            and PermissionService.has_assigned_permission(
+                user,
+                ContributorEligibilityService.PORTAL_PERMISSION,
+                tenant_id=source.tenant_id_snapshot,
+                campus_id=source.campus_id_snapshot,
+                exact_scope=True,
+            )
+            for source in contribution.eligibility_sources.all()
+        )
+        if not authorized_historical_scope:
+            return False
+
+        try:
+            from .exam_units import resolve_examination_unit
+
+            unit = resolve_examination_unit(cycle_course)
+        except ValidationError:
+            return False
+        return not ExamGenerationRevision.objects.filter(
+            cycle_course_id__in=unit.member_ids,
+            current_marker=1,
+        ).exists()
 
     @staticmethod
     def has_retained_current_print_eligibility(*, contribution):
@@ -463,6 +557,7 @@ class ContributionAuthorizationService:
     def require_mutable_locked(
         cls,
         *,
+        user,
         contribution,
         configuration,
         request_tenant_id,
@@ -471,15 +566,15 @@ class ContributionAuthorizationService:
         cycle_course = contribution.cycle_course
         cycle = cycle_course.cycle
         cls.require_common_read_access(
-            user=contribution.faculty_user,
+            user=user,
             tenant=cycle.tenant,
             request_tenant_id=request_tenant_id,
             request_campus_id=request_campus_id,
         )
+        if user != contribution.faculty_user:
+            raise PermissionDenied("Only the contribution owner may make changes.")
         if contribution.status != FacultyContribution.Status.DRAFT:
             raise PermissionDenied("Submitted contributions are read-only.")
-        if contribution.roster_status != FacultyContribution.RosterStatus.ACTIVE:
-            raise PermissionDenied("This contribution is blocked and read-only.")
         if cycle.status != cycle.Status.OPEN:
             raise PermissionDenied("The examination cycle is not open.")
         if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
@@ -496,8 +591,22 @@ class ContributionAuthorizationService:
             raise PermissionDenied("A contribution deadline is required.")
         if timezone.now() >= deadline:
             raise PermissionDenied("The contribution deadline has passed.")
-        if not cls.has_retained_live_eligibility(contribution=contribution):
-            raise PermissionDenied("No current qualifying teaching assignment remains.")
+        if (
+            contribution.roster_status == FacultyContribution.RosterStatus.ACTIVE
+            and cls.has_retained_live_eligibility(contribution=contribution)
+        ):
+            return cls.LIVE_AUTHORITY
+        if cls.has_authorized_reopened_existing_draft_authority(
+            user=user,
+            contribution=contribution,
+            configuration=configuration,
+            request_tenant_id=request_tenant_id,
+            request_campus_id=request_campus_id,
+        ):
+            return cls.REOPENED_DRAFT_AUTHORITY
+        if contribution.roster_status != FacultyContribution.RosterStatus.ACTIVE:
+            raise PermissionDenied("This contribution is blocked and read-only.")
+        raise PermissionDenied("No current qualifying teaching assignment remains.")
 
     @staticmethod
     def require_revision(*, contribution, expected_revision):

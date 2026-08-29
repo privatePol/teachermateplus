@@ -952,6 +952,7 @@ class QuestionDOCXImportService(QuestionCSVImportService):
             contribution_id=contribution_id, user=user, tenant_id=tenant_id
         )
         ContributionAuthorizationService.require_mutable_locked(
+            user=user,
             contribution=contribution,
             configuration=configuration,
             request_tenant_id=tenant_id,
@@ -1032,7 +1033,7 @@ class QuestionDOCXImportService(QuestionCSVImportService):
             raise Http404
         cls.require_feature(tenant_id=tenant_id)
         ContributionAuthorizationService.require_mutable_locked(
-            contribution=contribution, configuration=configuration,
+            user=user, contribution=contribution, configuration=configuration,
             request_tenant_id=tenant_id, request_campus_id=campus_id,
         )
         ContributionAuthorizationService.require_no_active_import(contribution=contribution)

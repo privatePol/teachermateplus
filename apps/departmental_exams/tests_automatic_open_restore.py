@@ -435,6 +435,7 @@ class AutomaticOpenRestoreTests(Stage5FixtureMixin, Stage4TestCase):
         configuration.refresh_from_db()
         draft.refresh_from_db()
         ContributionAuthorizationService.require_mutable_locked(
+            user=draft.faculty_user,
             contribution=draft,
             configuration=configuration,
             request_tenant_id=self.tenant.id,

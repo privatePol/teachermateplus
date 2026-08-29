@@ -19,8 +19,8 @@
                 <p class="text-muted small mb-2">{{ contribution.cycle_course.cycle.get_exam_period_display }} · {{ contribution.cycle_course.cycle.academic_year }} · {{ contribution.cycle_course.cycle.term }}</p>
               </div>
               <div class="text-end">
-                <span class="badge {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}text-bg-secondary{% elif contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
-                  {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
+                <span class="badge {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}text-bg-secondary{% elif contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.is_reopened_draft %}text-bg-info{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
+                  {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% elif contribution.is_reopened_draft %}Reopened Draft{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
                 </span>
               </div>
             </div>

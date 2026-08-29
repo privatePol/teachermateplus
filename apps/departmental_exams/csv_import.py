@@ -304,6 +304,7 @@ class QuestionCSVImportService:
             tenant_id=tenant_id,
         )
         ContributionAuthorizationService.require_mutable_locked(
+            user=user,
             contribution=contribution,
             configuration=configuration,
             request_tenant_id=tenant_id,
@@ -517,6 +518,7 @@ class QuestionCSVImportService:
         if batch.status not in QuestionImportBatch.resumable_statuses() or batch.error_count:
             raise ValidationError("Only a valid resumable preview can be imported.")
         ContributionAuthorizationService.require_mutable_locked(
+            user=user,
             contribution=contribution,
             configuration=configuration,
             request_tenant_id=tenant_id,

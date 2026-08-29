@@ -866,6 +866,7 @@ class FacultyContributionEligibilitySource(TimeStampedModel):
     offering_id_snapshot = models.PositiveBigIntegerField()
     tenant_id_snapshot = models.PositiveBigIntegerField()
     campus_id_snapshot = models.PositiveBigIntegerField()
+    eligibility_proven_at = models.DateTimeField(null=True, blank=True)
     is_current = models.BooleanField(default=True)
     invalidated_at = models.DateTimeField(null=True, blank=True)
 

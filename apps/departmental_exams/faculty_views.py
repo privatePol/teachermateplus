@@ -9,7 +9,6 @@ from django.db.models import Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.core.decorators import portal_required
@@ -141,7 +140,7 @@ def _owner_contribution(request, contribution_id):
     return contribution
 
 
-def _workspace_context(contribution):
+def _workspace_context(request, contribution):
     questions = list(
         contribution.questions.filter(
             Q(import_batch__isnull=True)
@@ -152,24 +151,21 @@ def _workspace_context(contribution):
     quota = contribution.quota_snapshot
     configuration = contribution.cycle_course.configuration
     cycle = contribution.cycle_course.cycle
-    otherwise_mutable = bool(
-        contribution.status == FacultyContribution.Status.DRAFT
-        and contribution.roster_status == FacultyContribution.RosterStatus.ACTIVE
-        and cycle.status == cycle.Status.OPEN
-        and contribution.cycle_course.inclusion_status
-        == contribution.cycle_course.InclusionStatus.INCLUDED
-        and configuration.workflow_status
-        == configuration.WorkflowStatus.OPEN
-        and configuration.active_contribution_deadline
-        and timezone.now() < configuration.active_contribution_deadline
-        and 50 <= quota <= 75
-    )
-    has_retained_live_eligibility = bool(
-        otherwise_mutable
-        and ContributionAuthorizationService.has_retained_live_eligibility(
-            contribution=contribution
+    tenant_id, campus_id = _scope(request)
+    try:
+        authority = ContributionAuthorizationService.require_mutable_locked(
+            user=request.user,
+            contribution=contribution,
+            configuration=configuration,
+            request_tenant_id=tenant_id,
+            request_campus_id=campus_id,
         )
-    )
+        live_eligibility_read_only = False
+    except PermissionDenied as exc:
+        authority = None
+        live_eligibility_read_only = str(exc) == (
+            "No current qualifying teaching assignment remains."
+        )
     active_import = (
         contribution.question_import_batches.filter(
             uploading_user=contribution.faculty_user,
@@ -178,9 +174,7 @@ def _workspace_context(contribution):
         .order_by("created_at", "id")
         .first()
     )
-    is_mutable = (
-        otherwise_mutable and has_retained_live_eligibility and active_import is None
-    )
+    is_mutable = authority is not None and active_import is None
     quota_reached = is_mutable and saved_count >= quota
     difficulty_distribution = ContributionDifficultyDistributionService.evaluate(
         questions=questions,
@@ -197,9 +191,11 @@ def _workspace_context(contribution):
         "configuration": configuration,
         "offering_snapshots": contribution.cycle_course.offering_snapshots.all(),
         "is_mutable": is_mutable,
-        "live_eligibility_read_only": (
-            otherwise_mutable and not has_retained_live_eligibility
+        "reopened_draft": (
+            authority
+            == ContributionAuthorizationService.REOPENED_DRAFT_AUTHORITY
         ),
+        "live_eligibility_read_only": live_eligibility_read_only,
         "quota_reached": quota_reached,
         "difficulty_distribution": difficulty_distribution,
         "active_import": active_import,
@@ -222,6 +218,7 @@ def _workspace_context(contribution):
 def _require_currently_mutable(request, contribution):
     tenant_id, campus_id = _scope(request)
     ContributionAuthorizationService.require_mutable_locked(
+        user=request.user,
         contribution=contribution,
         configuration=contribution.cycle_course.configuration,
         request_tenant_id=tenant_id,
@@ -318,6 +315,15 @@ def contribution_list_view(request):
         )
         contribution.questionnaire_print = print_options.get(contribution.id)
         contribution.answer_key_release = answer_key_options.get(contribution.id)
+        contribution.is_reopened_draft = (
+            ContributionAuthorizationService.has_authorized_reopened_existing_draft_authority(
+                user=request.user,
+                contribution=contribution,
+                configuration=contribution.cycle_course.configuration,
+                request_tenant_id=tenant_id,
+                request_campus_id=campus_id,
+            )
+        )
     return render(
         request,
         "departmental_exams/faculty/contribution_list.html",
@@ -518,7 +524,7 @@ def contribution_workspace_view(request, contribution_id):
     return render(
         request,
         "departmental_exams/faculty/contribution_workspace.html",
-        _workspace_context(contribution),
+        _workspace_context(request, contribution),
     )
 
 
@@ -781,6 +787,7 @@ def csv_preview_view(request, token):
     if can_confirm:
         try:
             ContributionAuthorizationService.require_mutable_locked(
+                user=request.user,
                 contribution=batch.contribution,
                 configuration=batch.contribution.cycle_course.configuration,
                 request_tenant_id=tenant_id,
@@ -1016,6 +1023,7 @@ def docx_preview_view(request, token):
     if can_confirm:
         try:
             ContributionAuthorizationService.require_mutable_locked(
+                user=request.user,
                 contribution=batch.contribution,
                 configuration=batch.contribution.cycle_course.configuration,
                 request_tenant_id=tenant_id,
