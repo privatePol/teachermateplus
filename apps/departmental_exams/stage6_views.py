@@ -44,6 +44,7 @@ from .models import (
     CycleCourse,
     CycleCourseOffering,
     ExamBlueprint,
+    ExamCourseEquivalencyMembership,
     ExamScenario,
     ExamScenarioMember,
     GeneratedExamSet,
@@ -1016,14 +1017,33 @@ def questionnaire_print_release_view(request):
         for course in courses
         for revision in course.generation_revisions.all()
     }
+    equivalency_primary_by_course_id = dict(
+        ExamCourseEquivalencyMembership.objects.filter(
+            cycle_course_id__in=course_by_id,
+            active_marker=1,
+            group__is_active=True,
+        ).values_list("cycle_course_id", "group__primary_cycle_course_id")
+    )
+    can_bulk_release = any(
+        DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+        in management_map[course.id]
+        for course in courses
+    )
     bulk_selection_rows = []
     for course in courses:
+        if equivalency_primary_by_course_id.get(course.id, course.id) != course.id:
+            continue
         if (
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
             not in management_map[course.id]
         ):
             continue
         for revision in course.generation_revisions.all():
+            if not (
+                revision.current_marker == 1
+                and revision.status == ExamGenerationRevision.Status.GENERATED
+            ):
+                continue
             value = f"{course.id}:{revision.id}"
             bulk_selection_rows.append(
                 {
@@ -1421,7 +1441,9 @@ def questionnaire_print_release_view(request):
             "courses": courses,
             "now": now,
             "bulk_form": bulk_form,
+            "can_bulk_release": can_bulk_release,
             "bulk_selection_rows": bulk_selection_rows,
+            "bulk_selection_row_count": len(bulk_selection_rows),
             "bulk_selected_values": set(bulk_form["selections"].value() or ()),
         },
         status=status,

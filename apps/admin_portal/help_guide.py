@@ -310,7 +310,7 @@ ADMIN_HELP_SECTIONS = [
                 "menu_path": "Admin Portal -> Departmental Exam Builder -> Automatic Generation Summary or Questionnaire Print Release",
                 "steps": [
                     "On Questionnaire Print Release, confirm the exact course and revision before setting Print From and Print Until. Faculty print buttons appear only for that released revision while the common Asia/Manila window is active; regeneration requires a separate release for the newer revision.",
-                    "For several courses, select one generated revision per course in Bulk Print Release, confirm the selected count, and apply one common window. The batch is all-or-nothing, while each course keeps an independent exact-revision release record and history.",
+                    "For several courses, Bulk Print Release lists only each examination unit's current Generated revision. Select rows individually or use Select All, confirm the selected count and displayed-record badge, then apply one common window. The batch remains all-or-nothing, while each course keeps an independent exact-revision release record and history.",
                     "Use Print Set A or Print Set B for Admin-only printing when Faculty release is unnecessary. Choose Letter (default), A4, or Legal before opening the browser print dialog. Supported scientific notation in Question Text and Choices A-D renders from escaped immutable snapshots before printing. Admin Direct Print does not create, replace, or extend a Faculty release.",
                     "Open the confidential Set A or Set B Answer Key only for the intended exact revision. Answer keys are restricted to authorized users and are never provided to Faculty through questionnaire printing.",
                     "For a separate Faculty Answer Key release, select the exact current-final revision, set Available From and Available Until, and confirm that all examination sessions for the course have concluded. A superseded revision is immediately blocked and a newer revision requires its own explicit release.",
@@ -336,8 +336,8 @@ ADMIN_HELP_SECTIONS = [
                     },
                     {
                         "name": "Bulk Print Release",
-                        "does": "Applies one common window to several selected course/revision pairs in one all-or-nothing submission.",
-                        "when": "Use it after verifying the selected count and one exact revision per course.",
+                        "does": "Applies one common window to selected primary-owned current Generated revisions in one all-or-nothing submission.",
+                        "when": "Use it after verifying the displayed-record badge and selected count; Select All includes only selectable rows.",
                         "avoid": "Do not mix unauthorized, cross-tenant, incomplete, or multiple same-course revisions in one batch.",
                         "result": "Each course receives its own independently governed revision-bound release record.",
                         "editable": "Each resulting release may later be replaced or individually revoked through the existing controls.",

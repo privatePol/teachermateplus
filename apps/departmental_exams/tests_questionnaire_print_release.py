@@ -19,8 +19,10 @@ from apps.academics.models import (
 from apps.auditlog.models import AuditLog
 from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, UserPermission
+from apps.tenants.models import Program
 
 from .automatic_workflow import AutomaticGenerationSummaryService
+from .exam_units import ExamCourseEquivalencyService
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
@@ -235,6 +237,11 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                 "print_until": print_until.strftime("%Y-%m-%dT%H:%M"),
             },
         )
+
+    def _bulk_page(self):
+        client = Client()
+        client.force_login(self.manager_user)
+        return client.get(reverse("departmental_exams:questionnaire_print_release"))
 
     def _newer_revision(self, parent, revision):
         ExamGenerationRevision.objects.filter(pk=revision.pk).update(
@@ -600,6 +607,253 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             html=False,
         )
 
+    def test_bulk_list_shows_one_current_r1_and_server_derived_badge(self):
+        ExamGenerationRevision.objects.filter(pk=self.r2.pk).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED,
+            current_marker=None,
+        )
+        r1_course = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="PRINT-R1-CURRENT",
+        )
+        r1 = self._make_revision(r1_course, revision_number=1)
+
+        response = self._bulk_page()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["bulk_selection_row_count"], 1)
+        self.assertEqual(
+            [row["revision"].id for row in response.context["bulk_selection_rows"]],
+            [r1.id],
+        )
+        self.assertContains(
+            response,
+            'aria-label="1 bulk print release record">1</span>',
+            html=False,
+        )
+
+    def test_bulk_list_shows_only_r2_when_r1_is_superseded(self):
+        ExamGenerationRevision.objects.filter(pk=self.r2.pk).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED,
+            current_marker=None,
+        )
+        course = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="PRINT-HISTORY",
+        )
+        r1 = self._make_revision(course, revision_number=1)
+        r2 = self._newer_revision(course, r1)
+
+        response = self._bulk_page()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["bulk_selection_row_count"], 1)
+        self.assertEqual(
+            [row["revision"].id for row in response.context["bulk_selection_rows"]],
+            [r2.id],
+        )
+        self.assertTrue(
+            ExamGenerationRevision.objects.filter(
+                pk=r1.id,
+                status=ExamGenerationRevision.Status.SUPERSEDED,
+                current_marker__isnull=True,
+            ).exists()
+        )
+
+    def test_bulk_list_has_exactly_one_current_revision_per_course(self):
+        second_course, second_r1 = self._second_bulk_target()
+        second_current = self._newer_revision(second_course, second_r1)
+        third_course = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="PRINT-THIRD",
+        )
+        third_current = self._make_revision(third_course, revision_number=1)
+
+        response = self._bulk_page()
+
+        rows = response.context["bulk_selection_rows"]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["bulk_selection_row_count"], 3)
+        self.assertEqual(
+            {row["course"].id: row["revision"].id for row in rows},
+            {
+                self.parent.id: self.r2.id,
+                second_course.id: second_current.id,
+                third_course.id: third_current.id,
+            },
+        )
+
+    def test_bulk_list_does_not_fall_back_when_no_current_revision_exists(self):
+        ExamGenerationRevision.objects.filter(pk=self.r2.pk).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED,
+            current_marker=None,
+        )
+
+        response = self._bulk_page()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["bulk_selection_rows"], [])
+        self.assertEqual(response.context["bulk_selection_row_count"], 0)
+        self.assertContains(
+            response,
+            'aria-label="0 bulk print release records">0</span>',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            "No current Generated revisions are available for bulk release.",
+        )
+
+    def test_bulk_select_all_and_selected_count_dom_contract(self):
+        response = self._bulk_page()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="bulk-print-release-form"', html=False)
+        self.assertContains(response, 'id="bulk-select-all"', html=False)
+        self.assertContains(
+            response,
+            'name="selections" value="'
+            f"{self.parent.id}:{self.r2.id}"
+            '"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'form.querySelectorAll(".bulk-release-selection:not(:disabled)")',
+            html=False,
+        )
+        self.assertContains(response, "selectAll.indeterminate", html=False)
+        self.assertContains(
+            response,
+            "selection.checked = selectAll.checked",
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'selection.addEventListener("change", updateSelectionState)',
+            html=False,
+        )
+        self.assertNotContains(
+            response,
+            "The batch is all-or-nothing. Any invalid, unauthorized, cross-tenant, or incomplete selection prevents every release in this submission.",
+        )
+
+    def test_bulk_list_equivalency_row_is_primary_owned_and_requires_all_campuses(self):
+        cycle = self.make_cycle(
+            status=ExaminationCycle.Status.OPEN,
+            scope_suffix="BULK-EQ",
+        )
+        cycle.processing_mode = ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        cycle.save(update_fields=["processing_mode", "updated_at"])
+        primary = self.make_course(cycle=cycle, code="PRINT-EQ-P")
+        secondary = self.make_course(cycle=cycle, code="PRINT-EQ-S")
+        deadline = self.future_deadline()
+        opened_at = timezone.now() - timezone.timedelta(days=2)
+        for member in (primary, secondary):
+            self.make_configuration(
+                member,
+                workflow=CourseExamConfiguration.WorkflowStatus.CLOSED,
+                opened_at=opened_at,
+                deadline=deadline,
+            )
+        program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            code="PRINT-EQ-NORTH-P",
+            name="Print Equivalency North Program",
+        )
+        section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=program,
+            code="PRINT-EQ-NORTH-S",
+            name="Print Equivalency North Section",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=program,
+            academic_year=cycle.academic_year,
+            term=cycle.term,
+            course=secondary.course,
+            section=section,
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=secondary,
+            offering=offering,
+            campus=self.other_campus,
+        )
+        ExamCourseEquivalencyService.create_group(
+            cycle_id=cycle.id,
+            name="Bulk Print Equivalency",
+            primary_cycle_course_id=primary.id,
+            member_ids=(primary.id, secondary.id),
+            actor=self.admin,
+        )
+        revision = self._make_revision(primary, revision_number=1)
+        secondary_revision = self._make_revision(secondary, revision_number=1)
+        permission = Permission.objects.get(
+            code="departmental_exams.manage_exam_generation"
+        )
+        north_allow = UserPermission.objects.create(
+            user=self.manager_user,
+            permission=permission,
+            grant_type=UserPermission.GrantType.ALLOW,
+            tenant=self.tenant,
+            campus=self.other_campus,
+        )
+
+        response = self._bulk_page()
+
+        group_rows = [
+            row
+            for row in response.context["bulk_selection_rows"]
+            if row["course"].id in (primary.id, secondary.id)
+        ]
+        self.assertEqual(
+            [(row["course"].id, row["revision"].id) for row in group_rows],
+            [(primary.id, revision.id)],
+        )
+
+        print_from, print_until = self._bulk_window()
+        with self.assertRaisesRegex(
+            ValidationError,
+            "primary-owned revision for an examination unit",
+        ):
+            QuestionnairePrintReleaseService.bulk_release(
+                selections=((secondary.id, secondary_revision.id),),
+                tenant_id=self.tenant.id,
+                actor=self.manager_user,
+                print_from=print_from,
+                print_until=print_until,
+            )
+
+        north_allow.delete()
+        UserPermission.objects.create(
+            user=self.manager_user,
+            permission=permission,
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.other_campus,
+        )
+        with self.assertRaises(PermissionDenied):
+            QuestionnairePrintReleaseService.bulk_release(
+                selections=((primary.id, revision.id),),
+                tenant_id=self.tenant.id,
+                actor=self.manager_user,
+                print_from=print_from,
+                print_until=print_until,
+            )
+        self.assertFalse(
+            QuestionnairePrintRelease.objects.filter(cycle_course=primary).exists()
+        )
+
     def test_bulk_release_authorized_multiple_revisions(self):
         second_parent, second_revision = self._second_bulk_target()
 
@@ -615,6 +869,51 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             ).count(),
             2,
         )
+
+    def test_forged_bulk_post_rejects_superseded_revision(self):
+        superseded = self.r2
+        self._newer_revision(self.parent, superseded)
+
+        response = self._bulk_post(((self.parent, superseded),))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+    def test_direct_bulk_release_rejects_superseded_revision_and_rolls_back(self):
+        second_parent, superseded = self._second_bulk_target()
+        self._newer_revision(second_parent, superseded)
+        print_from, print_until = self._bulk_window()
+
+        with self.assertRaisesRegex(
+            ValidationError,
+            "Bulk print release accepts only the current Generated revision.",
+        ):
+            QuestionnairePrintReleaseService.bulk_release(
+                selections=(
+                    (self.parent.id, self.r2.id),
+                    (second_parent.id, superseded.id),
+                ),
+                tenant_id=self.tenant.id,
+                actor=self.manager_user,
+                print_from=print_from,
+                print_until=print_until,
+            )
+
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_QUESTIONNAIRE_PRINT_RELEASED"
+            ).exists()
+        )
+
+    def test_bulk_current_only_does_not_change_individual_historical_release(self):
+        superseded = self.r2
+        self._newer_revision(self.parent, superseded)
+
+        release = self._release(revision=superseded)
+
+        self.assertEqual(release.generation_revision_id, superseded.id)
+        self.assertEqual(release.status, QuestionnairePrintRelease.Status.ACTIVE)
 
     def test_bulk_release_applies_same_window_to_each_record(self):
         second_parent, second_revision = self._second_bulk_target()

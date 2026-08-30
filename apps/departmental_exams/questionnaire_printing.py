@@ -155,7 +155,14 @@ class QuestionnairePrintReleaseService:
         )
 
     @staticmethod
-    def _require_valid_revision(*, revision):
+    def _require_valid_revision(*, revision, require_current_generated=False):
+        if require_current_generated and (
+            revision.current_marker != 1
+            or revision.status != ExamGenerationRevision.Status.GENERATED
+        ):
+            raise ValidationError(
+                "Bulk print release accepts only the current Generated revision."
+            )
         set_rows = list(
             GeneratedExamSet.objects.filter(generation_revision=revision)
             .annotate(actual_item_count=Count("items"))
@@ -222,6 +229,7 @@ class QuestionnairePrintReleaseService:
         print_from,
         print_until,
         request=None,
+        require_current_generated=False,
     ):
         cls._validate_window(print_from=print_from, print_until=print_until)
         course = cls._lock_course(
@@ -232,6 +240,13 @@ class QuestionnairePrintReleaseService:
             user=actor,
             cycle_course=course,
         )
+        if (
+            require_current_generated
+            and resolve_examination_unit(course).primary.id != course.id
+        ):
+            raise ValidationError(
+                "Bulk print release accepts only the primary-owned revision for an examination unit."
+            )
         try:
             revision = (
                 ExamGenerationRevision.objects.select_for_update()
@@ -242,7 +257,10 @@ class QuestionnairePrintReleaseService:
             raise ValidationError(
                 {"generation_revision": "Selected revision does not belong to this course examination."}
             ) from exc
-        cls._require_valid_revision(revision=revision)
+        cls._require_valid_revision(
+            revision=revision,
+            require_current_generated=require_current_generated,
+        )
 
         now = timezone.now()
         previous = (
@@ -347,6 +365,7 @@ class QuestionnairePrintReleaseService:
                     print_from=print_from,
                     print_until=print_until,
                     request=request,
+                    require_current_generated=True,
                 )
             )
         return tuple(releases)
