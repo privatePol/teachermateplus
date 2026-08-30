@@ -1,5 +1,6 @@
+import hashlib
 from collections import Counter
-from itertools import combinations
+from itertools import combinations, combinations_with_replacement
 from time import perf_counter
 from unittest.mock import patch
 
@@ -636,6 +637,12 @@ class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
     difficulty_quotas = {"EASY": 15, "MODERATE": 25, "DIFFICULT": 10}
 
     @staticmethod
+    def _selection_digest(result):
+        return hashlib.sha256(
+            repr((result.set_a_block_ids, result.set_b_block_ids)).encode()
+        ).hexdigest()
+
+    @staticmethod
     def _review_counterexample_blocks():
         rows = {
             "logical:0": (
@@ -740,6 +747,7 @@ class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
 
     def test_review_counterexample_proves_minimum_combined_deviation_two(self):
         blocks = self._review_counterexample_blocks()
+        diagnostics = {}
         result = solve_automatic_identity_aware_two_sets(
             margins=(3,),
             blocks=blocks,
@@ -749,6 +757,7 @@ class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
             hmac_context={"review_case": "minimum-deviation"},
             max_states=100_000,
             optimize_soft=True,
+            _diagnostics=diagnostics,
         )
 
         self.assertTrue(result.feasible, result)
@@ -758,6 +767,16 @@ class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
         exhaustive_optimum = self._exhaustive_review_counterexample_optimum(blocks)
         self.assertEqual(exhaustive_optimum, 2)
         self.assertEqual(result.difficulty_deviation, exhaustive_optimum)
+        self.assertEqual(
+            (result.set_a_block_ids, result.set_b_block_ids),
+            (
+                ("question:2", "question:6", "question:7"),
+                ("question:4", "question:5", "question:9"),
+            ),
+        )
+        self.assertEqual(diagnostics["ranked_assignments"], 2)
+        self.assertEqual(diagnostics["hmac_cache_misses"], 18)
+        self.assertEqual(diagnostics["hmac_cache_hits"], 14)
         self._assert_review_counterexample_hard_constraints(
             result=result, blocks=blocks
         )
@@ -859,6 +878,285 @@ class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
             source_id += 1
         return tuple(blocks)
 
+    def _pathological_hall_shape(self, *, unique_count):
+        """Build the 150-row cross-campus shape seen in timeout profiles."""
+        blocks = []
+        source_id = 1
+        for logical_index in range(48):
+            for campus in ("C1", "C2"):
+                blocks.append(
+                    IdentityBlock(
+                        block_id=f"question:{source_id}",
+                        vector=(1,),
+                        members=(
+                            IdentityMember(
+                                source_id,
+                                (logical_index % 7) + 1,
+                                campus,
+                                "EASY",
+                                0,
+                            ),
+                        ),
+                        logical_group_id=f"logical:{logical_index}",
+                    )
+                )
+                source_id += 1
+        for logical_index in range(48, unique_count):
+            blocks.append(
+                IdentityBlock(
+                    block_id=f"question:{source_id}",
+                    vector=(1,),
+                    members=(
+                        IdentityMember(
+                            source_id,
+                            (logical_index % 7) + 1,
+                            "C3",
+                            "EASY",
+                            0,
+                        ),
+                    ),
+                    logical_group_id=f"logical:{logical_index}",
+                )
+            )
+            source_id += 1
+        while len(blocks) < 150:
+            logical_index = len(blocks) % 48
+            blocks.append(
+                IdentityBlock(
+                    block_id=f"question:{source_id}",
+                    vector=(1,),
+                    members=(
+                        IdentityMember(
+                            source_id,
+                            (logical_index % 7) + 1,
+                            "C1",
+                            "EASY",
+                            0,
+                        ),
+                    ),
+                    logical_group_id=f"logical:{logical_index}",
+                )
+            )
+            source_id += 1
+        return tuple(blocks)
+
+    @staticmethod
+    def _brute_force_hard_overlap(*, blocks, campus_quotas):
+        total = sum(campus_quotas.values())
+        feasible_sets = []
+        for selected in combinations(blocks, total):
+            if Counter(
+                block.members[0].campus for block in selected
+            ) != Counter(campus_quotas):
+                continue
+            by_logical_id = {
+                block.logical_group_id: block.block_id for block in selected
+            }
+            if len(by_logical_id) != total:
+                continue
+            feasible_sets.append(by_logical_id)
+        overlaps = []
+        for set_a in feasible_sets:
+            for set_b in feasible_sets:
+                common_logical_ids = set(set_a).intersection(set_b)
+                if any(
+                    set_a[logical_id] != set_b[logical_id]
+                    for logical_id in common_logical_ids
+                ):
+                    continue
+                overlaps.append(len(common_logical_ids))
+        return min(overlaps) if overlaps else None
+
+    def test_hard_feasibility_matches_exhaustive_small_oracle(self):
+        campuses = ("C1", "C2")
+        compared = 0
+        for group_count in range(2, 5):
+            for group_masks in combinations_with_replacement(
+                (1, 2, 3), group_count
+            ):
+                blocks = []
+                source_id = 1
+                for logical_index, mask in enumerate(group_masks):
+                    for position, campus in enumerate(campuses):
+                        if mask & (1 << position):
+                            blocks.append(
+                                IdentityBlock(
+                                    block_id=f"question:{source_id}",
+                                    vector=(1,),
+                                    members=(
+                                        IdentityMember(
+                                            source_id,
+                                            logical_index + 1,
+                                            campus,
+                                            "EASY",
+                                            0,
+                                        ),
+                                    ),
+                                    logical_group_id=f"logical:{logical_index}",
+                                )
+                            )
+                            source_id += 1
+                expected_overlap = self._brute_force_hard_overlap(
+                    blocks=blocks,
+                    campus_quotas={"C1": 1, "C2": 1},
+                )
+                result = solve_automatic_identity_aware_two_sets(
+                    margins=(2,),
+                    blocks=blocks,
+                    campus_quotas={"C1": 1, "C2": 1},
+                    difficulty_quotas={"EASY": 2},
+                    secret=self.secret,
+                    hmac_context={"oracle_masks": group_masks},
+                    max_states=1_000,
+                )
+                self.assertEqual(
+                    result.feasible,
+                    expected_overlap is not None,
+                    group_masks,
+                )
+                self.assertEqual(result.overlap, expected_overlap, group_masks)
+                compared += 1
+        self.assertEqual(compared, 31)
+
+    def test_combined_campus_hall_deficits_match_exhaustive_oracle(self):
+        cases = (
+            (("C1", "C2", "C3"), (3, 3, 3, 4, 4, 4)),
+            (("C1", "C2", "C3", "C4"), (7, 7, 7, 7, 7, 8, 8, 8)),
+        )
+        for campuses, group_masks in cases:
+            with self.subTest(campuses=campuses):
+                blocks = []
+                source_id = 1
+                for logical_index, mask in enumerate(group_masks):
+                    for position, campus in enumerate(campuses):
+                        if mask & (1 << position):
+                            blocks.append(
+                                IdentityBlock(
+                                    block_id=f"question:{source_id}",
+                                    vector=(1,),
+                                    members=(
+                                        IdentityMember(
+                                            source_id,
+                                            logical_index + 1,
+                                            campus,
+                                            "EASY",
+                                            0,
+                                        ),
+                                    ),
+                                    logical_group_id=f"logical:{logical_index}",
+                                )
+                            )
+                            source_id += 1
+                campus_quotas = {campus: 1 for campus in campuses}
+                expected_overlap = self._brute_force_hard_overlap(
+                    blocks=blocks,
+                    campus_quotas=campus_quotas,
+                )
+                self.assertEqual(expected_overlap, 1)
+
+                result = solve_automatic_identity_aware_two_sets(
+                    margins=(len(campuses),),
+                    blocks=tuple(blocks),
+                    campus_quotas=campus_quotas,
+                    difficulty_quotas={"EASY": len(campuses)},
+                    secret=self.secret,
+                    hmac_context={"combined_hall_masks": group_masks},
+                    max_states=10_000,
+                )
+
+                self.assertTrue(result.feasible, result)
+                self.assertEqual(result.overlap, expected_overlap)
+
+    def test_large_campus_hard_feasibility_is_polynomial_and_budgeted(self):
+        for campus_count in (16, 20):
+            with self.subTest(campus_count=campus_count):
+                campuses = tuple(f"C{index:02d}" for index in range(campus_count))
+                base, remainder = divmod(50, campus_count)
+                campus_quotas = {
+                    campus: base + (1 if index < remainder else 0)
+                    for index, campus in enumerate(campuses)
+                }
+                blocks = []
+                source_id = 1
+                for campus, quota in campus_quotas.items():
+                    for _index in range(2 * quota):
+                        blocks.append(
+                            IdentityBlock(
+                                block_id=f"question:{source_id}",
+                                vector=(1,),
+                                members=(
+                                    IdentityMember(
+                                        source_id,
+                                        source_id,
+                                        campus,
+                                        "EASY",
+                                        0,
+                                    ),
+                                ),
+                                logical_group_id=f"logical:{source_id}",
+                            )
+                        )
+                        source_id += 1
+                diagnostics = {}
+                started = perf_counter()
+                result = solve_automatic_identity_aware_two_sets(
+                    margins=(50,),
+                    blocks=tuple(blocks),
+                    campus_quotas=campus_quotas,
+                    difficulty_quotas={"EASY": 50},
+                    secret=self.secret,
+                    hmac_context={"large_campus_count": campus_count},
+                    max_states=1,
+                    _diagnostics=diagnostics,
+                )
+                elapsed = perf_counter() - started
+
+                self.assertTrue(result.feasible, result)
+                self.assertFalse(result.limit_hit)
+                self.assertEqual(result.overlap, 0)
+                self.assertEqual(result.states_explored, 1)
+                self.assertEqual(diagnostics["hard_feasibility_checks"], 1)
+                self.assertEqual(diagnostics["ranked_assignments"], 1)
+                self.assertLess(elapsed, 5)
+
+    def test_pathological_cross_campus_shapes_avoid_repeated_ranked_assignment(self):
+        expected_digests = {
+            101: "4130373838ac2290d5f0b06691781d2af9f52767a0f992014cae0461b9f1f0a4",
+            102: "85ea1baf1ef64f21868382f9a3220259cafe1c78668ff841884235cf09d12be5",
+        }
+        for unique_count in (101, 102):
+            with self.subTest(unique_count=unique_count):
+                blocks = self._pathological_hall_shape(unique_count=unique_count)
+                diagnostics = {}
+                started = perf_counter()
+                with patch(
+                    "apps.departmental_exams.generation_algorithms.confidential_hmac_rank",
+                    wraps=confidential_hmac_rank,
+                ) as ranked:
+                    result = solve_automatic_identity_aware_two_sets(
+                        margins=(50,),
+                        blocks=blocks,
+                        campus_quotas=self.campus_quotas,
+                        difficulty_quotas={"EASY": 50},
+                        secret="pathological-secret",
+                        hmac_context={"pathological": unique_count},
+                        max_states=1_000_000,
+                        _diagnostics=diagnostics,
+                    )
+                elapsed = perf_counter() - started
+                self.assertTrue(result.feasible, result)
+                self.assertFalse(result.limit_hit)
+                self.assertEqual(result.overlap, 20)
+                self.assertEqual(result.states_explored, 1_584)
+                self.assertEqual(diagnostics["hard_feasibility_checks"], 1_584)
+                self.assertEqual(diagnostics["ranked_assignments"], 1)
+                self.assertEqual(ranked.call_count, diagnostics["hmac_cache_misses"])
+                self.assertLessEqual(ranked.call_count, 301)
+                self.assertEqual(
+                    self._selection_digest(result), expected_digests[unique_count]
+                )
+                self.assertLess(elapsed, 5)
+
     def _solve_shape(self, *, unique_count, submitted_count):
         blocks = self._shape(
             unique_count=unique_count,
@@ -898,6 +1196,11 @@ class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
         )
         self.assertEqual(result.overlap, 0)
         self.assertTrue(result.difficulty_target_met)
+        self.assertEqual(result.states_explored, 7_857)
+        self.assertEqual(
+            self._selection_digest(result),
+            "33b9c831044a6b263d7a69f8e928fc6c630171a9be6c8ae9d2b508f8c0102d96",
+        )
         print(f"AUTOMATIC_SHAPE FM322 elapsed={elapsed:.6f}s")
 
     def test_ge213_like_150_submitted_98_unique_uses_two_overlap(self):
@@ -906,6 +1209,11 @@ class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
             submitted_count=150,
         )
         self.assertEqual(result.overlap, 2)
+        self.assertEqual(result.states_explored, 8_024)
+        self.assertEqual(
+            self._selection_digest(result),
+            "82c706398651f4fa85b8a3bd555554d22baf85d1e9f68135f6f9757e3e4ca310",
+        )
         print(f"AUTOMATIC_SHAPE GE213 elapsed={elapsed:.6f}s")
 
     def test_fm311_like_150_submitted_101_unique_completes_quickly(self):
@@ -915,6 +1223,11 @@ class AutomaticProductionShapeOptimizationTests(SimpleTestCase):
         )
         self.assertEqual(result.overlap, 0)
         self.assertTrue(result.difficulty_target_met)
+        self.assertEqual(result.states_explored, 8_181)
+        self.assertEqual(
+            self._selection_digest(result),
+            "6076154454283bf59230c1ba448ba13b5146d79ba97ba6f0645096a104f0ff47",
+        )
         print(f"AUTOMATIC_SHAPE FM311 elapsed={elapsed:.6f}s")
 
     def test_is313_like_impossible_target_uses_proved_closest_mix(self):

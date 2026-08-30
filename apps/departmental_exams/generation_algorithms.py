@@ -2025,6 +2025,7 @@ def solve_automatic_identity_aware_two_sets(
     hmac_context,
     max_states,
     optimize_soft=False,
+    _diagnostics=None,
 ):
     """Select Automatic Set A/B with hard campus margins and soft difficulty.
 
@@ -2098,6 +2099,125 @@ def solve_automatic_identity_aware_two_sets(
     states_explored = 0
     optimization_limit_hit = False
     rank_limit = (1 << 256) * (2 * total + 1)
+
+    def record_diagnostic(key):
+        if _diagnostics is not None:
+            _diagnostics[key] = _diagnostics.get(key, 0) + 1
+
+    def consume_state():
+        nonlocal states_explored
+        states_explored += 1
+        if states_explored > max_states:
+            raise FeasibilityLimitExceeded
+
+    # Hard-phase slots differ by Set A/Set B/shared state, but all three states
+    # have exactly the same logical-group neighbors for a campus.  Record that
+    # bipartite adjacency once in polynomial O(campuses * logical groups) work.
+    # Each tested allocation is then an exact capacitated max-flow instance of
+    # the same rectangular matching used by assignment_for().
+    campus_group_indices = tuple(
+        tuple(
+            group_index
+            for group_index, rows in enumerate(ordered_groups)
+            if any(block.members[0].campus == campus for block in rows)
+        )
+        for campus in campus_order
+    )
+
+    def hard_assignment_exists(shared_counts):
+        """Return exact unranked hard feasibility for one campus allocation."""
+        consume_state()
+        record_diagnostic("hard_feasibility_checks")
+        required_by_campus = tuple(
+            2 * int(campus_quotas[campus]) - int(shared_counts[position])
+            for position, campus in enumerate(campus_order)
+        )
+        required_total = sum(required_by_campus)
+        if required_total > group_count:
+            return False
+
+        source = 0
+        campus_offset = 1
+        group_offset = campus_offset + len(campus_order)
+        sink = group_offset + group_count
+        graph = [[] for _ in range(sink + 1)]
+
+        def add_edge(start, end, capacity):
+            forward = [end, len(graph[end]), int(capacity)]
+            reverse = [start, len(graph[start]), 0]
+            graph[start].append(forward)
+            graph[end].append(reverse)
+
+        for position, required in enumerate(required_by_campus):
+            if required <= 0:
+                continue
+            campus_node = campus_offset + position
+            add_edge(source, campus_node, required)
+            for group_index in campus_group_indices[position]:
+                add_edge(campus_node, group_offset + group_index, 1)
+        for group_index in range(group_count):
+            add_edge(group_offset + group_index, sink, 1)
+
+        flow = 0
+        while flow < required_total:
+            levels = [-1] * len(graph)
+            levels[source] = 0
+            queue = [source]
+            for node in queue:
+                for end, _reverse_index, capacity in graph[node]:
+                    if capacity > 0 and levels[end] < 0:
+                        levels[end] = levels[node] + 1
+                        queue.append(end)
+            if levels[sink] < 0:
+                return False
+
+            next_edge = [0] * len(graph)
+
+            def send_flow(node, available):
+                if node == sink:
+                    return available
+                while next_edge[node] < len(graph[node]):
+                    edge = graph[node][next_edge[node]]
+                    end, reverse_index, capacity = edge
+                    if capacity > 0 and levels[end] == levels[node] + 1:
+                        sent = send_flow(end, min(available, capacity))
+                        if sent:
+                            edge[2] -= sent
+                            graph[end][reverse_index][2] += sent
+                            return sent
+                    next_edge[node] += 1
+                return 0
+
+            while flow < required_total:
+                sent = send_flow(source, required_total - flow)
+                if not sent:
+                    break
+                flow += sent
+        return flow == required_total
+
+    selection_rank_cache = {}
+
+    def selection_rank(*, overlap, block_id, selection_state):
+        # secret, domain, and the base HMAC context are invariant for this
+        # solver invocation; the key contains every input that varies here.
+        cache_key = (overlap, block_id, selection_state)
+        cached = selection_rank_cache.get(cache_key)
+        if cached is not None:
+            record_diagnostic("hmac_cache_hits")
+            return cached
+        rank = confidential_hmac_rank(
+            secret=secret,
+            domain=SELECTION_HMAC_DOMAIN,
+            context={
+                **dict(hmac_context),
+                "minimum_overlap": overlap,
+                "block_identity": block_id,
+                "selection_state": selection_state,
+            },
+        )
+        selection_rank_cache[cache_key] = rank
+        record_diagnostic("hmac_cache_misses")
+        return rank
 
     def shared_campus_allocations(overlap):
         """Yield only overlap allocations that fit real campus capacity."""
@@ -2186,12 +2306,12 @@ def solve_automatic_identity_aware_two_sets(
         target_table=None,
         target_table_b=None,
         shared_cells=None,
+        count_state=True,
     ):
         """Solve one capacity-feasible campus allocation by rectangular Hungarian."""
-        nonlocal states_explored
-        states_explored += 1
-        if states_explored > max_states:
-            raise FeasibilityLimitExceeded
+        record_diagnostic("ranked_assignments")
+        if count_state:
+            consume_state()
         slots = []
         if target_table is None:
             for position, campus in enumerate(campus_order):
@@ -2254,15 +2374,10 @@ def solve_automatic_identity_aware_two_sets(
                             if set_code == "X"
                             else difficulty_costs[set_code].get(member.difficulty, 0)
                         )
-                        rank = confidential_hmac_rank(
-                            secret=secret,
-                            domain=SELECTION_HMAC_DOMAIN,
-                            context={
-                                **dict(hmac_context),
-                                "minimum_overlap": overlap,
-                                "block_identity": block.block_id,
-                                "selection_state": selection_state,
-                            },
+                        rank = selection_rank(
+                            overlap=overlap,
+                            block_id=block.block_id,
+                            selection_state=selection_state,
                         )
                         choices.append(
                             (coefficient * rank_limit + rank, str(block.block_id))
@@ -2382,10 +2497,13 @@ def solve_automatic_identity_aware_two_sets(
     try:
         for overlap in range(minimum_possible_overlap, total + 1):
             for shared_counts in shared_campus_allocations(overlap):
+                if not hard_assignment_exists(shared_counts):
+                    continue
                 candidate = assignment_for(
                     overlap=overlap,
                     shared_counts=shared_counts,
                     difficulty_costs=zero_costs,
+                    count_state=False,
                 )
                 if candidate is not None:
                     hard_candidate = candidate
@@ -2438,12 +2556,6 @@ def solve_automatic_identity_aware_two_sets(
             for difficulty in difficulty_order
         }
 
-        def consume_optimization_state():
-            nonlocal states_explored
-            states_explored += 1
-            if states_explored > max_states:
-                raise FeasibilityLimitExceeded
-
         def row_allocations(total_needed, limits, position=0, prefix=()):
             if position == len(limits) - 1:
                 if total_needed <= limits[position]:
@@ -2464,7 +2576,7 @@ def solve_automatic_identity_aware_two_sets(
             def build(campus_index, remaining, cells):
                 if campus_index == len(campus_order):
                     if not any(remaining):
-                        consume_optimization_state()
+                        consume_state()
                         table = dict(cells)
                         tables.append(
                             (
@@ -2528,7 +2640,7 @@ def solve_automatic_identity_aware_two_sets(
             def build(position, remaining, values):
                 if position == len(cell_order):
                     if remaining == 0:
-                        consume_optimization_state()
+                        consume_state()
                         yield {
                             cell: values[index]
                             for index, cell in enumerate(cell_order)
@@ -2567,7 +2679,7 @@ def solve_automatic_identity_aware_two_sets(
                         )
                         for index, difficulty in enumerate(difficulty_order)
                     )
-                    consume_optimization_state()
+                    consume_state()
                     values.append((deviation, counts))
                     return
                 for amount in range(remaining + 1):
@@ -2599,7 +2711,7 @@ def solve_automatic_identity_aware_two_sets(
                             next_b,
                         ),
                     )
-                consume_optimization_state()
+                consume_state()
                 table_a = tables_a[index_a][2]
                 table_b = tables_b[index_b][2]
                 for shared_cells in shared_cell_allocations(table_a, table_b):
@@ -2641,7 +2753,7 @@ def solve_automatic_identity_aware_two_sets(
                             count_pair_heap,
                             (next_deviation, index_a, next_b),
                         )
-                consume_optimization_state()
+                consume_state()
                 if combined_deviation < lower_bound:
                     continue
                 counts_a = count_vectors[index_a][1]
