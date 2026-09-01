@@ -1,11 +1,19 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-08-06
+Last updated by Codex: 2026-09-01
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+### Departmental Exam Regeneration Confirmation Implementation
+- Date/baseline: 2026-09-01; clean isolated worktree `D:\teachermateplus-regenerate-confirmation`, branch `fix/regenerate-confirmation`, HEAD `765acd5184c1321dfe64d85ed8d4721c4155ce24`. The original dirty `D:\teachermateplus` checkout was inspected only and left unchanged.
+- Completed: the shared Manual/Automatic regeneration POST form now carries a simple confirmation warning. On Cancel, the submit handler prevents submission and returns before setting submitted state, busy state, or disabled controls, so the reason/note remains editable. On OK, the unchanged one-submit/busy protection and existing regeneration endpoint continue. First-generation forms, GET links, generation services, URLs, authorization, lifecycle, CSRF, revision/fingerprint/token fields, versioning, audit, and confidentiality rules are unchanged.
+- Tests changed but not run: focused render-contract coverage was added to `apps/departmental_exams/tests_stage6_generation.py` and `apps/departmental_exams/tests_automatic_workflow.py` for Manual and Automatic form confirmation markup, unchanged POST action, CSRF, expected revision, input fingerprint, request token, reason/note field, and confirmation-before-submitted-state ordering. Per the current gate, no tests, Django checks, migration checks, or browser smoke were run.
+- Changed files: `templates/departmental_exams/admin/generation_workspace.html`; `apps/departmental_exams/tests_stage6_generation.py`; `apps/departmental_exams/tests_automatic_workflow.py`; `templates/admin_portal/guide.html`; `CHANGE_LOG.md`; `TEACHERMATEPLUS_CONTEXT.md`; and this handoff. No migrations are required.
+- Pending/risks: validation remains a separate authorization gate. The browser confirmation is a usability safeguard, not a server security boundary; the unchanged server authorization/idempotency controls remain authoritative. JavaScript Cancel/OK behavior has not yet been exercised in a real browser.
+- Exact next step: in a separately authorized validation gate, run only the two new focused tests first, then the approved nearby regressions and `python manage.py check`; perform Manual and Automatic browser smoke for Cancel/edit/resubmit and OK/duplicate-submit behavior. Do not stage, commit, push, migrate, deploy, or restart without separate authorization.
+
 ### Stage 6 Campus-Code Adapter Remediation
 - Date/baseline: 2026-08-13; branch `feat/departmental-exam-builder-stage5-8`; unchanged HEAD `7eb5ca7716fe359bdbc8bc2ceea23a2fc002e1aa`. Staging commit `7f479cd046c745c11d4d3ef10ad979a24b9584a9` is an ancestor of this HEAD with three later Departmental Exam Builder commits retained. The initial seven dirty paths, including both protected Submission Readiness files and `logs/system.log`, were preserved.
 - Completed: added one explicit Stage 6 Campus.code adapter for the approved internal, deployed `NCBA-*`, and setup-bundle `NCBA-01/02/03` aliases. Readiness canonicalizes participating snapshot and Submitted source-campus ingress; confidential question placement uses the same boundary. Unknown/unofficial codes remain fail closed, and distinct Campus rows that collapse to one canonical key are rejected. `generation_algorithms.py`, 33/33/34 weights, difficulty/section/scenario/overlap/contributor/HMAC semantics, generation/approval services, algorithm version, revision/audit behavior, and canonical persisted quota/item snapshots are unchanged.

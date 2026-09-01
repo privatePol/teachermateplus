@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Fixed
+- Manual and Automatic Departmental Exam regeneration now share a browser confirmation at the state-changing Regenerate Set A & Set B form. Cancel leaves the reason or note editable and does not activate the busy or disabled state; Continue preserves the existing one-submit protection and unchanged regeneration POST endpoint. No migration is required.
 - Departmental Exam Builder Stage 6 now canonicalizes the explicitly supported `CUBAO` / `FAIRVIEW` / `TAYTAY`, `NCBA-CUBAO` / `NCBA-FAIRVIEW` / `NCBA-TAYTAY`, and `NCBA-01` / `NCBA-02` / `NCBA-03` Campus.code conventions at the readiness and confidential-placement ingress boundary. Unknown or unofficial abbreviations remain fail closed, distinct Campus rows cannot silently collapse to one canonical allocation key, and persisted generation snapshots continue using the unchanged internal Stage 6 keys and 33/33/34 algorithm. No migration is required.
 
 ### Added

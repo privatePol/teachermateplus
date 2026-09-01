@@ -435,6 +435,39 @@ class Stage6BGenerationViewTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertContains(response, "data-generation-form")
         self.assertNotContains(response, "% complete")
 
+    def test_manual_regeneration_form_preserves_post_contract_and_requires_confirmation(self):
+        parent, problem = self.ready_generation_course()
+        current = self.generate_with_proved_selection(parent=parent, problem=problem).revision
+        self.client.force_login(self.reviewer)
+
+        response = self.client.get(
+            reverse("departmental_exams:generation_workspace", args=[parent.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'action="{reverse("departmental_exams:regenerate_exam", args=[parent.id])}"',
+        )
+        self.assertContains(
+            response,
+            'data-regeneration-confirmation="Regenerate Set A and Set B? '
+            'This will create a new revision and supersede the current revision. Continue?"',
+        )
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertContains(
+            response,
+            f'name="expected_current_revision" value="{current.revision_number}"',
+        )
+        self.assertContains(response, 'name="input_fingerprint"')
+        self.assertContains(response, 'name="request_token"')
+        self.assertContains(response, 'name="reason"')
+        body = response.content.decode()
+        self.assertLess(
+            body.index("window.confirm(confirmationMessage)"),
+            body.index("form.dataset.submitted = 'true'"),
+        )
+
     def test_stale_post_is_409_and_detail_uses_historical_snapshots(self):
         parent, problem = self.ready_generation_course()
         self.client.force_login(self.reviewer)

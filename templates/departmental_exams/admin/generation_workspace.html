@@ -40,7 +40,7 @@
       {% endif %}
     {% else %}
       <div class="alert alert-info">Regeneration creates a new immutable revision and supersedes revision #{{ current_revision.revision_number }}. Existing question, order, and answer snapshots remain unchanged.</div>
-      <form method="post" action="{% url 'departmental_exams:regenerate_exam' cycle_course.id %}" class="js-generation-form" data-generation-form aria-busy="false">
+      <form method="post" action="{% url 'departmental_exams:regenerate_exam' cycle_course.id %}" class="js-generation-form" data-generation-form data-regeneration-confirmation="Regenerate Set A and Set B? This will create a new revision and supersede the current revision. Continue?" aria-busy="false">
         {% csrf_token %}{{ regeneration_form.expected_current_revision }}{{ regeneration_form.input_fingerprint }}{{ regeneration_form.request_token }}
         <div class="mb-3"><label class="form-label fw-semibold" for="{{ regeneration_form.reason.id_for_label }}">{% if automatic_mode %}Optional note{% else %}Regeneration reason{% endif %}</label>{{ regeneration_form.reason }}<div class="form-text">{% if automatic_mode %}A note is optional and never blocks regeneration.{% else %}Stored confidentially; audit metadata records only its hash and length.{% endif %}</div></div>
         <div class="de-generation-busy mb-3" data-generation-busy><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Generating Set A and Set B... Please wait.</span></div>
@@ -73,6 +73,8 @@
   forms.forEach(function (form) {
     form.addEventListener('submit', function (event) {
       if (form.dataset.submitted === 'true') { event.preventDefault(); return; }
+      const confirmationMessage = form.dataset.regenerationConfirmation;
+      if (confirmationMessage && !window.confirm(confirmationMessage)) { event.preventDefault(); return; }
       form.dataset.submitted = 'true';
       form.setAttribute('aria-busy', 'true');
       form.querySelectorAll('button, input:not([type="hidden"]), textarea, select').forEach(function (control) { control.disabled = true; });

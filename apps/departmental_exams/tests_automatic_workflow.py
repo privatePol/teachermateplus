@@ -461,6 +461,36 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertEqual(r2.generated_by, self.generation_manager)
         self.assertEqual(r2.generation_trigger, "MANUAL")
 
+    def test_automatic_regeneration_form_preserves_post_contract_and_requires_confirmation(self):
+        parent, _configuration, problem = self._ready_automatic_course()
+        result = self._process_with_proved_selection(parent=parent, problem=problem)
+        client = Client()
+        client.force_login(self.generation_manager)
+
+        response = client.get(
+            reverse("departmental_exams:generation_workspace", args=[parent.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CONFIDENTIAL AUTOMATIC OUTPUT")
+        self.assertContains(
+            response,
+            f'action="{reverse("departmental_exams:regenerate_exam", args=[parent.id])}"',
+        )
+        self.assertContains(
+            response,
+            'data-regeneration-confirmation="Regenerate Set A and Set B? '
+            'This will create a new revision and supersede the current revision. Continue?"',
+        )
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertContains(
+            response,
+            f'name="expected_current_revision" value="{result.generation_revision}"',
+        )
+        self.assertContains(response, 'name="input_fingerprint"')
+        self.assertContains(response, 'name="request_token"')
+        self.assertContains(response, 'name="reason"')
+
     def test_reopen_supersedes_current_preserves_submissions_and_allows_fresh_r2(self):
         parent, configuration, problem = self._ready_automatic_course()
         self._process_with_proved_selection(parent=parent, problem=problem)
