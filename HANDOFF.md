@@ -1,11 +1,19 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-08-30
+Last updated by Codex: 2026-09-01
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+### Regeneration Confirmation Mainline Implementation
+- Date/gate/baseline: 2026-09-01 implementation/remediation only in clean isolated `D:\teachermateplus-regenerate-confirmation-mainline`, branch `fix/regenerate-confirmation-mainline`, exact unchanged HEAD `aa00bdc712f7c6e2ff2f0f0d07fa50316d17e29a`. Fetched `origin/main` matched that approved SHA. The dirty `D:\teachermateplus` checkout was baselined and not modified.
+- Completed: the shared generation workspace now confirms Manual and Automatic regeneration before submitted/busy state or control disabling. Cancel prevents the native form POST and leaves the reason/note editable; Continue enters the unchanged one-submit/progress flow. The Automatic Generation Summary's direct AJAX regeneration now shows the same warning before `FormData`, busy/progress state, control disabling, or `fetch`; Cancel remains on the summary with no POST, while Continue uses the unchanged AJAX flow.
+- Tests changed but not run: parser-backed form-contract coverage checks Manual and Automatic workspace POST action, CSRF, current-revision/fingerprint/request-token fields, editable reason/note, confirmation text, and confirmation-before-submitted/busy ordering. Automatic Summary coverage checks its direct POST contract and confirmation-before-`FormData`/processing/`fetch` ordering. Per this gate, no Django tests, `manage.py check`, migration command, pre-commit validation, or browser smoke was run.
+- Changed files: `templates/departmental_exams/admin/generation_workspace.html`; `templates/departmental_exams/admin/automatic_generation_summary.html`; `apps/departmental_exams/tests_stage6_generation.py`; `apps/departmental_exams/tests_automatic_workflow.py`; `CHANGE_LOG.md`; `TEACHERMATEPLUS_CONTEXT.md`; `templates/admin_portal/guide.html`; and this handoff. No migrations are required.
+- Pending/risks: validation remains separately authorized. Source-order tests do not replace real-browser Cancel/OK interaction evidence. Browser confirmation is a usability safeguard; unchanged server authorization, lifecycle, concurrency, idempotency, supersession, audit, and confidentiality controls remain authoritative.
+- Exact next steps: in a separately authorized validation gate, run the new focused Manual/Automatic workspace and Automatic Summary tests, then approved adjacent regressions and `python manage.py check`; browser-smoke Cancel/edit/resubmit and Continue/progress/duplicate-submit behavior on both surfaces. Do not stage, commit, push, migrate, deploy, or restart without separate authorization.
+
 ### Bulk Print Release Current-Revision UX Fix
 - Date/gate/baseline: 2026-08-30 implementation/remediation plus focused validation in clean isolated `D:\codex-worktrees\TMP-DEB-Bulk-Print-Release-UX-Fix`, branch `codex/tmp-deb-bulk-print-release-ux-fix`, exact unchanged HEAD and `origin/main` `66fa3d5840584cff757e70fc936143db6ae0d2da`. The protected dirty/divergent `D:\teachermateplus` checkout was baselined and not modified.
 - Completed: Bulk Print Release now derives one row only from the primary-owned `ExamGenerationRevision` with `current_marker=1` and `status=GENERATED`; it never uses `MAX(revision_number)` or falls back to superseded/history rows. The card remains generation-manager scoped, shows a server-derived `len(bulk_selection_rows)` badge including zero, and renders an explicit empty state. The unchanged `selections=<cycle_course_id>:<revision_id>` checkboxes gained a form-scoped Select All control that targets only `.bulk-release-selection:not(:disabled)`, updates the existing selected count, and synchronizes checked/unchecked/indeterminate state. The visible all-or-nothing instructional sentence was removed only from this page.

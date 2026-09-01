@@ -52,6 +52,7 @@
   const error = document.querySelector('[data-automatic-processing-error]');
   const forms = document.querySelectorAll('[data-automatic-regeneration-form]');
   const actions = document.querySelectorAll('[data-automatic-action]');
+  const regenerationConfirmation = 'Regenerate Set A and Set B? This will create a new revision and supersede the current revision. Continue?';
   function setProcessing(active) {
     root.setAttribute('aria-busy', active ? 'true' : 'false');
     progress.hidden = !active;
@@ -79,6 +80,7 @@
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
       if (root.getAttribute('aria-busy') === 'true') { return; }
+      if (!window.confirm(regenerationConfirmation)) { return; }
       const payload = new FormData(form);
       error.hidden = true;
       setProcessing(true);

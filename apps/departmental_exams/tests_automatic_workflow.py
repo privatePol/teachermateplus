@@ -82,7 +82,11 @@ from .services import (
     DepartmentalExamAuthorizationService,
     ExaminationCycleConfigurationService,
 )
-from .tests_stage6_generation import Stage6BGenerationFixtureMixin
+from .tests_stage6_generation import (
+    REGENERATION_CONFIRMATION,
+    RegenerationFormParser,
+    Stage6BGenerationFixtureMixin,
+)
 
 
 class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
@@ -2306,6 +2310,50 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertEqual(r2.generated_by, self.generation_manager)
         self.assertEqual(r2.generation_trigger, "MANUAL")
 
+    def test_automatic_workspace_regeneration_preserves_form_contract(self):
+        parent, _configuration, problem = self._ready_automatic_course()
+        result = self._process_with_proved_selection(parent=parent, problem=problem)
+        client = Client()
+        client.force_login(self.generation_manager)
+
+        response = client.get(
+            reverse("departmental_exams:generation_workspace", args=[parent.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CONFIDENTIAL AUTOMATIC OUTPUT")
+        self.assertContains(response, "Optional note")
+        parser = RegenerationFormParser()
+        parser.feed(response.content.decode())
+        self.assertEqual(len(parser.forms), 1)
+        form = parser.forms[0]
+        attributes = form["attributes"]
+        controls = form["controls"]
+        self.assertEqual(attributes.get("method"), "post")
+        self.assertEqual(
+            attributes.get("action"),
+            reverse("departmental_exams:regenerate_exam", args=[parent.id]),
+        )
+        self.assertEqual(
+            attributes.get("data-regeneration-confirmation"),
+            REGENERATION_CONFIRMATION,
+        )
+        self.assertTrue(
+            {
+                "csrfmiddlewaretoken",
+                "expected_current_revision",
+                "input_fingerprint",
+                "request_token",
+                "reason",
+            }.issubset(controls)
+        )
+        self.assertEqual(
+            controls["expected_current_revision"]["attributes"].get("value"),
+            str(result.generation_revision),
+        )
+        self.assertEqual(controls["reason"]["tag"], "textarea")
+        self.assertNotIn("disabled", controls["reason"]["attributes"])
+
     def test_reopen_supersedes_current_preserves_submissions_and_allows_fresh_r2(self):
         parent, configuration, problem = self._ready_automatic_course()
         self._process_with_proved_selection(parent=parent, problem=problem)
@@ -2402,6 +2450,66 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                 campus=denied_campus,
             )
         self.assertEqual(client.get(url).status_code, 403)
+
+    def test_summary_direct_regeneration_confirms_before_ajax_processing(self):
+        parent, _configuration, problem = self._ready_automatic_course(
+            clear_manual_assignment=False
+        )
+        result = self._process_with_proved_selection(parent=parent, problem=problem)
+        client = Client()
+        client.force_login(self.generation_manager)
+
+        response = client.get(
+            reverse(
+                "departmental_exams:automatic_generation_summary",
+                args=[parent.cycle_id],
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        parser = RegenerationFormParser()
+        parser.feed(body)
+        self.assertEqual(len(parser.forms), 1)
+        form = parser.forms[0]
+        attributes = form["attributes"]
+        controls = form["controls"]
+        self.assertEqual(attributes.get("method"), "post")
+        self.assertEqual(
+            attributes.get("action"),
+            reverse("departmental_exams:regenerate_exam", args=[parent.id]),
+        )
+        self.assertTrue(
+            {
+                "csrfmiddlewaretoken",
+                "expected_current_revision",
+                "input_fingerprint",
+                "request_token",
+            }.issubset(controls)
+        )
+        self.assertEqual(
+            controls["expected_current_revision"]["attributes"].get("value"),
+            str(result.generation_revision),
+        )
+        self.assertIn(REGENERATION_CONFIRMATION, body)
+        handler_index = body.index("form.addEventListener('submit'")
+        confirmation_index = body.index(
+            "window.confirm(regenerationConfirmation)",
+            handler_index,
+        )
+        self.assertLess(
+            confirmation_index,
+            body.index("new FormData(form)", handler_index),
+        )
+        self.assertLess(
+            confirmation_index,
+            body.index("setProcessing(true)", handler_index),
+        )
+        self.assertLess(
+            confirmation_index,
+            body.index("await fetch(form.action", handler_index),
+        )
+        self.assertIn("control.disabled = active", body)
 
     def test_generated_summary_uses_current_persisted_revision_without_solver(self):
         parent, _configuration, problem = self._ready_automatic_course(

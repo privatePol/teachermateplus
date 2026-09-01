@@ -1,3 +1,4 @@
+from html.parser import HTMLParser
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -24,6 +25,44 @@ from .models import (
 )
 from .stage4_test_support import Stage4TestCase
 from .tests_stage6_blueprint_readiness import Stage6BlueprintFixtureMixin
+
+
+REGENERATION_CONFIRMATION = (
+    "Regenerate Set A and Set B? This will create a new revision and supersede "
+    "the current revision. Continue?"
+)
+
+
+class RegenerationFormParser(HTMLParser):
+    """Extract regeneration form transport and editable-control contracts."""
+
+    def __init__(self):
+        super().__init__()
+        self.forms = []
+        self._current_form = None
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "form" and (
+            "data-generation-form" in attributes
+            or "data-automatic-regeneration-form" in attributes
+        ):
+            self._current_form = {
+                "attributes": attributes,
+                "controls": {},
+            }
+            self.forms.append(self._current_form)
+        elif self._current_form is not None and tag in {"input", "textarea", "select"}:
+            name = attributes.get("name")
+            if name:
+                self._current_form["controls"][name] = {
+                    "tag": tag,
+                    "attributes": attributes,
+                }
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self._current_form = None
 
 
 class Stage6BGenerationFixtureMixin(Stage6BlueprintFixtureMixin):
@@ -463,6 +502,61 @@ class Stage6BGenerationViewTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertContains(response, 'aria-busy="false"')
         self.assertContains(response, "data-generation-form")
         self.assertNotContains(response, "% complete")
+
+    def test_manual_regeneration_form_confirms_before_submitted_and_busy_state(self):
+        parent, problem = self.ready_generation_course()
+        current = self.generate_with_proved_selection(
+            parent=parent,
+            problem=problem,
+        ).revision
+        self.client.force_login(self.reviewer)
+
+        response = self.client.get(
+            reverse("departmental_exams:generation_workspace", args=[parent.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        parser = RegenerationFormParser()
+        parser.feed(body)
+        self.assertEqual(len(parser.forms), 1)
+        form = parser.forms[0]
+        attributes = form["attributes"]
+        controls = form["controls"]
+        self.assertEqual(attributes.get("method"), "post")
+        self.assertEqual(
+            attributes.get("action"),
+            reverse("departmental_exams:regenerate_exam", args=[parent.id]),
+        )
+        self.assertEqual(
+            attributes.get("data-regeneration-confirmation"),
+            REGENERATION_CONFIRMATION,
+        )
+        self.assertTrue(
+            {
+                "csrfmiddlewaretoken",
+                "expected_current_revision",
+                "input_fingerprint",
+                "request_token",
+                "reason",
+            }.issubset(controls)
+        )
+        self.assertEqual(
+            controls["expected_current_revision"]["attributes"].get("value"),
+            str(current.revision_number),
+        )
+        self.assertEqual(controls["reason"]["tag"], "textarea")
+        self.assertNotIn("disabled", controls["reason"]["attributes"])
+        confirmation_index = body.index("window.confirm(confirmationMessage)")
+        self.assertLess(
+            confirmation_index,
+            body.index("form.dataset.submitted = 'true'"),
+        )
+        self.assertLess(
+            confirmation_index,
+            body.index("form.setAttribute('aria-busy', 'true')"),
+        )
+        self.assertLess(confirmation_index, body.index("control.disabled = true"))
 
     def test_stale_post_is_409_and_detail_uses_historical_snapshots(self):
         parent, problem = self.ready_generation_course()
