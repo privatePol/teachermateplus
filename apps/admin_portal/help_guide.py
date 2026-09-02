@@ -314,6 +314,8 @@ ADMIN_HELP_SECTIONS = [
                     "Use Print Set A or Print Set B for Admin-only printing when Faculty release is unnecessary. Choose Letter (default), A4, or Legal before opening the browser print dialog. Supported scientific notation in Question Text and Choices A-D renders from escaped immutable snapshots before printing. Admin Direct Print does not create, replace, or extend a Faculty release.",
                     "Open the confidential Set A or Set B Answer Key only for the intended exact revision. Answer keys are restricted to authorized users and are never provided to Faculty through questionnaire printing.",
                     "For a separate Faculty Answer Key release, select the exact current-final revision, set Available From and Available Until, and confirm that all examination sessions for the course have concluded. A superseded revision is immediately blocked and a newer revision requires its own explicit release.",
+                    "For several courses, Bulk Answer Key Release lists one authoritative primary course per examination unit and preserves each displayed course/revision pair. Select eligible rows or use Select All, apply one common Available From/Until window, and confirm that all sessions for all selected courses concluded. Any stale, incomplete, unauthorized, or superseded row rolls back the complete batch; an identical retry reuses the active release without artificial history.",
+                    "Use Who Viewed for an exact Answer Key release to review Faculty users who successfully opened the actual authorized Set A or Set B page, with first/last timestamps. Menu visibility, denied requests, Answer Key printing, and Checking Master printing do not count as Viewed.",
                     "In Question Selection Audit, summary counts mean: Submitted Questions is the persisted eligible source-row total; Unique Logical is the number of logical questions after equivalence grouping; Duplicate/Equivalent Copies is Submitted minus Unique Logical; Set A and Set B are their persisted item totals; Overlap is the number of logical questions selected in both sets; Selected Unique is the union selected by either set; Not Selected is the authoritative logical source pool outside that union.",
                     "Audit columns are No. (displayed report line), Question, Contributor, Campus / Context, Difficulty, Correct Answer, Source (Q### r#), Set A position, Set B position, and Equivalence Status.",
                     "Equivalence Status is Unique, Selected representative (EQ-###), Equivalent copy not selected (EQ-###), or Unselected equivalent group (EQ-###). EQ-### is an audit-friendly group label, never a raw hash.",
@@ -357,6 +359,14 @@ ADMIN_HELP_SECTIONS = [
                         "avoid": "Do not reuse the Questionnaire window or assume a regenerated revision inherits access.",
                         "result": "Currently assigned Faculty receive separate View and Print actions for both sets only inside the active window.",
                         "editable": "The active release may be revoked or replaced; every prior row remains immutable history.",
+                    },
+                    {
+                        "name": "Bulk Answer Key Release",
+                        "does": "Applies one common Answer Key availability window to selected primary-owned current-final Automatic Generated or Manual Locked revisions in one all-or-nothing submission.",
+                        "when": "Use it only after all examination sessions for every selected course have concluded.",
+                        "avoid": "Do not select an obsolete displayed pair or treat a historically active release on a superseded revision as Faculty-accessible.",
+                        "result": "Each selected course retains its own exact release record; identical retries are safe no-ops, while real changes preserve replacement history.",
+                        "editable": "Each active release remains separately revocable, and Who Viewed remains bound to the exact historical release.",
                     },
                     {
                         "name": "Answer Key / Selection Audit",

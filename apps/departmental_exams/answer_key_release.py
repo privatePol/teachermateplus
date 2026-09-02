@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, F
+from django.db.models import F
 from django.http import Http404
 from django.utils import timezone
 
+from apps.auditlog.models import AuditLog
 from apps.core.services.audit import AuditService
 from apps.core.services.settings import SystemSettingService
 
@@ -19,6 +22,7 @@ from .models import (
     ExamGenerationRevision,
     ExaminationCycle,
     FacultyContribution,
+    GeneratedExamItem,
     GeneratedExamSet,
 )
 from .services import DepartmentalExamAuthorizationService
@@ -26,6 +30,21 @@ from .services import DepartmentalExamAuthorizationService
 
 MANILA_TIMEZONE = ZoneInfo("Asia/Manila")
 ANSWER_KEY_RELEASE_ATTESTATION_VERSION = "all-sessions-concluded-v1"
+
+
+@dataclass(frozen=True)
+class AnswerKeyAccessAuditContext:
+    release_id: int
+    tenant_id: int
+    cycle_id: int
+    cycle_course_id: int
+    revision_id: int
+    revision_number: int
+    set_code: str
+    faculty_user_id: int
+    available_from: datetime
+    available_until: datetime
+    accessed_at: datetime
 
 
 def _revision_is_current_final(revision):
@@ -41,22 +60,39 @@ def _revision_is_current_final(revision):
 
 def _complete_sets(revision):
     rows = list(
-        GeneratedExamSet.objects.filter(generation_revision=revision)
-        .annotate(actual_item_count=Count("items"))
-        .values("set_code", "item_count", "actual_item_count")
-    )
-    return bool(
-        {row["set_code"] for row in rows}
-        == {GeneratedExamSet.SetCode.A, GeneratedExamSet.SetCode.B}
-        and all(
-            row["item_count"] >= 1
-            and row["actual_item_count"] == row["item_count"]
-            for row in rows
+        GeneratedExamSet.objects.filter(generation_revision=revision).values(
+            "id",
+            "set_code",
+            "item_count",
         )
+    )
+    if len(rows) != 2 or {row["set_code"] for row in rows} != {
+        GeneratedExamSet.SetCode.A,
+        GeneratedExamSet.SetCode.B,
+    }:
+        return False
+    if not 1 <= revision.final_item_count_snapshot <= 75:
+        return False
+    positions_by_set = {row["id"]: [] for row in rows}
+    for generated_set_id, position in GeneratedExamItem.objects.filter(
+        generated_set_id__in=positions_by_set
+    ).order_by("generated_set_id", "position").values_list(
+        "generated_set_id",
+        "position",
+    ):
+        positions_by_set[generated_set_id].append(position)
+    return all(
+        row["item_count"] == revision.final_item_count_snapshot
+        and positions_by_set[row["id"]] == list(range(1, row["item_count"] + 1))
+        for row in rows
     )
 
 
 class AnswerKeyReleaseService:
+    @staticmethod
+    def revision_is_eligible(revision):
+        return _revision_is_current_final(revision) and _complete_sets(revision)
+
     @staticmethod
     def _validate_window(*, available_from, available_until):
         if (
@@ -142,6 +178,7 @@ class AnswerKeyReleaseService:
         available_until,
         attestation_confirmed,
         request=None,
+        require_primary=False,
     ):
         cls._validate_window(
             available_from=available_from,
@@ -159,6 +196,10 @@ class AnswerKeyReleaseService:
             user=actor,
             cycle_course=course,
         )
+        if require_primary and resolve_examination_unit(course).primary.id != course.id:
+            raise ValidationError(
+                "Bulk Answer Key release accepts only the primary-owned revision for an examination unit."
+            )
         try:
             revision = (
                 ExamGenerationRevision.objects.select_for_update()
@@ -189,6 +230,15 @@ class AnswerKeyReleaseService:
             )
             .first()
         )
+        if (
+            previous
+            and previous.generation_revision_id == revision.id
+            and previous.available_from == available_from
+            and previous.available_until == available_until
+            and previous.attestation_version
+            == ANSWER_KEY_RELEASE_ATTESTATION_VERSION
+        ):
+            return previous
         if previous:
             previous.status = AnswerKeyRelease.Status.REVOKED
             previous.active_marker = None
@@ -234,6 +284,101 @@ class AnswerKeyReleaseService:
             metadata={"replaced_release_id": previous.id if previous else None},
         )
         return release
+
+    @classmethod
+    @transaction.atomic
+    def bulk_release(
+        cls,
+        *,
+        selections,
+        tenant_id,
+        actor,
+        available_from,
+        available_until,
+        attestation_confirmed,
+        request=None,
+    ):
+        cls._validate_window(
+            available_from=available_from,
+            available_until=available_until,
+        )
+        if attestation_confirmed is not True:
+            raise ValidationError(
+                "Confirm that all examination sessions for all selected courses have concluded."
+            )
+        normalized = []
+        course_ids = set()
+        for selection in selections:
+            try:
+                cycle_course_id, revision_id = (int(value) for value in selection)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    {"selections": "One or more selected revisions are invalid."}
+                ) from exc
+            if cycle_course_id < 1 or revision_id < 1:
+                raise ValidationError(
+                    {"selections": "One or more selected revisions are invalid."}
+                )
+            if cycle_course_id in course_ids:
+                raise ValidationError(
+                    {"selections": "Select only one revision for each course examination."}
+                )
+            course_ids.add(cycle_course_id)
+            normalized.append((cycle_course_id, revision_id))
+        if not normalized:
+            raise ValidationError(
+                {"selections": "Select at least one current final course revision."}
+            )
+
+        cycle_by_course = dict(
+            CycleCourse.objects.filter(
+                id__in=course_ids,
+                cycle__tenant_id=tenant_id,
+            ).values_list("id", "cycle_id")
+        )
+        ordered = sorted(
+            normalized,
+            key=lambda selection: (
+                cycle_by_course.get(selection[0], 2**63),
+                selection[0],
+            ),
+        )
+        releases = []
+        for cycle_course_id, revision_id in ordered:
+            releases.append(
+                cls.release(
+                    cycle_course_id=cycle_course_id,
+                    revision_id=revision_id,
+                    tenant_id=tenant_id,
+                    actor=actor,
+                    available_from=available_from,
+                    available_until=available_until,
+                    attestation_confirmed=True,
+                    request=request,
+                    require_primary=True,
+                )
+            )
+        return tuple(releases)
+
+    @staticmethod
+    def operational_status(*, release, expected_revision=None, now=None):
+        if release is None:
+            return "Not released"
+        if (
+            expected_revision is None
+            or release.generation_revision_id != expected_revision.id
+            or not _revision_is_current_final(release.generation_revision)
+            or not _complete_sets(release.generation_revision)
+        ):
+            return "Superseded / No Longer Faculty Accessible"
+        if release.status == AnswerKeyRelease.Status.REVOKED:
+            return "Revoked"
+        now = now or timezone.now()
+        if now < release.available_from:
+            return "Scheduled"
+        if now > release.available_until:
+            return "Ended"
+        return "Currently Released / Available"
 
     @classmethod
     @transaction.atomic
@@ -405,6 +550,7 @@ class FacultyAnswerKeyReleaseService:
         printable,
         request=None,
         now=None,
+        include_audit_context=False,
     ):
         release, normalized_set, item_rows = cls._authorized_release(
             contribution=contribution,
@@ -445,7 +591,28 @@ class FacultyAnswerKeyReleaseService:
             "release_id": release.id,
             "contribution_id": contribution.id,
         }
-        AuditService.log_event(
+        audit_context = AnswerKeyAccessAuditContext(
+            release_id=release.id,
+            tenant_id=tenant.id,
+            cycle_id=cycle.id,
+            cycle_course_id=release.cycle_course_id,
+            revision_id=release.generation_revision_id,
+            revision_number=release.generation_revision.revision_number,
+            set_code=normalized_set,
+            faculty_user_id=actor.id,
+            available_from=release.available_from,
+            available_until=release.available_until,
+            accessed_at=accessed_at,
+        )
+        if include_audit_context:
+            return context, audit_context
+        return context
+
+    @staticmethod
+    def record_access(*, audit_context, actor, printable, request=None):
+        if actor.id != audit_context.faculty_user_id:
+            raise PermissionDenied("Answer Key access is unavailable.")
+        return AuditService.log_event(
             action=(
                 "DE_FACULTY_ANSWER_KEY_SET_PRINTED"
                 if printable
@@ -453,24 +620,23 @@ class FacultyAnswerKeyReleaseService:
             ),
             portal="FACULTY",
             entity_type="AnswerKeyRelease",
-            entity_id=release.id,
+            entity_id=audit_context.release_id,
             actor=actor,
-            tenant=tenant.id,
+            tenant=audit_context.tenant_id,
             metadata={
-                "release_id": release.id,
-                "cycle_id": cycle.id,
-                "cycle_course_id": release.cycle_course_id,
-                "revision_id": release.generation_revision_id,
-                "revision_number": release.generation_revision.revision_number,
-                "set_code": normalized_set,
-                "faculty_user_id": actor.id,
-                "available_from": release.available_from,
-                "available_until": release.available_until,
-                "accessed_at": accessed_at,
+                "release_id": audit_context.release_id,
+                "cycle_id": audit_context.cycle_id,
+                "cycle_course_id": audit_context.cycle_course_id,
+                "revision_id": audit_context.revision_id,
+                "revision_number": audit_context.revision_number,
+                "set_code": audit_context.set_code,
+                "faculty_user_id": audit_context.faculty_user_id,
+                "available_from": audit_context.available_from,
+                "available_until": audit_context.available_until,
+                "accessed_at": audit_context.accessed_at,
             },
             request=request,
         )
-        return context
 
     @classmethod
     def build_checking_master_context(
@@ -582,3 +748,58 @@ class FacultyAnswerKeyReleaseService:
             request=request,
         )
         return context
+
+
+class AnswerKeyViewerReportService:
+    @staticmethod
+    def report(*, release_id, tenant_id, actor):
+        try:
+            release = AnswerKeyRelease.objects.select_related(
+                "cycle_course__cycle__tenant",
+                "cycle_course__cycle__academic_year",
+                "cycle_course__cycle__term",
+                "cycle_course__course",
+                "generation_revision",
+            ).get(
+                pk=release_id,
+                cycle_course__cycle__tenant_id=tenant_id,
+                generation_revision__cycle_course_id=F("cycle_course_id"),
+            )
+        except AnswerKeyRelease.DoesNotExist as exc:
+            raise Http404(
+                "Answer Key release does not exist in the active tenant."
+            ) from exc
+        DepartmentalExamAuthorizationService.require_answer_key_release(
+            user=actor,
+            cycle_course=release.cycle_course,
+        )
+        events = AuditLog.objects.filter(
+            tenant_id=tenant_id,
+            entity_type="AnswerKeyRelease",
+            entity_id=str(release.id),
+            action="DE_FACULTY_ANSWER_KEY_SET_VIEWED",
+            actor_user__isnull=False,
+        ).select_related("actor_user").order_by("created_at", "id")
+        grouped = {}
+        for event in events:
+            row = grouped.setdefault(
+                event.actor_user_id,
+                {
+                    "faculty": event.actor_user,
+                    "sets_viewed": set(),
+                    "first_viewed": event.created_at,
+                    "last_viewed": event.created_at,
+                },
+            )
+            set_code = (event.metadata_json or {}).get("set_code")
+            if set_code in GeneratedExamSet.SetCode.values:
+                row["sets_viewed"].add(set_code)
+            row["last_viewed"] = event.created_at
+        rows = tuple(
+            {
+                **row,
+                "sets_viewed": tuple(sorted(row["sets_viewed"])),
+            }
+            for row in grouped.values()
+        )
+        return release, rows

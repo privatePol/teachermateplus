@@ -549,6 +549,82 @@ class BulkQuestionnairePrintReleaseForm(forms.Form):
         return cleaned
 
 
+class BulkAnswerKeyReleaseForm(forms.Form):
+    CONFIRMATION_TEXT = (
+        "I confirm that ALL examination sessions for ALL selected courses "
+        "have concluded."
+    )
+
+    selections = forms.MultipleChoiceField(
+        choices=(),
+        error_messages={
+            "required": "Select at least one current final course revision.",
+            "invalid_choice": "One or more selected revisions are unavailable or stale.",
+        },
+    )
+    available_from = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+    )
+    available_until = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+    )
+    sessions_concluded = forms.BooleanField(
+        required=True,
+        label=CONFIRMATION_TEXT,
+        error_messages={
+            "required": (
+                "Confirm that all examination sessions for all selected courses "
+                "have concluded."
+            )
+        },
+    )
+
+    def __init__(self, *args, selection_choices=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["selections"].choices = tuple(selection_choices)
+
+    def clean_selections(self):
+        selections = []
+        course_ids = set()
+        for value in self.cleaned_data["selections"]:
+            try:
+                course_id, revision_id = (int(part) for part in value.split(":", 1))
+            except (TypeError, ValueError) as exc:
+                raise forms.ValidationError(
+                    "One or more selected revisions are invalid."
+                ) from exc
+            if course_id in course_ids:
+                raise forms.ValidationError(
+                    "Select only one revision for each course examination."
+                )
+            course_ids.add(course_id)
+            selections.append((course_id, revision_id))
+        return tuple(selections)
+
+    def clean(self):
+        cleaned = super().clean()
+        available_from = cleaned.get("available_from")
+        available_until = cleaned.get("available_until")
+        if (
+            available_from
+            and available_until
+            and available_until <= available_from
+        ):
+            self.add_error(
+                "available_until",
+                "Available Until must be later than Available From.",
+            )
+        return cleaned
+
+
 class AnswerKeyReleaseForm(forms.Form):
     CONFIRMATION_TEXT = (
         "Confirm that all examination sessions for this course have concluded "

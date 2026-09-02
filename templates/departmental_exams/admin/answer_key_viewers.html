@@ -1,0 +1,23 @@
+{% extends "admin_portal/base.html" %}
+{% load tz %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:questionnaire_print_release' %}#bulk-answer-key-release">Answer Key Release</a></li><li class="breadcrumb-item active">Who Viewed</li></ol></nav>
+<header class="de-exam-hero">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+    <div><span class="badge text-bg-danger mb-2">CONFIDENTIAL</span><h1>Who Viewed the Answer Key</h1><p>{{ release.cycle_course.course.code }} &mdash; {{ release.cycle_course.course.title }} &middot; Revision R{{ release.generation_revision.revision_number }}</p></div>
+    <a class="btn btn-light btn-sm" href="{% url 'departmental_exams:questionnaire_print_release' %}#bulk-answer-key-release">Back to Answer Key Release</a>
+  </div>
+</header>
+
+<div class="alert alert-warning"><strong>Successful page opens only.</strong> This report counts authorized Faculty opens of the actual Set A or Set B Answer Key page. Menu visibility, denied requests, Answer Key printing, and Checking Master printing are not counted here.</div>
+
+<section class="card de-exam-card mb-4">
+  <div class="card-header bg-white p-4"><div class="row g-3"><div class="col-md-3"><div class="small text-muted">Examination context</div><strong>{{ release.cycle_course.cycle.academic_year }} / {{ release.cycle_course.cycle.term }}</strong><div class="small">{{ release.cycle_course.cycle.get_exam_period_display }}</div></div><div class="col-md-3"><div class="small text-muted">Exact release</div><strong>#{{ release.id }} &middot; R{{ release.generation_revision.revision_number }}</strong><div class="small">{{ release.get_status_display }}</div></div><div class="col-md-3"><div class="small text-muted">Available From</div><strong>{{ release.available_from|localtime|date:"M j, Y g:i A" }}</strong></div><div class="col-md-3"><div class="small text-muted">Available Until</div><strong>{{ release.available_until|localtime|date:"M j, Y g:i A" }}</strong></div></div></div>
+  <div class="card-body p-4">
+    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Faculty</th><th>Set(s) Viewed</th><th>First Viewed</th><th>Last Viewed</th></tr></thead><tbody>
+      {% for row in viewer_rows %}<tr><td><strong>{{ row.faculty.full_name }}</strong><br><span class="small text-muted">{{ row.faculty.username }}</span></td><td>{% for set_code in row.sets_viewed %}<span class="badge text-bg-secondary me-1">Set {{ set_code }}</span>{% empty %}&mdash;{% endfor %}</td><td>{{ row.first_viewed|localtime|date:"M j, Y g:i A" }}</td><td>{{ row.last_viewed|localtime|date:"M j, Y g:i A" }}</td></tr>{% empty %}<tr><td colspan="4" class="text-muted">No Faculty user has successfully opened this exact Answer Key release.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</section>
+{% endblock %}

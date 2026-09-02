@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.apps import apps as django_apps
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.template import TemplateDoesNotExist
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.http import Http404
@@ -21,8 +22,10 @@ from apps.tenants.models import Campus
 from .answer_key_release import (
     ANSWER_KEY_RELEASE_ATTESTATION_VERSION,
     AnswerKeyReleaseService,
+    AnswerKeyViewerReportService,
     FacultyAnswerKeyReleaseService,
 )
+from .exam_units import ExamCourseEquivalencyService
 from .models import (
     AnswerKeyRelease,
     CourseExamConfiguration,
@@ -820,6 +823,621 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             self.assertEqual(list(Path(media_root).iterdir()), [])
         self.assertEqual(AnswerKeyRelease.objects.count(), release_count)
         self.assertFalse(Permission.objects.filter(code__icontains="checking_master").exists())
+
+    def test_bulk_list_uses_current_marker_not_highest_revision_and_ui_contract(self):
+        r5 = self._replace_current_revision(item_count=2)
+        ExamGenerationRevision.objects.filter(pk=r5.pk).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED,
+            current_marker=None,
+        )
+        ExamGenerationRevision.objects.filter(pk=self.r4.pk).update(
+            status=ExamGenerationRevision.Status.GENERATED,
+            current_marker=1,
+        )
+        self.r4.refresh_from_db()
+        release = self._release(revision=self.r4)
+
+        client = Client()
+        client.force_login(self.release_manager)
+        response = client.get(
+            reverse("departmental_exams:questionnaire_print_release")
+        )
+        self.assertEqual(response.status_code, 200)
+        expected_value = f"{self.parent.id}:{self.r4.id}"
+        stale_value = f"{self.parent.id}:{r5.id}"
+        self.assertContains(response, 'id="bulk-answer-key-release-form"', html=False)
+        self.assertContains(response, 'id="bulk-answer-key-select-all"', html=False)
+        self.assertContains(response, f'value="{expected_value}"', html=False)
+        self.assertNotContains(response, f'value="{stale_value}"', html=False)
+        expected_tag = next(
+            tag
+            for tag in response.content.decode().split(">")
+            if f'value="{expected_value}"' in tag
+        )
+        self.assertNotIn("checked", expected_tag)
+        self.assertContains(response, "Currently Released / Available")
+        self.assertContains(
+            response,
+            reverse("departmental_exams:answer_key_viewers", args=[release.id]),
+        )
+        self.assertContains(
+            response,
+            'form.querySelectorAll(".bulk-answer-key-selection:not(:disabled)")',
+            html=False,
+        )
+
+    def test_bulk_list_supports_manual_locked_and_lists_equivalency_primary_once(self):
+        manual_cycle = self.make_cycle(
+            status=ExaminationCycle.Status.OPEN,
+            scope_suffix="manual-bulk-key",
+        )
+        manual_cycle.processing_mode = ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        manual_cycle.save(update_fields=["processing_mode", "updated_at"])
+        manual_course = self.make_course(
+            cycle=manual_cycle,
+            department=self.department,
+            code="KEY-MANUAL",
+        )
+        RolePermission.objects.create(
+            role=self.release_manager.user_roles.get().role,
+            permission=Permission.objects.get(
+                code="departmental_exams.review_generate"
+            ),
+        )
+        manual_course.reviewer = self.release_manager
+        manual_course.save(update_fields=["reviewer", "updated_at"])
+        self.make_configuration(manual_course)
+        manual_revision = self._make_revision(1, cycle_course=manual_course)
+        self.assertFalse(
+            AnswerKeyReleaseService.revision_is_eligible(manual_revision)
+        )
+        ExamGenerationRevision.objects.filter(pk=manual_revision.pk).update(
+            status=ExamGenerationRevision.Status.LOCKED,
+            locked_at=timezone.now(),
+            locked_by=self.release_manager,
+            approval_attestation_version="manual-lock-v1",
+        )
+        manual_revision.refresh_from_db()
+        self.assertTrue(
+            AnswerKeyReleaseService.revision_is_eligible(manual_revision)
+        )
+
+        group_cycle = self.make_cycle(
+            status=ExaminationCycle.Status.OPEN,
+            scope_suffix="bulk-key-unit",
+        )
+        group_cycle.processing_mode = (
+            ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        )
+        group_cycle.save(update_fields=["processing_mode", "updated_at"])
+        primary = self.make_course(cycle=group_cycle, code="KEY-UNIT-P")
+        secondary = self.make_course(cycle=group_cycle, code="KEY-UNIT-S")
+        shared_deadline = self.future_deadline()
+        self.make_configuration(primary, deadline=shared_deadline)
+        self.make_configuration(secondary, deadline=shared_deadline)
+        ExamCourseEquivalencyService.create_group(
+            cycle_id=group_cycle.id,
+            name="Bulk Answer Key Unit",
+            primary_cycle_course_id=primary.id,
+            member_ids=(primary.id, secondary.id),
+            actor=self.admin,
+        )
+        primary_revision = self._make_revision(1, cycle_course=primary)
+        secondary_revision = self._make_revision(1, cycle_course=secondary)
+
+        client = Client()
+        client.force_login(self.release_manager)
+        response = client.get(
+            reverse("departmental_exams:questionnaire_print_release")
+        )
+        self.assertContains(
+            response,
+            f'value="{manual_course.id}:{manual_revision.id}"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            f'value="{primary.id}:{primary_revision.id}"',
+            html=False,
+        )
+        self.assertNotContains(
+            response,
+            f'value="{secondary.id}:{secondary_revision.id}"',
+            html=False,
+        )
+
+    def test_bulk_exact_pair_attestation_duplicate_and_all_or_nothing_validation(self):
+        now = timezone.now()
+        with self.assertRaisesRegex(ValidationError, "all selected courses"):
+            AnswerKeyReleaseService.bulk_release(
+                selections=((self.parent.id, self.r4.id),),
+                tenant_id=self.tenant.id,
+                actor=self.release_manager,
+                available_from=now,
+                available_until=now + timezone.timedelta(hours=1),
+                attestation_confirmed=False,
+            )
+        with self.assertRaisesRegex(ValidationError, "only one revision"):
+            AnswerKeyReleaseService.bulk_release(
+                selections=(
+                    (self.parent.id, self.r4.id),
+                    (self.parent.id, self.r4.id),
+                ),
+                tenant_id=self.tenant.id,
+                actor=self.release_manager,
+                available_from=now,
+                available_until=now + timezone.timedelta(hours=1),
+                attestation_confirmed=True,
+            )
+
+        other_course = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="KEY-BULK-ROLLBACK",
+        )
+        other_revision = self._make_revision(1, cycle_course=other_course)
+        other_set = GeneratedExamSet.objects.get(
+            generation_revision=other_revision,
+            set_code=GeneratedExamSet.SetCode.B,
+        )
+        GeneratedExamItem.objects.filter(
+            generated_set=other_set,
+            position=2,
+        ).update(position=3)
+        with self.assertRaisesRegex(ValidationError, "complete revision"):
+            AnswerKeyReleaseService.bulk_release(
+                selections=(
+                    (self.parent.id, self.r4.id),
+                    (other_course.id, other_revision.id),
+                ),
+                tenant_id=self.tenant.id,
+                actor=self.release_manager,
+                available_from=now,
+                available_until=now + timezone.timedelta(hours=1),
+                attestation_confirmed=True,
+            )
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+        with self.assertRaisesRegex(ValidationError, "does not belong"):
+            AnswerKeyReleaseService.bulk_release(
+                selections=((self.parent.id, other_revision.id),),
+                tenant_id=self.tenant.id,
+                actor=self.release_manager,
+                available_from=now,
+                available_until=now + timezone.timedelta(hours=1),
+                attestation_confirmed=True,
+            )
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
+    def test_bulk_post_requires_attestation_and_applies_one_common_window(self):
+        other_course = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="KEY-BULK-POST",
+        )
+        other_revision = self._make_revision(1, cycle_course=other_course)
+        local_start = timezone.localtime().replace(second=0, microsecond=0)
+        local_end = local_start + timezone.timedelta(hours=2)
+        payload = {
+            "action": "bulk_answer_key_release",
+            "selections": (
+                f"{self.parent.id}:{self.r4.id}",
+                f"{other_course.id}:{other_revision.id}",
+            ),
+            "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": local_end.strftime("%Y-%m-%dT%H:%M"),
+        }
+        client = Client()
+        client.force_login(self.release_manager)
+        url = reverse("departmental_exams:questionnaire_print_release")
+        denied = client.post(url, payload)
+        self.assertEqual(denied.status_code, 400)
+        self.assertContains(
+            denied,
+            "Confirm that all examination sessions for all selected courses have concluded.",
+            status_code=400,
+        )
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
+        payload["sessions_concluded"] = "on"
+        allowed = client.post(url, payload)
+        self.assertEqual(allowed.status_code, 302)
+        releases = list(AnswerKeyRelease.objects.order_by("cycle_course_id"))
+        self.assertEqual(len(releases), 2)
+        self.assertEqual(
+            {release.generation_revision_id for release in releases},
+            {self.r4.id, other_revision.id},
+        )
+        self.assertEqual({release.available_from for release in releases}, {local_start})
+        self.assertEqual({release.available_until for release in releases}, {local_end})
+
+    def test_bulk_cross_tenant_and_direct_deny_fail_closed_without_writes(self):
+        now = timezone.now()
+        with self.assertRaises(Http404):
+            AnswerKeyReleaseService.bulk_release(
+                selections=((self.parent.id, self.r4.id),),
+                tenant_id=self.other_tenant.id,
+                actor=self.release_manager,
+                available_from=now,
+                available_until=now + timezone.timedelta(hours=1),
+                attestation_confirmed=True,
+            )
+        UserPermission.objects.create(
+            user=self.release_manager,
+            permission=Permission.objects.get(
+                code="departmental_exams.release_answer_keys"
+            ),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        with self.assertRaises(PermissionDenied):
+            AnswerKeyReleaseService.bulk_release(
+                selections=((self.parent.id, self.r4.id),),
+                tenant_id=self.tenant.id,
+                actor=self.release_manager,
+                available_from=now,
+                available_until=now + timezone.timedelta(hours=1),
+                attestation_confirmed=True,
+            )
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
+    def test_one_unauthorized_row_rolls_back_an_earlier_authorized_release(self):
+        unauthorized_course = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="KEY-BULK-UNAUTHORIZED",
+        )
+        unauthorized_course.offering_snapshots.update(campus=self.other_campus)
+        unauthorized_revision = self._make_revision(
+            1,
+            cycle_course=unauthorized_course,
+        )
+        now = timezone.now()
+        with self.assertRaises(PermissionDenied):
+            AnswerKeyReleaseService.bulk_release(
+                selections=(
+                    (self.parent.id, self.r4.id),
+                    (unauthorized_course.id, unauthorized_revision.id),
+                ),
+                tenant_id=self.tenant.id,
+                actor=self.release_manager,
+                available_from=now,
+                available_until=now + timezone.timedelta(hours=1),
+                attestation_confirmed=True,
+            )
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+        self.assertFalse(
+            AuditLog.objects.filter(action="DE_ANSWER_KEY_RELEASED").exists()
+        )
+
+    def test_stale_expected_revision_rejects_the_complete_batch(self):
+        other_course = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="KEY-BULK-STALE",
+        )
+        stale_revision = self._make_revision(1, cycle_course=other_course)
+        ExamGenerationRevision.objects.filter(pk=stale_revision.pk).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED,
+            current_marker=None,
+        )
+        current_revision = self._make_revision(2, cycle_course=other_course)
+        now = timezone.now()
+        with self.assertRaisesRegex(ValidationError, "current final revision"):
+            AnswerKeyReleaseService.bulk_release(
+                selections=(
+                    (self.parent.id, self.r4.id),
+                    (other_course.id, stale_revision.id),
+                ),
+                tenant_id=self.tenant.id,
+                actor=self.release_manager,
+                available_from=now,
+                available_until=now + timezone.timedelta(hours=1),
+                attestation_confirmed=True,
+            )
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+        self.assertFalse(
+            AnswerKeyRelease.objects.filter(
+                generation_revision=current_revision
+            ).exists()
+        )
+
+    def test_identical_retry_is_noop_and_changed_window_replaces_history(self):
+        start = timezone.now()
+        end = start + timezone.timedelta(hours=2)
+        first = AnswerKeyReleaseService.bulk_release(
+            selections=((self.parent.id, self.r4.id),),
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+            available_from=start,
+            available_until=end,
+            attestation_confirmed=True,
+        )[0]
+        retried = AnswerKeyReleaseService.bulk_release(
+            selections=((self.parent.id, self.r4.id),),
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+            available_from=start,
+            available_until=end,
+            attestation_confirmed=True,
+        )[0]
+        self.assertEqual(retried.id, first.id)
+        self.assertEqual(AnswerKeyRelease.objects.count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(action="DE_ANSWER_KEY_RELEASED").count(),
+            1,
+        )
+        changed = AnswerKeyReleaseService.bulk_release(
+            selections=((self.parent.id, self.r4.id),),
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+            available_from=start,
+            available_until=end + timezone.timedelta(hours=1),
+            attestation_confirmed=True,
+        )[0]
+        first.refresh_from_db()
+        self.assertNotEqual(changed.id, first.id)
+        self.assertEqual(first.status, AnswerKeyRelease.Status.REVOKED)
+        self.assertEqual(AnswerKeyRelease.objects.count(), 2)
+
+    def test_operational_statuses_cover_window_revocation_and_supersession(self):
+        now = timezone.now()
+        scheduled = self._release(
+            start=now + timezone.timedelta(hours=1),
+            end=now + timezone.timedelta(hours=2),
+        )
+        self.assertEqual(
+            AnswerKeyReleaseService.operational_status(
+                release=scheduled,
+                expected_revision=self.r4,
+                now=now,
+            ),
+            "Scheduled",
+        )
+        available = self._release(
+            start=now - timezone.timedelta(minutes=1),
+            end=now + timezone.timedelta(hours=1),
+        )
+        self.assertEqual(
+            AnswerKeyReleaseService.operational_status(
+                release=available,
+                expected_revision=self.r4,
+                now=now,
+            ),
+            "Currently Released / Available",
+        )
+        ended = self._release(
+            start=now - timezone.timedelta(hours=2),
+            end=now - timezone.timedelta(hours=1),
+        )
+        self.assertEqual(
+            AnswerKeyReleaseService.operational_status(
+                release=ended,
+                expected_revision=self.r4,
+                now=now,
+            ),
+            "Ended",
+        )
+        AnswerKeyReleaseService.revoke(
+            release_id=ended.id,
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+        )
+        ended.refresh_from_db()
+        self.assertEqual(
+            AnswerKeyReleaseService.operational_status(
+                release=ended,
+                expected_revision=self.r4,
+                now=now,
+            ),
+            "Revoked",
+        )
+        stale_release = self._release()
+        current = self._replace_current_revision(item_count=2)
+        stale_release.refresh_from_db()
+        self.assertEqual(
+            AnswerKeyReleaseService.operational_status(
+                release=stale_release,
+                expected_revision=current,
+                now=now,
+            ),
+            "Superseded / No Longer Faculty Accessible",
+        )
+
+    def test_current_row_ignores_revoked_release_from_superseded_revision(self):
+        r4_release = self._release()
+        AnswerKeyReleaseService.revoke(
+            release_id=r4_release.id,
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+        )
+        r5 = self._replace_current_revision(item_count=2)
+
+        client = Client()
+        client.force_login(self.release_manager)
+        response = client.get(
+            reverse("departmental_exams:questionnaire_print_release")
+        )
+        self.assertEqual(response.status_code, 200)
+        current_row = next(
+            row
+            for row in response.context["bulk_answer_key_rows"]
+            if row["revision"].id == r5.id
+        )
+        self.assertEqual(current_row["release_status"], "Not released")
+        self.assertIsNone(current_row["active_release"])
+        self.assertIsNone(current_row["displayed_release"])
+
+        r4_release.refresh_from_db()
+        self.assertEqual(r4_release.status, AnswerKeyRelease.Status.REVOKED)
+        self.assertEqual(r4_release.generation_revision_id, self.r4.id)
+        self.assertContains(
+            response,
+            reverse("departmental_exams:answer_key_viewers", args=[r4_release.id]),
+            count=1,
+        )
+
+    def test_current_row_uses_release_for_exact_current_revision(self):
+        r4_release = self._release()
+        AnswerKeyReleaseService.revoke(
+            release_id=r4_release.id,
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+        )
+        r5 = self._replace_current_revision(item_count=2)
+        r5_release = self._release(revision=r5)
+
+        client = Client()
+        client.force_login(self.release_manager)
+        response = client.get(
+            reverse("departmental_exams:questionnaire_print_release")
+        )
+        self.assertEqual(response.status_code, 200)
+        current_row = next(
+            row
+            for row in response.context["bulk_answer_key_rows"]
+            if row["revision"].id == r5.id
+        )
+        self.assertEqual(
+            current_row["release_status"],
+            "Currently Released / Available",
+        )
+        self.assertEqual(current_row["active_release"].id, r5_release.id)
+        self.assertEqual(current_row["displayed_release"].id, r5_release.id)
+        self.assertContains(
+            response,
+            reverse("departmental_exams:answer_key_viewers", args=[r5_release.id]),
+        )
+
+    def test_superseded_historical_release_status_precedes_revocation_state(self):
+        r4_release = self._release()
+        AnswerKeyReleaseService.revoke(
+            release_id=r4_release.id,
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+        )
+        r5 = self._replace_current_revision(item_count=2)
+        r4_release.refresh_from_db()
+
+        self.assertEqual(
+            AnswerKeyReleaseService.operational_status(
+                release=r4_release,
+                expected_revision=r5,
+            ),
+            "Superseded / No Longer Faculty Accessible",
+        )
+
+    def test_viewed_audit_requires_successful_actual_page_render(self):
+        client = self._faculty_client()
+        client.get(reverse("departmental_exams:contribution_list"))
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_FACULTY_ANSWER_KEY_SET_VIEWED"
+            ).exists()
+        )
+        now = timezone.now()
+        unavailable = self._release(
+            start=now - timezone.timedelta(hours=2),
+            end=now - timezone.timedelta(hours=1),
+        )
+        self.assertEqual(client.get(self._url(unavailable)).status_code, 403)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_FACULTY_ANSWER_KEY_SET_VIEWED"
+            ).exists()
+        )
+        AnswerKeyReleaseService.revoke(
+            release_id=unavailable.id,
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+        )
+        self.assertEqual(client.get(self._url(unavailable)).status_code, 403)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_FACULTY_ANSWER_KEY_SET_VIEWED"
+            ).exists()
+        )
+        release = self._release()
+        with patch(
+            "apps.departmental_exams.faculty_views.render",
+            side_effect=TemplateDoesNotExist("forced Answer Key render failure"),
+        ):
+            with self.assertRaises(TemplateDoesNotExist):
+                client.get(self._url(release, "A"))
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_FACULTY_ANSWER_KEY_SET_VIEWED"
+            ).exists()
+        )
+        self.assertEqual(client.get(self._url(release, "A")).status_code, 200)
+        self.assertEqual(client.get(self._url(release, "B")).status_code, 200)
+        audits = AuditLog.objects.filter(
+            action="DE_FACULTY_ANSWER_KEY_SET_VIEWED"
+        ).order_by("id")
+        self.assertEqual(audits.count(), 2)
+        self.assertEqual(
+            {audit.metadata_json["set_code"] for audit in audits},
+            {"A", "B"},
+        )
+        for audit in audits:
+            self.assertEqual(str(audit.entity_id), str(release.id))
+            self.assertEqual(audit.metadata_json["revision_id"], self.r4.id)
+            self.assertEqual(audit.metadata_json["cycle_course_id"], self.parent.id)
+            for forbidden in (
+                "correct_answer",
+                "question",
+                "choices",
+                "fingerprint",
+            ):
+                self.assertNotIn(forbidden, str(audit.metadata_json).lower())
+
+    def test_who_viewed_aggregates_exact_release_and_is_confidential(self):
+        release = self._release()
+        faculty_client = self._faculty_client()
+        faculty_client.get(self._url(release, "A"))
+        faculty_client.get(self._url(release, "A"))
+        faculty_client.get(self._url(release, "B"))
+
+        persisted_release, rows = AnswerKeyViewerReportService.report(
+            release_id=release.id,
+            tenant_id=self.tenant.id,
+            actor=self.release_manager,
+        )
+        self.assertEqual(persisted_release.id, release.id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["faculty"].id, self.faculty.id)
+        self.assertEqual(rows[0]["sets_viewed"], ("A", "B"))
+        self.assertLessEqual(rows[0]["first_viewed"], rows[0]["last_viewed"])
+
+        admin_client = Client()
+        admin_client.force_login(self.release_manager)
+        report = admin_client.get(
+            reverse("departmental_exams:answer_key_viewers", args=[release.id])
+        )
+        self.assertEqual(report.status_code, 200)
+        self.assertContains(report, self.faculty.username)
+        self.assertContains(report, "Set A")
+        self.assertContains(report, "Set B")
+        self.assertIn("no-store", report["Cache-Control"])
+        self.assertIn("private", report["Cache-Control"])
+
+        denied_client = Client()
+        denied_client.force_login(self.generation_manager)
+        self.assertEqual(
+            denied_client.get(
+                reverse(
+                    "departmental_exams:answer_key_viewers",
+                    args=[release.id],
+                )
+            ).status_code,
+            403,
+        )
+        with self.assertRaises(Http404):
+            AnswerKeyViewerReportService.report(
+                release_id=release.id,
+                tenant_id=self.other_tenant.id,
+                actor=self.release_manager,
+            )
 
 
 class AnswerKeyPermissionMigrationSafetyTests(TestCase):

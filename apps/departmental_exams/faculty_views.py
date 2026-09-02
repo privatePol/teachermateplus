@@ -444,13 +444,14 @@ def personalized_answer_sheet_print_view(
 
 def _answer_key_response(request, *, contribution_id, release_id, set_code, printable):
     contribution = _owner_contribution(request, contribution_id)
-    context = FacultyAnswerKeyReleaseService.build_safe_context(
+    context, audit_context = FacultyAnswerKeyReleaseService.build_safe_context(
         contribution=contribution,
         release_id=release_id,
         set_code=set_code,
         actor=request.user,
         printable=printable,
         request=request,
+        include_audit_context=True,
     )
     response = render(
         request,
@@ -460,6 +461,12 @@ def _answer_key_response(request, *, contribution_id, release_id, set_code, prin
             else "departmental_exams/faculty/answer_key.html"
         ),
         context,
+    )
+    FacultyAnswerKeyReleaseService.record_access(
+        audit_context=audit_context,
+        actor=request.user,
+        printable=printable,
+        request=request,
     )
     response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
     response["Pragma"] = "no-cache"

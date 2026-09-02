@@ -27,7 +27,10 @@ from .automatic_workflow import (
     AutomaticContributionReopenService,
     AutomaticGenerationSummaryService,
 )
-from .answer_key_release import AnswerKeyReleaseService
+from .answer_key_release import (
+    AnswerKeyReleaseService,
+    AnswerKeyViewerReportService,
+)
 from .generation_readiness import (
     Stage6ReadinessService,
     eligible_submitted_question_pool,
@@ -55,6 +58,7 @@ from .models import (
 from .forms import (
     AnswerKeyReleaseForm,
     AutomaticContributionReopenForm,
+    BulkAnswerKeyReleaseForm,
     BulkQuestionnairePrintReleaseForm,
     QuestionnairePrintReleaseForm,
 )
@@ -1024,6 +1028,20 @@ def questionnaire_print_release_view(request):
             group__is_active=True,
         ).values_list("cycle_course_id", "group__primary_cycle_course_id")
     )
+    now = timezone.now()
+    local_now = timezone.localtime(now).replace(second=0, microsecond=0)
+    for course in courses:
+        course.answer_key_release_history = list(course.answer_key_releases.all())
+        course.active_answer_key_release = next(
+            (
+                release
+                for release in course.answer_key_release_history
+                if release.status == AnswerKeyRelease.Status.ACTIVE
+                and release.active_marker == 1
+            ),
+            None,
+        )
+
     can_bulk_release = any(
         DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
         in management_map[course.id]
@@ -1059,13 +1077,68 @@ def questionnaire_print_release_view(request):
         )
         for row in bulk_selection_rows
     )
+    can_bulk_answer_key_release = any(
+        answer_key_release_map[course.id]
+        and equivalency_primary_by_course_id.get(course.id, course.id) == course.id
+        for course in courses
+    )
+    bulk_answer_key_rows = []
+    for course in courses:
+        if (
+            not answer_key_release_map[course.id]
+            or equivalency_primary_by_course_id.get(course.id, course.id) != course.id
+        ):
+            continue
+        eligible_revisions = [
+            revision
+            for revision in course.generation_revisions.all()
+            if AnswerKeyReleaseService.revision_is_eligible(revision)
+        ]
+        if len(eligible_revisions) != 1:
+            continue
+        revision = eligible_revisions[0]
+        current_revision_release = next(
+            (
+                release
+                for release in course.answer_key_release_history
+                if release.generation_revision_id == revision.id
+            ),
+            None,
+        )
+        active_release = (
+            current_revision_release
+            if current_revision_release
+            and current_revision_release.status == AnswerKeyRelease.Status.ACTIVE
+            and current_revision_release.active_marker == 1
+            else None
+        )
+        bulk_answer_key_rows.append(
+            {
+                "value": f"{course.id}:{revision.id}",
+                "course": course,
+                "revision": revision,
+                "finalized_at": revision.locked_at or revision.generated_at,
+                "active_release": active_release,
+                "displayed_release": current_revision_release,
+                "release_status": AnswerKeyReleaseService.operational_status(
+                    release=current_revision_release,
+                    expected_revision=revision,
+                    now=now,
+                ),
+            }
+        )
+    bulk_answer_key_choices = tuple(
+        (
+            row["value"],
+            f"{row['course'].course.code} R{row['revision'].revision_number}",
+        )
+        for row in bulk_answer_key_rows
+    )
     bound_course_id = None
     bound_form = None
     bound_answer_key_course_id = None
     bound_answer_key_form = None
     status = 200
-    now = timezone.now()
-    local_now = timezone.localtime(now).replace(second=0, microsecond=0)
     bulk_form = BulkQuestionnairePrintReleaseForm(
         selection_choices=bulk_selection_choices,
         initial={
@@ -1073,9 +1146,61 @@ def questionnaire_print_release_view(request):
             "print_until": local_now + timezone.timedelta(days=1),
         },
     )
+    bulk_answer_key_form = BulkAnswerKeyReleaseForm(
+        selection_choices=bulk_answer_key_choices,
+        initial={
+            "available_from": local_now,
+            "available_until": local_now + timezone.timedelta(days=1),
+        },
+    )
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "bulk_release":
+        if action == "bulk_answer_key_release":
+            bulk_answer_key_form = BulkAnswerKeyReleaseForm(
+                request.POST,
+                selection_choices=bulk_answer_key_choices,
+            )
+            if bulk_answer_key_form.is_valid():
+                try:
+                    releases = AnswerKeyReleaseService.bulk_release(
+                        selections=bulk_answer_key_form.cleaned_data["selections"],
+                        tenant_id=tenant_id,
+                        actor=request.user,
+                        available_from=bulk_answer_key_form.cleaned_data[
+                            "available_from"
+                        ],
+                        available_until=bulk_answer_key_form.cleaned_data[
+                            "available_until"
+                        ],
+                        attestation_confirmed=bulk_answer_key_form.cleaned_data[
+                            "sessions_concluded"
+                        ],
+                        request=request,
+                    )
+                except ValidationError as exc:
+                    if hasattr(exc, "message_dict"):
+                        for field, errors in exc.message_dict.items():
+                            target = (
+                                field
+                                if field in bulk_answer_key_form.fields
+                                else None
+                            )
+                            for error in errors:
+                                bulk_answer_key_form.add_error(target, error)
+                    else:
+                        bulk_answer_key_form.add_error(None, exc)
+                    status = 400
+                else:
+                    messages.success(
+                        request,
+                        f"Processed {len(releases)} exact Answer Key revisions with the common Faculty availability window.",
+                    )
+                    return redirect(
+                        "departmental_exams:questionnaire_print_release"
+                    )
+            else:
+                status = 400
+        elif action == "bulk_release":
             bulk_form = BulkQuestionnairePrintReleaseForm(
                 request.POST,
                 selection_choices=bulk_selection_choices,
@@ -1324,47 +1449,51 @@ def questionnaire_print_release_view(request):
                 for revision in course.available_revisions
             )
         )
-        course.answer_key_release_history = list(course.answer_key_releases.all())
-        course.active_answer_key_release = next(
+        active_answer_key = course.active_answer_key_release
+        eligible_answer_key_revisions = [
+            revision
+            for revision in course.available_revisions
+            if AnswerKeyReleaseService.revision_is_eligible(revision)
+        ]
+        expected_answer_key_revision = (
+            eligible_answer_key_revisions[0]
+            if len(eligible_answer_key_revisions) == 1
+            else None
+        )
+        current_revision_answer_key_release = next(
             (
                 release
                 for release in course.answer_key_release_history
-                if release.status == AnswerKeyRelease.Status.ACTIVE
-                and release.active_marker == 1
+                if expected_answer_key_revision is not None
+                and release.generation_revision_id
+                == expected_answer_key_revision.id
             ),
             None,
         )
-        active_answer_key = course.active_answer_key_release
-        course.answer_key_revision_superseded = bool(
-            active_answer_key
-            and not (
-                active_answer_key.generation_revision.current_marker == 1
-                and (
-                    (
-                        course.cycle.processing_mode
-                        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-                        and active_answer_key.generation_revision.status
-                        == ExamGenerationRevision.Status.GENERATED
-                    )
-                    or (
-                        course.cycle.processing_mode
-                        == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
-                        and active_answer_key.generation_revision.status
-                        == ExamGenerationRevision.Status.LOCKED
-                    )
-                )
+        course.answer_key_window_status = (
+            AnswerKeyReleaseService.operational_status(
+                release=current_revision_answer_key_release,
+                expected_revision=expected_answer_key_revision,
+                now=now,
             )
         )
-        if active_answer_key is None:
-            course.answer_key_window_status = "Not released"
-        elif course.answer_key_revision_superseded:
-            course.answer_key_window_status = "Superseded — blocked"
-        elif now < active_answer_key.available_from:
-            course.answer_key_window_status = "Scheduled"
-        elif now > active_answer_key.available_until:
-            course.answer_key_window_status = "Window ended"
-        else:
-            course.answer_key_window_status = "Available now"
+        course.answer_key_revision_superseded = bool(
+            active_answer_key
+            and AnswerKeyReleaseService.operational_status(
+                release=active_answer_key,
+                expected_revision=expected_answer_key_revision,
+                now=now,
+            )
+            == "Superseded / No Longer Faculty Accessible"
+        )
+        for answer_key_release in course.answer_key_release_history:
+            answer_key_release.operational_status = (
+                AnswerKeyReleaseService.operational_status(
+                    release=answer_key_release,
+                    expected_revision=expected_answer_key_revision,
+                    now=now,
+                )
+            )
 
         if not course.can_manage_answer_key_release:
             course.answer_key_release_form = None
@@ -1445,9 +1574,38 @@ def questionnaire_print_release_view(request):
             "bulk_selection_rows": bulk_selection_rows,
             "bulk_selection_row_count": len(bulk_selection_rows),
             "bulk_selected_values": set(bulk_form["selections"].value() or ()),
+            "bulk_answer_key_form": bulk_answer_key_form,
+            "can_bulk_answer_key_release": can_bulk_answer_key_release,
+            "bulk_answer_key_rows": bulk_answer_key_rows,
+            "bulk_answer_key_row_count": len(bulk_answer_key_rows),
+            "bulk_answer_key_selected_values": set(
+                bulk_answer_key_form["selections"].value() or ()
+            ),
         },
         status=status,
     )
+
+
+@portal_required("ADMIN")
+@require_GET
+def answer_key_viewers_view(request, release_id):
+    release, viewer_rows = AnswerKeyViewerReportService.report(
+        release_id=release_id,
+        tenant_id=_tenant_id(request),
+        actor=request.user,
+    )
+    response = render(
+        request,
+        "departmental_exams/admin/answer_key_viewers.html",
+        {
+            "release": release,
+            "viewer_rows": viewer_rows,
+        },
+    )
+    response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
 
 
 @portal_required("ADMIN")
