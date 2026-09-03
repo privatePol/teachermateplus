@@ -1,0 +1,79 @@
+{% load tz %}
+<div class="de-release-section-heading">
+  <h2 class="h5 mb-1">Questionnaire Release</h2>
+  <p class="small mb-0">Admin print, deterministic audit, and bounded Faculty questionnaire release controls remain exact-revision operations.</p>
+</div>
+
+{% if can_bulk_release %}
+<section class="card de-exam-card de-release-card" id="bulk-print-release">
+  <div class="card-header de-release-major-header d-flex flex-wrap justify-content-between align-items-start gap-3"><div><h3 class="h5 mb-1">Bulk Print Release</h3><p class="small text-muted mb-0">Select current Generated revisions and apply one common Faculty Print From / Print Until window. Each course keeps its own independent release record and history.</p></div><span class="badge text-bg-light text-dark border" aria-label="{{ bulk_selection_row_count }} bulk print release record{{ bulk_selection_row_count|pluralize }}">{{ bulk_selection_row_count }}</span></div>
+  <div class="card-body p-4">
+    <form method="post" novalidate id="bulk-print-release-form" data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="bulk_release">
+      {% csrf_token %}<input type="hidden" name="action" value="bulk_release">
+      {% if bulk_form.non_field_errors %}<div class="alert alert-danger">{{ bulk_form.non_field_errors }}</div>{% endif %}
+      {% if bulk_form.selections.errors %}<div class="alert alert-danger">{{ bulk_form.selections.errors }}</div>{% endif %}
+      <div class="table-responsive mb-3"><table class="table table-sm align-middle de-release-table"><thead><tr><th scope="col"><input class="form-check-input" type="checkbox" id="bulk-select-all" aria-label="Select all current Generated revisions"{% if not bulk_selection_rows %} disabled{% endif %}><label class="form-check-label ms-1" for="bulk-select-all">Select All</label></th><th scope="col">Course</th><th scope="col">Exact revision</th><th scope="col">Generated</th></tr></thead><tbody>
+        {% for row in bulk_selection_rows %}<tr><td><input class="form-check-input bulk-release-selection" type="checkbox" name="selections" value="{{ row.value }}" id="bulk-selection-{{ row.course.id }}-{{ row.revision.id }}"{% if row.value in bulk_selected_values %} checked{% endif %}><label class="visually-hidden" for="bulk-selection-{{ row.course.id }}-{{ row.revision.id }}">Select {{ row.course.course.code }} revision R{{ row.revision.revision_number }}</label></td><td><strong>{{ row.course.course.code }}</strong> &mdash; {{ row.course.course.title }}</td><td><strong>R{{ row.revision.revision_number }}</strong> <span class="small text-muted">{{ row.revision.get_status_display }}</span></td><td>{{ row.revision.generated_at|localtime|date:"M j, Y g:i A" }}</td></tr>{% endfor %}
+        {% if not bulk_selection_rows %}<tr><td colspan="4" class="text-muted">No current Generated revisions are available for bulk release.</td></tr>{% endif %}
+      </tbody></table></div>
+      <div class="row g-3 align-items-start">
+        <div class="col-lg-3"><div class="form-label">Selected</div><div class="form-control-plaintext"><strong id="bulk-selected-count">0</strong> revision<span class="visually-hidden">s</span></div></div>
+        <div class="col-lg-3"><label class="form-label" for="{{ bulk_form.print_from.id_for_label }}">Common Print From</label>{{ bulk_form.print_from }}{{ bulk_form.print_from.errors }}<div class="form-text">Asia/Manila</div></div>
+        <div class="col-lg-3"><label class="form-label" for="{{ bulk_form.print_until.id_for_label }}">Common Print Until</label>{{ bulk_form.print_until }}{{ bulk_form.print_until.errors }}<div class="form-text">Asia/Manila</div></div>
+        <div class="col-lg-3 d-grid"><label class="form-label invisible" aria-hidden="true">Action</label><button class="btn btn-primary" type="submit" data-processing-label="Releasing..."{% if not bulk_selection_rows %} disabled{% endif %}>Release Selected Revisions</button></div>
+      </div>
+    </form>
+  </div>
+</section>
+{% endif %}
+
+{% for course in courses %}
+<section class="card de-exam-card de-release-card" id="questionnaire-course-{{ course.id }}">
+  <div class="card-header de-release-course-header d-flex flex-wrap justify-content-between gap-3">
+    <div><h3 class="h5 mb-1">{{ course.course.code }} &mdash; {{ course.course.title }}</h3><div class="small text-muted">{{ course.cycle.academic_year }} / {{ course.cycle.term }} / {{ course.cycle.get_exam_period_display }} &middot; {% for campus in course.print_release_campuses %}{% if not forloop.first %}, {% endif %}{{ campus.name }}{% endfor %}</div></div>
+    <span class="badge {% if course.print_window_status == 'Printable now' %}text-bg-success{% elif course.print_window_status == 'Scheduled' %}text-bg-info{% elif course.print_window_status == 'Window ended' %}text-bg-secondary{% else %}text-bg-light text-dark border{% endif %}">{{ course.print_window_status }}</span>
+  </div>
+  <div class="card-body p-4">
+    <h4 class="h6">Generated revisions</h4>
+    <div class="table-responsive mb-4"><table class="table table-sm align-middle"><thead><tr><th>Revision</th><th>Generated</th><th>Admin Questionnaire</th><th>Automatic Audit</th></tr></thead><tbody>
+      {% for revision in course.available_revisions %}<tr>
+        <td><strong>R{{ revision.revision_number }}</strong><br><span class="small text-muted">{{ revision.get_status_display }}</span></td>
+        <td>{{ revision.generated_at|localtime|date:"M j, Y g:i A" }}</td>
+        <td>{% if revision.can_admin_print %}<div class="btn-group btn-group-sm" role="group" aria-label="Admin print revision R{{ revision.revision_number }}"><a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:admin_questionnaire_print' revision.id 'A' %}">Print Set A</a><a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:admin_questionnaire_print' revision.id 'B' %}">Print Set B</a></div><div class="small text-muted mt-1">Exact R{{ revision.revision_number }}; no Faculty release required.</div>{% else %}<span class="text-muted">Not authorized</span>{% endif %}</td>
+        <td>{% if revision.can_run_automatic_audit %}<div class="d-flex flex-wrap gap-2 align-items-center"><form method="post" class="d-inline">{% csrf_token %}<input type="hidden" name="action" value="run_audit"><input type="hidden" name="revision_id" value="{{ revision.id }}"><button class="btn btn-sm btn-outline-dark" type="submit">Run Automatic Audit</button></form>{% if revision.latest_automatic_audit %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'departmental_exams:automatic_generation_audit_result' revision.id revision.latest_automatic_audit.id %}">View Audit Result</a><span class="badge {% if revision.latest_automatic_audit.status == 'PASS' %}text-bg-success{% elif revision.latest_automatic_audit.status == 'WARNING' %}text-bg-warning{% else %}text-bg-danger{% endif %}">{{ revision.latest_automatic_audit.status }}</span>{% endif %}</div>{% if revision.audit_history %}<details class="small mt-2 de-release-history"><summary>Audit history ({{ revision.audit_history|length }})</summary><ul class="list-unstyled mb-0 mt-1">{% for audit_run in revision.audit_history %}<li><a href="{% url 'departmental_exams:automatic_generation_audit_result' revision.id audit_run.id %}">{{ audit_run.status }} &middot; {{ audit_run.run_at|localtime|date:"M j, Y g:i A" }}</a></li>{% endfor %}</ul></details>{% endif %}{% else %}<span class="text-muted">Not authorized</span>{% endif %}</td>
+      </tr>{% endfor %}
+    </tbody></table></div>
+
+    {% if course.can_manage_release %}
+      {% if course.active_print_release %}
+        <div class="row g-3 mb-3">
+          <div class="col-md-2"><div class="small text-muted">Released revision</div><strong>R{{ course.active_print_release.generation_revision.revision_number }}</strong></div>
+          <div class="col-md-3"><div class="small text-muted">Print From</div><strong>{{ course.active_print_release.print_from|localtime|date:"M j, Y g:i A" }}</strong></div>
+          <div class="col-md-3"><div class="small text-muted">Print Until</div><strong>{{ course.active_print_release.print_until|localtime|date:"M j, Y g:i A" }}</strong></div>
+          <div class="col-md-4"><div class="small text-muted">Released By / At</div><strong>{{ course.active_print_release.released_by.full_name|default:course.active_print_release.released_by.username }}</strong><div class="small">{{ course.active_print_release.released_at|localtime|date:"M j, Y g:i A" }}</div></div>
+        </div>
+        {% if course.newer_revision_exists %}<div class="alert alert-info py-2"><strong>A newer generated revision exists.</strong> It is not printable until it receives its own explicit release.</div>{% endif %}
+        <form method="post" class="mb-4" data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="revoke" data-release-course-id="{{ course.id }}">{% csrf_token %}<input type="hidden" name="action" value="revoke"><input type="hidden" name="release_id" value="{{ course.active_print_release.id }}"><button class="btn btn-sm btn-outline-danger" type="submit" data-processing-label="Revoking...">Revoke Current Release</button></form>
+      {% else %}
+        <p class="text-muted">No revision is currently released for faculty printing.</p>
+      {% endif %}
+
+      <h4 class="h6">{% if course.active_print_release %}Replace active release{% else %}Release an exact revision{% endif %}</h4>
+      <form method="post" novalidate data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="release" data-release-course-id="{{ course.id }}">
+        {% csrf_token %}<input type="hidden" name="action" value="release">{{ course.release_form.cycle_course_id }}
+        {% if course.release_form.non_field_errors %}<div class="alert alert-danger">{{ course.release_form.non_field_errors }}</div>{% endif %}
+        <div class="row g-3 align-items-start">
+          <div class="col-lg-4"><label class="form-label" for="{{ course.release_form.generation_revision.id_for_label }}">Exact generated revision</label>{{ course.release_form.generation_revision }}{{ course.release_form.generation_revision.errors }}<div class="form-text">A historical revision remains selectable because releases stay bound to the exact snapshot.</div></div>
+          <div class="col-lg-3"><label class="form-label" for="{{ course.release_form.print_from.id_for_label }}">Print From</label>{{ course.release_form.print_from }}{{ course.release_form.print_from.errors }}<div class="form-text">Asia/Manila</div></div>
+          <div class="col-lg-3"><label class="form-label" for="{{ course.release_form.print_until.id_for_label }}">Print Until</label>{{ course.release_form.print_until }}{{ course.release_form.print_until.errors }}<div class="form-text">Asia/Manila</div></div>
+          <div class="col-lg-2 d-grid"><label class="form-label invisible" aria-hidden="true">Action</label><button class="btn btn-primary" type="submit" data-processing-label="Releasing...">Release Revision</button></div>
+        </div>
+      </form>
+
+      {% if course.release_history %}<details class="mt-4 de-release-history"><summary class="fw-semibold">Release history ({{ course.release_history|length }})</summary><div class="table-responsive mt-2"><table class="table table-sm align-middle"><thead><tr><th>Revision</th><th>Status</th><th>Window</th><th>Released</th><th>Revoked</th></tr></thead><tbody>{% for release in course.release_history %}<tr><td>R{{ release.generation_revision.revision_number }}</td><td>{{ release.get_status_display }}</td><td>{{ release.print_from|localtime|date:"M j, Y g:i A" }} &ndash; {{ release.print_until|localtime|date:"M j, Y g:i A" }}</td><td>{{ release.released_by.full_name|default:release.released_by.username }}<br><span class="small text-muted">{{ release.released_at|localtime|date:"M j, Y g:i A" }}</span></td><td>{% if release.revoked_at %}{{ release.revoked_by.full_name|default:release.revoked_by.username }}<br><span class="small text-muted">{{ release.revoked_at|localtime|date:"M j, Y g:i A" }}</span>{% else %}&mdash;{% endif %}</td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+    {% else %}
+      <div class="alert alert-light border mb-0">Faculty release controls require generation-management authority. Admin questionnaire printing and deterministic audit permissions do not create or modify Faculty releases.</div>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}

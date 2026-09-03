@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -89,6 +89,37 @@ def _tenant_id(request):
     return getattr(request, "scope", {}).get("tenant_id") or getattr(
         request.user, "default_tenant_id", None
     )
+
+
+def _is_ajax_request(request):
+    return request.headers.get("x-requested-with") == "XMLHttpRequest"
+
+
+def _release_action_success(
+    request, *, message, section, affected_course_ids
+):
+    if _is_ajax_request(request):
+        return JsonResponse(
+            {
+                "success": True,
+                "message": message,
+                "section": section,
+                "affected_course_ids": sorted(
+                    {int(course_id) for course_id in affected_course_ids}
+                ),
+                "refresh_url": reverse(
+                    "departmental_exams:questionnaire_print_release"
+                ),
+            }
+        )
+    messages.success(request, message)
+    return redirect("departmental_exams:questionnaire_print_release")
+
+
+def _release_form_errors(form):
+    if form is None:
+        return []
+    return [str(error) for errors in form.errors.values() for error in errors]
 
 
 def _course(tenant_id, cycle_course_id):
@@ -914,7 +945,10 @@ def questionnaire_print_release_view(request):
             "cycle__academic_year",
             "cycle__term",
             "course",
+            "course__exam_department",
+            "course__exam_department__campus",
             "responsible_department",
+            "responsible_department__campus",
             "reviewer",
         )
         .prefetch_related(
@@ -1028,6 +1062,10 @@ def questionnaire_print_release_view(request):
             group__is_active=True,
         ).values_list("cycle_course_id", "group__primary_cycle_course_id")
     )
+    unit_courses_by_primary_id = {}
+    for course in courses:
+        primary_course_id = equivalency_primary_by_course_id.get(course.id, course.id)
+        unit_courses_by_primary_id.setdefault(primary_course_id, []).append(course)
     now = timezone.now()
     local_now = timezone.localtime(now).replace(second=0, microsecond=0)
     for course in courses:
@@ -1083,6 +1121,8 @@ def questionnaire_print_release_view(request):
         for course in courses
     )
     bulk_answer_key_rows = []
+    bulk_answer_key_departments = {}
+    bulk_answer_key_campuses = {}
     for course in courses:
         if (
             not answer_key_release_map[course.id]
@@ -1112,6 +1152,35 @@ def questionnaire_print_release_view(request):
             and current_revision_release.active_marker == 1
             else None
         )
+        unit_courses = unit_courses_by_primary_id.get(course.id, (course,))
+        row_departments = {}
+        row_campuses = {}
+        search_parts = []
+        for member in unit_courses:
+            search_parts.extend((member.course.code, member.course.title))
+            department = (
+                member.responsible_department or member.course.exam_department
+            )
+            if department is not None:
+                row_departments[department.id] = department
+                bulk_answer_key_departments[department.id] = department
+            for campus in member.print_release_campuses:
+                row_campuses[campus.id] = campus
+                bulk_answer_key_campuses[campus.id] = campus
+        release_status = AnswerKeyReleaseService.operational_status(
+            release=current_revision_release,
+            expected_revision=revision,
+            now=now,
+        )
+        filter_release_status = release_status
+        if active_release is None and course.active_answer_key_release is not None:
+            previous_active_status = AnswerKeyReleaseService.operational_status(
+                release=course.active_answer_key_release,
+                expected_revision=revision,
+                now=now,
+            )
+            if previous_active_status == "Superseded / No Longer Faculty Accessible":
+                filter_release_status = previous_active_status
         bulk_answer_key_rows.append(
             {
                 "value": f"{course.id}:{revision.id}",
@@ -1120,13 +1189,43 @@ def questionnaire_print_release_view(request):
                 "finalized_at": revision.locked_at or revision.generated_at,
                 "active_release": active_release,
                 "displayed_release": current_revision_release,
-                "release_status": AnswerKeyReleaseService.operational_status(
-                    release=current_revision_release,
-                    expected_revision=revision,
-                    now=now,
+                "search_text": " ".join(search_parts),
+                "departments": tuple(
+                    sorted(
+                        row_departments.values(),
+                        key=lambda department: (
+                            department.campus.code,
+                            department.code,
+                            department.id,
+                        ),
+                    )
                 ),
+                "campuses": tuple(
+                    sorted(
+                        row_campuses.values(),
+                        key=lambda campus: (campus.name, campus.code, campus.id),
+                    )
+                ),
+                "release_status": release_status,
+                "filter_release_status": filter_release_status,
             }
         )
+    bulk_answer_key_department_options = tuple(
+        sorted(
+            bulk_answer_key_departments.values(),
+            key=lambda department: (
+                department.campus.code,
+                department.code,
+                department.id,
+            ),
+        )
+    )
+    bulk_answer_key_campus_options = tuple(
+        sorted(
+            bulk_answer_key_campuses.values(),
+            key=lambda campus: (campus.name, campus.code, campus.id),
+        )
+    )
     bulk_answer_key_choices = tuple(
         (
             row["value"],
@@ -1153,8 +1252,20 @@ def questionnaire_print_release_view(request):
             "available_until": local_now + timezone.timedelta(days=1),
         },
     )
+    action = request.POST.get("action") if request.method == "POST" else ""
+    answer_key_actions = {
+        "bulk_answer_key_release",
+        "answer_key_release",
+        "answer_key_revoke",
+    }
+    release_section = (
+        "answer-key-releases"
+        if action in answer_key_actions
+        or request.GET.get("section") == "answer-key-releases"
+        else "questionnaire-releases"
+    )
+    ajax_error_message = ""
     if request.method == "POST":
-        action = request.POST.get("action")
         if action == "bulk_answer_key_release":
             bulk_answer_key_form = BulkAnswerKeyReleaseForm(
                 request.POST,
@@ -1191,12 +1302,13 @@ def questionnaire_print_release_view(request):
                         bulk_answer_key_form.add_error(None, exc)
                     status = 400
                 else:
-                    messages.success(
+                    return _release_action_success(
                         request,
-                        f"Processed {len(releases)} exact Answer Key revisions with the common Faculty availability window.",
-                    )
-                    return redirect(
-                        "departmental_exams:questionnaire_print_release"
+                        message=f"Processed {len(releases)} exact Answer Key revisions with the common Faculty availability window.",
+                        section="answer-key-releases",
+                        affected_course_ids=(
+                            release.cycle_course_id for release in releases
+                        ),
                     )
             else:
                 status = 400
@@ -1225,27 +1337,38 @@ def questionnaire_print_release_view(request):
                         bulk_form.add_error(None, exc)
                     status = 400
                 else:
-                    messages.success(
+                    return _release_action_success(
                         request,
-                        f"Released {len(releases)} exact questionnaire revisions with the common faculty print window.",
+                        message=f"Released {len(releases)} exact questionnaire revisions with the common faculty print window.",
+                        section="questionnaire-releases",
+                        affected_course_ids=(
+                            release.cycle_course_id for release in releases
+                        ),
                     )
-                    return redirect("departmental_exams:questionnaire_print_release")
             else:
                 status = 400
         elif action == "revoke":
             try:
-                QuestionnairePrintReleaseService.revoke(
+                release = QuestionnairePrintReleaseService.revoke(
                     release_id=int(request.POST.get("release_id") or 0),
                     tenant_id=tenant_id,
                     actor=request.user,
                     request=request,
                 )
             except (ValueError, ValidationError) as exc:
-                messages.error(request, " ".join(getattr(exc, "messages", (str(exc),))))
+                ajax_error_message = " ".join(
+                    getattr(exc, "messages", (str(exc),))
+                )
+                if not _is_ajax_request(request):
+                    messages.error(request, ajax_error_message)
                 status = 400
             else:
-                messages.success(request, "Questionnaire print release revoked.")
-                return redirect("departmental_exams:questionnaire_print_release")
+                return _release_action_success(
+                    request,
+                    message="Questionnaire print release revoked.",
+                    section="questionnaire-releases",
+                    affected_course_ids=(release.cycle_course_id,),
+                )
         elif action == "run_audit":
             try:
                 revision_id = int(request.POST.get("revision_id") or 0)
@@ -1306,11 +1429,12 @@ def questionnaire_print_release_view(request):
                         bound_form.add_error(None, exc)
                     status = 400
                 else:
-                    messages.success(
+                    return _release_action_success(
                         request,
-                        "Exact questionnaire revision released for faculty printing.",
+                        message="Exact questionnaire revision released for faculty printing.",
+                        section="questionnaire-releases",
+                        affected_course_ids=(course.id,),
                     )
-                    return redirect("departmental_exams:questionnaire_print_release")
             else:
                 status = 400
         elif action == "answer_key_release":
@@ -1364,30 +1488,36 @@ def questionnaire_print_release_view(request):
                         bound_answer_key_form.add_error(None, exc)
                     status = 400
                 else:
-                    messages.success(
+                    return _release_action_success(
                         request,
-                        "Exact Answer Key revision released to currently assigned faculty.",
+                        message="Exact Answer Key revision released to currently assigned faculty.",
+                        section="answer-key-releases",
+                        affected_course_ids=(course.id,),
                     )
-                    return redirect("departmental_exams:questionnaire_print_release")
             else:
                 status = 400
         elif action == "answer_key_revoke":
             try:
-                AnswerKeyReleaseService.revoke(
+                release = AnswerKeyReleaseService.revoke(
                     release_id=int(request.POST.get("release_id") or 0),
                     tenant_id=tenant_id,
                     actor=request.user,
                     request=request,
                 )
             except (ValueError, ValidationError) as exc:
-                messages.error(
-                    request,
-                    " ".join(getattr(exc, "messages", (str(exc),))),
+                ajax_error_message = " ".join(
+                    getattr(exc, "messages", (str(exc),))
                 )
+                if not _is_ajax_request(request):
+                    messages.error(request, ajax_error_message)
                 status = 400
             else:
-                messages.success(request, "Faculty Answer Key release revoked.")
-                return redirect("departmental_exams:questionnaire_print_release")
+                return _release_action_success(
+                    request,
+                    message="Faculty Answer Key release revoked.",
+                    section="answer-key-releases",
+                    affected_course_ids=(release.cycle_course_id,),
+                )
         else:
             raise Http404("Unknown questionnaire print release action.")
 
@@ -1563,6 +1693,27 @@ def questionnaire_print_release_view(request):
                     ),
                 },
             )
+    if request.method == "POST" and _is_ajax_request(request) and status >= 400:
+        action_form = {
+            "bulk_release": bulk_form,
+            "release": bound_form,
+            "bulk_answer_key_release": bulk_answer_key_form,
+            "answer_key_release": bound_answer_key_form,
+        }.get(action)
+        errors = _release_form_errors(action_form)
+        if ajax_error_message:
+            errors.append(ajax_error_message)
+        return JsonResponse(
+            {
+                "success": False,
+                "message": errors[0] if errors else "The release action could not be completed.",
+                "errors": errors,
+                "section": release_section,
+                "affected_course_ids": [],
+            },
+            status=status,
+        )
+
     return render(
         request,
         "departmental_exams/admin/questionnaire_print_release.html",
@@ -1578,9 +1729,14 @@ def questionnaire_print_release_view(request):
             "can_bulk_answer_key_release": can_bulk_answer_key_release,
             "bulk_answer_key_rows": bulk_answer_key_rows,
             "bulk_answer_key_row_count": len(bulk_answer_key_rows),
+            "bulk_answer_key_department_options": (
+                bulk_answer_key_department_options
+            ),
+            "bulk_answer_key_campus_options": bulk_answer_key_campus_options,
             "bulk_answer_key_selected_values": set(
                 bulk_answer_key_form["selections"].value() or ()
             ),
+            "initial_release_section": release_section,
         },
         status=status,
     )
