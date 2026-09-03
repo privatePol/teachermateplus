@@ -36,6 +36,7 @@ from .models import (
     GeneratedExamItem,
     GeneratedExamSet,
     Question,
+    QuestionnairePrintRelease,
 )
 from .stage4_test_support import Stage4TestCase
 
@@ -862,7 +863,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         )
         self.assertContains(
             response,
-            'form.querySelectorAll(".bulk-answer-key-selection:not(:disabled)")',
+            "js/departmental_exam_release_center.js",
             html=False,
         )
 
@@ -1438,6 +1439,336 @@ class AnswerKeyReleaseTests(Stage4TestCase):
                 tenant_id=self.other_tenant.id,
                 actor=self.release_manager,
             )
+
+    def test_release_center_filter_selection_and_ajax_source_contract(self):
+        self.parent.course.exam_department = self.department
+        self.parent.course.save(update_fields=["exam_department", "updated_at"])
+        client = Client()
+        client.force_login(self.release_manager)
+        response = client.get(
+            reverse("departmental_exams:questionnaire_print_release")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="questionnaire-releases-tab"', html=False)
+        self.assertContains(response, 'id="answer-key-releases-tab"', html=False)
+        self.assertContains(response, 'id="answer-key-course-search"', html=False)
+        self.assertContains(response, 'id="answer-key-department-filter"', html=False)
+        self.assertContains(response, 'id="answer-key-campus-filter"', html=False)
+        self.assertContains(response, 'id="answer-key-status-filter"', html=False)
+        self.assertContains(
+            response,
+            f'data-course-search="{self.parent.course.code} {self.parent.course.title}"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            f'data-department-ids="{self.department.id} "',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            f'data-campus-ids="{self.campus.id} "',
+            html=False,
+        )
+        self.assertContains(response, 'data-release-status="Not released"', html=False)
+        self.assertContains(response, 'data-eligible="true"', html=False)
+        self.assertContains(response, "Select All Visible")
+        self.assertContains(response, 'name="csrfmiddlewaretoken"', html=False)
+        self.assertContains(
+            response,
+            "js/departmental_exam_release_center.js",
+            html=False,
+        )
+
+        script = (
+            Path(__file__).resolve().parents[2]
+            / "static"
+            / "js"
+            / "departmental_exam_release_center.js"
+        ).read_text(encoding="utf-8")
+        for contract in (
+            '!row.hidden && row.dataset.eligible === "true"',
+            "selection && !selection.disabled",
+            "const deselectUnavailableRows = function ()",
+            '(row.hidden || row.dataset.eligible !== "true" || selection.disabled)',
+            "selection.checked = false",
+            "visibleEligibleRows().forEach",
+            "selectedCount.textContent = visibleSelected",
+            "selectAll.indeterminate =",
+            "row.hidden = !(",
+            "toLocaleLowerCase()",
+            "matchesDepartment",
+            "matchesCampus",
+            'row.dataset.releaseStatus === statusValue',
+            "[search, department, campus, status].forEach",
+            'control === search ? "input" : "change"',
+            'form.addEventListener("submit", function ()',
+            "input.checked = !input.disabled && selected.has(input.value)",
+            '"X-Requested-With": "XMLHttpRequest"',
+            "body: new FormData(form)",
+            "currentCourse.replaceWith(refreshedCourse)",
+            "HTMLFormElement.prototype.submit.call(form)",
+            "window.scrollTo(0, scrollPosition)",
+        ):
+            self.assertIn(contract, script)
+        self.assertGreaterEqual(script.count("deselectUnavailableRows();"), 2)
+        self.assertLess(
+            script.index("row.hidden = !("),
+            script.index("deselectUnavailableRows();"),
+        )
+        self.assertLess(
+            script.index('form.addEventListener("submit", function ()'),
+            script.index("body: new FormData(form)"),
+        )
+
+    def test_ajax_answer_key_release_is_safe_and_non_ajax_fallback_still_redirects(self):
+        local_start = timezone.localtime().replace(second=0, microsecond=0)
+        payload = {
+            "action": "answer_key_release",
+            "cycle_course_id": self.parent.id,
+            "generation_revision": self.r4.id,
+            "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": (
+                local_start + timezone.timedelta(hours=2)
+            ).strftime("%Y-%m-%dT%H:%M"),
+            "sessions_concluded": "on",
+        }
+        client = Client()
+        client.force_login(self.release_manager)
+        url = reverse("departmental_exams:questionnaire_print_release")
+
+        ajax = client.post(
+            url,
+            payload,
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(ajax.status_code, 200)
+        body = ajax.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["section"], "answer-key-releases")
+        self.assertEqual(body["affected_course_ids"], [self.parent.id])
+        self.assertEqual(body["refresh_url"], url)
+        self.assertEqual(AnswerKeyRelease.objects.count(), 1)
+        serialized = str(body).lower()
+        for confidential in (
+            "confidential key source",
+            "private set",
+            "correct_answer",
+            "choices_snapshot",
+        ):
+            self.assertNotIn(confidential, serialized)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_FACULTY_ANSWER_KEY_SET_VIEWED"
+            ).exists()
+        )
+
+        fallback = client.post(url, payload)
+        self.assertEqual(fallback.status_code, 302)
+        self.assertEqual(AnswerKeyRelease.objects.count(), 1)
+
+    def test_ajax_bulk_answer_key_release_returns_affected_courses_only(self):
+        local_start = timezone.localtime().replace(second=0, microsecond=0)
+        client = Client()
+        client.force_login(self.release_manager)
+        response = client.post(
+            reverse("departmental_exams:questionnaire_print_release"),
+            {
+                "action": "bulk_answer_key_release",
+                "selections": (f"{self.parent.id}:{self.r4.id}",),
+                "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+                "available_until": (
+                    local_start + timezone.timedelta(hours=2)
+                ).strftime("%Y-%m-%dT%H:%M"),
+                "sessions_concluded": "on",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["affected_course_ids"],
+            [self.parent.id],
+        )
+        self.assertEqual(response.json()["section"], "answer-key-releases")
+        self.assertEqual(AnswerKeyRelease.objects.count(), 1)
+
+    def test_ajax_validation_stale_revision_and_direct_deny_stay_fail_closed(self):
+        local_start = timezone.localtime().replace(second=0, microsecond=0)
+        payload = {
+            "action": "answer_key_release",
+            "cycle_course_id": self.parent.id,
+            "generation_revision": self.r4.id,
+            "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": (
+                local_start + timezone.timedelta(hours=2)
+            ).strftime("%Y-%m-%dT%H:%M"),
+        }
+        client = Client()
+        client.force_login(self.release_manager)
+        url = reverse("departmental_exams:questionnaire_print_release")
+        headers = {
+            "HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
+            "HTTP_ACCEPT": "application/json",
+        }
+
+        missing_attestation = client.post(url, payload, **headers)
+        self.assertEqual(missing_attestation.status_code, 400)
+        self.assertFalse(missing_attestation.json()["success"])
+        self.assertIn("sessions", missing_attestation.json()["message"].lower())
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
+        self._replace_current_revision(item_count=2)
+        payload["sessions_concluded"] = "on"
+        stale = client.post(url, payload, **headers)
+        self.assertEqual(stale.status_code, 400)
+        self.assertFalse(stale.json()["success"])
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
+        UserPermission.objects.create(
+            user=self.generation_manager,
+            permission=Permission.objects.get(
+                code="departmental_exams.release_answer_keys"
+            ),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        denied = Client()
+        denied.force_login(self.generation_manager)
+        unauthorized = denied.post(url, payload, **headers)
+        self.assertEqual(unauthorized.status_code, 403)
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
+    def test_ajax_revoke_refreshes_derived_state_without_faculty_view_audit(self):
+        release = self._release()
+        client = Client()
+        client.force_login(self.release_manager)
+        url = reverse("departmental_exams:questionnaire_print_release")
+
+        response = client.post(
+            url,
+            {"action": "answer_key_revoke", "release_id": release.id},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        release.refresh_from_db()
+        self.assertEqual(release.status, AnswerKeyRelease.Status.REVOKED)
+        refreshed = client.get(url + "?section=answer-key-releases")
+        row = next(
+            item
+            for item in refreshed.context["bulk_answer_key_rows"]
+            if item["course"].id == self.parent.id
+        )
+        self.assertEqual(row["release_status"], "Revoked")
+        self.assertIsNone(row["active_release"])
+        self.assertEqual(row["displayed_release"].id, release.id)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_FACULTY_ANSWER_KEY_SET_VIEWED"
+            ).exists()
+        )
+
+    def test_ajax_r4_release_does_not_leak_into_r5_current_bulk_row(self):
+        local_start = timezone.localtime().replace(second=0, microsecond=0)
+        client = Client()
+        client.force_login(self.release_manager)
+        url = reverse("departmental_exams:questionnaire_print_release")
+        response = client.post(
+            url,
+            {
+                "action": "answer_key_release",
+                "cycle_course_id": self.parent.id,
+                "generation_revision": self.r4.id,
+                "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+                "available_until": (
+                    local_start + timezone.timedelta(hours=2)
+                ).strftime("%Y-%m-%dT%H:%M"),
+                "sessions_concluded": "on",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        r4_release = AnswerKeyRelease.objects.get()
+        r5 = self._replace_current_revision(item_count=2)
+
+        refreshed = client.get(
+            response.json()["refresh_url"] + "?section=answer-key-releases"
+        )
+        row = next(
+            item
+            for item in refreshed.context["bulk_answer_key_rows"]
+            if item["course"].id == self.parent.id
+        )
+        self.assertEqual(row["revision"].id, r5.id)
+        self.assertEqual(row["release_status"], "Not released")
+        self.assertEqual(
+            row["filter_release_status"],
+            "Superseded / No Longer Faculty Accessible",
+        )
+        self.assertIsNone(row["displayed_release"])
+        content = refreshed.content.decode()
+        current_row = content.split(
+            f'id="answer-key-row-{self.parent.id}"', 1
+        )[1].split("</tr>", 1)[0]
+        self.assertNotIn(
+            reverse(
+                "departmental_exams:answer_key_viewers",
+                args=[r4_release.id],
+            ),
+            current_row,
+        )
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="DE_FACULTY_ANSWER_KEY_SET_VIEWED"
+            ).exists()
+        )
+
+    def test_questionnaire_release_and_revoke_support_ajax_without_new_logic(self):
+        local_start = timezone.localtime().replace(second=0, microsecond=0)
+        client = Client()
+        client.force_login(self.generation_manager)
+        url = reverse("departmental_exams:questionnaire_print_release")
+        headers = {
+            "HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
+            "HTTP_ACCEPT": "application/json",
+        }
+        released = client.post(
+            url,
+            {
+                "action": "release",
+                "cycle_course_id": self.parent.id,
+                "generation_revision": self.r4.id,
+                "print_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+                "print_until": (
+                    local_start + timezone.timedelta(hours=2)
+                ).strftime("%Y-%m-%dT%H:%M"),
+            },
+            **headers,
+        )
+        self.assertEqual(released.status_code, 200)
+        self.assertEqual(released.json()["section"], "questionnaire-releases")
+        questionnaire_release = QuestionnairePrintRelease.objects.get()
+
+        revoked = client.post(
+            url,
+            {"action": "revoke", "release_id": questionnaire_release.id},
+            **headers,
+        )
+        self.assertEqual(revoked.status_code, 200)
+        questionnaire_release.refresh_from_db()
+        self.assertEqual(
+            questionnaire_release.status,
+            QuestionnairePrintRelease.Status.REVOKED,
+        )
 
 
 class AnswerKeyPermissionMigrationSafetyTests(TestCase):

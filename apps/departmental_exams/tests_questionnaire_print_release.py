@@ -600,12 +600,14 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             tuple(campus.id for campus in course.print_release_campuses),
             (self.campus.id,),
         )
-        self.assertContains(
-            response,
-            f"&middot; {self.campus.name}</div>",
-            count=1,
-            html=False,
-        )
+        content = response.content.decode()
+        questionnaire_pane, answer_key_pane = content.split(
+            'id="questionnaire-releases-pane"', 1
+        )[1].split('id="answer-key-releases-pane"', 1)
+        campus_header = f"&middot; {self.campus.name}</div>"
+        # The deduplicated campus appears once in each Release Center tab.
+        self.assertEqual(questionnaire_pane.count(campus_header), 1)
+        self.assertEqual(answer_key_pane.count(campus_header), 1)
 
     def test_bulk_list_shows_one_current_r1_and_server_derived_badge(self):
         ExamGenerationRevision.objects.filter(pk=self.r2.pk).update(
@@ -722,18 +724,28 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         )
         self.assertContains(
             response,
-            'form.querySelectorAll(".bulk-release-selection:not(:disabled)")',
+            'class="form-check-input bulk-release-selection"',
             html=False,
         )
-        self.assertContains(response, "selectAll.indeterminate", html=False)
+        self.assertContains(response, 'id="bulk-selected-count"', html=False)
         self.assertContains(
             response,
-            "selection.checked = selectAll.checked",
+            'data-release-ajax="true"',
             html=False,
         )
         self.assertContains(
             response,
-            'selection.addEventListener("change", updateSelectionState)',
+            'data-release-section="questionnaire-releases"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'data-release-action="bulk_release"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            "js/departmental_exam_release_center.js",
             html=False,
         )
         self.assertNotContains(
