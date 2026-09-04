@@ -160,6 +160,11 @@ urlpatterns = [
         name="contributor_monitoring_print",
     ),
     path(
+        "admin-portal/departmental-exams/contributor-monitoring/cycles/<int:cycle_id>/drafts/print/",
+        monitoring_views.contributor_monitoring_draft_print_view,
+        name="contributor_monitoring_draft_print",
+    ),
+    path(
         "admin-portal/departmental-exams/contributor-monitoring/automatic-generation-readiness/",
         generation_readiness_views.automatic_generation_readiness_view,
         name="automatic_generation_readiness",

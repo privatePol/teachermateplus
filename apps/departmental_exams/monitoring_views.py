@@ -12,6 +12,7 @@ from django.views.decorators.http import require_http_methods
 from django.utils import timezone
 
 from apps.core.decorators import portal_required
+from apps.core.services.settings import SystemSettingService
 
 from .contribution_forms import RosterActionForm
 from .contribution_authorization import ContributorEligibilityService
@@ -21,7 +22,7 @@ from .blueprint_services import (
     contribution_source_evidence,
     resolution_matches_episode,
 )
-from .models import CycleCourse, ExaminationCycle
+from .models import CycleCourse, ExaminationCycle, FacultyContribution
 from .services import DepartmentalExamAuthorizationService
 
 
@@ -406,6 +407,72 @@ def contributor_monitoring_print_view(request):
         request,
         "departmental_exams/admin/contributor_monitoring_print.html",
         context,
+    )
+
+
+@_admin_error_page
+@portal_required("ADMIN")
+@require_http_methods(["GET"])
+def contributor_monitoring_draft_print_view(request, cycle_id):
+    tenant_id = _tenant_id(request)
+    DepartmentalExamAuthorizationService.require_assigned_course_route_capability(
+        user=request.user, tenant_id=tenant_id
+    )
+    if not ContributionMonitoringSelector.navigation_visible(
+        user=request.user, tenant_id=tenant_id
+    ):
+        raise PermissionDenied(
+            "No exact-scoped contributor monitoring assignment is available."
+        )
+    visible_courses = ContributionMonitoringSelector.visible_cycle_courses(
+        user=request.user,
+        tenant_id=tenant_id,
+        contribution_status=FacultyContribution.Status.DRAFT,
+    )
+    if not visible_courses.filter(cycle_id=cycle_id).exists():
+        raise PermissionDenied(
+            "The selected examination cycle is not available within the current exact scope."
+        )
+
+    cycle = get_object_or_404(
+        ExaminationCycle.objects.select_related("academic_year", "term"),
+        pk=cycle_id,
+        tenant_id=tenant_id,
+    )
+    courses = list(
+        visible_courses.filter(
+            cycle_id=cycle_id,
+            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+            faculty_contributions__status=FacultyContribution.Status.DRAFT,
+        )
+        .distinct()
+        .order_by("course__code", "course__title", "id")
+    )
+    for course in courses:
+        course.monitoring_contributions = list(course.faculty_contributions.all())
+    _decorate_contribution_metrics(courses)
+    _decorate_contributor_locations(courses=courses, tenant_id=tenant_id)
+
+    return render(
+        request,
+        "departmental_exams/admin/contributor_monitoring_draft_print.html",
+        {
+            "cycle": cycle,
+            "courses": courses,
+            "generated_at": timezone.localtime(
+                timezone.now(), timezone=ZoneInfo("Asia/Manila")
+            ),
+            "print_header_name": SystemSettingService.get(
+                "PRINT_HEADER_SCHOOL_NAME",
+                tenant_id=tenant_id,
+                default="NATIONAL COLLEGE OF BUSINESS AND ARTS",
+            ),
+            "print_header_address": SystemSettingService.get(
+                "PRINT_HEADER_SCHOOL_ADDRESS",
+                tenant_id=tenant_id,
+                default="",
+            ),
+        },
     )
 
 

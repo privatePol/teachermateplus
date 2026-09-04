@@ -82,7 +82,7 @@ class ContributionSelector:
 
 class ContributionMonitoringSelector:
     @staticmethod
-    def visible_cycle_courses(*, user, tenant_id):
+    def visible_cycle_courses(*, user, tenant_id, contribution_status=None):
         base = CycleCourse.objects.filter(cycle__tenant_id=tenant_id)
         manual_courses = base.filter(
             cycle__processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW,
@@ -190,6 +190,8 @@ class ContributionMonitoringSelector:
             )
             .order_by("faculty_user__last_name", "faculty_user__first_name", "id")
         )
+        if contribution_status is not None:
+            contributions = contributions.filter(status=contribution_status)
         offering_snapshots = CycleCourseOffering.objects.select_related(
             "campus"
         ).order_by("campus__name", "offering_id")
