@@ -6,6 +6,7 @@
   <div class="d-flex flex-wrap gap-2">
     {% if show_automatic_generation_readiness %}<a class="btn btn-primary" href="{% url 'departmental_exams:automatic_generation_readiness' %}">Automatic Generation Readiness</a>{% endif %}
     {% if selected_cycle_id %}<a class="btn btn-primary" href="{% url 'departmental_exams:contributor_monitoring_draft_print' selected_cycle_id %}" target="_blank" rel="noopener">Print All Draft Contributions</a>{% else %}<button class="btn btn-primary" type="button" disabled title="Select an examination cycle and apply the filter first.">Print All Draft Contributions</button>{% endif %}
+    {% if selected_cycle_id %}<a class="btn btn-primary" href="{% url 'departmental_exams:contributor_monitoring_faculty_submission_print' selected_cycle_id %}" target="_blank" rel="noopener">Print Faculty Submission Summary</a>{% else %}<button class="btn btn-primary" type="button" disabled title="Select an examination cycle and apply the filter first.">Print Faculty Submission Summary</button>{% endif %}
     <a class="btn btn-outline-primary" href="{% url 'departmental_exams:contributor_monitoring_print' %}{% if filter_query %}?{{ filter_query }}{% endif %}" target="_blank" rel="noopener">Print / Printer-Friendly View</a>
   </div>
 </div>

@@ -22,6 +22,9 @@
     .course-report { margin: 0 0 24px; }
     .course-heading { break-after: avoid; page-break-after: avoid; border-bottom: 1px solid #333; padding-bottom: 6px; }
     .course-heading h2 { margin-bottom: 3px; font-size: 17px; }
+    .faculty-summary { margin-top: 28px; border-top: 2px solid #333; padding-top: 12px; }
+    .faculty-summary h2 { margin-bottom: 8px; font-size: 18px; }
+    .faculty-summary-entry { break-inside: avoid; page-break-inside: avoid; margin-bottom: 4px; }
     table { width: 100%; margin-top: 8px; border-collapse: collapse; }
     thead { display: table-header-group; }
     th, td { border: 1px solid #777; padding: 5px 7px; text-align: left; vertical-align: top; }
@@ -54,7 +57,7 @@
   {% for course in courses %}
   <section class="course-report">
     <header class="course-heading">
-      <h2>{{ course.course.code }} &mdash; {{ course.course.title }}</h2>
+      <h2>{{ forloop.counter }}. {{ course.course.code }} &mdash; {{ course.course.title }}</h2>
     </header>
     <table>
       <thead><tr><th>Contributor</th><th>Campus</th><th>Progress</th><th>Workflow</th><th>Deadline</th></tr></thead>
@@ -74,5 +77,14 @@
   {% empty %}
   <p class="empty">No draft contributions found</p>
   {% endfor %}
+
+  {% if faculty_summary %}
+  <footer class="faculty-summary">
+    <h2>Draft Summary by Faculty</h2>
+    {% for row in faculty_summary %}
+    <div class="faculty-summary-entry">{{ forloop.counter }}. {{ row.display_name }} &mdash; {{ row.draft_count }} Draft</div>
+    {% endfor %}
+  </footer>
+  {% endif %}
 </body>
 </html>

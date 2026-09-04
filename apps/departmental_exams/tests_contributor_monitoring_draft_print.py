@@ -1,5 +1,6 @@
 import re
 
+from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -7,9 +8,10 @@ from django.utils import timezone
 from django.utils.formats import date_format
 from django.utils.html import strip_tags
 
-from apps.academics.models import AcademicYear, Term
+from apps.academics.models import AcademicYear, Course, Term
 from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, UserPermission
+from apps.tenants.models import Campus
 
 from .contribution_services import ContributionRosterService
 from .models import CycleCourse, ExaminationCycle, FacultyContribution, Question
@@ -45,7 +47,9 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
             args=[self.parent.cycle_id],
         )
 
-    def make_visible_contribution(self, code, *, cycle=None, username=None):
+    def make_visible_contribution(
+        self, code, *, cycle=None, username=None, faculty=None
+    ):
         parent = self.make_course(cycle=cycle or self.parent.cycle, code=code)
         configuration = self.make_configuration(
             parent,
@@ -53,7 +57,7 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
             opened_at=timezone.now(),
             deadline=self.future_deadline(),
         )
-        faculty = self.make_faculty(username or f"faculty-{parent.id}")
+        faculty = faculty or self.make_faculty(username or f"faculty-{parent.id}")
         self.make_assignment(parent, faculty)
         ContributionRosterService.initialize(
             cycle_course_id=parent.id,
@@ -80,6 +84,9 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(response, 'target="_blank"')
 
     def test_report_is_cycle_bound_draft_only_included_and_exact_scope(self):
+        self.faculty.last_name = "Dela Cruz"
+        self.faculty.first_name = "Juan"
+        self.faculty.save(update_fields=["last_name", "first_name", "updated_at"])
         Question.objects.create(
             contribution=self.contribution,
             question_text="CONFIDENTIAL DRAFT QUESTION",
@@ -148,6 +155,57 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
             configuration_revision_snapshot=hidden_configuration.revision,
         )
 
+        other_tenant_campus = Campus.objects.create(
+            tenant=self.other_tenant,
+            code="DRAFT-PRINT-OTHER-CAMPUS",
+            name="Draft Print Other Campus",
+        )
+        other_tenant_year = AcademicYear.objects.create(
+            tenant=self.other_tenant,
+            code="DRAFT-PRINT-OTHER-TENANT-AY",
+            name="Draft Print Other Tenant AY",
+            start_date="2026-06-01",
+            end_date="2027-05-31",
+        )
+        other_tenant_term = Term.objects.create(
+            tenant=self.other_tenant,
+            academic_year=other_tenant_year,
+            code="DRAFT-PRINT-OTHER-TENANT-T1",
+            name="Draft Print Other Tenant Term",
+        )
+        other_tenant_cycle = ExaminationCycle.objects.create(
+            tenant=self.other_tenant,
+            academic_year=other_tenant_year,
+            term=other_tenant_term,
+            exam_period=ExaminationCycle.ExamPeriod.MIDTERM,
+            created_by=self.admin,
+        )
+        other_tenant_course = Course.objects.create(
+            tenant=self.other_tenant,
+            code="OTHER-TENANT-COURSE",
+            title="Other Tenant Course",
+        )
+        other_tenant_parent = CycleCourse.objects.create(
+            cycle=other_tenant_cycle,
+            course=other_tenant_course,
+        )
+        other_tenant_faculty = get_user_model().objects.create_user(
+            username="other-tenant-draft-faculty",
+            email="other-tenant-draft-faculty@example.edu",
+            password="Pass123!",
+            default_tenant=self.other_tenant,
+            default_campus=other_tenant_campus,
+            first_name="Olivia",
+            last_name="OtherTenant",
+        )
+        FacultyContribution.objects.create(
+            cycle_course=other_tenant_parent,
+            faculty_user=other_tenant_faculty,
+            source_campus=other_tenant_campus,
+            quota_snapshot=50,
+            configuration_revision_snapshot=1,
+        )
+
         self.client.force_login(self.configurer)
         with CaptureQueriesContext(connection) as captured:
             response = self.client.get(self.url)
@@ -157,8 +215,15 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
             [course.id for course in response.context["courses"]],
             [self.parent.id],
         )
+        self.assertEqual(
+            [
+                (row["display_name"], row["draft_count"])
+                for row in response.context["faculty_summary"]
+            ],
+            [("Dela Cruz, Juan", 1)],
+        )
         self.assertContains(response, self.parent.course.code)
-        self.assertContains(response, self.faculty.username)
+        self.assertContains(response, self.faculty.full_name)
         self.assertContains(response, "1 / 50 (2%)")
         self.assertContains(response, "<td>DRAFT</td>", html=True)
         self.assertContains(response, self.campus.name)
@@ -175,11 +240,73 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertNotContains(response, "other-cycle-report-faculty")
         self.assertNotContains(response, hidden_parent.course.code)
         self.assertNotContains(response, "hidden-report-faculty")
+        self.assertNotContains(response, "OtherTenant, Olivia")
         self.assertNotContains(response, "CONFIDENTIAL DRAFT QUESTION")
         self.assertNotContains(response, "CONFIDENTIAL ANSWER")
         sql = "\n".join(query["sql"] for query in captured.captured_queries).lower()
         self.assertNotIn("question_text", sql)
         self.assertNotIn("correct_answer", sql)
+
+    def test_course_and_faculty_summary_numbering_follow_stable_sorted_order(self):
+        self.faculty.last_name = "Zulu"
+        self.faculty.first_name = "Zoe"
+        self.faculty.save(update_fields=["last_name", "first_name", "updated_at"])
+        first_parent, _configuration, first = self.make_visible_contribution(
+            "AAA-REPORT", username="first-numbered-faculty"
+        )
+        first.faculty_user.last_name = "adams"
+        first.faculty_user.first_name = "Amy"
+        first.faculty_user.save(
+            update_fields=["last_name", "first_name", "updated_at"]
+        )
+        last_parent, _configuration, _last = self.make_visible_contribution(
+            "ZZZ-REPORT", faculty=self.faculty
+        )
+        duplicate_offering = self.add_grouped_offering(
+            self.parent,
+            campus=self.campus,
+            department=self.department,
+            slug="DRAFT-NUMBER-DUPLICATE",
+        )
+        self.make_assignment(
+            self.parent,
+            self.faculty,
+            offering=duplicate_offering,
+        )
+        ContributionRosterService.synchronize(
+            cycle_course_id=self.parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        self.assertEqual(self.contribution.eligibility_sources.count(), 2)
+        self.client.force_login(self.configurer)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [course.id for course in response.context["courses"]],
+            [first_parent.id, self.parent.id, last_parent.id],
+        )
+        content = response.content.decode()
+        course_headings = [
+            f"{number}. {course.course.code} &mdash; {course.course.title}"
+            for number, course in enumerate(response.context["courses"], start=1)
+        ]
+        self.assertEqual(
+            [content.index(heading) for heading in course_headings],
+            sorted(content.index(heading) for heading in course_headings),
+        )
+        self.assertEqual(
+            [
+                (row["display_name"], row["draft_count"])
+                for row in response.context["faculty_summary"]
+            ],
+            [("adams, Amy", 1), ("Zulu, Zoe", 2)],
+        )
+        self.assertContains(response, "Draft Summary by Faculty")
+        self.assertContains(response, "1. adams, Amy &mdash; 1 Draft", html=False)
+        self.assertContains(response, "2. Zulu, Zoe &mdash; 2 Draft", html=False)
 
     def test_required_columns_brand_cycle_timestamp_and_print_css_render(self):
         self.client.force_login(self.configurer)
@@ -226,6 +353,7 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["courses"], [])
         self.assertContains(response, "No draft contributions found")
+        self.assertNotContains(response, "Draft Summary by Faculty")
 
     def test_unauthorized_wrong_tenant_and_direct_deny_access_fail_closed(self):
         self.client.force_login(self.manager)

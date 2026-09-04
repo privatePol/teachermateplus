@@ -1,0 +1,69 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Faculty Submission Summary</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 900px; padding: 24px; background: #fff; color: #111; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.35; }
+    h1, p { margin-top: 0; }
+    .print-controls { display: flex; justify-content: flex-end; margin-bottom: 14px; }
+    .print-button { border: 1px solid #222; border-radius: 4px; padding: 8px 16px; background: #fff; color: #111; cursor: pointer; font: inherit; }
+    .report-header { margin-bottom: 20px; text-align: center; }
+    .report-brand { display: flex; align-items: center; justify-content: center; gap: 14px; }
+    .report-logo { width: 70px; height: 70px; object-fit: contain; }
+    .school-name { margin-bottom: 2px; font-size: 20px; text-transform: uppercase; }
+    .school-address { margin-bottom: 0; color: #333; }
+    .report-title { margin: 14px 0 8px; font-size: 24px; }
+    .report-meta { margin-bottom: 3px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { display: table-header-group; }
+    th, td { border: 1px solid #777; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #eee; color: #111; }
+    th:first-child, td:first-child { width: 8%; text-align: center; }
+    th:nth-child(n+3), td:nth-child(n+3) { width: 13%; text-align: center; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    .empty { padding: 14px; border: 1px solid #777; text-align: center; }
+    @page { margin: 14mm; }
+    @media print {
+      body { max-width: none; padding: 0; font-size: 10pt; }
+      .print-controls { display: none !important; }
+      .report-logo { width: 58px; height: 58px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-controls"><button class="print-button" type="button" onclick="window.print()">Print</button></div>
+  <header class="report-header">
+    <div class="report-brand">
+      <img class="report-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA logo">
+      <div>
+        <div class="school-name">{{ print_header_name }}</div>
+        <p class="school-address">{{ print_header_address }}</p>
+      </div>
+    </div>
+    <h1 class="report-title">Faculty Submission Summary</h1>
+    <p class="report-meta"><strong>Examination Cycle:</strong> {{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }}</p>
+    <p class="report-meta"><strong>Campus (Default Campus):</strong> {% if default_campus %}{{ default_campus.name }}{% else %}Not configured{% endif %}</p>
+    <p class="report-meta"><strong>Date and time printed:</strong> {{ generated_at|date:"M j, Y g:i A" }} (Asia/Manila)</p>
+  </header>
+
+  {% if not default_campus %}
+  <p class="empty">No default campus is configured or available for this user.</p>
+  {% elif summary_rows %}
+  <table>
+    <thead><tr><th>No.</th><th>Contributor</th><th>Draft</th><th>Submitted</th><th>Courses</th></tr></thead>
+    <tbody>
+    {% for row in summary_rows %}
+      <tr><td>{{ forloop.counter }}</td><td>{{ row.display_name }}</td><td>{{ row.draft_count }}</td><td>{{ row.submitted_count }}</td><td>{{ row.course_count }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No qualifying faculty contributions found for the default campus.</p>
+  {% endif %}
+</body>
+</html>

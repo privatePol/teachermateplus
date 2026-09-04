@@ -175,11 +175,22 @@ class AdminHelpGuideTests(TestCase):
         self.assertIn("shared across its listed campuses", topic["steps"][1])
         self.assertIn("cycle-wide contribution deadline", topic["steps"][6])
         self.assertIn("NOT CONFIGURED", topic["steps"][7])
+        contributor_topic = next(
+            topic
+            for section in sections
+            for topic in section["topics"]
+            if topic["code"] == "contributor-monitoring"
+        )
+        action_names = {action["name"] for action in contributor_topic["actions"]}
+        self.assertIn("Print All Draft Contributions", action_names)
+        self.assertIn("Print Faculty Submission Summary", action_names)
         self.client.force_login(user)
         role_response = self.client.get(reverse("admin_portal:guide"))
         self.assertEqual(role_response.status_code, 200)
         self.assertTemplateUsed(role_response, "admin_portal/guide_role_based.html")
         self.assertContains(role_response, "New cycle courses start Included")
+        self.assertContains(role_response, "Print All Draft Contributions")
+        self.assertContains(role_response, "Print Faculty Submission Summary")
         response = self.client.get(reverse("admin_portal:guide"), {"view": "full"})
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "admin_portal/guide.html")
@@ -191,6 +202,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "No downstream data is deleted")
         self.assertContains(response, "cycle-wide contribution deadline")
         self.assertContains(response, "NOT CONFIGURED")
+        self.assertContains(response, "Draft Summary by Faculty")
+        self.assertContains(response, "Campus (Default Campus)")
 
     def test_departmental_exam_output_guides_cover_release_and_audit_operations(self):
         output_permission, _ = Permission.objects.get_or_create(

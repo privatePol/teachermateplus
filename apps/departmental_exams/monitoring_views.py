@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from apps.core.decorators import portal_required
 from apps.core.services.settings import SystemSettingService
+from apps.tenants.models import Campus
 
 from .contribution_forms import RosterActionForm
 from .contribution_authorization import ContributorEligibilityService
@@ -374,6 +375,87 @@ def _decorate_print_report(*, courses, tenant_id):
         )
 
 
+def _faculty_report_name(user):
+    last_name = (user.last_name or "").strip()
+    first_name = (user.first_name or "").strip()
+    if last_name and first_name:
+        return f"{last_name}, {first_name}"
+    return last_name or first_name or user.username
+
+
+def _faculty_contribution_summary(contributions):
+    rows_by_faculty = {}
+    seen_contribution_ids = set()
+    for contribution in contributions:
+        if (
+            contribution.id in seen_contribution_ids
+            or contribution.status
+            not in (
+                FacultyContribution.Status.DRAFT,
+                FacultyContribution.Status.SUBMITTED,
+            )
+        ):
+            continue
+        seen_contribution_ids.add(contribution.id)
+        faculty = contribution.faculty_user
+        row = rows_by_faculty.setdefault(
+            faculty.id,
+            {
+                "faculty": faculty,
+                "display_name": _faculty_report_name(faculty),
+                "draft_count": 0,
+                "submitted_count": 0,
+            },
+        )
+        if contribution.status == FacultyContribution.Status.DRAFT:
+            row["draft_count"] += 1
+        else:
+            row["submitted_count"] += 1
+
+    rows = list(rows_by_faculty.values())
+    for row in rows:
+        row["course_count"] = row["draft_count"] + row["submitted_count"]
+    return sorted(
+        rows,
+        key=lambda row: (
+            (row["faculty"].last_name or "").casefold(),
+            (row["faculty"].first_name or "").casefold(),
+            row["faculty"].username.casefold(),
+            row["faculty"].id,
+        ),
+    )
+
+
+def _effective_report_campus(request, *, tenant_id):
+    campus_id = getattr(request, "scope", {}).get("campus_id")
+    if not campus_id:
+        return None
+    return Campus.objects.filter(
+        pk=campus_id,
+        tenant_id=tenant_id,
+        is_active=True,
+    ).first()
+
+
+def _contribution_matches_campus_scope(
+    *, contribution, course, tenant_id, campus_id
+):
+    offering_ids = {
+        snapshot.offering_id
+        for snapshot in course.offering_snapshots.all()
+        if snapshot.campus_id == campus_id
+    }
+    if not offering_ids:
+        return False
+    return any(
+        source.is_current
+        and source.tenant_id_snapshot == tenant_id
+        and source.campus_id_snapshot == campus_id
+        and source.offering_id_snapshot in offering_ids
+        for source in contribution.eligibility_sources.all()
+    )
+
+
 @_admin_error_page
 @portal_required("ADMIN")
 @require_http_methods(["GET"])
@@ -452,6 +534,11 @@ def contributor_monitoring_draft_print_view(request, cycle_id):
         course.monitoring_contributions = list(course.faculty_contributions.all())
     _decorate_contribution_metrics(courses)
     _decorate_contributor_locations(courses=courses, tenant_id=tenant_id)
+    faculty_summary = _faculty_contribution_summary(
+        contribution
+        for course in courses
+        for contribution in course.monitoring_contributions
+    )
 
     return render(
         request,
@@ -459,6 +546,87 @@ def contributor_monitoring_draft_print_view(request, cycle_id):
         {
             "cycle": cycle,
             "courses": courses,
+            "faculty_summary": faculty_summary,
+            "generated_at": timezone.localtime(
+                timezone.now(), timezone=ZoneInfo("Asia/Manila")
+            ),
+            "print_header_name": SystemSettingService.get(
+                "PRINT_HEADER_SCHOOL_NAME",
+                tenant_id=tenant_id,
+                default="NATIONAL COLLEGE OF BUSINESS AND ARTS",
+            ),
+            "print_header_address": SystemSettingService.get(
+                "PRINT_HEADER_SCHOOL_ADDRESS",
+                tenant_id=tenant_id,
+                default="",
+            ),
+        },
+    )
+
+
+@_admin_error_page
+@portal_required("ADMIN")
+@require_http_methods(["GET"])
+def contributor_monitoring_faculty_submission_print_view(request, cycle_id):
+    tenant_id = _tenant_id(request)
+    DepartmentalExamAuthorizationService.require_assigned_course_route_capability(
+        user=request.user, tenant_id=tenant_id
+    )
+    if not ContributionMonitoringSelector.navigation_visible(
+        user=request.user, tenant_id=tenant_id
+    ):
+        raise PermissionDenied(
+            "No exact-scoped contributor monitoring assignment is available."
+        )
+    visible_courses = ContributionMonitoringSelector.visible_cycle_courses(
+        user=request.user,
+        tenant_id=tenant_id,
+    )
+    if not visible_courses.filter(cycle_id=cycle_id).exists():
+        raise PermissionDenied(
+            "The selected examination cycle is not available within the current exact scope."
+        )
+
+    cycle = get_object_or_404(
+        ExaminationCycle.objects.select_related("academic_year", "term"),
+        pk=cycle_id,
+        tenant_id=tenant_id,
+    )
+    default_campus = _effective_report_campus(request, tenant_id=tenant_id)
+    summary_rows = []
+    if default_campus is not None:
+        courses = list(
+            visible_courses.filter(
+                cycle_id=cycle_id,
+                inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+            ).order_by("course__code", "course__title", "id")
+        )
+        qualifying_contributions = []
+        for course in courses:
+            for contribution in course.faculty_contributions.all():
+                if (
+                    contribution.status
+                    in (
+                        FacultyContribution.Status.DRAFT,
+                        FacultyContribution.Status.SUBMITTED,
+                    )
+                    and _contribution_matches_campus_scope(
+                        contribution=contribution,
+                        course=course,
+                        tenant_id=tenant_id,
+                        campus_id=default_campus.id,
+                    )
+                ):
+                    qualifying_contributions.append(contribution)
+        summary_rows = _faculty_contribution_summary(qualifying_contributions)
+
+    return render(
+        request,
+        "departmental_exams/admin/contributor_monitoring_faculty_submission_print.html",
+        {
+            "cycle": cycle,
+            "default_campus": default_campus,
+            "summary_rows": summary_rows,
             "generated_at": timezone.localtime(
                 timezone.now(), timezone=ZoneInfo("Asia/Manila")
             ),
