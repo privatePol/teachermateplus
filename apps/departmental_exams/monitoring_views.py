@@ -13,8 +13,6 @@ from django.utils import timezone
 
 from apps.core.decorators import portal_required
 from apps.core.services.settings import SystemSettingService
-from apps.tenants.models import Campus
-
 from .contribution_forms import RosterActionForm
 from .contribution_authorization import ContributorEligibilityService
 from .contribution_selectors import ContributionMonitoringSelector
@@ -403,6 +401,11 @@ def _faculty_contribution_summary(contributions):
             {
                 "faculty": faculty,
                 "display_name": _faculty_report_name(faculty),
+                "default_campus_name": (
+                    faculty.default_campus.name
+                    if faculty.default_campus_id
+                    else "Not set"
+                ),
                 "draft_count": 0,
                 "submitted_count": 0,
             },
@@ -426,31 +429,20 @@ def _faculty_contribution_summary(contributions):
     )
 
 
-def _effective_report_campus(request, *, tenant_id):
-    campus_id = getattr(request, "scope", {}).get("campus_id")
-    if not campus_id:
-        return None
-    return Campus.objects.filter(
-        pk=campus_id,
-        tenant_id=tenant_id,
-        is_active=True,
-    ).first()
-
-
-def _contribution_matches_campus_scope(
-    *, contribution, course, tenant_id, campus_id
+def _contribution_matches_authorized_campus_scope(
+    *, contribution, course, tenant_id, campus_ids
 ):
     offering_ids = {
         snapshot.offering_id
         for snapshot in course.offering_snapshots.all()
-        if snapshot.campus_id == campus_id
+        if snapshot.campus_id in campus_ids
     }
     if not offering_ids:
         return False
     return any(
         source.is_current
         and source.tenant_id_snapshot == tenant_id
-        and source.campus_id_snapshot == campus_id
+        and source.campus_id_snapshot in campus_ids
         and source.offering_id_snapshot in offering_ids
         for source in contribution.eligibility_sources.all()
     )
@@ -592,40 +584,39 @@ def contributor_monitoring_faculty_submission_print_view(request, cycle_id):
         pk=cycle_id,
         tenant_id=tenant_id,
     )
-    default_campus = _effective_report_campus(request, tenant_id=tenant_id)
-    summary_rows = []
-    if default_campus is not None:
-        courses = list(
-            visible_courses.filter(
-                cycle_id=cycle_id,
-                inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
-            ).order_by("course__code", "course__title", "id")
-        )
-        qualifying_contributions = []
-        for course in courses:
-            for contribution in course.faculty_contributions.all():
-                if (
-                    contribution.status
-                    in (
-                        FacultyContribution.Status.DRAFT,
-                        FacultyContribution.Status.SUBMITTED,
-                    )
-                    and _contribution_matches_campus_scope(
-                        contribution=contribution,
-                        course=course,
-                        tenant_id=tenant_id,
-                        campus_id=default_campus.id,
-                    )
-                ):
-                    qualifying_contributions.append(contribution)
-        summary_rows = _faculty_contribution_summary(qualifying_contributions)
+    authorized_campus_ids = set(
+        getattr(request, "scope", {}).get("campus_ids") or []
+    )
+    courses = list(
+        visible_courses.filter(
+            cycle_id=cycle_id,
+            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+        ).order_by("course__code", "course__title", "id")
+    )
+    qualifying_contributions = []
+    for course in courses:
+        for contribution in course.faculty_contributions.all():
+            if (
+                contribution.status
+                in (
+                    FacultyContribution.Status.DRAFT,
+                    FacultyContribution.Status.SUBMITTED,
+                )
+                and _contribution_matches_authorized_campus_scope(
+                    contribution=contribution,
+                    course=course,
+                    tenant_id=tenant_id,
+                    campus_ids=authorized_campus_ids,
+                )
+            ):
+                qualifying_contributions.append(contribution)
+    summary_rows = _faculty_contribution_summary(qualifying_contributions)
 
     return render(
         request,
         "departmental_exams/admin/contributor_monitoring_faculty_submission_print.html",
         {
             "cycle": cycle,
-            "default_campus": default_campus,
             "summary_rows": summary_rows,
             "generated_at": timezone.localtime(
                 timezone.now(), timezone=ZoneInfo("Asia/Manila")

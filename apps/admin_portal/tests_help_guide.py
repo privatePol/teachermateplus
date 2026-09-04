@@ -203,7 +203,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "cycle-wide contribution deadline")
         self.assertContains(response, "NOT CONFIGURED")
         self.assertContains(response, "Draft Summary by Faculty")
-        self.assertContains(response, "Campus (Default Campus)")
+        self.assertContains(response, "Default Campus")
+        self.assertContains(response, "Not set")
 
     def test_departmental_exam_output_guides_cover_release_and_audit_operations(self):
         output_permission, _ = Permission.objects.get_or_create(

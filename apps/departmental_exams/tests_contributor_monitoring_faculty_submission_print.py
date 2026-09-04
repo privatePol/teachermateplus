@@ -1,5 +1,4 @@
 import re
-from unittest.mock import patch
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -123,7 +122,9 @@ class ContributorMonitoringFacultySubmissionPrintTests(
         self.assertContains(response, f'href="{self.url}"')
         self.assertContains(response, 'target="_blank"')
 
-    def test_counts_default_campus_distinctly_and_numbers_sorted_contributors(self):
+    def test_campus_scoped_viewer_counts_distinctly_and_numbers_sorted_contributors(
+        self,
+    ):
         _second_draft_parent, _second_draft = self.make_summary_contribution(
             "SECOND-DRAFT", faculty=self.faculty
         )
@@ -216,18 +217,21 @@ class ContributorMonitoringFacultySubmissionPrintTests(
             response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["default_campus"], self.campus)
         self.assertEqual(
             [
                 (
                     row["display_name"],
+                    row["default_campus_name"],
                     row["draft_count"],
                     row["submitted_count"],
                     row["course_count"],
                 )
                 for row in response.context["summary_rows"]
             ],
-            [("adams, Amy", 0, 1, 1), ("Zulu, Zoe", 2, 1, 3)],
+            [
+                ("adams, Amy", self.campus.name, 0, 1, 1),
+                ("Zulu, Zoe", self.campus.name, 2, 1, 3),
+            ],
         )
         headers = [
             strip_tags(value).strip()
@@ -239,19 +243,27 @@ class ContributorMonitoringFacultySubmissionPrintTests(
         ]
         self.assertEqual(
             headers,
-            ["No.", "Contributor", "Draft", "Submitted", "Courses"],
+            [
+                "No.",
+                "Contributor",
+                "Default Campus",
+                "Draft",
+                "Submitted",
+                "Courses",
+            ],
         )
         self.assertContains(
             response,
-            "<tr><td>1</td><td>adams, Amy</td><td>0</td><td>1</td><td>1</td></tr>",
+            f"<tr><td>1</td><td>adams, Amy</td><td>{self.campus.name}</td><td>0</td><td>1</td><td>1</td></tr>",
             html=True,
         )
         self.assertContains(
             response,
-            "<tr><td>2</td><td>Zulu, Zoe</td><td>2</td><td>1</td><td>3</td></tr>",
+            f"<tr><td>2</td><td>Zulu, Zoe</td><td>{self.campus.name}</td><td>2</td><td>1</td><td>3</td></tr>",
             html=True,
         )
-        self.assertContains(response, "Campus (Default Campus):")
+        self.assertNotContains(response, "Campus (Default Campus):")
+        self.assertContains(response, "Default Campus")
         self.assertContains(response, self.campus.name)
         self.assertContains(response, "NATIONAL COLLEGE OF BUSINESS AND ARTS")
         self.assertContains(response, "994 Aurora Blvd., Cubao, Quezon City")
@@ -265,6 +277,35 @@ class ContributorMonitoringFacultySubmissionPrintTests(
         sql = "\n".join(query["sql"] for query in captured.captured_queries).lower()
         self.assertNotIn("question_text", sql)
         self.assertNotIn("correct_answer", sql)
+
+    def test_globally_authorized_viewer_receives_authorized_multi_campus_rows(self):
+        north = self.make_faculty(
+            "faculty-summary-global-north",
+            campus=self.other_campus,
+            department=self.other_department,
+        )
+        self._set_name(north, last_name="North", first_name="Nora")
+        self.make_summary_contribution(
+            "GLOBAL-OTHER-CAMPUS",
+            faculty=north,
+            campus=self.other_campus,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [
+                (row["display_name"], row["default_campus_name"])
+                for row in response.context["summary_rows"]
+            ],
+            [
+                ("North, Nora", self.other_campus.name),
+                ("Zulu, Zoe", self.campus.name),
+            ],
+        )
+        self.assertContains(response, self.other_campus.name)
 
     def test_report_is_get_only_and_direct_access_remains_protected(self):
         self.client.force_login(self.configurer)
@@ -325,23 +366,22 @@ class ContributorMonitoringFacultySubmissionPrintTests(
         self.assertEqual(response.context["summary_rows"], [])
         self.assertContains(
             response,
-            "No qualifying faculty contributions found for the default campus.",
+            "No qualifying faculty contributions found.",
         )
 
-    def test_missing_effective_default_campus_is_safe_and_empty(self):
-        self.client.force_login(self.admin)
+    def test_missing_contributor_default_campus_displays_not_set(self):
+        self.faculty.default_campus = None
+        self.faculty.save(update_fields=["default_campus", "updated_at"])
+        self.client.force_login(self.configurer)
 
-        with patch(
-            "apps.core.services.scope.ScopeService.get_accessible_campus_ids",
-            return_value=[],
-        ):
-            response = self.client.get(self.url)
+        response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.context["default_campus"])
-        self.assertEqual(response.context["summary_rows"], [])
-        self.assertContains(
-            response,
-            "No default campus is configured or available for this user.",
+        self.assertEqual(
+            [
+                (row["display_name"], row["default_campus_name"])
+                for row in response.context["summary_rows"]
+            ],
+            [("Zulu, Zoe", "Not set")],
         )
-        self.assertNotContains(response, "Zulu, Zoe")
+        self.assertContains(response, "<td>Not set</td>", html=True)

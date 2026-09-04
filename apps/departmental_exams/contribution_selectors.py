@@ -171,7 +171,9 @@ class ContributionMonitoringSelector:
             .order_by("assignment_id_snapshot", "id")
         )
         contributions = (
-            FacultyContribution.objects.select_related("faculty_user")
+            FacultyContribution.objects.select_related(
+                "faculty_user", "faculty_user__default_campus"
+            )
             .prefetch_related(
                 Prefetch("eligibility_sources", queryset=contribution_sources),
                 "blocked_resolution_events",

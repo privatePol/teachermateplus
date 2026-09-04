@@ -24,7 +24,7 @@
     th, td { border: 1px solid #777; padding: 6px 8px; text-align: left; vertical-align: top; }
     th { background: #eee; color: #111; }
     th:first-child, td:first-child { width: 8%; text-align: center; }
-    th:nth-child(n+3), td:nth-child(n+3) { width: 13%; text-align: center; }
+    th:nth-child(n+4), td:nth-child(n+4) { width: 12%; text-align: center; }
     tr { break-inside: avoid; page-break-inside: avoid; }
     .empty { padding: 14px; border: 1px solid #777; text-align: center; }
     @page { margin: 14mm; }
@@ -47,23 +47,20 @@
     </div>
     <h1 class="report-title">Faculty Submission Summary</h1>
     <p class="report-meta"><strong>Examination Cycle:</strong> {{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }}</p>
-    <p class="report-meta"><strong>Campus (Default Campus):</strong> {% if default_campus %}{{ default_campus.name }}{% else %}Not configured{% endif %}</p>
     <p class="report-meta"><strong>Date and time printed:</strong> {{ generated_at|date:"M j, Y g:i A" }} (Asia/Manila)</p>
   </header>
 
-  {% if not default_campus %}
-  <p class="empty">No default campus is configured or available for this user.</p>
-  {% elif summary_rows %}
+  {% if summary_rows %}
   <table>
-    <thead><tr><th>No.</th><th>Contributor</th><th>Draft</th><th>Submitted</th><th>Courses</th></tr></thead>
+    <thead><tr><th>No.</th><th>Contributor</th><th>Default Campus</th><th>Draft</th><th>Submitted</th><th>Courses</th></tr></thead>
     <tbody>
     {% for row in summary_rows %}
-      <tr><td>{{ forloop.counter }}</td><td>{{ row.display_name }}</td><td>{{ row.draft_count }}</td><td>{{ row.submitted_count }}</td><td>{{ row.course_count }}</td></tr>
+      <tr><td>{{ forloop.counter }}</td><td>{{ row.display_name }}</td><td>{{ row.default_campus_name }}</td><td>{{ row.draft_count }}</td><td>{{ row.submitted_count }}</td><td>{{ row.course_count }}</td></tr>
     {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p class="empty">No qualifying faculty contributions found for the default campus.</p>
+  <p class="empty">No qualifying faculty contributions found.</p>
   {% endif %}
 </body>
 </html>

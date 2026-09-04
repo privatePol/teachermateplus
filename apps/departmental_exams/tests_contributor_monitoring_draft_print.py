@@ -305,6 +305,8 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
             [("adams, Amy", 1), ("Zulu, Zoe", 2)],
         )
         self.assertContains(response, "Draft Summary by Faculty")
+        self.assertContains(response, '<ol class="faculty-summary-list">')
+        self.assertContains(response, '<li class="faculty-summary-entry">')
         self.assertContains(response, "1. adams, Amy &mdash; 1 Draft", html=False)
         self.assertContains(response, "2. Zulu, Zoe &mdash; 2 Draft", html=False)
 
@@ -340,6 +342,11 @@ class ContributorMonitoringDraftPrintTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(response, "@media print")
         self.assertContains(response, "thead { display: table-header-group; }")
         self.assertContains(response, "page-break-inside: avoid")
+        self.assertContains(response, "column-count: 3")
+        self.assertContains(response, "column-count: 2")
+        self.assertContains(response, "column-count: 1")
+        self.assertContains(response, "column-fill: balance")
+        self.assertContains(response, "font-size: 9pt")
         self.assertContains(response, ".print-controls { display: none !important; }")
 
     def test_empty_result_has_clear_message(self):

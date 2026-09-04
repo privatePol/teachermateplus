@@ -24,18 +24,22 @@
     .course-heading h2 { margin-bottom: 3px; font-size: 17px; }
     .faculty-summary { margin-top: 28px; border-top: 2px solid #333; padding-top: 12px; }
     .faculty-summary h2 { margin-bottom: 8px; font-size: 18px; }
-    .faculty-summary-entry { break-inside: avoid; page-break-inside: avoid; margin-bottom: 4px; }
+    .faculty-summary-list { column-count: 3; column-fill: balance; column-gap: 24px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+    .faculty-summary-entry { break-inside: avoid; page-break-inside: avoid; margin: 0 0 5px; }
     table { width: 100%; margin-top: 8px; border-collapse: collapse; }
     thead { display: table-header-group; }
     th, td { border: 1px solid #777; padding: 5px 7px; text-align: left; vertical-align: top; }
     th { background: #eee; color: #111; }
     tr { break-inside: avoid; page-break-inside: avoid; }
     .empty { padding: 14px; border: 1px solid #777; text-align: center; }
+    @media (max-width: 800px) { .faculty-summary-list { column-count: 2; } }
+    @media (max-width: 520px) { .faculty-summary-list { column-count: 1; } }
     @page { margin: 14mm; }
     @media print {
       body { max-width: none; padding: 0; font-size: 10pt; }
       .print-controls { display: none !important; }
       .report-logo { width: 58px; height: 58px; }
+      .faculty-summary-list { column-count: 3; column-gap: 8mm; font-size: 9pt; }
     }
   </style>
 </head>
@@ -81,9 +85,11 @@
   {% if faculty_summary %}
   <footer class="faculty-summary">
     <h2>Draft Summary by Faculty</h2>
+    <ol class="faculty-summary-list">
     {% for row in faculty_summary %}
-    <div class="faculty-summary-entry">{{ forloop.counter }}. {{ row.display_name }} &mdash; {{ row.draft_count }} Draft</div>
+      <li class="faculty-summary-entry">{{ forloop.counter }}. {{ row.display_name }} &mdash; {{ row.draft_count }} Draft</li>
     {% endfor %}
+    </ol>
   </footer>
   {% endif %}
 </body>
