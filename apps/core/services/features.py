@@ -5,6 +5,9 @@ from apps.core.services.settings import SystemSettingService
 
 class FeatureSettingsService:
     DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY = "FEATURE_DEPARTMENTAL_EXAM_BUILDER_ENABLED"
+    DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED_KEY = (
+        "FEATURE_DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED"
+    )
     DEPARTMENTAL_EXAM_DOCX_IMPORT_ENABLED_KEY = "FEATURE_DEPARTMENTAL_EXAM_DOCX_IMPORT_ENABLED"
     CORRECTION_OFFICIAL_REPORT_ENABLED_KEY = "FEATURE_CORRECTION_OFFICIAL_REPORT_ENABLED"
     CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY = "FEATURE_CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED"
@@ -863,6 +866,18 @@ class FeatureSettingsService:
     @classmethod
     def is_departmental_exam_builder_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
         return bool(SystemSettingService.get(cls.DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY, tenant_id=tenant_id, default=default))
+
+    @classmethod
+    def is_departmental_exam_structured_lifecycle_enabled(
+        cls, *, tenant_id: int | None, default: bool = False
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
 
     @classmethod
     def is_departmental_exam_docx_import_enabled(

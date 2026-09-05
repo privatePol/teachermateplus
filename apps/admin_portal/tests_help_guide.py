@@ -175,6 +175,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertIn("shared across its listed campuses", topic["steps"][1])
         self.assertIn("cycle-wide contribution deadline", topic["steps"][6])
         self.assertIn("NOT CONFIGURED", topic["steps"][7])
+        self.assertIn("Structured Case/Scenario Exam Lifecycle", topic["steps"][7])
+        self.assertIn("permanently freezes", topic["steps"][7])
         contributor_topic = next(
             topic
             for section in sections

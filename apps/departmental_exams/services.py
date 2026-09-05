@@ -17,10 +17,12 @@ from .models import (
     CourseExamConfiguration,
     CycleCourse,
     CycleCourseOffering,
+    ExamBlueprint,
     ExaminationCycle,
     ExamGenerationRevision,
     FacultyContribution,
     Question,
+    _final_item_count_propagation_service_scope,
     normalize_contribution_deadline_to_minute,
 )
 
@@ -304,6 +306,88 @@ class ExaminationCycleConfigurationService:
         }
 
     @classmethod
+    def _lock_frozen_final_count_units(cls, *, cycle):
+        """Return member-to-frozen-count after locking every affected unit."""
+
+        from .exam_units import resolve_examination_unit
+
+        frozen_identities = tuple(
+            ExamBlueprint.objects.filter(
+                cycle_course__cycle=cycle,
+                structure_frozen_at__isnull=False,
+            )
+            .order_by("cycle_course_id", "id")
+            .values("id", "cycle_course_id")
+        )
+        if not frozen_identities:
+            return {}
+        primary_courses = {
+            row.id: row
+            for row in CycleCourse.objects.filter(
+                id__in={
+                    identity["cycle_course_id"]
+                    for identity in frozen_identities
+                }
+            )
+        }
+        units_by_blueprint_id = {}
+        all_member_ids = set()
+        for identity in frozen_identities:
+            primary_course = primary_courses[identity["cycle_course_id"]]
+            unit = resolve_examination_unit(
+                primary_course,
+                for_update=True,
+                validate=False,
+            )
+            units_by_blueprint_id[identity["id"]] = unit
+            all_member_ids.update(unit.member_ids)
+        tuple(
+            CycleCourse.objects.select_for_update()
+            .filter(id__in=all_member_ids)
+            .order_by("id")
+        )
+        configurations = {
+            row.cycle_course_id: row
+            for row in CourseExamConfiguration.objects.select_for_update()
+            .filter(cycle_course_id__in=all_member_ids)
+            .order_by("cycle_course_id")
+        }
+        locked_blueprints = tuple(
+            ExamBlueprint.objects.select_for_update()
+            .filter(id__in=units_by_blueprint_id)
+            .order_by("cycle_course_id", "id")
+        )
+        frozen_counts_by_member = {}
+        for blueprint in locked_blueprints:
+            unit = units_by_blueprint_id[blueprint.id]
+            if unit.primary.id != blueprint.cycle_course_id:
+                raise ValidationError(
+                    "A frozen exam blueprint is not owned by its authoritative equivalency primary."
+                )
+            for member_id in unit.member_ids:
+                configuration = configurations.get(member_id)
+                if (
+                    configuration is None
+                    or configuration.final_item_count
+                    != blueprint.structure_final_item_count
+                ):
+                    raise ValidationError(
+                        "The equivalency unit is incompatible with its permanently frozen exam structure."
+                    )
+                prior_count = frozen_counts_by_member.get(member_id)
+                if (
+                    prior_count is not None
+                    and prior_count != blueprint.structure_final_item_count
+                ):
+                    raise ValidationError(
+                        "Conflicting frozen exam structures govern one equivalency member."
+                    )
+                frozen_counts_by_member[member_id] = (
+                    blueprint.structure_final_item_count
+                )
+        return frozen_counts_by_member
+
+    @classmethod
     def _propagate_defaults_to_drafts(cls, *, cycle, changed_defaults):
         """Propagate in stable parent-ID batches while retaining parent-first locks.
 
@@ -315,6 +399,11 @@ class ExaminationCycleConfigurationService:
         created = updated = 0
         affected_configuration_ids = []
         excluded_by_reason = {}
+        frozen_counts_by_member = (
+            cls._lock_frozen_final_count_units(cycle=cycle)
+            if "final_item_count" in changed_defaults
+            else {}
+        )
 
         def exclude(reason):
             excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
@@ -428,6 +517,14 @@ class ExaminationCycleConfigurationService:
                     configuration.questions_required_per_faculty = cycle.default_questions_required_per_faculty
                     configuration.questions_required_per_faculty_source = "DEFAULT" if cycle.default_questions_required_per_faculty is not None else None
                 if "final_item_count" in changed_defaults and configuration.final_item_count_source in (None, "DEFAULT"):
+                    frozen_count = frozen_counts_by_member.get(parent_id)
+                    if (
+                        frozen_count is not None
+                        and cycle.default_final_item_count != frozen_count
+                    ):
+                        raise ValidationError(
+                            "Cycle-default propagation would conflict with a permanently frozen exam structure."
+                        )
                     configuration.final_item_count = cycle.default_final_item_count
                     configuration.final_item_count_source = "DEFAULT" if cycle.default_final_item_count is not None else None
                 if "contribution_deadline" in changed_defaults and configuration.contribution_deadline_source in (None, "DEFAULT"):
@@ -457,11 +554,34 @@ class ExaminationCycleConfigurationService:
                 CourseExamConfiguration.objects.bulk_create(creates, batch_size=cls.PROPAGATION_BATCH_SIZE)
                 created += len(creates)
             if changes:
-                CourseExamConfiguration.objects.bulk_update(
-                    changes,
-                    ["questions_required_per_faculty", "questions_required_per_faculty_source", "final_item_count", "final_item_count_source", "contribution_deadline", "contribution_deadline_source", "coverage", "coverage_source", "cycle_defaults_revision_snapshot", "revision", "updated_at"],
-                    batch_size=cls.PROPAGATION_BATCH_SIZE,
-                )
+                update_fields = [
+                    "questions_required_per_faculty",
+                    "questions_required_per_faculty_source",
+                    "contribution_deadline",
+                    "contribution_deadline_source",
+                    "coverage",
+                    "coverage_source",
+                    "cycle_defaults_revision_snapshot",
+                    "revision",
+                    "updated_at",
+                ]
+                if "final_item_count" in changed_defaults:
+                    update_fields[2:2] = [
+                        "final_item_count",
+                        "final_item_count_source",
+                    ]
+                    with _final_item_count_propagation_service_scope():
+                        CourseExamConfiguration.objects.bulk_update(
+                            changes,
+                            update_fields,
+                            batch_size=cls.PROPAGATION_BATCH_SIZE,
+                        )
+                else:
+                    CourseExamConfiguration.objects.bulk_update(
+                        changes,
+                        update_fields,
+                        batch_size=cls.PROPAGATION_BATCH_SIZE,
+                    )
                 updated += len(changes)
         return {
             "created": created,
@@ -2382,6 +2502,16 @@ class CourseExamConfigurationService:
             raise ValidationError(f"{label} override must be from 50 to 75.")
         questions_required_per_faculty, questions_required_per_faculty_source = resolve(questions_required_per_faculty, questions_required_per_faculty_mode, cycle.default_questions_required_per_faculty, "faculty quota")
         final_item_count, final_item_count_source = resolve(final_item_count, final_item_count_mode, cycle.default_final_item_count, "final item count")
+        if (
+            configuration is not None
+            and configuration.final_item_count != final_item_count
+        ):
+            from .blueprint_services import StructuredExamLifecyclePolicy
+
+            StructuredExamLifecyclePolicy.require_final_item_count_compatible(
+                cycle_course=parent,
+                final_item_count=final_item_count,
+            )
         submitted_deadline = normalize_contribution_deadline_to_minute(
             contribution_deadline
         )
@@ -2577,6 +2707,14 @@ class CourseExamConfigurationService:
         if non_status_blockers:
             raise ValidationError("Course examination is not ready to open: " + ", ".join(non_status_blockers))
         cls._require_no_activity(parent)
+        structured_lifecycle = None
+        from .blueprint_services import StructuredExamLifecyclePolicy
+
+        if StructuredExamLifecyclePolicy.enabled(tenant_id=tenant_id):
+            structured_lifecycle = StructuredExamLifecyclePolicy.validate_for_open(
+                cycle_course=parent,
+                configuration=configuration,
+            )
         before = cls._configuration_payload(configuration)
         configuration.workflow_status = CourseExamConfiguration.WorkflowStatus.OPEN
         if not configuration.opened_at:
@@ -2598,6 +2736,16 @@ class CourseExamConfigurationService:
             actor=user,
             request=request,
         )
+        if structured_lifecycle is not None:
+            unit, blueprint, sections = structured_lifecycle
+            StructuredExamLifecyclePolicy.freeze(
+                unit=unit,
+                blueprint=blueprint,
+                sections=sections,
+                final_item_count=configuration.final_item_count,
+                actor=user,
+                request=request,
+            )
         frozen_instructions = configuration.contributor_instructions_snapshot or ""
         cls._audit(
             action="DE_EXAM_COURSE_CONTRIBUTION_OPENED",

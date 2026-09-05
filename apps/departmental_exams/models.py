@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 from django.core.exceptions import ValidationError
-from django.db import models, router
+from django.db import models, router, transaction
 from django.utils import timezone
 
 from apps.core.models import ActivatableModel, TimeStampedModel
@@ -12,6 +12,24 @@ from apps.core.models import ActivatableModel, TimeStampedModel
 _EQUIVALENCY_LIFECYCLE_CAPABILITY = object()
 _equivalency_lifecycle_capability = ContextVar(
     "equivalency_lifecycle_capability",
+    default=None,
+)
+
+_EXAM_STRUCTURE_LIFECYCLE_CAPABILITY = object()
+_exam_structure_lifecycle_capability = ContextVar(
+    "exam_structure_lifecycle_capability",
+    default=None,
+)
+
+_EXAM_STRUCTURE_LOCKED_WRITE_CAPABILITY = object()
+_exam_structure_locked_write_capability = ContextVar(
+    "exam_structure_locked_write_capability",
+    default=None,
+)
+
+_FINAL_ITEM_COUNT_PROPAGATION_CAPABILITY = object()
+_final_item_count_propagation_capability = ContextVar(
+    "final_item_count_propagation_capability",
     default=None,
 )
 
@@ -33,6 +51,66 @@ def _equivalency_lifecycle_write_allowed():
     return (
         _equivalency_lifecycle_capability.get()
         is _EQUIVALENCY_LIFECYCLE_CAPABILITY
+    )
+
+
+@contextmanager
+def _exam_structure_lifecycle_service_scope():
+    """Permit the one-way structure-freeze transition inside audited services."""
+
+    reset_token = _exam_structure_lifecycle_capability.set(
+        _EXAM_STRUCTURE_LIFECYCLE_CAPABILITY
+    )
+    try:
+        yield
+    finally:
+        _exam_structure_lifecycle_capability.reset(reset_token)
+
+
+def _exam_structure_lifecycle_write_allowed():
+    return (
+        _exam_structure_lifecycle_capability.get()
+        is _EXAM_STRUCTURE_LIFECYCLE_CAPABILITY
+    )
+
+
+@contextmanager
+def _exam_structure_locked_write_scope():
+    """Mark an ORM write whose authoritative rows were locked and re-read."""
+
+    reset_token = _exam_structure_locked_write_capability.set(
+        _EXAM_STRUCTURE_LOCKED_WRITE_CAPABILITY
+    )
+    try:
+        yield
+    finally:
+        _exam_structure_locked_write_capability.reset(reset_token)
+
+
+def _exam_structure_locked_write_allowed():
+    return (
+        _exam_structure_locked_write_capability.get()
+        is _EXAM_STRUCTURE_LOCKED_WRITE_CAPABILITY
+    )
+
+
+@contextmanager
+def _final_item_count_propagation_service_scope():
+    """Permit a bulk final-count write after unit-wide validation and locking."""
+
+    reset_token = _final_item_count_propagation_capability.set(
+        _FINAL_ITEM_COUNT_PROPAGATION_CAPABILITY
+    )
+    try:
+        yield
+    finally:
+        _final_item_count_propagation_capability.reset(reset_token)
+
+
+def _final_item_count_propagation_write_allowed():
+    return (
+        _final_item_count_propagation_capability.get()
+        is _FINAL_ITEM_COUNT_PROPAGATION_CAPABILITY
     )
 
 
@@ -568,6 +646,97 @@ class CycleCourseOffering(TimeStampedModel):
                 raise ValidationError("Snapshot campus must match the offering campus.")
 
 
+class _CourseExamConfigurationQuerySet(models.QuerySet):
+    _FINAL_COUNT_FIELDS = frozenset(
+        {"final_item_count", "final_item_count_source"}
+    )
+
+    def _reject_unvalidated_final_count_write(self, fields):
+        if (
+            self._FINAL_COUNT_FIELDS.intersection(fields)
+            and not _final_item_count_propagation_write_allowed()
+        ):
+            raise ValidationError(
+                "Bulk final-item-count changes must use the protected cycle-default service."
+            )
+
+    def update(self, **kwargs):
+        self._reject_unvalidated_final_count_write(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._reject_unvalidated_final_count_write(fields)
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+
+def _lock_configuration_exam_unit(*, using, cycle_course_id):
+    """Lock and re-read the authoritative unit before a final-count save."""
+
+    identity = (
+        CycleCourse._base_manager.using(using)
+        .filter(pk=cycle_course_id)
+        .values("cycle_id")
+        .first()
+    )
+    if identity is None:
+        return None
+    ExaminationCycle._base_manager.using(using).select_for_update().get(
+        pk=identity["cycle_id"]
+    )
+    CycleCourse._base_manager.using(using).select_for_update().get(
+        pk=cycle_course_id
+    )
+    membership = (
+        ExamCourseEquivalencyMembership._base_manager.using(using)
+        .filter(
+            cycle_course_id=cycle_course_id,
+            active_marker=1,
+            group__is_active=True,
+        )
+        .values("group_id")
+        .first()
+    )
+    if membership is None:
+        member_ids = (cycle_course_id,)
+        primary_cycle_course_id = cycle_course_id
+    else:
+        group = (
+            ExamCourseEquivalencyGroup._base_manager.using(using)
+            .select_for_update()
+            .get(pk=membership["group_id"], is_active=True)
+        )
+        memberships = tuple(
+            ExamCourseEquivalencyMembership._base_manager.using(using)
+            .select_for_update()
+            .filter(group=group, active_marker=1)
+            .order_by("cycle_course_id", "id")
+        )
+        member_ids = tuple(row.cycle_course_id for row in memberships)
+        primary_cycle_course_id = group.primary_cycle_course_id
+    tuple(
+        CycleCourse._base_manager.using(using)
+        .select_for_update()
+        .filter(pk__in=member_ids)
+        .order_by("id")
+    )
+    tuple(
+        CourseExamConfiguration._base_manager.using(using)
+        .select_for_update()
+        .filter(cycle_course_id__in=member_ids)
+        .order_by("cycle_course_id")
+    )
+    return (
+        ExamBlueprint._base_manager.using(using)
+        .select_for_update()
+        .filter(
+            cycle_course_id=primary_cycle_course_id,
+            structure_frozen_at__isnull=False,
+        )
+        .values_list("structure_final_item_count", flat=True)
+        .first()
+    )
+
+
 class CourseExamConfiguration(TimeStampedModel):
     _FIRST_OPEN_IMMUTABLE_DEADLINE_FIELDS = (
         "contribution_deadline",
@@ -635,6 +804,8 @@ class CourseExamConfiguration(TimeStampedModel):
     )
     automatic_processing_code = models.CharField(max_length=64, blank=True, default="")
     automatic_processed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = _CourseExamConfigurationQuerySet.as_manager()
 
     class Meta:
         db_table = "departmental_exam_configurations"
@@ -714,6 +885,20 @@ class CourseExamConfiguration(TimeStampedModel):
                 "Contribution deadline and provenance are immutable after first opening."
             )
 
+    def _guard_frozen_structure_item_count_on_save(self, *, using, update_fields):
+        if (
+            update_fields is not None and "final_item_count" not in update_fields
+        ):
+            return
+        frozen_count = _lock_configuration_exam_unit(
+            using=using,
+            cycle_course_id=self.cycle_course_id,
+        )
+        if frozen_count is not None and self.final_item_count != frozen_count:
+            raise ValidationError(
+                "The final item count is incompatible with the permanently frozen exam structure."
+            )
+
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:
@@ -722,6 +907,17 @@ class CourseExamConfiguration(TimeStampedModel):
         database = kwargs.get("using") or router.db_for_write(
             type(self), instance=self
         )
+        if update_fields is None or "final_item_count" in update_fields:
+            with transaction.atomic(using=database):
+                self._guard_first_open_deadline_pair_on_save(
+                    using=database,
+                    update_fields=update_fields,
+                )
+                self._guard_frozen_structure_item_count_on_save(
+                    using=database,
+                    update_fields=update_fields,
+                )
+                return super().save(*args, **kwargs)
         self._guard_first_open_deadline_pair_on_save(
             using=database,
             update_fields=update_fields,
@@ -1211,6 +1407,283 @@ class BlockedContributionResolution(TimeStampedModel):
         raise ValidationError("Blocked contribution resolution evidence is immutable.")
 
 
+def _lock_exam_blueprint_rows(
+    *, using, blueprint_ids=(), cycle_course_ids=()
+):
+    """Acquire cycle-first locks and return current authoritative blueprints."""
+
+    normalized_blueprint_ids = tuple(
+        sorted({int(value) for value in blueprint_ids if value is not None})
+    )
+    normalized_cycle_course_ids = {
+        int(value) for value in cycle_course_ids if value is not None
+    }
+    if normalized_blueprint_ids:
+        normalized_cycle_course_ids.update(
+            ExamBlueprint._base_manager.using(using)
+            .filter(pk__in=normalized_blueprint_ids)
+            .values_list("cycle_course_id", flat=True)
+        )
+    cycle_course_ids = tuple(sorted(normalized_cycle_course_ids))
+    cycle_ids = tuple(
+        sorted(
+            set(
+                CycleCourse._base_manager.using(using)
+                .filter(pk__in=cycle_course_ids)
+                .values_list("cycle_id", flat=True)
+            )
+        )
+    )
+    tuple(
+        ExaminationCycle._base_manager.using(using)
+        .select_for_update()
+        .filter(pk__in=cycle_ids)
+        .order_by("id")
+    )
+    tuple(
+        CycleCourse._base_manager.using(using)
+        .select_for_update()
+        .filter(pk__in=cycle_course_ids)
+        .order_by("id")
+    )
+    condition = models.Q(pk__in=normalized_blueprint_ids)
+    if cycle_course_ids:
+        condition |= models.Q(cycle_course_id__in=cycle_course_ids)
+    if not normalized_blueprint_ids and not cycle_course_ids:
+        return ()
+    return tuple(
+        ExamBlueprint._base_manager.using(using)
+        .select_for_update()
+        .filter(condition)
+        .order_by("cycle_course_id", "id")
+    )
+
+
+def _lock_exam_section_rows(*, using, section_ids=(), blueprint_ids=()):
+    normalized_section_ids = tuple(
+        sorted({int(value) for value in section_ids if value is not None})
+    )
+    normalized_blueprint_ids = {
+        int(value) for value in blueprint_ids if value is not None
+    }
+    if normalized_section_ids:
+        normalized_blueprint_ids.update(
+            ExamSection._base_manager.using(using)
+            .filter(pk__in=normalized_section_ids)
+            .values_list("blueprint_id", flat=True)
+        )
+    locked_blueprints = _lock_exam_blueprint_rows(
+        using=using,
+        blueprint_ids=normalized_blueprint_ids,
+    )
+    locked_sections = tuple(
+        ExamSection._base_manager.using(using)
+        .select_for_update()
+        .filter(pk__in=normalized_section_ids)
+        .order_by("id")
+    )
+    return locked_blueprints, locked_sections
+
+
+class _ExamBlueprintQuerySet(models.QuerySet):
+    _STRUCTURE_FIELDS = frozenset(
+        {
+            "cycle_course",
+            "cycle_course_id",
+            "mode",
+            "revision",
+            "created_by",
+            "created_by_id",
+            "updated_by",
+            "updated_by_id",
+            "structure_frozen_at",
+            "structure_frozen_by",
+            "structure_frozen_by_id",
+            "structure_final_item_count",
+        }
+    )
+    _FREEZE_FIELDS = frozenset(
+        {
+            "structure_frozen_at",
+            "structure_frozen_by",
+            "structure_frozen_by_id",
+            "structure_final_item_count",
+        }
+    )
+
+    def update(self, **kwargs):
+        fields = set(kwargs)
+        if _exam_structure_lifecycle_write_allowed() or _exam_structure_locked_write_allowed():
+            return super().update(**kwargs)
+        if fields.intersection(self._FREEZE_FIELDS):
+            raise ValidationError(
+                "Exam structure freeze changes must use the protected lifecycle service."
+            )
+        if not fields.intersection(self._STRUCTURE_FIELDS):
+            return super().update(**kwargs)
+        if {"cycle_course", "cycle_course_id"}.intersection(fields):
+            raise ValidationError(
+                "Exam blueprint ownership cannot be changed through a direct ORM write."
+            )
+        object_ids = tuple(self.order_by().values_list("pk", flat=True))
+        with transaction.atomic(using=self.db):
+            locked = _lock_exam_blueprint_rows(
+                using=self.db,
+                blueprint_ids=object_ids,
+            )
+            if any(row.structure_frozen_at is not None for row in locked):
+                raise ValidationError("Frozen exam structure cannot be changed.")
+            with _exam_structure_locked_write_scope():
+                return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        objs = list(objs)
+        field_names = set(fields)
+        if _exam_structure_lifecycle_write_allowed() or _exam_structure_locked_write_allowed():
+            return super().bulk_update(objs, fields, batch_size=batch_size)
+        if field_names.intersection(self._FREEZE_FIELDS):
+            raise ValidationError(
+                "Exam structure freeze changes must use the protected lifecycle service."
+            )
+        if {"cycle_course", "cycle_course_id"}.intersection(field_names):
+            raise ValidationError(
+                "Exam blueprint ownership cannot be changed through a direct ORM write."
+            )
+        object_ids = {obj.pk for obj in objs if obj.pk is not None}
+        with transaction.atomic(using=self.db):
+            locked = _lock_exam_blueprint_rows(
+                using=self.db,
+                blueprint_ids=object_ids,
+            )
+            if (
+                field_names.intersection(self._STRUCTURE_FIELDS)
+                and any(row.structure_frozen_at is not None for row in locked)
+            ):
+                raise ValidationError("Frozen exam structure cannot be changed.")
+            with _exam_structure_locked_write_scope():
+                return super().bulk_update(
+                    objs,
+                    fields,
+                    batch_size=batch_size,
+                )
+
+    def bulk_create(self, objs, **kwargs):
+        objs = list(objs)
+        if _exam_structure_lifecycle_write_allowed():
+            return super().bulk_create(objs, **kwargs)
+        if kwargs.get("update_conflicts"):
+            raise ValidationError(
+                "Exam blueprints cannot be upserted through bulk_create."
+            )
+        if any(
+            obj.structure_frozen_at is not None
+            or obj.structure_frozen_by_id is not None
+            or obj.structure_final_item_count is not None
+            for obj in objs
+        ):
+            raise ValidationError(
+                "Exam structure freeze evidence must use the protected lifecycle service."
+            )
+        cycle_course_ids = {obj.cycle_course_id for obj in objs}
+        with transaction.atomic(using=self.db):
+            locked = _lock_exam_blueprint_rows(
+                using=self.db,
+                cycle_course_ids=cycle_course_ids,
+            )
+            if any(row.structure_frozen_at is not None for row in locked):
+                raise ValidationError("Frozen exam structure cannot be replaced.")
+            with _exam_structure_locked_write_scope():
+                return super().bulk_create(objs, **kwargs)
+
+    def delete(self):
+        if _exam_structure_lifecycle_write_allowed() or _exam_structure_locked_write_allowed():
+            return super().delete()
+        object_ids = tuple(self.order_by().values_list("pk", flat=True))
+        with transaction.atomic(using=self.db):
+            locked = _lock_exam_blueprint_rows(
+                using=self.db,
+                blueprint_ids=object_ids,
+            )
+            if any(row.structure_frozen_at is not None for row in locked):
+                raise ValidationError("Frozen exam structure cannot be deleted.")
+            with _exam_structure_locked_write_scope():
+                return super().delete()
+
+
+class _ExamSectionQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if _exam_structure_lifecycle_write_allowed() or _exam_structure_locked_write_allowed():
+            return super().update(**kwargs)
+        if {"blueprint", "blueprint_id"}.intersection(kwargs):
+            raise ValidationError(
+                "Exam section ownership cannot be changed through a direct ORM write."
+            )
+        object_ids = tuple(self.order_by().values_list("pk", flat=True))
+        with transaction.atomic(using=self.db):
+            locked_blueprints, _ = _lock_exam_section_rows(
+                using=self.db,
+                section_ids=object_ids,
+            )
+            if any(row.structure_frozen_at is not None for row in locked_blueprints):
+                raise ValidationError("Frozen exam sections cannot be changed.")
+            with _exam_structure_locked_write_scope():
+                return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        objs = list(objs)
+        if _exam_structure_lifecycle_write_allowed() or _exam_structure_locked_write_allowed():
+            return super().bulk_update(objs, fields, batch_size=batch_size)
+        if {"blueprint", "blueprint_id"}.intersection(fields):
+            raise ValidationError(
+                "Exam section ownership cannot be changed through a direct ORM write."
+            )
+        object_ids = {obj.pk for obj in objs if obj.pk is not None}
+        with transaction.atomic(using=self.db):
+            locked_blueprints, _ = _lock_exam_section_rows(
+                using=self.db,
+                section_ids=object_ids,
+            )
+            if any(row.structure_frozen_at is not None for row in locked_blueprints):
+                raise ValidationError("Frozen exam sections cannot be changed.")
+            with _exam_structure_locked_write_scope():
+                return super().bulk_update(
+                    objs,
+                    fields,
+                    batch_size=batch_size,
+                )
+
+    def bulk_create(self, objs, **kwargs):
+        objs = list(objs)
+        if _exam_structure_lifecycle_write_allowed() or _exam_structure_locked_write_allowed():
+            return super().bulk_create(objs, **kwargs)
+        blueprint_ids = {
+            obj.blueprint_id for obj in objs if obj.blueprint_id is not None
+        }
+        with transaction.atomic(using=self.db):
+            locked_blueprints, _ = _lock_exam_section_rows(
+                using=self.db,
+                blueprint_ids=blueprint_ids,
+            )
+            if any(row.structure_frozen_at is not None for row in locked_blueprints):
+                raise ValidationError("Frozen exam sections cannot be changed.")
+            with _exam_structure_locked_write_scope():
+                return super().bulk_create(objs, **kwargs)
+
+    def delete(self):
+        if _exam_structure_lifecycle_write_allowed() or _exam_structure_locked_write_allowed():
+            return super().delete()
+        object_ids = tuple(self.order_by().values_list("pk", flat=True))
+        with transaction.atomic(using=self.db):
+            locked_blueprints, _ = _lock_exam_section_rows(
+                using=self.db,
+                section_ids=object_ids,
+            )
+            if any(row.structure_frozen_at is not None for row in locked_blueprints):
+                raise ValidationError("Frozen exam sections cannot be deleted.")
+            with _exam_structure_locked_write_scope():
+                return super().delete()
+
+
 class ExamBlueprint(TimeStampedModel):
     class Mode(models.TextChoices):
         NO_SECTIONS = "NO_SECTIONS", "No Sections"
@@ -1237,6 +1710,20 @@ class ExamBlueprint(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="updated_exam_blueprints",
     )
+    structure_frozen_at = models.DateTimeField(null=True, blank=True)
+    structure_frozen_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="frozen_exam_blueprints",
+    )
+    structure_final_item_count = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    objects = _ExamBlueprintQuerySet.as_manager()
 
     class Meta:
         db_table = "departmental_exam_blueprints"
@@ -1244,11 +1731,122 @@ class ExamBlueprint(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(revision__gte=1),
                 name="ck_de_blueprint_revision",
-            )
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        structure_frozen_at__isnull=True,
+                        structure_frozen_by__isnull=True,
+                        structure_final_item_count__isnull=True,
+                    )
+                    | models.Q(
+                        structure_frozen_at__isnull=False,
+                        structure_frozen_by__isnull=False,
+                        structure_final_item_count__gte=1,
+                    )
+                ),
+                name="ck_de_blueprint_freeze_evidence",
+            ),
         ]
         indexes = [
             models.Index(fields=["mode", "updated_at"], name="idx_de_blueprint_mode")
         ]
+
+    def save(self, *args, **kwargs):
+        if _exam_structure_lifecycle_write_allowed():
+            return super().save(*args, **kwargs)
+        database = kwargs.get("using") or router.db_for_write(
+            type(self), instance=self
+        )
+        update_fields = kwargs.get("update_fields")
+        written_fields = None if update_fields is None else set(update_fields)
+
+        def writes(field_name):
+            if written_fields is None:
+                return True
+            field = self._meta.get_field(field_name)
+            return bool({field.name, field.attname}.intersection(written_fields))
+
+        if self._state.adding:
+            if (
+                self.structure_frozen_at is not None
+                or self.structure_frozen_by_id is not None
+                or self.structure_final_item_count is not None
+            ):
+                raise ValidationError(
+                    "Exam structure freeze changes must use the protected lifecycle service."
+                )
+            with transaction.atomic(using=database):
+                locked = _lock_exam_blueprint_rows(
+                    using=database,
+                    cycle_course_ids=(self.cycle_course_id,),
+                )
+                if any(row.structure_frozen_at is not None for row in locked):
+                    raise ValidationError("Frozen exam structure cannot be replaced.")
+                with _exam_structure_locked_write_scope():
+                    return super().save(*args, **kwargs)
+
+        with transaction.atomic(using=database):
+            locked = _lock_exam_blueprint_rows(
+                using=database,
+                blueprint_ids=(self.pk,),
+            )
+            previous = next((row for row in locked if row.pk == self.pk), None)
+            if previous is None:
+                with _exam_structure_locked_write_scope():
+                    return super().save(*args, **kwargs)
+            if (
+                previous.cycle_course_id != self.cycle_course_id
+                and writes("cycle_course")
+            ):
+                raise ValidationError(
+                    "Exam blueprint ownership cannot be changed through a direct ORM write."
+                )
+            freeze_changed = any(
+                getattr(previous, self._meta.get_field(field_name).attname)
+                != getattr(self, self._meta.get_field(field_name).attname)
+                for field_name in (
+                    "structure_frozen_at",
+                    "structure_frozen_by",
+                    "structure_final_item_count",
+                )
+                if writes(field_name)
+            )
+            if freeze_changed:
+                raise ValidationError(
+                    "Exam structure freeze changes must use the protected lifecycle service."
+                )
+            structure_changed = any(
+                getattr(previous, self._meta.get_field(field_name).attname)
+                != getattr(self, self._meta.get_field(field_name).attname)
+                for field_name in (
+                    "mode",
+                    "revision",
+                    "created_by",
+                    "updated_by",
+                )
+                if writes(field_name)
+            )
+            if previous.structure_frozen_at is not None and structure_changed:
+                raise ValidationError("Frozen exam structure cannot be changed.")
+            with _exam_structure_locked_write_scope():
+                return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if _exam_structure_lifecycle_write_allowed():
+            return super().delete(*args, **kwargs)
+        database = kwargs.get("using") or router.db_for_write(
+            type(self), instance=self
+        )
+        with transaction.atomic(using=database):
+            locked = _lock_exam_blueprint_rows(
+                using=database,
+                blueprint_ids=(self.pk,),
+            )
+            if any(row.structure_frozen_at is not None for row in locked):
+                raise ValidationError("Frozen exam structure cannot be deleted.")
+            with _exam_structure_locked_write_scope():
+                return super().delete(*args, **kwargs)
 
 
 class ExamSection(TimeStampedModel):
@@ -1261,6 +1859,8 @@ class ExamSection(TimeStampedModel):
     instructions = models.TextField(max_length=2000, blank=True)
     display_order = models.PositiveSmallIntegerField()
     item_quota = models.PositiveSmallIntegerField()
+
+    objects = _ExamSectionQuerySet.as_manager()
 
     class Meta:
         db_table = "departmental_exam_sections"
@@ -1286,6 +1886,54 @@ class ExamSection(TimeStampedModel):
             raise ValidationError({"title": "Section title is required."})
         if self.blueprint_id and self.blueprint.mode != ExamBlueprint.Mode.USE_SECTIONS:
             raise ValidationError("Explicit sections require Use Sections mode.")
+
+    def save(self, *args, **kwargs):
+        if _exam_structure_lifecycle_write_allowed():
+            return super().save(*args, **kwargs)
+        database = kwargs.get("using") or router.db_for_write(
+            type(self), instance=self
+        )
+        with transaction.atomic(using=database):
+            previous_blueprint_id = None
+            if not self._state.adding and self.pk is not None:
+                previous_blueprint_id = (
+                    type(self)._base_manager.using(database)
+                    .filter(pk=self.pk)
+                    .values_list("blueprint_id", flat=True)
+                    .first()
+                )
+            if (
+                previous_blueprint_id is not None
+                and previous_blueprint_id != self.blueprint_id
+            ):
+                raise ValidationError(
+                    "Exam section ownership cannot be changed through a direct ORM write."
+                )
+            locked_blueprints, _ = _lock_exam_section_rows(
+                using=database,
+                section_ids=(self.pk,) if self.pk is not None else (),
+                blueprint_ids=(self.blueprint_id,),
+            )
+            if any(row.structure_frozen_at is not None for row in locked_blueprints):
+                raise ValidationError("Frozen exam sections cannot be changed.")
+            with _exam_structure_locked_write_scope():
+                return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if _exam_structure_lifecycle_write_allowed():
+            return super().delete(*args, **kwargs)
+        database = kwargs.get("using") or router.db_for_write(
+            type(self), instance=self
+        )
+        with transaction.atomic(using=database):
+            locked_blueprints, _ = _lock_exam_section_rows(
+                using=database,
+                section_ids=(self.pk,),
+            )
+            if any(row.structure_frozen_at is not None for row in locked_blueprints):
+                raise ValidationError("Frozen exam sections cannot be deleted.")
+            with _exam_structure_locked_write_scope():
+                return super().delete(*args, **kwargs)
 
 
 class QuestionBlueprintPlacement(TimeStampedModel):

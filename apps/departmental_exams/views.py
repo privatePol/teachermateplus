@@ -16,6 +16,7 @@ from apps.academics.models import AcademicYear, Term
 from apps.accounts.models import User
 from apps.core.decorators import portal_required
 from apps.core.services.audit import AuditService
+from apps.core.services.features import FeatureSettingsService
 
 from .forms import (
     CourseContributionCloseForm,
@@ -732,6 +733,11 @@ def assigned_course_examinations_view(request):
         {
             "courses": courses,
             "automatic_summary_cycles": automatic_summary_cycles,
+            "structured_exam_lifecycle_enabled": (
+                FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                    tenant_id=scope["tenant_id"]
+                )
+            ),
         },
     )
 
@@ -1030,7 +1036,7 @@ def course_configuration_view(request, cycle_course_id):
             ),
         }
     )
-    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "action_flags": action_flags, "form": form, "close_form": close_form}, status=status)
+    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "action_flags": action_flags, "form": form, "close_form": close_form, "structured_exam_lifecycle_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(tenant_id=tenant_id)}, status=status)
 
 
 @portal_required("ADMIN")

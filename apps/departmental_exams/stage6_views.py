@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.core.decorators import portal_required
+from apps.core.services.features import FeatureSettingsService
 
 from .blueprint_services import (
     BlockedContributionResolutionService,
@@ -152,6 +153,17 @@ def _error(request, *, status, message):
 def blueprint_configuration_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
+    structured_lifecycle_enabled = (
+        FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+            tenant_id=tenant_id
+        )
+    )
+    if structured_lifecycle_enabled:
+        from .exam_units import resolve_examination_unit
+
+        unit = resolve_examination_unit(course, validate=False)
+        if unit.primary.id != course.id:
+            course = _course(tenant_id, unit.primary.id)
     DepartmentalExamAuthorizationService.require_blueprint_structure_management(
         user=request.user, cycle_course=course
     )
@@ -223,7 +235,17 @@ def blueprint_configuration_view(request, cycle_course_id):
         else:
             messages.success(
                 request,
-                "Stage 6 blueprint saved." if changed else "Stage 6 blueprint is unchanged.",
+                (
+                    "Exam structure saved."
+                    if changed
+                    else "Exam structure is unchanged."
+                )
+                if structured_lifecycle_enabled
+                else (
+                    "Stage 6 blueprint saved."
+                    if changed
+                    else "Stage 6 blueprint is unchanged."
+                ),
             )
             return redirect(
                 "departmental_exams:blueprint_configuration",
@@ -231,7 +253,11 @@ def blueprint_configuration_view(request, cycle_course_id):
             )
     elif request.method == "POST":
         status = 400
-    readiness = Stage6ReadinessService.evaluate(cycle_course=course)
+    readiness = (
+        None
+        if structured_lifecycle_enabled
+        else Stage6ReadinessService.evaluate(cycle_course=course)
+    )
     return render(
         request,
         "departmental_exams/admin/blueprint_configuration.html",
@@ -244,6 +270,10 @@ def blueprint_configuration_view(request, cycle_course_id):
             "readiness": readiness,
             "locked_revision": current_revision if is_locked else None,
             "has_current_automatic_generation": has_current_automatic_generation,
+            "structured_lifecycle_enabled": structured_lifecycle_enabled,
+            "structure_frozen": bool(
+                blueprint and blueprint.structure_frozen_at is not None
+            ),
         },
         status=status,
     )

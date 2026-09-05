@@ -14,6 +14,7 @@ from .models import (
     AnswerKeyRelease,
     CourseExamConfiguration,
     CycleCourse,
+    ExamBlueprint,
     ExamCourseEquivalencyGroup,
     ExamCourseEquivalencyMembership,
     ExamGenerationRevision,
@@ -239,6 +240,42 @@ class ExamCourseEquivalencyService:
             raise ValidationError("Every equivalency member must belong to the selected cycle.")
         return members
 
+    @staticmethod
+    def _require_structure_ownership_mutable(*, member_ids):
+        frozen = tuple(
+            ExamBlueprint.objects.select_for_update()
+            .filter(
+                cycle_course_id__in=tuple(sorted(set(member_ids))),
+                structure_frozen_at__isnull=False,
+            )
+            .order_by("cycle_course_id", "id")
+            .values_list("cycle_course_id", flat=True)
+        )
+        if frozen:
+            raise ValidationError(
+                "Equivalency ownership cannot change after an affected exam structure is frozen."
+            )
+
+    @staticmethod
+    def _require_single_structure_blueprint(*, member_ids, proposed_primary_id):
+        blueprints = tuple(
+            ExamBlueprint.objects.select_for_update()
+            .filter(cycle_course_id__in=tuple(sorted(set(member_ids))))
+            .order_by("cycle_course_id", "id")
+            .values_list("cycle_course_id", flat=True)
+        )
+        if len(blueprints) > 1:
+            raise ValidationError(
+                "Equivalency members have multiple independently configured exam structures. "
+                "Administratively reconcile the blueprints before changing equivalency membership."
+            )
+        if blueprints and blueprints[0] != proposed_primary_id:
+            raise ValidationError(
+                "The sole exam structure blueprint does not belong to the proposed authoritative "
+                "primary. Administratively reconcile the blueprint or primary selection before "
+                "changing equivalency membership."
+            )
+
     @classmethod
     @transaction.atomic
     def create_group(cls, *, cycle_id, name, primary_cycle_course_id, member_ids, actor):
@@ -262,6 +299,13 @@ class ExamCourseEquivalencyService:
                 cycle_course__in=members
             )
         }
+        cls._require_structure_ownership_mutable(
+            member_ids=(member.id for member in members)
+        )
+        cls._require_single_structure_blueprint(
+            member_ids=(member.id for member in members),
+            proposed_primary_id=primary_cycle_course_id,
+        )
         errors = _compatibility_errors(members=members, configurations=configurations)
         if errors:
             raise ValidationError({"members": errors})
@@ -353,6 +397,11 @@ class ExamCourseEquivalencyService:
                 cycle_course__in=members
             )
         }
+        cls._require_structure_ownership_mutable(member_ids=affected_ids)
+        cls._require_single_structure_blueprint(
+            member_ids=(member.id for member in members),
+            proposed_primary_id=primary_cycle_course_id,
+        )
         errors = _compatibility_errors(members=members, configurations=configurations)
         if errors:
             raise ValidationError({"members": errors})
@@ -450,6 +499,9 @@ class ExamCourseEquivalencyService:
             raise ValidationError("The active equivalency group membership is inconsistent.")
         cls._require_authority(cycle=cycle, members=members, actor=actor)
         cls._require_mutable(cycle=cycle, members=members)
+        cls._require_structure_ownership_mutable(
+            member_ids=(member.id for member in members)
+        )
 
         now = timezone.now()
         member_ids = tuple(member.id for member in members)

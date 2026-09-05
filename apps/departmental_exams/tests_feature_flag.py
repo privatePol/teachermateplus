@@ -56,7 +56,7 @@ class DepartmentalExamFeatureFlagTests(TestCase):
             menu_item=cls.faculty_item, permission=cls.faculty_permission
         )
 
-    def _feature_settings_payload(self, *, enabled):
+    def _feature_settings_payload(self, *, enabled, structured=False):
         payload = {
             "grade_deadline_enforcement_policy": "AUTO_CLOSE_REQUIRES_REOPEN",
             "enrollment_ownership_mode": "ADMIN_ONLY",
@@ -70,6 +70,8 @@ class DepartmentalExamFeatureFlagTests(TestCase):
         }
         if enabled:
             payload["departmental_exam_builder_enabled"] = "on"
+        if structured:
+            payload["departmental_exam_structured_lifecycle_enabled"] = "on"
         return payload
 
     def test_absent_setting_defaults_off_and_is_tenant_scoped(self):
@@ -77,6 +79,50 @@ class DepartmentalExamFeatureFlagTests(TestCase):
         SystemSettingService.set(FeatureSettingsService.DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY, True, tenant_id=self.tenant_a.id, value_type="BOOL")
         self.assertTrue(FeatureSettingsService.is_departmental_exam_builder_enabled(tenant_id=self.tenant_a.id))
         self.assertFalse(FeatureSettingsService.is_departmental_exam_builder_enabled(tenant_id=self.tenant_b.id))
+
+    def test_structured_exam_lifecycle_defaults_off_and_is_tenant_scoped(self):
+        self.assertFalse(
+            FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                tenant_id=self.tenant_a.id
+            )
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant_a.id,
+            value_type="BOOL",
+        )
+        self.assertTrue(
+            FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                tenant_id=self.tenant_a.id
+            )
+        )
+        self.assertFalse(
+            FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                tenant_id=self.tenant_b.id
+            )
+        )
+
+    def test_configurable_features_can_enable_structured_exam_lifecycle(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("admin_portal:configurable_features_settings"),
+            self._feature_settings_payload(enabled=True, structured=True),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                tenant_id=self.tenant_a.id
+            )
+        )
+        self.assertFalse(
+            FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                tenant_id=self.tenant_b.id
+            )
+        )
 
     def test_configurable_features_get_shows_only_current_foundation_capabilities(self):
         self.client.force_login(self.user)

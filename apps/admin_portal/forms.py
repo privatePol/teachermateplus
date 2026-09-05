@@ -3453,6 +3453,14 @@ class ConfigurableFeatureSettingForm(forms.Form):
             "contributor completion monitoring for this tenant."
         ),
     )
+    departmental_exam_structured_lifecycle_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Structured Case/Scenario Exam Lifecycle",
+        help_text=(
+            "Requires an authorized exam structure blueprint before faculty contribution opens "
+            "and permanently freezes its section mode, order, titles, and exact quotas at first open."
+        ),
+    )
     departmental_exam_docx_import_enabled = forms.BooleanField(
         required=False,
         label="Enable Word (.docx) Question Import",

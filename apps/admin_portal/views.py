@@ -4778,6 +4778,11 @@ def configurable_features_settings_view(request):
     current_departmental_exam_builder_enabled = FeatureSettingsService.is_departmental_exam_builder_enabled(
         tenant_id=tenant_id, default=False
     )
+    current_departmental_exam_structured_lifecycle_enabled = (
+        FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+            tenant_id=tenant_id, default=False
+        )
+    )
     current_departmental_exam_docx_import_enabled = (
         FeatureSettingsService.is_departmental_exam_docx_import_enabled(
             tenant_id=tenant_id, default=False
@@ -4788,6 +4793,9 @@ def configurable_features_settings_view(request):
         request.POST or None,
         initial={
             "departmental_exam_builder_enabled": current_departmental_exam_builder_enabled,
+            "departmental_exam_structured_lifecycle_enabled": (
+                current_departmental_exam_structured_lifecycle_enabled
+            ),
             "departmental_exam_docx_import_enabled": current_departmental_exam_docx_import_enabled,
             "student_academic_intervention_tracking_enabled": current_student_academic_intervention_tracking_enabled,
             "academic_performance_insights_enabled": current_academic_performance_insights_enabled,
@@ -4938,6 +4946,17 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY,
             bool(form.cleaned_data["departmental_exam_builder_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED_KEY,
+            bool(
+                form.cleaned_data[
+                    "departmental_exam_structured_lifecycle_enabled"
+                ]
+            ),
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
@@ -5447,6 +5466,9 @@ def configurable_features_settings_view(request):
             campus=getattr(request, "scope", {}).get("campus_id"),
             before_data={
                 "departmental_exam_builder_enabled": current_departmental_exam_builder_enabled,
+                "departmental_exam_structured_lifecycle_enabled": (
+                    current_departmental_exam_structured_lifecycle_enabled
+                ),
                 "departmental_exam_docx_import_enabled": current_departmental_exam_docx_import_enabled,
                 "student_academic_intervention_tracking_enabled": current_student_academic_intervention_tracking_enabled,
                 "academic_performance_insights_enabled": current_academic_performance_insights_enabled,
@@ -5516,6 +5538,11 @@ def configurable_features_settings_view(request):
             },
             after_data={
                 "departmental_exam_builder_enabled": bool(form.cleaned_data["departmental_exam_builder_enabled"]),
+                "departmental_exam_structured_lifecycle_enabled": bool(
+                    form.cleaned_data[
+                        "departmental_exam_structured_lifecycle_enabled"
+                    ]
+                ),
                 "departmental_exam_docx_import_enabled": bool(
                     form.cleaned_data["departmental_exam_docx_import_enabled"]
                 ),

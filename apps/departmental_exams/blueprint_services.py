@@ -12,6 +12,7 @@ from django.http import Http404
 from django.utils import timezone
 
 from apps.core.services.audit import AuditService
+from apps.core.services.features import FeatureSettingsService
 
 from .contribution_authorization import ContributorEligibilityService
 from .contribution_services import QuestionPayloadService, Stage5LockService
@@ -32,6 +33,7 @@ from .models import (
     Question,
     QuestionBlueprintPlacement,
     QuestionImportBatch,
+    _exam_structure_lifecycle_service_scope,
 )
 from .services import DepartmentalExamAuthorizationService
 from .stage6_campus_codes import (
@@ -459,8 +461,29 @@ class BlockedContributionResolutionService:
 
 class BlueprintMutationService:
     @staticmethod
-    def _require_prelock(*, cycle_course, configuration):
+    def _require_prelock(
+        *, cycle_course, configuration, structured_configurations=None
+    ):
         FinalExamLockPolicy.require_not_locked(cycle_course)
+        if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
+            raise ValidationError("Only Included course examinations may use a blueprint.")
+        require_stage6_open_cycle(cycle_course.cycle)
+        if structured_configurations is not None:
+            if not structured_configurations:
+                raise Stage6Conflict(
+                    "Configure every examination-unit member before blueprint work."
+                )
+            if any(
+                row.workflow_status
+                != CourseExamConfiguration.WorkflowStatus.DRAFT
+                or row.opened_at is not None
+                for row in structured_configurations
+            ):
+                raise Stage6Conflict(
+                    "Structured exam configuration is allowed only while every examination-unit "
+                    "member is Draft and has never opened for faculty contribution."
+                )
+            return
         if (
             cycle_course.cycle.processing_mode
             == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
@@ -473,9 +496,6 @@ class BlueprintMutationService:
             raise Stage6Conflict(
                 "Reopen contributions before changing inputs for a current automatic generation."
             )
-        if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
-            raise ValidationError("Only Included course examinations may use a blueprint.")
-        require_stage6_open_cycle(cycle_course.cycle)
         if (
             configuration is None
             or configuration.workflow_status
@@ -516,13 +536,50 @@ class BlueprintMutationService:
         sections,
         request=None,
     ):
-        _cycle, course, configuration = Stage5LockService.lock_cycle_course(
+        _cycle, requested_course, configuration = Stage5LockService.lock_cycle_course(
             cycle_course_id=cycle_course_id, tenant_id=tenant_id
         )
         DepartmentalExamAuthorizationService.require_blueprint_structure_management(
-            user=actor, cycle_course=course
+            user=actor, cycle_course=requested_course
         )
-        cls._require_prelock(cycle_course=course, configuration=configuration)
+        course = requested_course
+        structured_configurations = None
+        if FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+            tenant_id=tenant_id
+        ):
+            from .exam_units import resolve_examination_unit
+
+            unit = resolve_examination_unit(
+                requested_course, for_update=True, validate=False
+            )
+            _cycle, course, configuration = Stage5LockService.lock_cycle_course(
+                cycle_course_id=unit.primary.id,
+                tenant_id=tenant_id,
+            )
+            list(
+                CycleCourse.objects.select_for_update()
+                .filter(id__in=unit.member_ids)
+                .order_by("id")
+            )
+            structured_configurations = list(
+                CourseExamConfiguration.objects.select_for_update()
+                .filter(cycle_course_id__in=unit.member_ids)
+                .order_by("cycle_course_id")
+            )
+            if len(structured_configurations) != len(unit.member_ids):
+                raise Stage6Conflict(
+                    "Configure every examination-unit member before blueprint work."
+                )
+            configuration = next(
+                row
+                for row in structured_configurations
+                if row.cycle_course_id == course.id
+            )
+        cls._require_prelock(
+            cycle_course=course,
+            configuration=configuration,
+            structured_configurations=structured_configurations,
+        )
         blueprint = (
             ExamBlueprint.objects.select_for_update()
             .filter(cycle_course=course)
@@ -624,36 +681,231 @@ class BlueprintMutationService:
         )
         if not creating and before == after:
             return blueprint, False
-        blueprint.mode = mode
-        blueprint.updated_by = actor
-        if not creating:
-            blueprint.revision += 1
-        blueprint.full_clean()
-        blueprint.save()
+        with _exam_structure_lifecycle_service_scope():
+            blueprint.mode = mode
+            blueprint.updated_by = actor
+            if not creating:
+                blueprint.revision += 1
+            blueprint.full_clean()
+            blueprint.save()
 
-        for offset, section in enumerate(existing.values(), start=1):
-            section.display_order = 10_000 + offset
-            section.save(update_fields=["display_order", "updated_at"])
-        for item in removed:
-            item.delete()
-        for row in normalized:
-            section = existing.get(row["id"]) if row["id"] else None
-            if section is None:
-                section = ExamSection(blueprint=blueprint)
-            section.title = row["title"]
-            section.instructions = row["instructions"]
-            section.display_order = row["display_order"]
-            section.item_quota = row["item_quota"]
-            section.full_clean()
-            section.save()
+            for offset, section in enumerate(existing.values(), start=1):
+                section.display_order = 10_000 + offset
+                section.save(update_fields=["display_order", "updated_at"])
+            for item in removed:
+                item.delete()
+            saved_sections = []
+            for row in normalized:
+                section = existing.get(row["id"]) if row["id"] else None
+                if section is None:
+                    section = ExamSection(blueprint=blueprint)
+                section.title = row["title"]
+                section.instructions = row["instructions"]
+                section.display_order = row["display_order"]
+                section.item_quota = row["item_quota"]
+                section.full_clean()
+                section.save()
+                saved_sections.append(section)
         cls._audit(
             action="DE_EXAM_BLUEPRINT_CREATED" if creating else "DE_EXAM_BLUEPRINT_UPDATED",
             blueprint=blueprint,
             actor=actor,
             request=request,
-            metadata={"mode": mode, "section_count": len(normalized)},
+            metadata={
+                "mode": mode,
+                "section_count": len(saved_sections),
+                "sections": [
+                    {
+                        "section_id": section.id,
+                        "display_order": section.display_order,
+                        "item_quota": section.item_quota,
+                    }
+                    for section in saved_sections
+                ],
+            },
         )
         return blueprint, True
+
+
+class StructuredExamLifecyclePolicy:
+    """Validate and freeze the authoritative structure at first contribution open."""
+
+    @staticmethod
+    def enabled(*, tenant_id):
+        return FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+            tenant_id=tenant_id
+        )
+
+    @classmethod
+    def _locked_unit(cls, *, cycle_course):
+        from .exam_units import resolve_examination_unit
+
+        unit = resolve_examination_unit(
+            cycle_course, for_update=True, validate=False
+        )
+        list(
+            CycleCourse.objects.select_for_update()
+            .filter(id__in=unit.member_ids)
+            .order_by("id")
+        )
+        configurations = list(
+            CourseExamConfiguration.objects.select_for_update()
+            .filter(cycle_course_id__in=unit.member_ids)
+            .order_by("cycle_course_id")
+        )
+        if len(configurations) != len(unit.member_ids):
+            raise ValidationError(
+                "Every equivalent examination-unit member must be configured."
+            )
+        return unit, configurations
+
+    @classmethod
+    def validate_for_open(cls, *, cycle_course, configuration):
+        unit, configurations = cls._locked_unit(cycle_course=cycle_course)
+        authoritative_configuration = next(
+            row
+            for row in configurations
+            if row.cycle_course_id == unit.primary.id
+        )
+        if any(
+            row.final_item_count != authoritative_configuration.final_item_count
+            for row in configurations
+        ):
+            raise ValidationError(
+                "Equivalent examination-unit members must use the authoritative final item count."
+            )
+        if configuration.final_item_count != authoritative_configuration.final_item_count:
+            raise ValidationError(
+                "The course final item count does not match the authoritative examination unit."
+            )
+        blueprints = tuple(
+            ExamBlueprint.objects.select_for_update()
+            .filter(cycle_course_id__in=unit.member_ids)
+            .order_by("cycle_course_id", "id")
+        )
+        if len(blueprints) > 1:
+            raise ValidationError(
+                "Multiple exam structure blueprints exist for this examination unit. "
+                "Administrative reconciliation is required before opening faculty contribution."
+            )
+        if blueprints and blueprints[0].cycle_course_id != unit.primary.id:
+            raise ValidationError(
+                "An alias-owned exam structure blueprint requires administrative reconciliation "
+                "before opening faculty contribution."
+            )
+        blueprint = blueprints[0] if blueprints else None
+        if blueprint is None:
+            raise ValidationError(
+                "Configure a valid exam structure blueprint before opening faculty contribution."
+            )
+        if blueprint.mode not in ExamBlueprint.Mode.values:
+            raise ValidationError("The exam structure mode is invalid.")
+        sections = list(
+            ExamSection.objects.select_for_update()
+            .filter(blueprint=blueprint)
+            .order_by("display_order", "id")
+        )
+        if blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS:
+            if sections:
+                raise ValidationError(
+                    "No Sections mode cannot retain explicit sections."
+                )
+        else:
+            orders = [section.display_order for section in sections]
+            if not sections:
+                raise ValidationError(
+                    "Use Sections mode requires at least one valid section."
+                )
+            if (
+                len(orders) != len(set(orders))
+                or any(order <= 0 for order in orders)
+                or any(section.item_quota <= 0 for section in sections)
+                or any(not (section.title or "").strip() for section in sections)
+            ):
+                raise ValidationError(
+                    "Exam sections require unique positive ordering, titles, and positive quotas."
+                )
+            if sum(section.item_quota for section in sections) != configuration.final_item_count:
+                raise ValidationError(
+                    "Section quotas must equal the configured final item count exactly."
+                )
+        if (
+            blueprint.structure_frozen_at is not None
+            and blueprint.structure_final_item_count != configuration.final_item_count
+        ):
+            raise ValidationError(
+                "The final item count is incompatible with the permanently frozen exam structure."
+            )
+        return unit, blueprint, sections
+
+    @classmethod
+    def freeze(cls, *, unit, blueprint, sections, final_item_count, actor, request=None):
+        if blueprint.structure_frozen_at is not None:
+            return False
+        with _exam_structure_lifecycle_service_scope():
+            blueprint.structure_frozen_at = timezone.now()
+            blueprint.structure_frozen_by = actor
+            blueprint.structure_final_item_count = final_item_count
+            blueprint.full_clean()
+            blueprint.save(
+                update_fields=[
+                    "structure_frozen_at",
+                    "structure_frozen_by",
+                    "structure_final_item_count",
+                    "updated_at",
+                ]
+            )
+        AuditService.log_event(
+            action="DE_EXAM_BLUEPRINT_FROZEN",
+            portal="ADMIN",
+            entity_type="ExamBlueprint",
+            entity_id=blueprint.id,
+            actor=actor,
+            tenant=unit.primary.cycle.tenant_id,
+            campus=(
+                unit.primary.responsible_department.campus_id
+                if unit.primary.responsible_department_id
+                else None
+            ),
+            metadata={
+                "cycle_id": unit.primary.cycle_id,
+                "primary_cycle_course_id": unit.primary.id,
+                "member_cycle_course_ids": list(unit.member_ids),
+                "blueprint_revision": blueprint.revision,
+                "mode": blueprint.mode,
+                "section_ids": [section.id for section in sections],
+                "section_count": len(sections),
+                "section_quota_total": sum(section.item_quota for section in sections),
+                "final_item_count": final_item_count,
+            },
+            request=request,
+        )
+        return True
+
+    @classmethod
+    def require_final_item_count_compatible(
+        cls, *, cycle_course, final_item_count
+    ):
+        from .exam_units import resolve_examination_unit
+
+        unit = resolve_examination_unit(
+            cycle_course, for_update=True, validate=False
+        )
+        blueprint = (
+            ExamBlueprint.objects.select_for_update()
+            .filter(
+                cycle_course=unit.primary,
+                structure_frozen_at__isnull=False,
+            )
+            .first()
+        )
+        if (
+            blueprint is not None
+            and final_item_count != blueprint.structure_final_item_count
+        ):
+            raise ValidationError(
+                "The final item count is incompatible with the permanently frozen exam structure."
+            )
 
 
 def _stage6_question_identity(*, question_id, tenant_id):
