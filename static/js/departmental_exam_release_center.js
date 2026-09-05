@@ -309,9 +309,10 @@
     const courseId = form.dataset.releaseCourseId || "";
     const section = form.dataset.releaseSection || "questionnaire-releases";
     const buttons = processingButtons(form, submitter);
+    const requestUrl = form.getAttribute("action") || window.location.href;
     let requestPromise;
     try {
-      requestPromise = window.fetch(form.action || window.location.href, {
+      requestPromise = window.fetch(requestUrl, {
         method: "POST",
         body: new FormData(form),
         credentials: "same-origin",
