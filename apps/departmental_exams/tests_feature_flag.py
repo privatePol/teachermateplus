@@ -135,6 +135,20 @@ class DepartmentalExamFeatureFlagTests(TestCase):
         self.assertFalse(
             response.context["form"].initial["departmental_exam_builder_enabled"]
         )
+        self.assertFalse(
+            response.context["form"].initial[
+                "departmental_exam_structured_lifecycle_enabled"
+            ]
+        )
+        self.assertContains(
+            response, "Enable Structured Case/Scenario Exam Lifecycle"
+        )
+        self.assertContains(
+            response,
+            'name="departmental_exam_structured_lifecycle_enabled"',
+        )
+        self.assertContains(response, 'name="departmental_exam_builder_enabled"')
+        self.assertContains(response, 'name="departmental_exam_docx_import_enabled"')
         self.assertContains(response, "examination-cycle management")
         self.assertContains(response, "grouped course administration")
         self.assertContains(response, "Included/Exempt course control")
