@@ -8,6 +8,7 @@ class BootstrapFormMixin:
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.configure_dynamic_fields()
         invalid_fields = set(self.errors) if self.is_bound else set()
         for name, field in self.fields.items():
             widget = field.widget
@@ -26,6 +27,9 @@ class BootstrapFormMixin:
                 current_classes.append("is-invalid")
                 widget.attrs["aria-invalid"] = "true"
             widget.attrs["class"] = " ".join(current_classes)
+
+    def configure_dynamic_fields(self):
+        """Hook for request-scoped fields that must exist before bound validation."""
 
 
 class ContributionRevisionForm(BootstrapFormMixin, forms.Form):
@@ -49,6 +53,45 @@ class QuestionForm(ContributionRevisionForm):
     choice_d = forms.CharField(max_length=1000)
     correct_answer = forms.ChoiceField(choices=((value, value) for value in "ABCD"))
     difficulty = forms.ChoiceField(choices=Question.Difficulty.choices)
+
+    def __init__(
+        self,
+        *args,
+        sections=None,
+        require_section=False,
+        fixed_section=None,
+        scenario_id=None,
+        **kwargs,
+    ):
+        self._case_sections = sections
+        self._case_require_section = require_section
+        self._case_fixed_section = fixed_section
+        self._case_scenario_id = scenario_id
+        super().__init__(*args, **kwargs)
+
+    def configure_dynamic_fields(self):
+        if self._case_sections is not None:
+            choices = [("", "Select Exam Section"), *(
+                (str(section.id), section.title) for section in self._case_sections
+            )]
+            self.fields["section_id"] = forms.ChoiceField(
+                choices=choices,
+                required=self._case_require_section,
+                label="Exam Section",
+                widget=(forms.HiddenInput() if self._case_fixed_section else forms.Select()),
+            )
+            if self._case_fixed_section:
+                self.initial["section_id"] = str(self._case_fixed_section.id)
+            elif "section_id" not in self.initial:
+                self.initial["section_id"] = ""
+            if not self.fields["section_id"].widget.is_hidden:
+                self.fields["section_id"].widget.attrs["class"] = "form-select"
+        if self._case_scenario_id is not None:
+            self.fields["scenario_id"] = forms.IntegerField(
+                min_value=1,
+                widget=forms.HiddenInput,
+                initial=self._case_scenario_id,
+            )
 
 
 class QuestionDeleteForm(ContributionRevisionForm):
@@ -96,6 +139,51 @@ class ContributionSubmitForm(ContributionRevisionForm):
     confirm_exact_quota = forms.BooleanField(
         label="I confirm that this contribution is final and will become read-only."
     )
+
+
+class FacultyCaseForm(ContributionRevisionForm):
+    expected_scenario_revision = forms.IntegerField(
+        min_value=0, required=False, widget=forms.HiddenInput
+    )
+    title = forms.CharField(max_length=200, required=False)
+    stimulus = forms.CharField(
+        max_length=100000,
+        widget=forms.HiddenInput(attrs={"data-case-source": True}),
+        label="Case / Scenario content",
+    )
+
+    def __init__(self, *args, sections=(), require_section=False, **kwargs):
+        self._case_sections = sections
+        self._case_require_section = require_section
+        super().__init__(*args, **kwargs)
+
+    def configure_dynamic_fields(self):
+        if self._case_require_section:
+            self.fields["section_id"] = forms.ChoiceField(
+                label="Exam Section",
+                choices=[("", "Select Exam Section"), *(
+                    (str(section.id), section.title) for section in self._case_sections
+                )],
+                required=True,
+                widget=forms.Select(attrs={"class": "form-select"}),
+            )
+
+
+class FacultyCaseDeleteForm(ContributionRevisionForm):
+    expected_scenario_revision = forms.IntegerField(
+        min_value=1, widget=forms.HiddenInput
+    )
+
+
+class FacultyCaseMemberReorderForm(FacultyCaseDeleteForm):
+    ordered_question_ids = forms.CharField(widget=forms.HiddenInput)
+
+    def clean_ordered_question_ids(self):
+        raw = self.cleaned_data["ordered_question_ids"]
+        try:
+            return [int(value) for value in raw.split(",") if value.strip()]
+        except (TypeError, ValueError) as exc:
+            raise forms.ValidationError("Linked Question order is malformed.") from exc
 
 
 class RosterActionForm(BootstrapFormMixin, forms.Form):

@@ -126,7 +126,7 @@ class ExamGenerationService:
             )
             scenarios = list(
                 ExamScenario.objects.select_for_update()
-                .filter(blueprint=blueprint)
+                .filter(blueprint=blueprint, contribution__isnull=True)
                 .order_by("id")
             )
             list(

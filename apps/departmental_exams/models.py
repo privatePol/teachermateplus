@@ -1980,11 +1980,21 @@ class QuestionBlueprintPlacement(TimeStampedModel):
         if self.blueprint_id and self.question_id:
             if self.question.contribution.cycle_course_id != self.blueprint.cycle_course_id:
                 raise ValidationError("Placement question must belong to the same course examination.")
-            if self.question.contribution.status != FacultyContribution.Status.SUBMITTED:
-                raise ValidationError("Only Submitted questions may be classified.")
+            contribution = self.question.contribution
+            if contribution.status != FacultyContribution.Status.SUBMITTED and not (
+                contribution.status == FacultyContribution.Status.DRAFT
+                and self.blueprint.structure_frozen_at is not None
+            ):
+                raise ValidationError(
+                    "Only Submitted questions or faculty Draft questions in a frozen structure may be classified."
+                )
 
 
 class ExamScenario(TimeStampedModel):
+    class ContentFormat(models.TextChoices):
+        PLAIN_TEXT = "PLAIN_TEXT", "Plain text"
+        RICH_HTML_V1 = "RICH_HTML_V1", "Rich HTML V1"
+
     blueprint = models.ForeignKey(
         ExamBlueprint,
         on_delete=models.PROTECT,
@@ -1997,8 +2007,20 @@ class ExamScenario(TimeStampedModel):
         null=True,
         blank=True,
     )
+    contribution = models.ForeignKey(
+        FacultyContribution,
+        on_delete=models.PROTECT,
+        related_name="faculty_scenarios",
+        null=True,
+        blank=True,
+    )
     title = models.CharField(max_length=200, blank=True)
-    stimulus = models.TextField(max_length=5000)
+    stimulus = models.TextField(max_length=50000)
+    content_format = models.CharField(
+        max_length=16,
+        choices=ContentFormat.choices,
+        default=ContentFormat.PLAIN_TEXT,
+    )
     revision = models.PositiveIntegerField(default=1)
     created_by = models.ForeignKey(
         "accounts.User",
@@ -2023,18 +2045,39 @@ class ExamScenario(TimeStampedModel):
             models.Index(
                 fields=["blueprint", "section"],
                 name="idx_de_scenario_section",
-            )
+            ),
+            models.Index(
+                fields=["contribution", "created_at"],
+                name="idx_de_scenario_contrib",
+            ),
         ]
 
     def clean(self):
         if not (self.stimulus or "").strip():
             raise ValidationError({"stimulus": "Scenario text is required."})
+        if self.content_format not in self.ContentFormat.values:
+            raise ValidationError({"content_format": "Scenario content format is invalid."})
         if self.blueprint_id:
             if self.blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS:
                 if not self.section_id or self.section.blueprint_id != self.blueprint_id:
                     raise ValidationError("Use Sections scenarios require a section in the same blueprint.")
             elif self.section_id is not None:
                 raise ValidationError("No Sections scenarios use the implicit section.")
+            if (
+                self.contribution_id
+                and self.contribution.cycle_course_id != self.blueprint.cycle_course_id
+            ):
+                raise ValidationError(
+                    "Faculty Case contribution must belong to the same course examination."
+                )
+        if self.content_format == self.ContentFormat.RICH_HTML_V1:
+            from .scenario_content import canonicalize_scenario_content
+
+            canonical = canonicalize_scenario_content(self.stimulus).html
+            if canonical != self.stimulus:
+                raise ValidationError(
+                    {"stimulus": "Rich Case content must be stored in canonical form."}
+                )
 
 
 class ExamScenarioMember(TimeStampedModel):
@@ -2073,8 +2116,18 @@ class ExamScenarioMember(TimeStampedModel):
         if self.scenario_id and self.question_id:
             if self.question.contribution.cycle_course_id != self.scenario.blueprint.cycle_course_id:
                 raise ValidationError("Scenario questions must belong to the same course examination.")
-            if self.question.contribution.status != FacultyContribution.Status.SUBMITTED:
-                raise ValidationError("Only Submitted questions may belong to scenarios.")
+            contribution = self.question.contribution
+            if self.scenario.contribution_id is not None:
+                if self.scenario.contribution_id != contribution.id:
+                    raise ValidationError(
+                        "Faculty Case questions must belong to the exact same contribution."
+                    )
+                if contribution.status != FacultyContribution.Status.DRAFT:
+                    raise ValidationError(
+                        "Faculty Case membership may be changed only while the contribution is Draft."
+                    )
+            elif contribution.status != FacultyContribution.Status.SUBMITTED:
+                raise ValidationError("Only Submitted questions may belong to reviewer scenarios.")
 
 
 class ExamGenerationRevision(TimeStampedModel):

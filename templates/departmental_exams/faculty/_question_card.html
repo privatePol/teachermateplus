@@ -1,0 +1,23 @@
+<article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}" data-scientific-group>
+  <div class="card-body">
+    <div class="d-flex justify-content-between gap-3">
+      <h3 class="h6">Question <span class="question-position">{{ question.position }}</span></h3>
+      <span class="badge text-bg-light">{{ question.get_difficulty_display }} &middot; {{ question.get_entry_method_display }}</span>
+    </div>
+    <div class="mb-2" data-scientific-content>{{ question.question_text }}</div>
+    <ol type="A" class="mb-2">
+      <li{% if question.correct_answer == 'A' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_a }}</span></li>
+      <li{% if question.correct_answer == 'B' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_b }}</span></li>
+      <li{% if question.correct_answer == 'C' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_c }}</span></li>
+      <li{% if question.correct_answer == 'D' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_d }}</span></li>
+    </ol>
+    <p class="small mb-2"><strong>Correct answer:</strong> {{ question.correct_answer }}</p>
+    {% if is_mutable %}
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:question_edit' contribution.id question.id %}">Edit</a>
+        <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:question_delete' contribution.id question.id %}">Delete</a>
+        {% if show_global_reorder and not case_authoring_enabled %}<button type="button" class="btn btn-sm btn-outline-secondary move-up">Move up</button><button type="button" class="btn btn-sm btn-outline-secondary move-down">Move down</button>{% endif %}
+      </div>
+    {% endif %}
+  </div>
+</article>

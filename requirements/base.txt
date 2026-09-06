@@ -5,3 +5,4 @@ reportlab>=4.4
 Pillow>=10.0
 cryptography>=46.0
 defusedxml>=0.7.1
+nh3>=0.3.7,<0.4

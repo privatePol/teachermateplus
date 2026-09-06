@@ -697,6 +697,8 @@ class QuestionMutationService:
         campus_id,
         expected_contribution_revision,
         payload,
+        section_id=None,
+        scenario_id=None,
         request=None,
     ):
         _configuration, contribution, questions = cls._lock_mutable(
@@ -728,6 +730,16 @@ class QuestionMutationService:
             entry_method=Question.EntryMethod.MANUAL,
             **cleaned,
         )
+        from .faculty_case_services import FacultyCasePolicy
+
+        FacultyCasePolicy.apply_question_structure(
+            contribution=contribution,
+            question=question,
+            actor=user,
+            tenant_id=tenant_id,
+            section_id=section_id,
+            scenario_id=scenario_id,
+        )
         cls._increment_contribution(contribution)
         cls._audit(
             action="DE_EXAM_QUESTION_CREATED",
@@ -740,6 +752,7 @@ class QuestionMutationService:
                 "revision_before": before_revision,
                 "revision_after": contribution.revision,
                 "difficulty": question.difficulty,
+                "scenario_id": scenario_id,
             },
             request=request,
         )
@@ -759,6 +772,8 @@ class QuestionMutationService:
         expected_contribution_revision,
         expected_question_revision,
         payload,
+        section_id=None,
+        scenario_id=None,
         request=None,
     ):
         _configuration, contribution, questions = cls._lock_mutable(
@@ -785,7 +800,17 @@ class QuestionMutationService:
         changed_fields = [
             field for field, value in cleaned.items() if getattr(question, field) != value
         ]
-        if not changed_fields:
+        from .faculty_case_services import FacultyCasePolicy
+
+        structure_changed = FacultyCasePolicy.apply_question_structure(
+            contribution=contribution,
+            question=question,
+            actor=user,
+            tenant_id=tenant_id,
+            section_id=section_id,
+            scenario_id=scenario_id,
+        )
+        if not changed_fields and not structure_changed:
             question.duplicate_warning = duplicate_warning
             return question, False
         before_revision = contribution.revision
@@ -805,6 +830,7 @@ class QuestionMutationService:
                 "revision_before": before_revision,
                 "revision_after": contribution.revision,
                 "difficulty": question.difficulty,
+                "scenario_id": scenario_id,
             },
             request=request,
         )
@@ -856,6 +882,32 @@ class QuestionMutationService:
             (item for item in questions if item.id != deleted_id),
             key=lambda item: item.position,
         )
+        from .models import ExamScenario, ExamScenarioMember, QuestionBlueprintPlacement
+
+        membership = ExamScenarioMember.objects.select_for_update().filter(
+            question=question
+        ).first()
+        deleted_scenario_id = membership.scenario_id if membership else None
+        if membership:
+            membership.delete()
+            scenario = ExamScenario.objects.select_for_update().get(
+                pk=deleted_scenario_id
+            )
+            scenario.revision += 1
+            scenario.updated_by = user
+            scenario.save(update_fields=["revision", "updated_by", "updated_at"])
+            remaining_members = list(
+                ExamScenarioMember.objects.select_for_update()
+                .filter(scenario_id=deleted_scenario_id)
+                .order_by("position", "id")
+            )
+            for position, member in enumerate(remaining_members, start=1):
+                if member.position != position:
+                    member.position = position
+                    member.save(update_fields=["position", "updated_at"])
+        QuestionBlueprintPlacement.objects.select_for_update().filter(
+            question=question
+        ).delete()
         question.delete()
         cls._rewrite_positions(remaining)
         cls._increment_contribution(contribution)
@@ -869,6 +921,7 @@ class QuestionMutationService:
                 "resulting_count": len(remaining),
                 "revision_before": before_revision,
                 "revision_after": contribution.revision,
+                "scenario_id": deleted_scenario_id,
             },
             request=request,
         )
@@ -978,6 +1031,13 @@ class QuestionMutationService:
                     for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty")
                 }
             )
+        from .faculty_case_services import FacultyCasePolicy
+
+        FacultyCasePolicy.validate_submission(
+            contribution=contribution,
+            questions=questions,
+            tenant_id=tenant_id,
+        )
         difficulty_distribution = ContributionDifficultyDistributionService.evaluate(
             questions=questions,
             quota=contribution.quota_snapshot,

@@ -1,0 +1,8 @@
+.tmp-case-editor { min-height: 20rem; overflow: auto; }
+.tmp-case-editor table, .tmp-case-preview table, .tmp-case-content table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+.tmp-case-editor th, .tmp-case-editor td, .tmp-case-preview th, .tmp-case-preview td, .tmp-case-content th, .tmp-case-content td { border: 1px solid #adb5bd; padding: .35rem .5rem; vertical-align: top; }
+.tmp-case-preview, .tmp-case-content { overflow-x: auto; }
+.tmp-case-preview { min-height: 8rem; border: 1px solid #dee2e6; border-radius: .375rem; padding: 1rem; background: #fff; }
+.tmp-align-left { text-align: left; }
+.tmp-align-center { text-align: center; }
+.tmp-align-right { text-align: right; }

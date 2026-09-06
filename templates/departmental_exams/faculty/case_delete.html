@@ -1,0 +1,5 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Delete Case | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<h1 class="h3">Delete Case</h1><div class="card shadow-sm"><div class="card-body"><p>Delete <strong>{{ scenario.title|default:"this Case / Scenario" }}</strong>?</p><p class="text-muted">A Case can be deleted only after all Linked Questions have been deleted. Questions are never silently detached.</p><form method="post">{% csrf_token %}{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}{% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}<button class="btn btn-danger" type="submit">Delete Case</button> <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:faculty_case_detail' contribution.id scenario.id %}">Cancel</a></form></div></div>
+{% endblock %}

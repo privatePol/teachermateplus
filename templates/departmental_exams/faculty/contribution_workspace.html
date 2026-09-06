@@ -1,7 +1,7 @@
 {% extends "faculty_portal/base.html" %}
-{% load static %}
+{% load static departmental_exam_content %}
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">{% endblock %}
 {% block faculty_content %}
 <div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item active">{{ contribution.cycle_course.course.code }}</li></ol></nav>
@@ -73,7 +73,8 @@
 {% if is_mutable %}
   <div class="d-flex flex-wrap gap-2 mb-3">
     {% if not quota_reached %}
-      <a class="btn btn-primary" href="{% url 'departmental_exams:question_create' contribution.id %}">Add question</a>
+      <a class="btn btn-primary" href="{% url 'departmental_exams:question_create' contribution.id %}">{% if case_authoring_enabled %}Add Standalone MCQ{% else %}Add question{% endif %}</a>
+      {% if case_mutation_enabled %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:faculty_case_create' contribution.id %}">Create Case-Based Question Group</a>{% endif %}
       <a class="btn btn-outline-primary" href="{% url 'departmental_exams:csv_upload' contribution.id %}">Upload CSV</a>
       {% if docx_import_enabled %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:docx_upload' contribution.id %}">Import from Word (.docx)</a>{% endif %}
     {% endif %}
@@ -81,44 +82,44 @@
     {% if saved_count == quota %}<a class="btn btn-success" href="{% url 'departmental_exams:contribution_submit' contribution.id %}">Final submission</a>{% endif %}
   </div>
 {% endif %}
-{% if questions %}
-  {% if is_mutable %}
-  <form method="post" action="{% url 'departmental_exams:question_reorder' contribution.id %}" id="question-order-form" class="mb-3">
-    {% csrf_token %}
-    <input type="hidden" name="expected_contribution_revision" value="{{ contribution.revision }}">
-    <input type="hidden" name="ordered_question_ids" id="ordered-question-ids">
-    <button class="btn btn-sm btn-outline-primary" type="submit">Save displayed order</button>
-  </form>
-  {% endif %}
-  <div id="question-list">
-    {% for question in questions %}
-      <article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}" data-scientific-group>
+{% if faculty_cases %}
+  <section class="mb-4" aria-labelledby="case-groups-heading">
+    <h2 class="h4" id="case-groups-heading">Case-Based Questions</h2>
+    {% for scenario in faculty_cases %}
+      <article class="card shadow-sm mb-3">
+        <div class="card-header d-flex flex-wrap justify-content-between gap-2">
+          <div><strong>{{ scenario.title|default:"Case / Scenario" }}</strong>{% if scenario.section %} <span class="badge text-bg-secondary">{{ scenario.section.title }}</span>{% endif %}</div>
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:faculty_case_detail' contribution.id scenario.id %}">View Case</a>
+        </div>
         <div class="card-body">
-          <div class="d-flex justify-content-between gap-3">
-            <h2 class="h5">Question <span class="question-position">{{ question.position }}</span></h2>
-            <span class="badge text-bg-light">{{ question.get_difficulty_display }} · {{ question.get_entry_method_display }}</span>
-          </div>
-          <div class="mb-2" data-scientific-content>{{ question.question_text }}</div>
-          <ol type="A" class="mb-2">
-            <li{% if question.correct_answer == 'A' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_a }}</span></li>
-            <li{% if question.correct_answer == 'B' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_b }}</span></li>
-            <li{% if question.correct_answer == 'C' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_c }}</span></li>
-            <li{% if question.correct_answer == 'D' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_d }}</span></li>
-          </ol>
-          <p class="small mb-2"><strong>Correct answer:</strong> {{ question.correct_answer }}</p>
-          {% if is_mutable %}
-            <div class="d-flex flex-wrap gap-2">
-              <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:question_edit' contribution.id question.id %}">Edit</a>
-              <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:question_delete' contribution.id question.id %}">Delete</a>
-              <button type="button" class="btn btn-sm btn-outline-secondary move-up">Move up</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary move-down">Move down</button>
-            </div>
-          {% endif %}
+          <div class="tmp-case-content mb-3" data-scientific-content>{{ scenario.stimulus|scenario_content:scenario.content_format }}</div>
+          <p class="small text-muted mb-2">{{ scenario.ordered_members|length }} Linked Question{{ scenario.ordered_members|length|pluralize }}</p>
+          {% for member in scenario.ordered_members %}
+            {% include "departmental_exams/faculty/_question_card.html" with question=member.question show_global_reorder=False %}
+          {% empty %}
+            <div class="alert alert-warning mb-0">This Case has no Linked Questions yet.</div>
+          {% endfor %}
         </div>
       </article>
     {% endfor %}
+  </section>
+{% endif %}
+{% if standalone_questions %}
+  <h2 class="h4">{% if case_authoring_enabled %}Standalone MCQs{% else %}Saved Questions{% endif %}</h2>
+  {% if is_mutable and not case_authoring_enabled %}
+    <form method="post" action="{% url 'departmental_exams:question_reorder' contribution.id %}" id="question-order-form" class="mb-3">
+      {% csrf_token %}
+      <input type="hidden" name="expected_contribution_revision" value="{{ contribution.revision }}">
+      <input type="hidden" name="ordered_question_ids" id="ordered-question-ids">
+      <button class="btn btn-sm btn-outline-primary" type="submit">Save displayed order</button>
+    </form>
+  {% endif %}
+  <div id="question-list">
+    {% for question in standalone_questions %}
+      {% include "departmental_exams/faculty/_question_card.html" with show_global_reorder=True %}
+    {% endfor %}
   </div>
-{% else %}
+{% elif not faculty_cases %}
   <div class="alert alert-info">No questions have been saved.</div>
 {% endif %}
 </div>

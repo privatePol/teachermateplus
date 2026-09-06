@@ -340,7 +340,9 @@ def blueprint_review_view(request, cycle_course_id):
                 },
             )
         scenarios = list(
-            ExamScenario.objects.filter(blueprint=blueprint)
+            ExamScenario.objects.filter(
+                blueprint=blueprint, contribution__isnull=True
+            )
             .select_related("section")
             .prefetch_related(
                 Prefetch(

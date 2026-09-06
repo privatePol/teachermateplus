@@ -1,0 +1,29 @@
+{% extends "faculty_portal/base.html" %}
+{% load static departmental_exam_content %}
+{% block title %}{% if scenario %}Edit{% else %}Create{% endif %} Case | TeacherMate+{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">{% endblock %}
+{% block faculty_content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Contribution Workspace</a></li><li class="breadcrumb-item active">{% if scenario %}Edit Case{% else %}Create Case{% endif %}</li></ol></nav>
+<h1 class="h3">{% if scenario %}Edit Case / Scenario{% else %}Create Case-Based Question Group{% endif %}</h1>
+<p class="text-muted">Paste existing content from Microsoft Word. TeacherMate+ preserves supported paragraphs, headings, emphasis, lists, tables, merged cells, alignment, Unicode symbols, superscript/subscript, and TMP LaTeX delimiters. Native Word equations and pasted images are not supported.</p>
+<form method="post" class="card shadow-sm" data-case-editor-form data-preview-url="{{ preview_url }}" novalidate>
+  <div class="card-body">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    {% for hidden in form.hidden_fields %}{{ hidden }}{% for error in hidden.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}{% endfor %}
+    {% if form.section_id %}<div class="mb-3"><label class="form-label" for="{{ form.section_id.id_for_label }}">{{ form.section_id.label }} <span class="text-danger">*</span></label>{{ form.section_id }}{% for error in form.section_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>{% endif %}
+    <div class="mb-3"><label class="form-label" for="{{ form.title.id_for_label }}">Title</label>{{ form.title }}{% for error in form.title.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+    <div class="mb-3">
+      <label class="form-label" for="case-rich-editor">Case / Scenario content <span class="text-danger">*</span></label>
+      <div id="case-rich-editor" class="tmp-case-editor form-control" contenteditable="true" role="textbox" aria-multiline="true" data-case-rich-editor>{{ form.stimulus.value|scenario_content:"RICH_HTML_V1" }}</div>
+      <div class="form-text">Use Ctrl+V to paste from Word. Content is normalized in the browser and sanitized again by the server.</div>
+      {% for error in form.stimulus.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+    </div>
+    <div class="alert alert-danger" data-case-editor-errors hidden></div>
+    <div class="alert alert-warning" data-case-editor-warnings hidden></div>
+    <div class="d-flex flex-wrap gap-2 mb-3"><button type="button" class="btn btn-outline-primary" data-case-preview-button>Preview sanitized Case</button><button type="submit" class="btn btn-primary">Save Case</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Cancel</a></div>
+    <section aria-labelledby="case-preview-heading"><h2 class="h5" id="case-preview-heading">Server-authoritative preview</h2><div class="tmp-case-preview" data-case-preview data-scientific-content><p class="text-muted mb-0">Choose Preview to review the exact canonical content that can be saved.</p></div></section>
+  </div>
+</form>
+{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'js/departmental_exam_case_editor.js' %}"></script>{% endblock %}

@@ -781,7 +781,9 @@ class Stage6ReadinessService:
         scenarios = []
         if not automatic_flat_mode and blueprint is not None:
             scenarios = list(
-                ExamScenario.objects.filter(blueprint=blueprint)
+                ExamScenario.objects.filter(
+                    blueprint=blueprint, contribution__isnull=True
+                )
                 .select_related("section")
                 .prefetch_related(
                     Prefetch(

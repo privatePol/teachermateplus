@@ -74,6 +74,11 @@ urlpatterns = [
         name="question_create",
     ),
     path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/cases/<int:scenario_id>/questions/add/",
+        faculty_views.question_create_view,
+        name="faculty_case_question_create",
+    ),
+    path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/questions/<int:question_id>/edit/",
         faculty_views.question_edit_view,
         name="question_edit",
@@ -87,6 +92,36 @@ urlpatterns = [
         "faculty/departmental-exams/contributions/<int:contribution_id>/questions/reorder/",
         faculty_views.question_reorder_view,
         name="question_reorder",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/cases/preview/",
+        faculty_views.faculty_case_preview_view,
+        name="faculty_case_preview",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/cases/create/",
+        faculty_views.faculty_case_create_view,
+        name="faculty_case_create",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/cases/<int:scenario_id>/",
+        faculty_views.faculty_case_detail_view,
+        name="faculty_case_detail",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/cases/<int:scenario_id>/edit/",
+        faculty_views.faculty_case_edit_view,
+        name="faculty_case_edit",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/cases/<int:scenario_id>/delete/",
+        faculty_views.faculty_case_delete_view,
+        name="faculty_case_delete",
+    ),
+    path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/cases/<int:scenario_id>/questions/reorder/",
+        faculty_views.faculty_case_reorder_view,
+        name="faculty_case_reorder",
     ),
     path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/csv/template/",

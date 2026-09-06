@@ -10,6 +10,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from django.views.decorators.cache import never_cache
 
 from apps.core.decorators import portal_required
 from apps.core.services.features import FeatureSettingsService
@@ -24,6 +25,9 @@ from .contribution_authorization import (
 from .answer_key_release import FacultyAnswerKeyReleaseService
 from .contribution_forms import (
     ContributionSubmitForm,
+    FacultyCaseDeleteForm,
+    FacultyCaseForm,
+    FacultyCaseMemberReorderForm,
     QuestionCSVConfirmForm,
     QuestionCSVUploadForm,
     QuestionDOCXRowForm,
@@ -38,9 +42,17 @@ from .contribution_services import (
     ContributionDifficultyDistributionService,
     QuestionMutationService,
 )
+from .faculty_case_services import FacultyCaseMutationService, FacultyCasePolicy
 from .csv_import import CSV_FILENAME, QuestionCSVImportService
 from .docx_import import QuestionDOCXImportService
-from .models import FacultyContribution, Question, QuestionImportBatch
+from .models import (
+    ExamBlueprint,
+    ExamScenario,
+    FacultyContribution,
+    Question,
+    QuestionImportBatch,
+)
+from .scenario_content import canonicalize_scenario_content
 from .questionnaire_printing import (
     FacultyQuestionnairePrintService,
     _questionnaire_paper_context,
@@ -181,9 +193,36 @@ def _workspace_context(request, contribution):
         quota=quota,
         configuration=configuration,
     )
+    try:
+        case_context = FacultyCasePolicy.context(
+            contribution=contribution,
+            tenant_id=tenant_id,
+            required=False,
+        )
+    except (PermissionDenied, ValidationError):
+        case_context = None
+    scenarios = []
+    linked_question_ids = set()
+    if case_context is not None:
+        scenarios = list(
+            contribution.faculty_scenarios.select_related("section")
+            .prefetch_related("members__question")
+            .order_by("created_at", "id")
+        )
+        for scenario in scenarios:
+            scenario.ordered_members = sorted(
+                scenario.members.all(), key=lambda member: (member.position, member.id)
+            )
+            linked_question_ids.update(
+                member.question_id for member in scenario.ordered_members
+            )
     return {
         "contribution": contribution,
         "questions": questions,
+        "standalone_questions": [
+            question for question in questions if question.id not in linked_question_ids
+        ],
+        "faculty_cases": scenarios,
         "saved_count": saved_count,
         "quota": quota,
         "remaining": max(quota - saved_count, 0),
@@ -212,6 +251,34 @@ def _workspace_context(request, contribution):
         "docx_import_enabled": FeatureSettingsService.is_departmental_exam_docx_import_enabled(
             tenant_id=cycle.tenant_id, default=False
         ),
+        "case_authoring_enabled": case_context is not None,
+        "case_mutation_enabled": case_context is not None and is_mutable,
+    }
+
+
+def _question_structure_options(request, contribution, question=None, scenario=None):
+    tenant_id, _campus_id = _scope(request)
+    context = FacultyCasePolicy.context(
+        contribution=contribution,
+        tenant_id=tenant_id,
+        required=False,
+    )
+    if context is None:
+        return {"sections": None, "require_section": False, "section_id": None, "scenario_id": None}
+    blueprint, sections = context
+    fixed_section = scenario.section if scenario else None
+    section_id = None
+    if fixed_section:
+        section_id = fixed_section.id
+    elif question is not None:
+        placement = getattr(question, "blueprint_placement", None)
+        section_id = placement.section_id if placement else None
+    return {
+        "sections": sections if blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS else None,
+        "require_section": blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS,
+        "fixed_section": fixed_section,
+        "section_id": section_id,
+        "scenario_id": scenario.id if scenario else None,
     }
 
 
@@ -525,6 +592,7 @@ def checking_master_print_view(request, contribution_id, release_id, set_code):
 
 
 @_faculty_error_page
+@never_cache
 @portal_required("FACULTY")
 def contribution_workspace_view(request, contribution_id):
     contribution = _owner_contribution(request, contribution_id)
@@ -561,11 +629,32 @@ def _question_initial(question, contribution):
 @_faculty_error_page
 @portal_required("FACULTY")
 @require_http_methods(["GET", "POST"])
-def question_create_view(request, contribution_id):
+def question_create_view(request, contribution_id, scenario_id=None):
     contribution = _owner_contribution(request, contribution_id)
     _require_currently_mutable(request, contribution)
     _require_add_capacity(contribution)
-    form = QuestionForm(request.POST or None, initial=_question_initial(None, contribution))
+    scenario = None
+    if scenario_id is not None:
+        scenario = get_object_or_404(
+            ExamScenario,
+            pk=scenario_id,
+            contribution=contribution,
+            contribution__faculty_user=request.user,
+        )
+    structure = _question_structure_options(
+        request, contribution, scenario=scenario
+    )
+    initial = _question_initial(None, contribution)
+    if structure["section_id"]:
+        initial["section_id"] = structure["section_id"]
+    form = QuestionForm(
+        request.POST or None,
+        initial=initial,
+        sections=structure["sections"],
+        require_section=structure["require_section"],
+        fixed_section=structure.get("fixed_section"),
+        scenario_id=structure["scenario_id"],
+    )
     if request.method == "POST" and form.is_valid():
         tenant_id, campus_id = _scope(request)
         try:
@@ -576,18 +665,20 @@ def question_create_view(request, contribution_id):
                 campus_id=campus_id,
                 expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
                 payload=form.cleaned_data,
+                section_id=form.cleaned_data.get("section_id"),
+                scenario_id=form.cleaned_data.get("scenario_id"),
                 request=request,
             )
         except (ContributionConflict, ValidationError) as exc:
             return _error_response(request, exc)
         if getattr(question, "duplicate_warning", False):
             messages.warning(request, "This question resembles another question you have saved. It was saved because duplicates are warning-only.")
-        messages.success(request, "Question added.")
+        messages.success(request, "Linked Question added." if scenario else "Question added.")
         return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
     return render(
         request,
         "departmental_exams/faculty/question_form.html",
-        {"form": form, "contribution": contribution, "mode": "create"},
+        {"form": form, "contribution": contribution, "mode": "create", "scenario": scenario},
         status=400 if request.method == "POST" else 200,
     )
 
@@ -604,7 +695,22 @@ def question_edit_view(request, contribution_id, question_id):
         contribution__faculty_user=request.user,
     )
     _require_currently_mutable(request, contribution)
-    form = QuestionForm(request.POST or None, initial=_question_initial(question, contribution))
+    membership = getattr(question, "exam_scenario_membership", None)
+    scenario = membership.scenario if membership else None
+    structure = _question_structure_options(
+        request, contribution, question=question, scenario=scenario
+    )
+    initial = _question_initial(question, contribution)
+    if structure["section_id"]:
+        initial["section_id"] = structure["section_id"]
+    form = QuestionForm(
+        request.POST or None,
+        initial=initial,
+        sections=structure["sections"],
+        require_section=structure["require_section"],
+        fixed_section=structure.get("fixed_section"),
+        scenario_id=structure["scenario_id"],
+    )
     if request.method == "POST" and form.is_valid():
         tenant_id, campus_id = _scope(request)
         try:
@@ -617,6 +723,8 @@ def question_edit_view(request, contribution_id, question_id):
                 expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
                 expected_question_revision=form.cleaned_data["expected_question_revision"],
                 payload=form.cleaned_data,
+                section_id=form.cleaned_data.get("section_id"),
+                scenario_id=form.cleaned_data.get("scenario_id"),
                 request=request,
             )
         except (ContributionConflict, ValidationError) as exc:
@@ -628,7 +736,7 @@ def question_edit_view(request, contribution_id, question_id):
     return render(
         request,
         "departmental_exams/faculty/question_form.html",
-        {"form": form, "contribution": contribution, "question": question, "mode": "edit"},
+        {"form": form, "contribution": contribution, "question": question, "mode": "edit", "scenario": scenario},
         status=400 if request.method == "POST" else 200,
     )
 
@@ -700,6 +808,278 @@ def question_reorder_view(request, contribution_id):
         return _error_response(request, exc)
     messages.success(request, "Question order saved.")
     return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
+
+
+def _owner_case(request, contribution, scenario_id):
+    scenario = get_object_or_404(
+        ExamScenario.objects.select_related("section", "blueprint"),
+        pk=scenario_id,
+        contribution=contribution,
+        contribution__faculty_user=request.user,
+    )
+    tenant_id, _campus_id = _scope(request)
+    FacultyCasePolicy.context(
+        contribution=contribution,
+        tenant_id=tenant_id,
+    )
+    return scenario
+
+
+def _case_form(request, contribution, scenario=None):
+    tenant_id, _campus_id = _scope(request)
+    blueprint, sections = FacultyCasePolicy.context(
+        contribution=contribution,
+        tenant_id=tenant_id,
+    )
+    initial = {
+        "expected_contribution_revision": contribution.revision,
+        "expected_scenario_revision": scenario.revision if scenario else 0,
+        "title": scenario.title if scenario else "",
+        "stimulus": scenario.stimulus if scenario else "",
+    }
+    if scenario and scenario.section_id:
+        initial["section_id"] = scenario.section_id
+    return FacultyCaseForm(
+        request.POST or None,
+        initial=initial,
+        sections=sections,
+        require_section=blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS,
+    )
+
+
+def _render_case_form(request, *, contribution, form, scenario=None, status=200):
+    return render(
+        request,
+        "departmental_exams/faculty/case_form.html",
+        {
+            "contribution": contribution,
+            "scenario": scenario,
+            "form": form,
+            "preview_url": reverse(
+                "departmental_exams:faculty_case_preview",
+                args=[contribution.id],
+            ),
+        },
+        status=status,
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_POST
+def faculty_case_preview_view(request, contribution_id):
+    contribution = _owner_contribution(request, contribution_id)
+    _require_currently_mutable(request, contribution)
+    tenant_id, _campus_id = _scope(request)
+    FacultyCasePolicy.context(contribution=contribution, tenant_id=tenant_id)
+    try:
+        canonical = canonicalize_scenario_content(
+            request.POST.get("stimulus", ""),
+            input_format=request.POST.get("input_format", "html"),
+        )
+    except ValidationError as exc:
+        return JsonResponse({"errors": exc.messages}, status=400)
+    return JsonResponse(
+        {"html": canonical.html, "warnings": list(canonical.warnings)}
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def faculty_case_create_view(request, contribution_id):
+    contribution = _owner_contribution(request, contribution_id)
+    _require_currently_mutable(request, contribution)
+    form = _case_form(request, contribution)
+    if request.method == "POST" and form.is_valid():
+        tenant_id, campus_id = _scope(request)
+        try:
+            scenario, _creating = FacultyCaseMutationService.save(
+                contribution_id=contribution.id,
+                user=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
+                expected_scenario_revision=form.cleaned_data.get("expected_scenario_revision") or 0,
+                title=form.cleaned_data["title"],
+                raw_content=form.cleaned_data["stimulus"],
+                section_id=form.cleaned_data.get("section_id"),
+                request=request,
+            )
+        except (ContributionConflict, ValidationError) as exc:
+            form.add_error(None, exc)
+        else:
+            for warning in getattr(scenario, "content_warnings", ()):
+                messages.warning(request, warning)
+            messages.success(request, "Case saved. You can now add Linked Questions.")
+            return redirect(
+                "departmental_exams:faculty_case_detail",
+                contribution_id=contribution.id,
+                scenario_id=scenario.id,
+            )
+    return _render_case_form(
+        request,
+        contribution=contribution,
+        form=form,
+        status=400 if request.method == "POST" else 200,
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+def faculty_case_detail_view(request, contribution_id, scenario_id):
+    contribution = _owner_contribution(request, contribution_id)
+    scenario = _owner_case(request, contribution, scenario_id)
+    members = list(
+        scenario.members.select_related("question").order_by("position", "id")
+    )
+    tenant_id, campus_id = _scope(request)
+    try:
+        mutable = bool(
+            ContributionAuthorizationService.require_mutable_locked(
+                user=request.user,
+                contribution=contribution,
+                configuration=contribution.cycle_course.configuration,
+                request_tenant_id=tenant_id,
+                request_campus_id=campus_id,
+            )
+        )
+    except PermissionDenied:
+        mutable = False
+    return render(
+        request,
+        "departmental_exams/faculty/case_detail.html",
+        {
+            "contribution": contribution,
+            "scenario": scenario,
+            "members": members,
+            "is_mutable": mutable,
+        },
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def faculty_case_edit_view(request, contribution_id, scenario_id):
+    contribution = _owner_contribution(request, contribution_id)
+    scenario = _owner_case(request, contribution, scenario_id)
+    _require_currently_mutable(request, contribution)
+    form = _case_form(request, contribution, scenario)
+    if request.method == "POST" and form.is_valid():
+        tenant_id, campus_id = _scope(request)
+        try:
+            updated, _creating = FacultyCaseMutationService.save(
+                contribution_id=contribution.id,
+                scenario_id=scenario.id,
+                user=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
+                expected_scenario_revision=form.cleaned_data["expected_scenario_revision"],
+                title=form.cleaned_data["title"],
+                raw_content=form.cleaned_data["stimulus"],
+                section_id=form.cleaned_data.get("section_id"),
+                request=request,
+            )
+        except (ContributionConflict, ValidationError) as exc:
+            form.add_error(None, exc)
+        else:
+            for warning in getattr(updated, "content_warnings", ()):
+                messages.warning(request, warning)
+            messages.success(request, "Case updated.")
+            return redirect(
+                "departmental_exams:faculty_case_detail",
+                contribution_id=contribution.id,
+                scenario_id=scenario.id,
+            )
+    return _render_case_form(
+        request,
+        contribution=contribution,
+        form=form,
+        scenario=scenario,
+        status=400 if request.method == "POST" else 200,
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def faculty_case_delete_view(request, contribution_id, scenario_id):
+    contribution = _owner_contribution(request, contribution_id)
+    scenario = _owner_case(request, contribution, scenario_id)
+    _require_currently_mutable(request, contribution)
+    form = FacultyCaseDeleteForm(
+        request.POST or None,
+        initial={
+            "expected_contribution_revision": contribution.revision,
+            "expected_scenario_revision": scenario.revision,
+        },
+    )
+    if request.method == "POST" and form.is_valid():
+        tenant_id, campus_id = _scope(request)
+        try:
+            FacultyCaseMutationService.delete(
+                contribution_id=contribution.id,
+                scenario_id=scenario.id,
+                user=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
+                expected_scenario_revision=form.cleaned_data["expected_scenario_revision"],
+                request=request,
+            )
+        except (ContributionConflict, ValidationError) as exc:
+            form.add_error(None, exc)
+        else:
+            messages.success(request, "Case deleted.")
+            return redirect(
+                "departmental_exams:contribution_workspace",
+                contribution_id=contribution.id,
+            )
+    return render(
+        request,
+        "departmental_exams/faculty/case_delete.html",
+        {"contribution": contribution, "scenario": scenario, "form": form},
+        status=400 if request.method == "POST" else 200,
+    )
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_POST
+def faculty_case_reorder_view(request, contribution_id, scenario_id):
+    contribution = _owner_contribution(request, contribution_id)
+    scenario = _owner_case(request, contribution, scenario_id)
+    form = FacultyCaseMemberReorderForm(request.POST)
+    if not form.is_valid():
+        return _error_response(request, default_status=400)
+    tenant_id, campus_id = _scope(request)
+    try:
+        FacultyCaseMutationService.reorder_members(
+            contribution_id=contribution.id,
+            scenario_id=scenario.id,
+            ordered_question_ids=form.cleaned_data["ordered_question_ids"],
+            user=request.user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+            expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
+            expected_scenario_revision=form.cleaned_data["expected_scenario_revision"],
+            request=request,
+        )
+    except (ContributionConflict, ValidationError) as exc:
+        return _error_response(request, exc)
+    messages.success(request, "Linked Question order saved.")
+    return redirect(
+        "departmental_exams:faculty_case_detail",
+        contribution_id=contribution.id,
+        scenario_id=scenario.id,
+    )
 
 
 @_faculty_error_page

@@ -1159,7 +1159,7 @@ class ScenarioMutationService:
         scenario = None
         if scenario_id is not None:
             scenario = ExamScenario.objects.select_for_update().filter(
-                pk=scenario_id, blueprint=blueprint
+                pk=scenario_id, blueprint=blueprint, contribution__isnull=True
             ).first()
             if scenario is None:
                 raise Http404
@@ -1246,6 +1246,7 @@ class ScenarioMutationService:
     ):
         identity = ExamScenario.objects.filter(
             pk=scenario_id,
+            contribution__isnull=True,
             blueprint__cycle_course__cycle__tenant_id=tenant_id,
         ).values("blueprint__cycle_course_id").first()
         if identity is None:
@@ -1261,7 +1262,7 @@ class ScenarioMutationService:
         if blueprint is None:
             raise Http404
         scenario = ExamScenario.objects.select_for_update().get(
-            pk=scenario_id, blueprint=blueprint
+            pk=scenario_id, blueprint=blueprint, contribution__isnull=True
         )
         if scenario.revision != expected_revision:
             raise Stage6Conflict("The scenario changed after the page was loaded.")

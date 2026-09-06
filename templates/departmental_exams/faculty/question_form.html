@@ -2,7 +2,8 @@
 {% block title %}{% if mode == 'edit' %}Edit{% else %}Add{% endif %} Question | TeacherMate+{% endblock %}
 {% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
 {% block faculty_content %}
-<h1 class="h3">{% if mode == 'edit' %}Edit{% else %}Add{% endif %} question</h1>
+<h1 class="h3">{% if mode == 'edit' %}Edit{% else %}Add{% endif %} {% if scenario %}Linked {% endif %}Question</h1>
+{% if scenario %}<p class="text-muted">This MCQ belongs to <strong>{{ scenario.title|default:"Case / Scenario" }}</strong>{% if scenario.section %} in {{ scenario.section.title }}{% endif %}.</p>{% endif %}
 <p class="text-muted">Enter ordinary text normally. Use the scientific notation tools for equations, symbols, matrices, and chemical formulas. Choices are compared using normalized Unicode, whitespace, and case.</p>
 <form method="post" class="card shadow-sm" data-scientific-question-editor novalidate><div class="card-body">
   {% csrf_token %}
