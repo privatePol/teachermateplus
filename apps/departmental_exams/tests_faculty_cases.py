@@ -1,3 +1,5 @@
+from html.parser import HTMLParser
+
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404
 from django.test import SimpleTestCase
@@ -36,6 +38,54 @@ from .stage4_test_support import Stage4TestCase
 from .tests_stage5_contributions import Stage5FixtureMixin
 
 
+class _ElementCounter(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.count = 0
+
+    def handle_starttag(self, _tag, _attrs):
+        self.count += 1
+
+    def handle_startendtag(self, _tag, _attrs):
+        self.count += 1
+
+
+def _element_count(value):
+    counter = _ElementCounter()
+    counter.feed(value)
+    counter.close()
+    return counter.count
+
+
+def _realistic_word_accounting_case():
+    narrative = "".join(
+        f'<p class="MsoNormal">Accounting narrative {index}</p>'
+        for index in range(1, 6)
+    )
+    tables = []
+    for table_number in range(1, 6):
+        rows = []
+        for row_number in range(1, 17):
+            cells = []
+            for column_number in range(1, 9):
+                if (table_number, row_number, column_number) in {(1, 2, 1), (1, 3, 2)}:
+                    continue
+                attributes = ""
+                if (table_number, row_number, column_number) == (1, 1, 1):
+                    attributes = ' rowspan="2"'
+                elif (table_number, row_number, column_number) == (1, 3, 1):
+                    attributes = ' colspan="2"'
+                value = f"T{table_number}R{row_number}C{column_number} ₱1,250"
+                cells.append(
+                    f'<td{attributes}><p class="MsoNormal">&nbsp;</p>'
+                    f'<p class="MsoNormal"><span>{value}</span></p>'
+                    '<p class="MsoNormal"><br></p></td>'
+                )
+            rows.append("<tr>" + "".join(cells) + "</tr>")
+        tables.append("<table><tbody>" + "".join(rows) + "</tbody></table>")
+    return "<!--[if gte mso 9]><xml>Word metadata</xml><![endif]-->" + narrative + "".join(tables)
+
+
 class ScenarioContentTests(SimpleTestCase):
     def test_word_semantics_tables_unicode_alignment_and_idempotence(self):
         raw = """
@@ -59,6 +109,55 @@ class ScenarioContentTests(SimpleTestCase):
         self.assertEqual(result.html.count("<table>"), 2)
         self.assertEqual(canonicalize_scenario_content(result.html).html, result.html)
         self.assertTrue(result.warnings)
+
+    def test_realistic_word_accounting_tables_compact_below_node_limit(self):
+        raw = _realistic_word_accounting_case()
+
+        self.assertGreater(_element_count(raw), MAX_NODES)
+        result = canonicalize_scenario_content(raw)
+
+        self.assertLess(_element_count(result.html), MAX_NODES)
+        self.assertEqual(result.html.count("<table>"), 5)
+        self.assertEqual(result.html.count("<tr>"), 80)
+        self.assertEqual(result.html.count("<td"), 638)
+        self.assertEqual(result.html.count('rowspan="2"'), 1)
+        self.assertEqual(result.html.count('colspan="2"'), 1)
+        self.assertIn("T1R1C1 ₱1,250", result.html)
+        self.assertIn("T5R16C8 ₱1,250", result.html)
+        self.assertNotIn("<p>&nbsp;</p>", result.html)
+        self.assertNotIn("<p><br></p>", result.html)
+        self.assertEqual(canonicalize_scenario_content(result.html).html, result.html)
+
+    def test_cell_paragraph_compaction_preserves_meaning_and_alignment(self):
+        single = canonicalize_scenario_content(
+            '<table><tr><td><p>&nbsp;</p><p class="tmp-align-right">'
+            '<strong>Only paragraph</strong></p><p><br></p></td></tr></table>'
+        ).html
+        multiple = canonicalize_scenario_content(
+            "<table><tr><th><p>First paragraph</p><p>Second paragraph</p>"
+            "</th></tr></table>"
+        ).html
+
+        self.assertIn(
+            '<td class="tmp-align-right"><strong>Only paragraph</strong></td>',
+            single,
+        )
+        self.assertIn(
+            "<th><p>First paragraph</p><p>Second paragraph</p></th>",
+            multiple,
+        )
+
+    def test_repeated_spacing_and_word_block_wrappers_compact_idempotently(self):
+        result = canonicalize_scenario_content(
+            "<div><p>First</p><p></p><p>&nbsp;</p><p><br></p>"
+            "<p>A&nbsp;&nbsp;&nbsp;B<br><br><br><br>C</p><p>Last</p></div>"
+        )
+
+        self.assertEqual(
+            result.html,
+            "<p>First</p><p>A&nbsp;B<br><br>C</p><p>Last</p>",
+        )
+        self.assertEqual(canonicalize_scenario_content(result.html).html, result.html)
 
     def test_xss_and_office_metadata_are_removed(self):
         result = canonicalize_scenario_content(
@@ -534,6 +633,84 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertIn("content_digest", serialized)
         self.assertNotIn("Confidential", serialized)
         self.assertNotIn("₱700", serialized)
+
+    def test_realistic_word_accounting_preview_and_save_share_compacted_canonical_html(self):
+        raw = _realistic_word_accounting_case()
+        preview = self.client.post(
+            reverse("departmental_exams:faculty_case_preview", args=[self.contribution.id]),
+            {"stimulus": raw, "input_format": "html"},
+        )
+
+        self.assertEqual(preview.status_code, 200, preview.content)
+        canonical = preview.json()["html"]
+        self.assertLess(_element_count(canonical), MAX_NODES)
+        response = self.client.post(
+            reverse("departmental_exams:faculty_case_create", args=[self.contribution.id]),
+            {
+                "expected_contribution_revision": self.contribution.revision,
+                "expected_scenario_revision": 0,
+                "title": "Accounting Case",
+                "stimulus": raw,
+                "section_id": self.section_a.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+        scenario = ExamScenario.objects.get(contribution=self.contribution)
+        self.assertEqual(scenario.stimulus, canonical)
+
+    def test_rejected_save_rerenders_safe_formatted_editor_without_literal_markup(self):
+        raw = (
+            '<table onclick="alert(1)"><tr><td>'
+            + "<p><strong>x</strong></p>" * 1001
+            + "</td></tr></table>"
+        )
+        response = self.client.post(
+            reverse("departmental_exams:faculty_case_create", args=[self.contribution.id]),
+            {
+                "expected_contribution_revision": self.contribution.revision,
+                "expected_scenario_revision": 0,
+                "title": "Oversized meaningful Case",
+                "stimulus": raw,
+                "section_id": self.section_a.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "at most 2,000 HTML elements", status_code=400)
+        body = response.content.decode()
+        editor_markup = body.split("data-case-rich-editor>", 1)[1].split("</div>", 1)[0]
+        self.assertIn("<table>", editor_markup)
+        self.assertIn("<p><strong>x</strong></p>", editor_markup)
+        self.assertNotIn("&lt;p&gt;", editor_markup)
+        self.assertNotIn("&lt;table", editor_markup)
+        self.assertNotIn("&lt;strong&gt;", editor_markup)
+        self.assertNotIn("onclick", editor_markup)
+        self.assertEqual(body.count('name="stimulus"'), 1)
+        self.assertIn('type="hidden"', body)
+
+    def test_unrenderable_rejected_source_is_recoverable_but_never_injected(self):
+        raw = '<p>Safe narrative</p><img src="x" onerror="alert(1)">'
+        response = self.client.post(
+            reverse("departmental_exams:faculty_case_create", args=[self.contribution.id]),
+            {
+                "expected_contribution_revision": self.contribution.revision,
+                "expected_scenario_revision": 0,
+                "title": "Unsupported image Case",
+                "stimulus": raw,
+                "section_id": self.section_a.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "Images and diagrams", status_code=400)
+        body = response.content.decode()
+        editor_markup = body.split("data-case-rich-editor>", 1)[1].split("</div>", 1)[0]
+        self.assertEqual(editor_markup, "")
+        self.assertIn('data-case-editor-display-unavailable="true"', body)
+        self.assertIn("TeacherMate+ could not safely format the submitted source", body)
+        self.assertIn("&lt;img", body)
+        self.assertNotIn('<img src="x"', body)
 
     def test_preview_rejects_images_and_word_equations_without_persistence(self):
         for raw, message in (

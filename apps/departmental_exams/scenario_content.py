@@ -26,6 +26,7 @@ MAX_ROWS_PER_TABLE = 100
 MAX_COLUMNS_PER_ROW = 20
 MAX_SPAN = 20
 MAX_ORDERED_LIST_START = 10_000
+MAX_COMPACTION_DEPTH = 128
 
 ALLOWED_TAGS = {
     "p", "h3", "h4", "strong", "em", "ul", "ol", "li", "table",
@@ -36,6 +37,7 @@ ALIGNMENT_CLASSES = {
     "tmp-align-left", "tmp-align-center", "tmp-align-right"
 }
 ALIGNABLE_TAGS = {"p", "h3", "h4", "th", "td"}
+INLINE_TAGS = {"strong", "em", "sup", "sub"}
 DROP_WITH_CONTENT = {
     "script", "style", "iframe", "object", "embed", "svg", "form",
     "button", "input", "select", "textarea", "option", "link", "meta",
@@ -328,6 +330,154 @@ class _LimitInspector(HTMLParser):
             raise ValidationError(f"Each table may contain at most {MAX_ROWS_PER_TABLE} rows.")
 
 
+class _SemanticNode:
+    def __init__(self, tag=None, attrs=()):
+        self.tag = tag
+        self.attrs = list(attrs)
+        self.children = []
+
+
+class _SemanticTreeParser(HTMLParser):
+    """Build a small tree from already-sanitized semantic HTML."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = _SemanticNode()
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        if len(self.stack) > MAX_COMPACTION_DEPTH:
+            raise ValidationError("Case content is too deeply nested to normalize safely.")
+        node = _SemanticNode(tag, attrs)
+        self.stack[-1].children.append(node)
+        if tag != "br":
+            self.stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        self.stack[-1].children.append(_SemanticNode(tag, attrs))
+
+    def handle_endtag(self, tag):
+        matching_index = next(
+            (
+                index
+                for index in range(len(self.stack) - 1, 0, -1)
+                if self.stack[index].tag == tag
+            ),
+            None,
+        )
+        if matching_index is not None:
+            del self.stack[matching_index:]
+
+    def handle_data(self, data):
+        self.stack[-1].children.append(data)
+
+
+def _is_spacing_text(value):
+    return not value.replace("\xa0", " ").strip()
+
+
+def _paragraph_has_visible_meaning(node):
+    for child in node.children:
+        if isinstance(child, str):
+            if not _is_spacing_text(child):
+                return True
+        elif child.tag not in INLINE_TAGS | {"br"}:
+            return True
+        elif _paragraph_has_visible_meaning(child):
+            return True
+    return False
+
+
+def _compact_repeated_spacing(value):
+    return re.sub(r"\xa0(?:[ \t\r\n]*\xa0)+", "\xa0", value)
+
+
+def _collapse_duplicate_breaks(children):
+    compacted = []
+    consecutive_breaks = 0
+    for child in children:
+        if not isinstance(child, str) and child.tag == "br":
+            consecutive_breaks += 1
+            if consecutive_breaks <= 2:
+                compacted.append(child)
+            continue
+        if isinstance(child, str) and _is_spacing_text(child) and consecutive_breaks:
+            continue
+        consecutive_breaks = 0
+        compacted.append(child)
+    return compacted
+
+
+def _unwrap_single_cell_paragraph(node):
+    meaningful_children = [
+        child
+        for child in node.children
+        if not (isinstance(child, str) and _is_spacing_text(child))
+    ]
+    if len(meaningful_children) != 1:
+        return
+    paragraph = meaningful_children[0]
+    if isinstance(paragraph, str) or paragraph.tag != "p":
+        return
+    paragraph_attrs = dict(paragraph.attrs)
+    if set(paragraph_attrs) - {"class"}:
+        return
+    cell_attrs = dict(node.attrs)
+    paragraph_alignment = paragraph_attrs.get("class")
+    cell_alignment = cell_attrs.get("class")
+    if paragraph_alignment and cell_alignment and paragraph_alignment != cell_alignment:
+        return
+    if paragraph_alignment and not cell_alignment:
+        node.attrs.append(("class", paragraph_alignment))
+    node.children = paragraph.children
+
+
+def _compact_semantic_node(node):
+    compacted_children = []
+    for child in node.children:
+        if isinstance(child, str):
+            compacted_children.append(_compact_repeated_spacing(child))
+            continue
+        _compact_semantic_node(child)
+        if child.tag == "p" and not _paragraph_has_visible_meaning(child):
+            continue
+        compacted_children.append(child)
+    node.children = _collapse_duplicate_breaks(compacted_children)
+    if node.tag in {"td", "th"}:
+        _unwrap_single_cell_paragraph(node)
+
+
+def _serialize_semantic_node(node):
+    if node.tag is None:
+        return "".join(
+            html.escape(child, quote=False)
+            if isinstance(child, str)
+            else _serialize_semantic_node(child)
+            for child in node.children
+        )
+    rendered_attrs = "".join(
+        f' {name}="{html.escape(value or "", quote=True)}"'
+        for name, value in node.attrs
+    )
+    if node.tag == "br":
+        return f"<{node.tag}{rendered_attrs}>"
+    content = "".join(
+        html.escape(child, quote=False)
+        if isinstance(child, str)
+        else _serialize_semantic_node(child)
+        for child in node.children
+    )
+    return f"<{node.tag}{rendered_attrs}>{content}</{node.tag}>"
+
+
+def _compact_semantic_html(value):
+    parser = _SemanticTreeParser()
+    parser.feed(value)
+    parser.close()
+    _compact_semantic_node(parser.root)
+    return _serialize_semantic_node(parser.root)
+
+
 def _plain_text_to_html(value):
     paragraphs = re.split(r"\n\s*\n", value.replace("\r\n", "\n").replace("\r", "\n"))
     return "".join(
@@ -337,7 +487,26 @@ def _plain_text_to_html(value):
     )
 
 
-def canonicalize_scenario_content(raw_content, *, input_format="html"):
+def _clean_semantic_html(value):
+    attributes = {
+        "ol": {"start"},
+        "th": {"rowspan", "colspan", "scope"},
+        "td": {"rowspan", "colspan"},
+    }
+    return nh3.clean(
+        value,
+        tags=ALLOWED_TAGS,
+        clean_content_tags=DROP_WITH_CONTENT,
+        attributes=attributes,
+        allowed_classes={tag: ALIGNMENT_CLASSES for tag in ALIGNABLE_TAGS},
+        url_schemes=set(),
+        url_relative="deny",
+        strip_comments=True,
+        link_rel=None,
+    ).strip()
+
+
+def _prepare_scenario_content(raw_content, *, input_format="html", enforce_structure=True):
     raw_content = raw_content or ""
     if len(raw_content) > MAX_RAW_CHARACTERS or len(raw_content.encode("utf-8")) > MAX_RAW_BYTES:
         raise ValidationError(
@@ -367,33 +536,31 @@ def canonicalize_scenario_content(raw_content, *, input_format="html"):
         )
     warnings.update(normalizer.warnings)
     normalized = "".join(normalizer.output)
-    attributes = {
-        "ol": {"start"},
-        "th": {"rowspan", "colspan", "scope"},
-        "td": {"rowspan", "colspan"},
-    }
-    canonical = nh3.clean(
-        normalized,
-        tags=ALLOWED_TAGS,
-        clean_content_tags=DROP_WITH_CONTENT,
-        attributes=attributes,
-        allowed_classes={tag: ALIGNMENT_CLASSES for tag in ALIGNABLE_TAGS},
-        url_schemes=set(),
-        url_relative="deny",
-        strip_comments=True,
-        link_rel=None,
-    ).strip()
+    sanitized = _clean_semantic_html(normalized)
+    canonical = _clean_semantic_html(_compact_semantic_html(sanitized))
     if len(canonical) > MAX_CANONICAL_CHARACTERS:
         raise ValidationError(
             f"Canonical Case content may not exceed {MAX_CANONICAL_CHARACTERS:,} characters."
         )
-    inspector = _LimitInspector()
-    inspector.feed(canonical)
-    inspector.close()
-    inspector.validate()
+    if enforce_structure:
+        inspector = _LimitInspector()
+        inspector.feed(canonical)
+        inspector.close()
+        inspector.validate()
     if not html.unescape(strip_tags(canonical)).strip():
         raise ValidationError("Case / Scenario content is required.")
     return CanonicalScenarioContent(canonical, tuple(sorted(warnings)))
+
+
+def canonicalize_scenario_content(raw_content, *, input_format="html"):
+    return _prepare_scenario_content(raw_content, input_format=input_format)
+
+
+def render_scenario_content_for_editor(value):
+    if not (value or "").strip():
+        return mark_safe("")
+    prepared = _prepare_scenario_content(value, enforce_structure=False)
+    return mark_safe(prepared.html)
 
 
 def render_scenario_content(value, content_format):

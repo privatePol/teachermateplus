@@ -6,7 +6,7 @@
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Contribution Workspace</a></li><li class="breadcrumb-item active">{% if scenario %}Edit Case{% else %}Create Case{% endif %}</li></ol></nav>
 <h1 class="h3">{% if scenario %}Edit Case / Scenario{% else %}Create Case-Based Question Group{% endif %}</h1>
 <p class="text-muted">Paste existing content from Microsoft Word. TeacherMate+ preserves supported paragraphs, headings, emphasis, lists, tables, merged cells, alignment, Unicode symbols, superscript/subscript, and TMP LaTeX delimiters. Native Word equations and pasted images are not supported.</p>
-<form method="post" class="card shadow-sm" data-case-editor-form data-preview-url="{{ preview_url }}" novalidate>
+<form method="post" class="card shadow-sm" data-case-editor-form data-preview-url="{{ preview_url }}" data-case-editor-display-unavailable="{{ editor_display_unavailable|yesno:'true,false' }}" novalidate>
   <div class="card-body">
     {% csrf_token %}
     {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
@@ -15,9 +15,10 @@
     <div class="mb-3"><label class="form-label" for="{{ form.title.id_for_label }}">Title</label>{{ form.title }}{% for error in form.title.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
     <div class="mb-3">
       <label class="form-label" for="case-rich-editor">Case / Scenario content <span class="text-danger">*</span></label>
-      <div id="case-rich-editor" class="tmp-case-editor form-control" contenteditable="true" role="textbox" aria-multiline="true" data-case-rich-editor>{{ form.stimulus.value|scenario_content:"RICH_HTML_V1" }}</div>
+      <div id="case-rich-editor" class="tmp-case-editor form-control" contenteditable="true" role="textbox" aria-multiline="true" data-case-rich-editor>{{ editor_display_html }}</div>
       <div class="form-text">Use Ctrl+V to paste from Word. Content is normalized in the browser and sanitized again by the server.</div>
       {% for error in form.stimulus.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+      {% if editor_display_unavailable %}<div class="alert alert-warning mt-3 mb-0" data-case-editor-recovery><p>TeacherMate+ could not safely format the submitted source. The original source is preserved below for recovery; paste corrected Word content into the editor before trying again.</p><details><summary>Show preserved source</summary><textarea class="form-control font-monospace mt-2" rows="8" readonly>{{ editor_recovery_source }}</textarea></details></div>{% endif %}
     </div>
     <div class="alert alert-danger" data-case-editor-errors hidden></div>
     <div class="alert alert-warning" data-case-editor-warnings hidden></div>

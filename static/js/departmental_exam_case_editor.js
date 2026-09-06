@@ -8,6 +8,7 @@
   const errorBox = form.querySelector("[data-case-editor-errors]");
   const warningBox = form.querySelector("[data-case-editor-warnings]");
   const previewButton = form.querySelector("[data-case-preview-button]");
+  let editorDirty = form.dataset.caseEditorDisplayUnavailable !== "true";
   const allowed = new Set(["P", "H3", "H4", "STRONG", "EM", "UL", "OL", "LI", "TABLE", "CAPTION", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD", "BR", "SUP", "SUB"]);
   const alignable = new Set(["P", "H3", "H4", "TH", "TD"]);
 
@@ -26,7 +27,11 @@
     if (["IMG", "SVG", "OBJECT", "EMBED", "IFRAME"].includes(name)) throw new Error("Images, diagrams, and embedded objects are not supported in Case content.");
     if (name.includes("OMATH") || /office:math/i.test(node.namespaceURI || "")) throw new Error("A native Word equation was detected. Replace it with TMP LaTeX or Unicode.");
     if (["SCRIPT", "STYLE", "FORM", "INPUT", "BUTTON", "SELECT", "TEXTAREA"].includes(name)) return documentRef.createDocumentFragment();
-    let targetName = { B: "STRONG", I: "EM", DIV: "P" }[name] || name;
+    let targetName = { B: "STRONG", I: "EM" }[name] || name;
+    if (name === "DIV") {
+      const containsBlock = [...node.children].some(child => ["P", "DIV", "H3", "H4", "UL", "OL", "TABLE"].includes(child.tagName.toUpperCase()));
+      targetName = containsBlock ? "" : "P";
+    }
     const wrappers = [];
     if (targetName === "SPAN") {
       const style = (node.getAttribute("style") || "").toLowerCase();
@@ -49,10 +54,54 @@
     [...node.childNodes].forEach(child => container.appendChild(normalizeNode(child, documentRef)));
     return result;
   }
+  function isSpacingText(node) {
+    return node.nodeType === Node.TEXT_NODE && !(node.textContent || "").replace(/\u00a0/g, " ").trim();
+  }
+  function isSpacerParagraph(paragraph) {
+    if (paragraph.tagName !== "P") return false;
+    if ((paragraph.textContent || "").replace(/\u00a0/g, " ").trim()) return false;
+    return ![...paragraph.querySelectorAll("*")].some(child => !["STRONG", "EM", "SUP", "SUB", "BR"].includes(child.tagName));
+  }
+  function collapseBreaks(container) {
+    let consecutive = 0;
+    [...container.childNodes].forEach(child => {
+      if (child.nodeType === Node.ELEMENT_NODE && child.tagName === "BR") {
+        consecutive += 1;
+        if (consecutive > 2) child.remove();
+      } else if (isSpacingText(child) && consecutive) {
+        child.remove();
+      } else {
+        consecutive = 0;
+      }
+    });
+  }
+  function compactSemanticHtml(holder) {
+    [...holder.querySelectorAll("*")].reverse().forEach(element => {
+      [...element.childNodes].forEach(child => {
+        if (child.nodeType === Node.TEXT_NODE) child.textContent = (child.textContent || "").replace(/\u00a0(?:[ \t\r\n]*\u00a0)+/g, "\u00a0");
+      });
+      [...element.children].filter(isSpacerParagraph).forEach(paragraph => paragraph.remove());
+      collapseBreaks(element);
+      if (["TD", "TH"].includes(element.tagName)) {
+        const meaningful = [...element.childNodes].filter(child => !isSpacingText(child));
+        if (meaningful.length === 1 && meaningful[0].nodeType === Node.ELEMENT_NODE && meaningful[0].tagName === "P") {
+          const paragraph = meaningful[0];
+          const paragraphAlign = [...paragraph.classList].find(value => value.startsWith("tmp-align-"));
+          const cellAlign = [...element.classList].find(value => value.startsWith("tmp-align-"));
+          if (!paragraphAlign || !cellAlign || paragraphAlign === cellAlign) {
+            if (paragraphAlign && !cellAlign) element.classList.add(paragraphAlign);
+            paragraph.replaceWith(...[...paragraph.childNodes]);
+          }
+        }
+      }
+    });
+    collapseBreaks(holder);
+  }
   function normalizedClipboardHtml(raw) {
     const parsed = new DOMParser().parseFromString(raw, "text/html");
     const holder = document.createElement("div");
     [...parsed.body.childNodes].forEach(node => holder.appendChild(normalizeNode(node, document)));
+    compactSemanticHtml(holder);
     return holder.innerHTML;
   }
   editor.addEventListener("paste", event => {
@@ -62,9 +111,11 @@
       const text = event.clipboardData.getData("text/plain");
       const value = html ? normalizedClipboardHtml(html) : text.split(/\n\s*\n/).map(p => "<p>" + p.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>") + "</p>").join("");
       document.execCommand("insertHTML", false, value);
+      editorDirty = true;
     } catch (error) { show(errorBox, [error.message]); }
   });
-  function currentContent() { source.value = editor.innerHTML; return source.value; }
+  editor.addEventListener("input", () => { editorDirty = true; });
+  function currentContent() { if (editorDirty) source.value = editor.innerHTML; return source.value; }
   async function requestPreview() {
     show(errorBox, []); show(warningBox, []);
     const body = new FormData(); body.append("stimulus", currentContent()); body.append("input_format", "html");

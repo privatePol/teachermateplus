@@ -52,7 +52,10 @@ from .models import (
     Question,
     QuestionImportBatch,
 )
-from .scenario_content import canonicalize_scenario_content
+from .scenario_content import (
+    canonicalize_scenario_content,
+    render_scenario_content_for_editor,
+)
 from .questionnaire_printing import (
     FacultyQuestionnairePrintService,
     _questionnaire_paper_context,
@@ -848,6 +851,13 @@ def _case_form(request, contribution, scenario=None):
 
 
 def _render_case_form(request, *, contribution, form, scenario=None, status=200):
+    editor_source = form["stimulus"].value() or ""
+    editor_display_unavailable = False
+    try:
+        editor_display_html = render_scenario_content_for_editor(editor_source)
+    except ValidationError:
+        editor_display_html = ""
+        editor_display_unavailable = bool(editor_source)
     return render(
         request,
         "departmental_exams/faculty/case_form.html",
@@ -855,6 +865,9 @@ def _render_case_form(request, *, contribution, form, scenario=None, status=200)
             "contribution": contribution,
             "scenario": scenario,
             "form": form,
+            "editor_display_html": editor_display_html,
+            "editor_display_unavailable": editor_display_unavailable,
+            "editor_recovery_source": editor_source if editor_display_unavailable else "",
             "preview_url": reverse(
                 "departmental_exams:faculty_case_preview",
                 args=[contribution.id],
