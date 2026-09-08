@@ -57,17 +57,17 @@ def _element_count(value):
     return counter.count
 
 
-def _realistic_word_accounting_case():
+def _realistic_word_accounting_case(*, table_count=5, row_count=16, column_count=8, detailed=False):
     narrative = "".join(
         f'<p class="MsoNormal">Accounting narrative {index}</p>'
         for index in range(1, 6)
     )
     tables = []
-    for table_number in range(1, 6):
+    for table_number in range(1, table_count + 1):
         rows = []
-        for row_number in range(1, 17):
+        for row_number in range(1, row_count + 1):
             cells = []
-            for column_number in range(1, 9):
+            for column_number in range(1, column_count + 1):
                 if (table_number, row_number, column_number) in {(1, 2, 1), (1, 3, 2)}:
                     continue
                 attributes = ""
@@ -76,9 +76,16 @@ def _realistic_word_accounting_case():
                 elif (table_number, row_number, column_number) == (1, 3, 1):
                     attributes = ' colspan="2"'
                 value = f"T{table_number}R{row_number}C{column_number} ₱1,250"
+                alignment = ' style="text-align:right"' if detailed else ""
+                content = f'<p class="MsoNormal"{alignment}><span>{value}</span></p>'
+                if detailed and column_number == 3:
+                    content = (
+                        f'<p class="MsoNormal"{alignment}><strong>{value}</strong></p>'
+                        '<p style="text-align:right">Adjustment −25</p>'
+                    )
                 cells.append(
                     f'<td{attributes}><p class="MsoNormal">&nbsp;</p>'
-                    f'<p class="MsoNormal"><span>{value}</span></p>'
+                    f'{content}'
                     '<p class="MsoNormal"><br></p></td>'
                 )
             rows.append("<tr>" + "".join(cells) + "</tr>")
@@ -87,6 +94,71 @@ def _realistic_word_accounting_case():
 
 
 class ScenarioContentTests(SimpleTestCase):
+    def test_fourteen_and_twenty_five_word_tables_preserve_content_and_geometry(self):
+        for count in (14, 25):
+            with self.subTest(tables=count):
+                raw = _realistic_word_accounting_case(
+                    table_count=count, row_count=4, column_count=6, detailed=True,
+                )
+                canonical = canonicalize_scenario_content(raw).html
+                self.assertLess(len(raw), MAX_RAW_CHARACTERS)
+                self.assertLess(_element_count(canonical), MAX_NODES)
+                self.assertEqual(canonical.count("<table>"), count)
+                self.assertEqual(canonical.count("<tr>"), count * 4)
+                self.assertEqual(canonical.count("<td"), count * 24 - 2)
+                self.assertEqual(canonical.count('rowspan="2"'), 1)
+                self.assertEqual(canonical.count('colspan="2"'), 1)
+                for table in range(1, count + 1):
+                    for row in range(1, 5):
+                        for column in range(1, 7):
+                            if (table, row, column) not in {(1, 2, 1), (1, 3, 2)}:
+                                self.assertIn(f"T{table}R{row}C{column} ₱1,250", canonical)
+                self.assertIn(
+                    '<p class="tmp-align-right"><strong>T1R1C3 ₱1,250</strong></p>'
+                    '<p class="tmp-align-right">Adjustment −25</p>', canonical,
+                )
+                self.assertIn('<td class="tmp-align-right">', canonical)
+                self.assertEqual(canonicalize_scenario_content(canonical).html, canonical)
+
+    def test_exact_fifty_table_cap_and_nested_document_total(self):
+        self.assertEqual(MAX_TABLES, 50)
+        table = "<table><tr><td>Account ₱500</td></tr></table>"
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                accepted = table * 50
+                rejected = table * 51
+                if nested:
+                    accepted = "<table><tr><td>Outer" + table * 49 + "</td></tr></table>"
+                    rejected = "<table><tr><td>Outer" + table * 50 + "</td></tr></table>"
+                canonical = canonicalize_scenario_content(accepted).html
+                self.assertEqual(canonical.count("<table>"), 50)
+                self.assertLess(_element_count(canonical), MAX_NODES)
+                self.assertEqual(canonicalize_scenario_content(canonical).html, canonical)
+                with self.assertRaises(ValidationError) as caught:
+                    canonicalize_scenario_content(rejected)
+                self.assertEqual(caught.exception.messages, ["A Case may contain at most 50 tables."])
+
+    def test_suppressed_tables_excluded_and_surviving_empty_tables_counted(self):
+        raw = "<p>Keep</p>" + "<table></table>" * 50
+        canonical = canonicalize_scenario_content(
+            raw + "<form>" + "<table><tr><td>Suppressed</td></tr></table>" * 51 + "</form>"
+        ).html
+        self.assertEqual(canonical.count("<table>"), 50)
+        self.assertNotIn("Suppressed", canonical)
+        with self.assertRaisesRegex(ValidationError, "A Case may contain at most 50 tables"):
+            canonicalize_scenario_content(raw + "<table></table>")
+
+    def test_below_table_cap_still_rejects_document_nodes_and_per_table_rows(self):
+        cases = (
+            ("<table><tr><td>x</td></tr></table>" + "<p>x</p>" * 2000,
+             "at most 2,000 HTML elements"),
+            ("<table>" + "<tr><td>x</td></tr>" * 101 + "</table>",
+             "Each table may contain at most 100 rows"),
+        )
+        for raw, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(ValidationError, message):
+                canonicalize_scenario_content(raw)
+
     def test_word_semantics_tables_unicode_alignment_and_idempotence(self):
         raw = """
         <!--[if gte mso 9]>metadata<![endif]-->
@@ -210,7 +282,7 @@ class ScenarioContentTests(SimpleTestCase):
             ),
             (
                 "<table><tr><td>x</td></tr></table>" * (MAX_TABLES + 1),
-                "at most 10 tables",
+                "at most 50 tables",
             ),
         )
         for raw, message in payloads:
@@ -501,6 +573,72 @@ class FacultyCaseFixtureMixin(Stage5FixtureMixin):
 
 
 class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
+    def test_many_table_preview_create_edit_share_canonical_content(self):
+        scenario = None
+        for count in (14, 25, 50):
+            with self.subTest(tables=count):
+                raw = (
+                    _realistic_word_accounting_case(
+                        table_count=count, row_count=4, column_count=6, detailed=True,
+                    ) if count < 50 else "<table><tr><td>Account ₱500</td></tr></table>" * 50
+                )
+                preview = self.client.post(
+                    reverse("departmental_exams:faculty_case_preview", args=[self.contribution.id]),
+                    {"stimulus": raw, "input_format": "html"},
+                )
+                self.assertEqual(preview.status_code, 200)
+                canonical = preview.json()["html"]
+                self.assertEqual(canonical.count("<table>"), count)
+                self.contribution.refresh_from_db()
+                route = "faculty_case_edit" if scenario else "faculty_case_create"
+                args = [self.contribution.id, scenario.id] if scenario else [self.contribution.id]
+                response = self.client.post(
+                    reverse("departmental_exams:" + route, args=args),
+                    {
+                        "expected_contribution_revision": self.contribution.revision,
+                        "expected_scenario_revision": scenario.revision if scenario else 0,
+                        "title": "Accounting Case", "stimulus": raw,
+                        "section_id": self.section_a.id,
+                    },
+                )
+                self.assertEqual(response.status_code, 302)
+                scenario = ExamScenario.objects.get(contribution=self.contribution)
+                self.assertEqual(scenario.stimulus, canonical)
+                self.assertEqual(canonical, canonicalize_scenario_content(raw).html)
+
+    def test_fifty_one_table_save_rejection_retains_safe_editor_and_source(self):
+        raw = (
+            '<table onclick="alert(1)"><tr><td><p><strong>Account ₱500</strong></p>'
+            '</td></tr></table>'
+        ) * 51
+        preview = self.client.post(
+            reverse("departmental_exams:faculty_case_preview", args=[self.contribution.id]),
+            {"stimulus": raw},
+        )
+        self.assertEqual(preview.status_code, 400)
+        self.assertEqual(preview.json()["errors"], ["A Case may contain at most 50 tables."])
+        response = self.client.post(
+            reverse("departmental_exams:faculty_case_create", args=[self.contribution.id]),
+            {
+                "expected_contribution_revision": self.contribution.revision,
+                "expected_scenario_revision": 0, "title": "Too many tables",
+                "stimulus": raw, "section_id": self.section_a.id,
+            },
+        )
+        self.assertContains(response, "A Case may contain at most 50 tables.", status_code=400)
+        body = response.content.decode()
+        editor = body.split("data-case-rich-editor>", 1)[1].split("</div>", 1)[0]
+        self.assertEqual(editor.count("<table>"), 51)
+        self.assertEqual(editor.count("<strong>Account ₱500</strong>"), 51)
+        for forbidden in ("onclick", "&lt;table", "&lt;p&gt;", "&lt;strong&gt;"):
+            self.assertNotIn(forbidden, editor)
+        source = response.context["form"]["stimulus"]
+        self.assertEqual(source.value(), raw)
+        self.assertIn(str(source), body)
+        self.assertEqual(body.count('name="stimulus"'), 1)
+        self.assertRegex(body, r'<input[^>]+type="hidden"[^>]+name="stimulus"[^>]+data-case-source')
+        self.assertFalse(ExamScenario.objects.filter(contribution=self.contribution).exists())
+
     def _prepare_legacy_stage6_boundary(self):
         self.campus.code = "CUBAO"
         self.campus.save(update_fields=["code", "updated_at"])
