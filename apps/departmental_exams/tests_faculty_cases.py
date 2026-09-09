@@ -96,6 +96,44 @@ def _realistic_word_accounting_case(*, table_count=5, row_count=16, column_count
 
 
 class ScenarioContentTests(SimpleTestCase):
+    def test_editor_semantics_preserve_blank_paragraphs_breaks_and_independent_alignment(self):
+        source = (
+            '<p class="tmp-align-justify tmp-indent-8 tmp-preserve">'
+            '<u>Underlined</u> A&nbsp;&nbsp;B<br><br><br>C</p>'
+            '<p class="tmp-preserve"></p>'
+            '<table><caption>Accounts</caption><thead><tr><th scope="col">Cash</th></tr></thead>'
+            '<tbody><tr><td class="tmp-align-right tmp-valign-middle">'
+            '<p class="tmp-align-left tmp-preserve">First</p>'
+            '<p class="tmp-preserve"></p><p class="tmp-preserve">Second</p>'
+            '</td></tr></tbody><tfoot><tr><td>Total</td></tr></tfoot></table>'
+        )
+        canonical = canonicalize_scenario_content(source).html
+        for expected in ('<u>Underlined</u>', 'tmp-indent-8', '<br><br><br>',
+                         '<p class="tmp-preserve"></p>', 'tmp-valign-middle',
+                         '<p class="tmp-align-left tmp-preserve">First</p>',
+                         '<caption>Accounts</caption>', '<tfoot>', 'scope="col"'):
+            self.assertIn(expected, canonical)
+        self.assertEqual(canonicalize_scenario_content(canonical).html, canonical)
+
+    def test_editor_classes_do_not_bypass_sanitation_or_structural_limits(self):
+        source = ('<p class="tmp-preserve tmp-indent-9 other" style="position:fixed" '
+                  'onclick="alert(1)"><u>Safe</u><script>bad()</script></p>')
+        canonical = canonicalize_scenario_content(source).html
+        self.assertEqual(canonical, '<p class="tmp-preserve"><u>Safe</u></p>')
+        with self.assertRaisesRegex(ValidationError, 'at most 2,000 HTML elements'):
+            canonicalize_scenario_content('<p class="tmp-preserve">' + '<br>' * MAX_NODES + '</p>')
+        with self.assertRaisesRegex(ValidationError, '50 tables'):
+            canonicalize_scenario_content('<p class="tmp-preserve">Text</p>' + '<table></table>' * 51)
+
+    def test_word_underline_and_cell_vertical_alignment_map_to_bounded_semantics(self):
+        canonical = canonicalize_scenario_content(
+            '<p><span style="text-decoration:underline">Text</span></p>'
+            '<table><tr><td style="vertical-align:bottom;text-align:justify">Value</td></tr></table>'
+        ).html
+        self.assertIn('<u>Text</u>', canonical)
+        self.assertIn('tmp-align-justify tmp-valign-bottom', canonical)
+        self.assertNotIn('style=', canonical)
+
     def test_fourteen_and_twenty_five_word_tables_preserve_content_and_geometry(self):
         for count in (14, 25):
             with self.subTest(tables=count):
@@ -575,6 +613,39 @@ class FacultyCaseFixtureMixin(Stage5FixtureMixin):
 
 
 class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
+    def test_editor_formatting_create_edit_reopen_preview_detail_are_consistent(self):
+        html = ('<p class="tmp-align-justify tmp-indent-2 tmp-preserve"><u>Case ₱500</u>'
+                '<br><br><br>Next</p><p class="tmp-preserve"></p>'
+                '<table><tr><td class="tmp-align-right tmp-valign-bottom">'
+                '<p class="tmp-align-left tmp-preserve">Cell</p></td></tr></table>')
+        canonical = canonicalize_scenario_content(html).html
+        scenario = None
+        for attempt in range(2):
+            self.contribution.refresh_from_db()
+            route = 'faculty_case_edit' if scenario else 'faculty_case_create'
+            args = [self.contribution.id, scenario.id] if scenario else [self.contribution.id]
+            response = self.client.post(reverse('departmental_exams:' + route, args=args), {
+                'expected_contribution_revision': self.contribution.revision,
+                'expected_scenario_revision': scenario.revision if scenario else 0,
+                'title': 'Editor round trip', 'stimulus': canonical, 'section_id': self.section_a.id,
+            })
+            self.assertEqual(response.status_code, 302)
+            scenario = ExamScenario.objects.get(contribution=self.contribution)
+            self.assertEqual(scenario.stimulus, canonical)
+            for view in ('faculty_case_edit', 'faculty_case_detail'):
+                response = self.client.get(reverse('departmental_exams:' + view, args=[self.contribution.id, scenario.id]))
+                self.assertContains(response, canonical, html=False)
+            preview = self.client.post(reverse('departmental_exams:faculty_case_preview', args=[self.contribution.id]), {'stimulus': canonical})
+            self.assertEqual(preview.json()['html'], canonical)
+
+    def test_case_editor_self_hosted_assets_and_disabled_save_until_initialized(self):
+        response = self.client.get(reverse('departmental_exams:faculty_case_create', args=[self.contribution.id]))
+        self.assertContains(response, 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js')
+        self.assertContains(response, 'data-case-save disabled')
+        self.assertContains(response, 'role="toolbar"')
+        self.assertContains(response, 'aria-live="polite"')
+        self.assertNotContains(response, 'tiptap-pro')
+
     def _linked_question_form(self, scenario):
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.faculty)

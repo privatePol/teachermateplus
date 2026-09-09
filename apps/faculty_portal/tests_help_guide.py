@@ -133,6 +133,26 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "Choose Letter, A4, or Legal portrait paper")
         self.assertContains(response, "Stud Number, Date, Student Name, and Course/Subject")
 
+    def test_case_editor_guide_explains_controls_limits_and_scope(self):
+        response = self.client.get(reverse("faculty_portal:guide"))
+        for wording in (
+            "up to 50 tables per Case, including nested tables",
+            "Overall content limits still apply",
+            "bold, italic, underline",
+            "left/center/right/justified paragraphs",
+            "eight indentation levels",
+            "Shift+Enter inserts a line break",
+            "cell alignment separately from paragraph alignment",
+            "top/middle/bottom cell alignment",
+            "Clear text formatting keeps lists, table geometry, and paragraph separation",
+            "Start cell selection", "Extend cell selection", "Merge cells",
+            "Unsupported Word numbering is rejected",
+            "Existing table captions are preserved",
+            "Save is disabled", "Case narratives only, not MCQ text or choices",
+            "Case-aware exam generation and printing are not included",
+        ):
+            self.assertContains(response, wording)
+
     def test_grouped_help_link_opens_faculty_quick_guide(self):
         response = self.client.get(reverse("faculty_portal:my_courses"))
 

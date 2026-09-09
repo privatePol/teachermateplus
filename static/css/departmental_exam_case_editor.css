@@ -6,3 +6,31 @@
 .tmp-align-left { text-align: left; }
 .tmp-align-center { text-align: center; }
 .tmp-align-right { text-align: right; }
+.tmp-align-justify { text-align: justify; }
+.tmp-indent-1 { margin-inline-start: 1.5rem; }
+.tmp-indent-2 { margin-inline-start: 3rem; }
+.tmp-indent-3 { margin-inline-start: 4.5rem; }
+.tmp-indent-4 { margin-inline-start: 6rem; }
+.tmp-indent-5 { margin-inline-start: 7.5rem; }
+.tmp-indent-6 { margin-inline-start: 9rem; }
+.tmp-indent-7 { margin-inline-start: 10.5rem; }
+.tmp-indent-8 { margin-inline-start: 12rem; }
+.tmp-case-editor .tmp-valign-top, .tmp-case-preview .tmp-valign-top, .tmp-case-content .tmp-valign-top { vertical-align: top; }
+.tmp-case-editor .tmp-valign-middle, .tmp-case-preview .tmp-valign-middle, .tmp-case-content .tmp-valign-middle { vertical-align: middle; }
+.tmp-case-editor .tmp-valign-bottom, .tmp-case-preview .tmp-valign-bottom, .tmp-case-content .tmp-valign-bottom { vertical-align: bottom; }
+.tmp-case-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-bottom: .65rem; }
+.tmp-case-toolbar [aria-pressed="true"] { background: #175d40; color: white; }
+.tmp-case-toolbar :focus-visible, .tmp-case-editor :focus-visible { outline: 3px solid #1264a3; outline-offset: 2px; }
+.tmp-case-table-size { font-size: .85rem; }
+.tmp-case-table-size input { width: 4rem; }
+.tmp-case-editor .tiptap { min-height: 19rem; position: relative; white-space: pre-wrap; overflow-wrap: break-word; }
+/* Avoid Firefox's pre-wrap/justify combination without collapsing authored spaces. */
+.tmp-preserve { white-space: break-spaces; }
+.tmp-preserve:empty { min-height: 1.5em; }
+.tmp-case-editor .tmp-align-justify { white-space: break-spaces; }
+.tmp-case-editor .selectedCell { position: relative; }
+.tmp-case-editor .selectedCell::after { content: ''; position: absolute; inset: 0; background: rgba(40,100,180,.18); pointer-events: none; }
+.tmp-case-editor .ProseMirror-gapcursor { display: none; position: absolute; pointer-events: none; }
+.tmp-case-editor .ProseMirror-gapcursor::after { content: ''; display: block; position: absolute; top: -2px; width: 20px; border-top: 1px solid black; }
+.tmp-case-editor .ProseMirror-focused .ProseMirror-gapcursor { display: block; }
+.tmp-case-editor caption, .tmp-case-preview caption, .tmp-case-content caption { caption-side: top; }

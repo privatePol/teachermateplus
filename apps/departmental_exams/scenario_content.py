@@ -31,13 +31,25 @@ MAX_COMPACTION_DEPTH = 128
 ALLOWED_TAGS = {
     "p", "h3", "h4", "strong", "em", "ul", "ol", "li", "table",
     "caption", "thead", "tbody", "tfoot", "tr", "th", "td", "br",
-    "sup", "sub",
+    "sup", "sub", "u",
 }
 ALIGNMENT_CLASSES = {
-    "tmp-align-left", "tmp-align-center", "tmp-align-right"
+    "tmp-align-left", "tmp-align-center", "tmp-align-right", "tmp-align-justify"
 }
 ALIGNABLE_TAGS = {"p", "h3", "h4", "th", "td"}
-INLINE_TAGS = {"strong", "em", "sup", "sub"}
+INLINE_TAGS = {"strong", "em", "sup", "sub", "u"}
+# Additive RICH_HTML_V1 semantics. These classes confer no trust: sanitation
+# and every structural/request budget still apply, including to preserved blanks.
+INDENT_CLASSES = {f"tmp-indent-{level}" for level in range(1, 9)}
+VERTICAL_CLASSES = {f"tmp-valign-{value}" for value in ("top", "middle", "bottom")}
+PRESERVE_CLASS = "tmp-preserve"
+BLOCK_TAGS = {"p", "h3", "h4"}
+ALLOWED_CLASSES = {
+    tag: ALIGNMENT_CLASSES | (
+        INDENT_CLASSES | {PRESERVE_CLASS} if tag in BLOCK_TAGS else VERTICAL_CLASSES
+    )
+    for tag in ALIGNABLE_TAGS
+}
 DROP_WITH_CONTENT = {
     "script", "style", "iframe", "object", "embed", "svg", "form",
     "button", "input", "select", "textarea", "option", "link", "meta",
@@ -55,7 +67,7 @@ IMAGE_PATTERN = re.compile(r"<(?:img|svg|v:shape|v:imagedata)\b", re.I)
 OMML_PATTERN = re.compile(
     r"<(?:m:)?oMath(?:Para)?\b|urn:schemas-microsoft-com:office:math", re.I
 )
-ALIGNMENT_PATTERN = re.compile(r"(?:^|;)\s*text-align\s*:\s*(left|center|right)\s*(?:;|$)", re.I)
+ALIGNMENT_PATTERN = re.compile(r"(?:^|;)\s*text-align\s*:\s*(left|center|right|justify)\s*(?:;|$)", re.I)
 
 
 @dataclass(frozen=True)
@@ -116,6 +128,8 @@ class _WordSemanticNormalizer(HTMLParser):
                 wrappers.append("strong")
             if "font-style:italic" in style.replace(" ", ""):
                 wrappers.append("em")
+            if re.search(r"(?:^|;)\s*text-decoration(?:-line)?\s*:[^;]*\bunderline\b", style):
+                wrappers.append("u")
             if re.search(r"vertical-align\s*:\s*super", style):
                 wrappers.append("sup")
             elif re.search(r"vertical-align\s*:\s*sub", style):
@@ -138,13 +152,29 @@ class _WordSemanticNormalizer(HTMLParser):
                 attributes["start"], field="Ordered-list start", maximum=MAX_ORDERED_LIST_START
             )))
         if tag in ALIGNABLE_TAGS:
-            approved = next((name for name in attributes.get("class", "").split() if name in ALIGNMENT_CLASSES), None)
+            source_classes = attributes.get("class", "").split()
+            approved = next((name for name in source_classes if name in ALIGNMENT_CLASSES), None)
             if approved is None:
                 match = ALIGNMENT_PATTERN.search(attributes.get("style", ""))
                 if match:
                     approved = f"tmp-align-{match.group(1).lower()}"
-            if approved:
-                result.append(("class", approved))
+            classes = [approved] if approved else []
+            if tag in BLOCK_TAGS:
+                indent = next((name for name in source_classes if name in INDENT_CLASSES), None)
+                if indent:
+                    classes.append(indent)
+                if PRESERVE_CLASS in source_classes:
+                    classes.append(PRESERVE_CLASS)
+            else:
+                vertical = next((name for name in source_classes if name in VERTICAL_CLASSES), None)
+                if vertical is None:
+                    match = re.search(r"(?:^|;)\s*vertical-align\s*:\s*(top|middle|bottom)\s*(?:;|$)", attributes.get("style", ""), re.I)
+                    if match:
+                        vertical = f"tmp-valign-{match.group(1).lower()}"
+                if vertical:
+                    classes.append(vertical)
+            if classes:
+                result.append(("class", " ".join(classes)))
         return result
 
     def handle_starttag(self, tag, attrs):
@@ -420,6 +450,9 @@ def _unwrap_single_cell_paragraph(node):
     if isinstance(paragraph, str) or paragraph.tag != "p":
         return
     paragraph_attrs = dict(paragraph.attrs)
+    # An editor-authored paragraph owns its formatting independently of its cell.
+    if set(paragraph_attrs.get("class", "").split()) - ALIGNMENT_CLASSES:
+        return
     if set(paragraph_attrs) - {"class"}:
         return
     cell_attrs = dict(node.attrs)
@@ -432,17 +465,18 @@ def _unwrap_single_cell_paragraph(node):
     node.children = paragraph.children
 
 
-def _compact_semantic_node(node):
+def _compact_semantic_node(node, preserve_spacing=False):
+    preserve_spacing = preserve_spacing or PRESERVE_CLASS in dict(node.attrs).get("class", "").split()
     compacted_children = []
     for child in node.children:
         if isinstance(child, str):
-            compacted_children.append(_compact_repeated_spacing(child))
+            compacted_children.append(child if preserve_spacing else _compact_repeated_spacing(child))
             continue
-        _compact_semantic_node(child)
-        if child.tag == "p" and not _paragraph_has_visible_meaning(child):
+        _compact_semantic_node(child, preserve_spacing)
+        if child.tag == "p" and not _paragraph_has_visible_meaning(child) and PRESERVE_CLASS not in dict(child.attrs).get("class", "").split():
             continue
         compacted_children.append(child)
-    node.children = _collapse_duplicate_breaks(compacted_children)
+    node.children = compacted_children if preserve_spacing else _collapse_duplicate_breaks(compacted_children)
     if node.tag in {"td", "th"}:
         _unwrap_single_cell_paragraph(node)
 
@@ -498,7 +532,7 @@ def _clean_semantic_html(value):
         tags=ALLOWED_TAGS,
         clean_content_tags=DROP_WITH_CONTENT,
         attributes=attributes,
-        allowed_classes={tag: ALIGNMENT_CLASSES for tag in ALIGNABLE_TAGS},
+        allowed_classes=ALLOWED_CLASSES,
         url_schemes=set(),
         url_relative="deny",
         strip_comments=True,

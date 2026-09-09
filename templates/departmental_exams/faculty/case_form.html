@@ -15,16 +15,20 @@
     <div class="mb-3"><label class="form-label" for="{{ form.title.id_for_label }}">Title</label>{{ form.title }}{% for error in form.title.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
     <div class="mb-3">
       <label class="form-label" for="case-rich-editor">Case / Scenario content <span class="text-danger">*</span></label>
-      <div id="case-rich-editor" class="tmp-case-editor form-control" contenteditable="true" role="textbox" aria-multiline="true" data-case-rich-editor>{{ editor_display_html }}</div>
-      <div class="form-text">Use Ctrl+V to paste from Word. Content is normalized in the browser and sanitized again by the server.</div>
+      <div class="tmp-case-toolbar" role="toolbar" aria-label="Case formatting and tables" data-case-toolbar></div>
+      <div id="case-rich-editor" class="tmp-case-editor form-control" data-case-rich-editor>{{ editor_display_html }}</div>
+      <div class="form-text" id="case-editor-help">Paste from Word with Ctrl+V. Enter creates a paragraph; Shift+Enter inserts a line break. Indentation has eight levels. Tab / Shift+Tab moves between table cells. For keyboard cell selection, choose Start cell selection, move to the last cell, then Extend cell selection and Merge cells. Clear text formatting keeps lists and table geometry.</div>
+      <p class="small" role="status" aria-live="polite" data-case-editor-status>Loading editor. Save remains disabled if the editor cannot load safely.</p>
+      <noscript><p class="alert alert-warning">JavaScript is required to edit this Case safely. The saved content has not been changed.</p></noscript>
+      <details data-case-original-source hidden><summary>Recover original source (Save disabled)</summary><textarea class="form-control font-monospace" aria-label="Original Case source" rows="8" readonly></textarea></details>
       {% for error in form.stimulus.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
-      {% if editor_display_unavailable %}<div class="alert alert-warning mt-3 mb-0" data-case-editor-recovery><p>TeacherMate+ could not safely format the submitted source. The original source is preserved below for recovery; paste corrected Word content into the editor before trying again.</p><details><summary>Show preserved source</summary><textarea class="form-control font-monospace mt-2" rows="8" readonly>{{ editor_recovery_source }}</textarea></details></div>{% endif %}
+      {% if editor_display_unavailable %}<div class="alert alert-warning mt-3 mb-0" data-case-editor-recovery><p>TeacherMate+ could not safely format the submitted source. The original source is preserved below for recovery. Save is disabled; recover your source, then reopen the Case form to paste corrected Word content.</p><details><summary>Show preserved source</summary><textarea class="form-control font-monospace mt-2" rows="8" readonly>{{ editor_recovery_source }}</textarea></details></div>{% endif %}
     </div>
-    <div class="alert alert-danger" data-case-editor-errors hidden></div>
-    <div class="alert alert-warning" data-case-editor-warnings hidden></div>
-    <div class="d-flex flex-wrap gap-2 mb-3"><button type="button" class="btn btn-outline-primary" data-case-preview-button>Preview sanitized Case</button><button type="submit" class="btn btn-primary">Save Case</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Cancel</a></div>
+    <div class="alert alert-danger" role="alert" data-case-editor-errors hidden></div>
+    <div class="alert alert-warning" role="status" data-case-editor-warnings hidden></div>
+    <div class="d-flex flex-wrap gap-2 mb-3"><button type="button" class="btn btn-outline-primary" data-case-preview-button disabled>Preview sanitized Case</button><button type="submit" class="btn btn-primary" data-case-save disabled>Save Case</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Cancel</a></div>
     <section aria-labelledby="case-preview-heading"><h2 class="h5" id="case-preview-heading">Server-authoritative preview</h2><div class="tmp-case-preview" data-case-preview data-scientific-content><p class="text-muted mb-0">Choose Preview to review the exact canonical content that can be saved.</p></div></section>
   </div>
 </form>
 {% endblock %}
-{% block extra_js %}{{ block.super }}<script src="{% static 'js/departmental_exam_case_editor.js' %}"></script>{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js' %}" defer></script>{% endblock %}

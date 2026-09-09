@@ -1,131 +1,138 @@
-(function () {
-  "use strict";
-  const form = document.querySelector("[data-case-editor-form]");
-  if (!form) return;
-  const editor = form.querySelector("[data-case-rich-editor]");
-  const source = form.querySelector("[data-case-source]");
-  const preview = form.querySelector("[data-case-preview]");
-  const errorBox = form.querySelector("[data-case-editor-errors]");
-  const warningBox = form.querySelector("[data-case-editor-warnings]");
-  const previewButton = form.querySelector("[data-case-preview-button]");
-  let editorDirty = form.dataset.caseEditorDisplayUnavailable !== "true";
-  const allowed = new Set(["P", "H3", "H4", "STRONG", "EM", "UL", "OL", "LI", "TABLE", "CAPTION", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD", "BR", "SUP", "SUB"]);
-  const alignable = new Set(["P", "H3", "H4", "TH", "TD"]);
+import {createCaseEditor, cellsShareTable} from '../../frontend/case-editor/extensions.js';
+import {normalizeClipboard, prepareLegacy, serializeEditor, preservationError} from '../../frontend/case-editor/compatibility.js';
 
-  function show(box, messages) {
-    box.textContent = messages.join(" ");
-    box.hidden = messages.length === 0;
+export function mountCaseEditor(form) {
+  const host = form.querySelector('[data-case-rich-editor]');
+  const source = form.querySelector('[data-case-source]');
+  const preview = form.querySelector('[data-case-preview]');
+  const errors = form.querySelector('[data-case-editor-errors]');
+  const warnings = form.querySelector('[data-case-editor-warnings]');
+  const previewButton = form.querySelector('[data-case-preview-button]');
+  const saveButton = form.querySelector('[data-case-save]');
+  const toolbar = form.querySelector('[data-case-toolbar]');
+  const status = form.querySelector('[data-case-editor-status]');
+  const original = source.value;
+  const safeHtml = host.innerHTML;
+  let dirty = false, editor, anchorCell = null, failed = false;
+  const controls = [];
+  const show = (box, messages) => { box.textContent = messages.join(' '); box.hidden = !messages.length; };
+  function fail() {
+    failed = true; saveButton.disabled = true; previewButton.disabled = true;
+    for (const control of toolbar.querySelectorAll('button,input')) control.disabled = true;
+    if (editor && !editor.isDestroyed) editor.setEditable(false);
+    show(errors, [preservationError]);
+    const recovery = form.querySelector('[data-case-original-source]');
+    recovery.hidden = false; recovery.querySelector('textarea').value = original;
+    status.textContent = 'Editor unavailable. Original source preserved; Save disabled.';
   }
-  function alignment(node) {
-    const value = (node.style && node.style.textAlign || "").toLowerCase();
-    return ["left", "center", "right"].includes(value) ? "tmp-align-" + value : "";
+  function currentContent() {
+    if (failed) throw new Error(preservationError);
+    if (dirty) source.value = serializeEditor(editor);
+    return source.value;
   }
-  function normalizeNode(node, documentRef) {
-    if (node.nodeType === Node.TEXT_NODE) return documentRef.createTextNode(node.textContent || "");
-    if (node.nodeType !== Node.ELEMENT_NODE) return documentRef.createDocumentFragment();
-    const name = node.tagName.toUpperCase();
-    if (["IMG", "SVG", "OBJECT", "EMBED", "IFRAME"].includes(name)) throw new Error("Images, diagrams, and embedded objects are not supported in Case content.");
-    if (name.includes("OMATH") || /office:math/i.test(node.namespaceURI || "")) throw new Error("A native Word equation was detected. Replace it with TMP LaTeX or Unicode.");
-    if (["SCRIPT", "STYLE", "FORM", "INPUT", "BUTTON", "SELECT", "TEXTAREA"].includes(name)) return documentRef.createDocumentFragment();
-    let targetName = { B: "STRONG", I: "EM" }[name] || name;
-    if (name === "DIV") {
-      const containsBlock = [...node.children].some(child => ["P", "DIV", "H3", "H4", "UL", "OL", "TABLE"].includes(child.tagName.toUpperCase()));
-      targetName = containsBlock ? "" : "P";
-    }
-    const wrappers = [];
-    if (targetName === "SPAN") {
-      const style = (node.getAttribute("style") || "").toLowerCase();
-      if (/font-weight\s*:\s*(bold|[6-9]00)/.test(style)) wrappers.push("STRONG");
-      if (/font-style\s*:\s*italic/.test(style)) wrappers.push("EM");
-      if (/vertical-align\s*:\s*super/.test(style)) wrappers.push("SUP");
-      if (/vertical-align\s*:\s*sub/.test(style)) wrappers.push("SUB");
-    } else if (allowed.has(targetName)) wrappers.push(targetName);
-    let result = documentRef.createDocumentFragment();
-    let container = result;
-    wrappers.forEach(tag => { const element=documentRef.createElement(tag.toLowerCase()); container.appendChild(element); container=element; });
-    const element = container.nodeType === Node.ELEMENT_NODE ? container : null;
-    if (element) {
-      const tag = element.tagName.toUpperCase();
-      if (["TH", "TD"].includes(tag)) ["rowspan", "colspan"].forEach(attr => { const value=parseInt(node.getAttribute(attr),10); if(value>=1&&value<=20) element.setAttribute(attr,String(value)); });
-      if (tag === "TH" && ["row", "col", "rowgroup", "colgroup"].includes((node.getAttribute("scope") || "").toLowerCase())) element.setAttribute("scope", node.getAttribute("scope").toLowerCase());
-      if (tag === "OL") { const start=parseInt(node.getAttribute("start"),10); if(start>=1&&start<=10000) element.setAttribute("start",String(start)); }
-      const align = alignment(node); if (align && alignable.has(tag)) element.className=align;
-    }
-    [...node.childNodes].forEach(child => container.appendChild(normalizeNode(child, documentRef)));
-    return result;
-  }
-  function isSpacingText(node) {
-    return node.nodeType === Node.TEXT_NODE && !(node.textContent || "").replace(/\u00a0/g, " ").trim();
-  }
-  function isSpacerParagraph(paragraph) {
-    if (paragraph.tagName !== "P") return false;
-    if ((paragraph.textContent || "").replace(/\u00a0/g, " ").trim()) return false;
-    return ![...paragraph.querySelectorAll("*")].some(child => !["STRONG", "EM", "SUP", "SUB", "BR"].includes(child.tagName));
-  }
-  function collapseBreaks(container) {
-    let consecutive = 0;
-    [...container.childNodes].forEach(child => {
-      if (child.nodeType === Node.ELEMENT_NODE && child.tagName === "BR") {
-        consecutive += 1;
-        if (consecutive > 2) child.remove();
-      } else if (isSpacingText(child) && consecutive) {
-        child.remove();
-      } else {
-        consecutive = 0;
-      }
+  function button(label, command, active = null, enabled = null) {
+    const button = document.createElement('button'); button.type = 'button';
+    button.className = 'btn btn-sm btn-outline-secondary'; button.textContent = label;
+    button.setAttribute('aria-label',label);
+    button.addEventListener('click', () => {
+      try { command(); editor.commands.focus(); refresh(); }
+      catch { fail(); }
     });
+    toolbar.append(button); controls.push({button,active,enabled}); return button;
   }
-  function compactSemanticHtml(holder) {
-    [...holder.querySelectorAll("*")].reverse().forEach(element => {
-      [...element.childNodes].forEach(child => {
-        if (child.nodeType === Node.TEXT_NODE) child.textContent = (child.textContent || "").replace(/\u00a0(?:[ \t\r\n]*\u00a0)+/g, "\u00a0");
-      });
-      [...element.children].filter(isSpacerParagraph).forEach(paragraph => paragraph.remove());
-      collapseBreaks(element);
-      if (["TD", "TH"].includes(element.tagName)) {
-        const meaningful = [...element.childNodes].filter(child => !isSpacingText(child));
-        if (meaningful.length === 1 && meaningful[0].nodeType === Node.ELEMENT_NODE && meaningful[0].tagName === "P") {
-          const paragraph = meaningful[0];
-          const paragraphAlign = [...paragraph.classList].find(value => value.startsWith("tmp-align-"));
-          const cellAlign = [...element.classList].find(value => value.startsWith("tmp-align-"));
-          if (!paragraphAlign || !cellAlign || paragraphAlign === cellAlign) {
-            if (paragraphAlign && !cellAlign) element.classList.add(paragraphAlign);
-            paragraph.replaceWith(...[...paragraph.childNodes]);
-          }
+  function refresh() {
+    if (!editor || editor.isDestroyed) return;
+    for (const control of controls) {
+      control.button.disabled = failed || (control.enabled ? !control.enabled() : false);
+      if (control.active) control.button.setAttribute('aria-pressed',String(control.active()));
+    }
+  }
+  function cellPosition() {
+    const position = editor.state.selection.$from;
+    for (let depth=position.depth; depth>0; depth--) if (['tableCell','tableHeader'].includes(position.node(depth).type.name)) return position.before(depth);
+    return editor.state.selection.$anchorCell?.pos ?? null;
+  }
+  try {
+    if (form.dataset.caseEditorDisplayUnavailable === 'true') throw new Error(preservationError);
+    host.replaceChildren();
+    editor = createCaseEditor(host, safeHtml, {
+      onUpdate: () => { dirty = true; },
+      onTransaction: ({transaction}) => {
+        if (anchorCell !== null && transaction.docChanged) {
+          const mapped = transaction.mapping.mapResult(anchorCell); anchorCell = mapped.deleted ? null : mapped.pos;
+        }
+        refresh();
+      },
+      editorProps: {
+        attributes: {role:'textbox','aria-label':'Case narrative','aria-multiline':'true','aria-describedby':'case-editor-help'},
+        handlePaste: (_view,event) => {
+          event.preventDefault(); show(errors,[]);
+          try {
+            if (event.clipboardData.files?.length) throw new Error('Images and embedded objects are not supported.');
+            const html = normalizeClipboard(event.clipboardData.getData('text/html'), event.clipboardData.getData('text/plain'));
+            if (!html.trim()) throw new Error('No supported Case content was found. No content was inserted.');
+            const probe = createCaseEditor(document.createElement('div'), html); probe.destroy();
+            if (!editor.commands.insertContent(prepareLegacy(html), {parseOptions:{preserveWhitespace:'full'}})) throw new Error('Paste could not be inserted at this position. Your content is unchanged.');
+            status.textContent = 'Paste inserted. Use Preview to check server validation.';
+          } catch (error) { show(errors,[error.message]); }
+          return true;
         }
       }
     });
-    collapseBreaks(holder);
-  }
-  function normalizedClipboardHtml(raw) {
-    const parsed = new DOMParser().parseFromString(raw, "text/html");
-    const holder = document.createElement("div");
-    [...parsed.body.childNodes].forEach(node => holder.appendChild(normalizeNode(node, document)));
-    compactSemanticHtml(holder);
-    return holder.innerHTML;
-  }
-  editor.addEventListener("paste", event => {
-    event.preventDefault(); show(errorBox, []);
-    try {
-      const html = event.clipboardData.getData("text/html");
-      const text = event.clipboardData.getData("text/plain");
-      const value = html ? normalizedClipboardHtml(html) : text.split(/\n\s*\n/).map(p => "<p>" + p.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>") + "</p>").join("");
-      document.execCommand("insertHTML", false, value);
-      editorDirty = true;
-    } catch (error) { show(errorBox, [error.message]); }
+    const toggle = (label,name,command) => button(label, () => editor.chain().focus()[command]().run(), () => editor.isActive(name));
+    toggle('Bold','bold','toggleBold'); toggle('Italic','italic','toggleItalic'); toggle('Underline','underline','toggleUnderline');
+    toggle('Superscript','superscript','toggleSuperscript'); toggle('Subscript','subscript','toggleSubscript');
+    toggle('Bulleted list','bulletList','toggleBulletList'); toggle('Numbered list','orderedList','toggleOrderedList');
+    for (const alignment of ['left','center','right','justify']) button('Paragraph '+alignment,
+      () => editor.chain().focus().setTextAlign(alignment).run(), () => editor.isActive({textAlign:alignment}));
+    for (const [label,delta] of [['Decrease indent',-1],['Increase indent',1]]) button(label,
+      () => editor.chain().focus().indentParagraph(delta).run(), null, () => editor.can().indentParagraph(delta));
+    function numberInput(label,max) {
+      const wrapper = document.createElement('label'); wrapper.className = 'tmp-case-table-size'; wrapper.textContent = label+' ';
+      const input = document.createElement('input'); input.type='number'; input.min='1'; input.max=String(max); input.value='2';
+      wrapper.append(input); toolbar.append(wrapper); return input;
+    }
+    const rows=numberInput('Table rows',100), columns=numberInput('Table columns',20);
+    button('Insert table', () => {
+      if (!rows.checkValidity() || !columns.checkValidity()) { show(errors,['Choose 1–100 rows and 1–20 columns.']); return; }
+      editor.chain().focus().insertTable({rows:Number(rows.value),cols:Number(columns.value),withHeaderRow:true}).run();
+    });
+    for (const [label,command] of [
+      ['Add row above','addRowBefore'],['Add row below','addRowAfter'],['Delete row','deleteRow'],
+      ['Add column before','addColumnBefore'],['Add column after','addColumnAfter'],['Delete column','deleteColumn'],
+      ['Delete table','deleteTable'],['Merge cells','mergeCells'],['Split cell','splitCell']
+    ]) button(label, () => editor.chain().focus()[command]().run(), null, () => editor.can()[command]());
+    button('Start cell selection', () => { anchorCell = cellPosition(); status.textContent='Selection start recorded. Move to another cell, then choose Extend cell selection.'; }, null, () => cellPosition() !== null);
+    button('Extend cell selection', () => editor.commands.setCellSelection({anchorCell,headCell:cellPosition()}), null, () => cellsShareTable(editor,anchorCell,cellPosition()));
+    for (const value of ['left','center','right','justify']) button('Cell '+value,
+      () => editor.chain().focus().setCellAttribute('cellAlign',value).run(),
+      () => editor.isActive('tableCell',{cellAlign:value}) || editor.isActive('tableHeader',{cellAlign:value}), () => cellPosition() !== null);
+    for (const value of ['top','middle','bottom']) button('Cell vertical '+value,
+      () => editor.chain().focus().setCellAttribute('verticalAlign',value).run(),
+      () => editor.isActive('tableCell',{verticalAlign:value}) || editor.isActive('tableHeader',{verticalAlign:value}), () => cellPosition() !== null);
+    button('Undo', () => editor.chain().focus().undo().run(), null, () => editor.can().undo());
+    button('Redo', () => editor.chain().focus().redo().run(), null, () => editor.can().redo());
+    button('Clear text formatting', () => editor.chain().focus().clearTextFormatting().run());
+    saveButton.disabled = false; previewButton.disabled = false;
+    status.textContent='Editor ready. Enter creates a paragraph; Shift+Enter inserts a line break.';
+    refresh();
+  } catch { host.innerHTML = safeHtml; fail(); }
+  form.addEventListener('submit', event => {
+    try { currentContent(); } catch { event.preventDefault(); fail(); }
   });
-  editor.addEventListener("input", () => { editorDirty = true; });
-  function currentContent() { if (editorDirty) source.value = editor.innerHTML; return source.value; }
-  async function requestPreview() {
-    show(errorBox, []); show(warningBox, []);
-    const body = new FormData(); body.append("stimulus", currentContent()); body.append("input_format", "html");
-    body.append("csrfmiddlewaretoken", form.querySelector("[name=csrfmiddlewaretoken]").value);
-    const response = await fetch(form.dataset.previewUrl, { method: "POST", body, credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } });
-    const payload = await response.json();
-    if (!response.ok) { show(errorBox, payload.errors || ["Preview could not be generated."]); return; }
-    preview.innerHTML = payload.html; show(warningBox, payload.warnings || []);
-    if (typeof window.renderMathInElement === "function") window.renderMathInElement(preview, { delimiters: [{left:"\\(",right:"\\)",display:false},{left:"\\[",right:"\\]",display:true}], trust:false, throwOnError:false, strict:"error", maxSize:10, maxExpand:1000 });
-  }
-  previewButton.addEventListener("click", () => requestPreview().catch(() => show(errorBox, ["Preview could not be generated. Try again."])));
-  form.addEventListener("submit", currentContent);
-})();
+  previewButton.addEventListener('click', async () => {
+    try {
+      show(errors,[]); show(warnings,[]);
+      const body = new FormData(); body.append('stimulus',currentContent()); body.append('input_format','html');
+      body.append('csrfmiddlewaretoken',form.querySelector('[name=csrfmiddlewaretoken]').value);
+      const response = await fetch(form.dataset.previewUrl,{method:'POST',body,credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const payload = await response.json();
+      if (!response.ok) { show(errors,payload.errors || ['Preview could not be generated.']); return; }
+      preview.innerHTML=payload.html; show(warnings,payload.warnings || []); status.textContent='Server-authoritative Preview updated.';
+      if (typeof window.renderMathInElement === 'function') window.renderMathInElement(preview,{delimiters:[{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],trust:false,throwOnError:false,strict:'error',maxSize:10,maxExpand:1000});
+    } catch { show(errors,['Preview could not be generated. Your source is preserved.']); }
+  });
+  return {editor,currentContent};
+}
+const form = document.querySelector('[data-case-editor-form]');
+if (form) mountCaseEditor(form);
