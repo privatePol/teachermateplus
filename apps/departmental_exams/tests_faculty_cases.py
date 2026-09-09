@@ -1,8 +1,9 @@
 from html.parser import HTMLParser
+from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404
-from django.test import SimpleTestCase
+from django.test import Client, SimpleTestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -36,6 +37,7 @@ from .scenario_content import (
 from .services import CourseExamConfigurationService
 from .stage4_test_support import Stage4TestCase
 from .tests_stage5_contributions import Stage5FixtureMixin
+from .tests_stage5_views import _QuestionFormParser, _response_hrefs
 
 
 class _ElementCounter(HTMLParser):
@@ -573,6 +575,172 @@ class FacultyCaseFixtureMixin(Stage5FixtureMixin):
 
 
 class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
+    def _linked_question_form(self, scenario):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.faculty)
+        detail = client.get(reverse(
+            "departmental_exams:faculty_case_detail", args=[self.contribution.id, scenario.id],
+        ))
+        self.assertEqual(detail.status_code, 200)
+        links = [href for href in _response_hrefs(detail)
+                 if "/cases/" in href and href.endswith("/questions/add/")]
+        self.assertEqual(len(links), 1)
+        response = client.get(links[0])
+        self.assertEqual(response.status_code, 200)
+        form = _QuestionFormParser(response)
+        self.assertEqual(form.action, links[0])
+        self.assertEqual(form.data["scenario_id"], str(scenario.id))
+        self.assertEqual(form.data["section_id"], str(scenario.section_id))
+        self.assertEqual(form.data["expected_question_revision"], "")
+        self.assertTrue(form.data["csrfmiddlewaretoken"])
+        return client, form
+
+    def _complete_question_form(self, form, text="Rendered linked MCQ"):
+        return {**form.data, **self.payload(text),
+                "correct_answer": "D", "difficulty": "DIFFICULT"}
+
+    def _question_mutation_snapshot(self):
+        self.contribution.refresh_from_db()
+        return (
+            self.contribution.revision,
+            list(self.contribution.questions.values_list("id", "revision")),
+            list(ExamScenarioMember.objects.values_list("scenario_id", "question_id", "position")),
+            list(ExamScenario.objects.values_list("id", "revision")),
+            QuestionBlueprintPlacement.objects.count(),
+            AuditLog.objects.count(),
+        )
+
+    def test_linked_mcq_follows_rendered_navigation_with_csrf_and_owned_membership(self):
+        scenario = self.save_case()
+        client, form = self._linked_question_form(scenario)
+        payload = self._complete_question_form(form)
+        without_csrf = {key: value for key, value in payload.items() if key != "csrfmiddlewaretoken"}
+        self.assertEqual(client.post(form.action, without_csrf).status_code, 403)
+        self.assertFalse(self.contribution.questions.exists())
+        with patch(
+            "apps.departmental_exams.faculty_views.QuestionMutationService.create",
+            wraps=QuestionMutationService.create,
+        ) as create:
+            self.assertEqual(client.post(form.action, payload).status_code, 302)
+        self.assertEqual(create.call_args.kwargs["scenario_id"], scenario.id)
+        question = self.contribution.questions.get()
+        self.assertEqual(question.exam_scenario_membership.scenario_id, scenario.id)
+        self.assertEqual(question.blueprint_placement.section_id, scenario.section_id)
+
+    def test_linked_form_rejects_missing_tampered_case_and_fixed_section(self):
+        scenario = self.save_case()
+        other_owned = self.save_case(title="Other owned Case")
+        foreign = self.save_case(contribution=self.other_contribution)
+        client, form = self._linked_question_form(scenario)
+        original = self._complete_question_form(form)
+        missing = dict(original)
+        missing.pop("scenario_id")
+        payloads = [missing, {**original, "scenario_id": ""},
+                    {**original, "scenario_id": "invalid"},
+                    {**original, "scenario_id": str(other_owned.id)},
+                    {**original, "scenario_id": str(foreign.id)},
+                    {**original, "section_id": str(self.section_b.id)}]
+        before = self._question_mutation_snapshot()
+        for payload in payloads:
+            with self.subTest(case=payload.get("scenario_id"), section=payload["section_id"]):
+                with patch("apps.departmental_exams.faculty_views.QuestionMutationService.create") as create:
+                    response = client.post(form.action, payload)
+                create.assert_not_called()
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(_QuestionFormParser(response).action, form.action)
+                self.assertEqual(self._question_mutation_snapshot(), before)
+        standalone_url = reverse("departmental_exams:question_create", args=[self.contribution.id])
+        standalone = _QuestionFormParser(client.get(standalone_url))
+        self.assertEqual(standalone.action, standalone_url)
+        for injected in (str(scenario.id), ""):
+            response = client.post(standalone.action, {
+                **self._complete_question_form(standalone),
+                "section_id": str(self.section_a.id), "scenario_id": injected,
+            })
+            self.assertContains(response, "A standalone question cannot be attached", status_code=400)
+            self.assertEqual(self._question_mutation_snapshot(), before)
+
+    def test_linked_payload_errors_preserve_safe_content_and_corrected_resubmission(self):
+        scenario = self.save_case(title='<script>alert("Case")</script>')
+        failures = (
+            ({"choice_a": "Cash", "choice_b": " cash "},
+             "Choices must be distinct after text normalization.", "__all__"),
+            ({"choice_a": "Cash\u200e"},
+             "Control and bidirectional formatting characters are not allowed.", "choice_a"),
+        )
+        for index, (changes, message, field) in enumerate(failures):
+            with self.subTest(field=field):
+                client, form = self._linked_question_form(scenario)
+                text = f'<script>alert("Question {index}")</script>'
+                payload = {**self._complete_question_form(form, text), **changes}
+                before = self._question_mutation_snapshot()
+                response = client.post(form.action, payload)
+                self.assertContains(response, message, status_code=400)
+                self.assertIn(field, response.context["form"].errors)
+                self.assertNotContains(response, "The submitted page state is missing or invalid", status_code=400)
+                self.assertNotContains(response, text, status_code=400)
+                self.assertNotContains(response, scenario.title, status_code=400)
+                self.assertEqual(self._question_mutation_snapshot(), before)
+                recovered = _QuestionFormParser(response)
+                self.assertEqual(recovered.action, form.action)
+                # Django remasks the same CSRF secret on every render.
+                self.assertTrue(recovered.data["csrfmiddlewaretoken"])
+                self.assertEqual(
+                    {key: value for key, value in recovered.data.items() if key != "csrfmiddlewaretoken"},
+                    {key: value for key, value in payload.items() if key != "csrfmiddlewaretoken"},
+                )
+                recovered.data.update(choice_a="Cash", choice_b="Revenue")
+                self.assertEqual(client.post(recovered.action, recovered.data).status_code, 302)
+                self.assertEqual(self.contribution.questions.count(), index + 1)
+                question = self.contribution.questions.get(question_text=text)
+                self.assertEqual(question.exam_scenario_membership.scenario_id, scenario.id)
+
+    def test_linked_edit_and_stale_revision_contracts_from_rendered_forms(self):
+        scenario = self.save_case()
+        client, form = self._linked_question_form(scenario)
+        self.add_question(scenario=scenario, text="Changes contribution revision")
+        before = self._question_mutation_snapshot()
+        self.assertEqual(client.post(form.action, self._complete_question_form(form)).status_code, 409)
+        self.assertEqual(self._question_mutation_snapshot(), before)
+        question = self.contribution.questions.get()
+        url = reverse("departmental_exams:question_edit", args=[self.contribution.id, question.id])
+        edit = _QuestionFormParser(client.get(url))
+        self.assertEqual(edit.action, url)
+        self.assertEqual(edit.data["scenario_id"], str(scenario.id))
+        for revision in ("", str(question.revision + 1)):
+            response = client.post(edit.action, {**edit.data, "expected_question_revision": revision})
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(self._question_mutation_snapshot(), before)
+        rejected = client.post(edit.action, {**edit.data, "choice_a": "Cash", "choice_b": "cash"})
+        self.assertContains(rejected, "Choices must be distinct after text normalization.", status_code=400)
+        recovered = _QuestionFormParser(rejected)
+        self.assertEqual(recovered.action, url)
+        self.assertEqual(recovered.data["scenario_id"], str(scenario.id))
+        self.assertEqual(self._question_mutation_snapshot(), before)
+        response = client.post(recovered.action, {**recovered.data, "choice_b": "Revenue"})
+        self.assertEqual(response.status_code, 302)
+        question.refresh_from_db()
+        self.assertEqual(question.choice_b, "Revenue")
+        self.assertEqual(question.revision, 2)
+        self.assertEqual(question.exam_scenario_membership.scenario_id, scenario.id)
+
+    def test_question_service_diagnostics_are_never_exposed(self):
+        scenario = self.save_case()
+        client, form = self._linked_question_form(scenario)
+        before = self._question_mutation_snapshot()
+        for error in (ValidationError({"question_text": "Private internal diagnostic"}),
+                      ValidationError({"internal_metadata": "Other faculty confidential content"})):
+            with self.subTest(error=type(error).__name__), patch(
+                "apps.departmental_exams.faculty_views.QuestionMutationService.create",
+                side_effect=error,
+            ):
+                response = client.post(form.action, self._complete_question_form(form))
+            self.assertContains(response, "The question could not be saved. Review the form and try again.", status_code=400)
+            for hidden in ("Private internal diagnostic", "Other faculty confidential content", "internal_metadata"):
+                self.assertNotContains(response, hidden, status_code=400)
+            self.assertEqual(_QuestionFormParser(response).action, form.action)
+            self.assertEqual(self._question_mutation_snapshot(), before)
+
     def test_many_table_preview_create_edit_share_canonical_content(self):
         scenario = None
         for count in (14, 25, 50):

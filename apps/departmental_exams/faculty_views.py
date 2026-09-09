@@ -606,6 +606,34 @@ def contribution_workspace_view(request, contribution_id):
     )
 
 
+def _bind_question_validation_errors(form, exc):
+    # Only publish known author-facing messages, never arbitrary model diagnostics.
+    public_messages = {
+        "Control and bidirectional formatting characters are not allowed.",
+        "Question text is required.",
+        "Question text may not exceed 5,000 characters.",
+        "This choice is required.",
+        "Each choice may not exceed 1,000 characters.",
+        "Choices must be distinct after text normalization.",
+        "Correct answer must be A, B, C, or D.",
+        "Difficulty must be Easy, Moderate, or Difficult.",
+        "Select a valid frozen Exam Section.",
+        "Linked Questions must use the Case Exam Section.",
+        "A question may belong to at most one Case.",
+    }
+    errors = exc.message_dict if hasattr(exc, "error_dict") else {None: exc.messages}
+    needs_fallback = False
+    for field, messages_for_field in errors.items():
+        for message in messages_for_field:
+            if message not in public_messages:
+                needs_fallback = True
+                continue
+            target = field if field in form.fields else None
+            form.add_error(target, message)
+    if needs_fallback:
+        form.add_error(None, "The question could not be saved. Review the form and try again.")
+
+
 def _question_initial(question, contribution):
     initial = {
         "expected_contribution_revision": contribution.revision,
@@ -669,15 +697,18 @@ def question_create_view(request, contribution_id, scenario_id=None):
                 expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
                 payload=form.cleaned_data,
                 section_id=form.cleaned_data.get("section_id"),
-                scenario_id=form.cleaned_data.get("scenario_id"),
+                scenario_id=scenario.id if scenario else None,
                 request=request,
             )
-        except (ContributionConflict, ValidationError) as exc:
+        except ContributionConflict as exc:
             return _error_response(request, exc)
-        if getattr(question, "duplicate_warning", False):
-            messages.warning(request, "This question resembles another question you have saved. It was saved because duplicates are warning-only.")
-        messages.success(request, "Linked Question added." if scenario else "Question added.")
-        return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
+        except ValidationError as exc:
+            _bind_question_validation_errors(form, exc)
+        else:
+            if getattr(question, "duplicate_warning", False):
+                messages.warning(request, "This question resembles another question you have saved. It was saved because duplicates are warning-only.")
+            messages.success(request, "Linked Question added." if scenario else "Question added.")
+            return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
     return render(
         request,
         "departmental_exams/faculty/question_form.html",
@@ -727,15 +758,18 @@ def question_edit_view(request, contribution_id, question_id):
                 expected_question_revision=form.cleaned_data["expected_question_revision"],
                 payload=form.cleaned_data,
                 section_id=form.cleaned_data.get("section_id"),
-                scenario_id=form.cleaned_data.get("scenario_id"),
+                scenario_id=scenario.id if scenario else None,
                 request=request,
             )
-        except (ContributionConflict, ValidationError) as exc:
+        except ContributionConflict as exc:
             return _error_response(request, exc)
-        if getattr(updated_question, "duplicate_warning", False):
-            messages.warning(request, "This question resembles another question you have saved. It remains allowed as a warning-only duplicate.")
-        messages.success(request, "Question updated." if changed else "No question changes were needed.")
-        return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
+        except ValidationError as exc:
+            _bind_question_validation_errors(form, exc)
+        else:
+            if getattr(updated_question, "duplicate_warning", False):
+                messages.warning(request, "This question resembles another question you have saved. It remains allowed as a warning-only duplicate.")
+            messages.success(request, "Question updated." if changed else "No question changes were needed.")
+            return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
     return render(
         request,
         "departmental_exams/faculty/question_form.html",

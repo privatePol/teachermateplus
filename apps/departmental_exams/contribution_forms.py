@@ -93,6 +93,24 @@ class QuestionForm(ContributionRevisionForm):
                 initial=self._case_scenario_id,
             )
 
+    def clean_scenario_id(self):
+        scenario_id = self.cleaned_data["scenario_id"]
+        if scenario_id != self._case_scenario_id:
+            raise forms.ValidationError("The submitted Case does not match this question form.")
+        return scenario_id
+
+    def clean_section_id(self):
+        section_id = self.cleaned_data["section_id"]
+        if self._case_fixed_section and str(section_id) != str(self._case_fixed_section.id):
+            raise forms.ValidationError("Linked Questions must use the Case Exam Section.")
+        return section_id
+
+    def clean(self):
+        cleaned = super().clean()
+        if self._case_scenario_id is None and "scenario_id" in self.data:
+            raise forms.ValidationError("A standalone question cannot be attached to a Case from this form.")
+        return cleaned
+
 
 class QuestionDeleteForm(ContributionRevisionForm):
     expected_question_revision = forms.IntegerField(

@@ -6,7 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from django.test import RequestFactory
+from django.test import Client, RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.formats import date_format
@@ -70,6 +70,58 @@ def _response_hrefs(response):
     return parser.hrefs
 
 
+class _QuestionFormParser(HTMLParser):
+    """Read successful controls from the actual rendered authoring form."""
+
+    def __init__(self, response):
+        super().__init__(convert_charrefs=True)
+        self.active = False
+        self.action = None
+        self.data = {}
+        self.options = {}
+        self.textarea = None
+        self.select = None
+        self.feed(response.content.decode())
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form" and "data-scientific-question-editor" in attrs:
+            self.active = True
+            self.action = attrs.get("action")
+        if not self.active or "disabled" in attrs:
+            return
+        name = attrs.get("name")
+        if tag == "input" and name and attrs.get("type") not in {"submit", "button"}:
+            self.data[name] = attrs.get("value", "")
+        elif tag == "textarea" and name:
+            self.textarea = name
+            self.data[name] = ""
+        elif tag == "select" and name:
+            self.select = name
+            self.options[name] = []
+        elif tag == "option" and self.select:
+            value = attrs.get("value", "")
+            self.options[self.select].append(value)
+            if self.select not in self.data or "selected" in attrs:
+                self.data[self.select] = value
+
+    def handle_data(self, data):
+        if self.active and self.textarea:
+            self.data[self.textarea] += data
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self.active = False
+        elif tag == "textarea":
+            if self.textarea and self.data[self.textarea].startswith("\n"):
+                # HTML textarea parsing ignores one opening newline, as browsers do.
+                self.data[self.textarea] = self.data[self.textarea][1:]
+            self.textarea = None
+        elif tag == "select":
+            self.select = None
+
+
 class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
     def setUp(self):
         super().setUp()
@@ -79,6 +131,56 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.initialize(self.parent)
         self.contribution = FacultyContribution.objects.get()
         self.client.force_login(self.faculty)
+
+    def test_rendered_standalone_create_and_edit_revision_contract(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.faculty)
+        create_url = reverse("departmental_exams:question_create", args=[self.contribution.id])
+        form = _QuestionFormParser(client.get(create_url))
+        self.assertEqual(form.action, create_url)
+        self.assertEqual(form.data["expected_question_revision"], "")
+        self.assertNotIn("scenario_id", form.data)
+        payload = dict(form.data)
+        payload.update({key: value for key, value in self.valid_question_post(0).items()
+                        if key != "expected_contribution_revision"})
+        self.assertEqual(client.post(form.action, payload).status_code, 302)
+        question = Question.objects.get(contribution=self.contribution)
+        edit_url = reverse("departmental_exams:question_edit", args=[self.contribution.id, question.id])
+        edit = _QuestionFormParser(client.get(edit_url))
+        self.assertEqual(edit.action, edit_url)
+        self.assertEqual(edit.data["question_text"], payload["question_text"])
+        for revision in ("", str(question.revision + 1)):
+            with self.subTest(revision=revision):
+                response = client.post(edit.action, {**edit.data, "expected_question_revision": revision})
+                self.assertEqual(response.status_code, 409)
+                question.refresh_from_db()
+                self.assertEqual(question.revision, 1)
+        saved = client.post(edit.action, {**edit.data, "question_text": "Edited standalone"})
+        self.assertEqual(saved.status_code, 302)
+        question.refresh_from_db()
+        self.assertEqual(question.question_text, "Edited standalone")
+        self.assertEqual(question.revision, 2)
+
+    def test_standalone_payload_errors_preserve_form_and_reject_scenario_injection(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.faculty)
+        url = reverse("departmental_exams:question_create", args=[self.contribution.id])
+        form = _QuestionFormParser(client.get(url))
+        payload = dict(form.data)
+        payload.update({key: value for key, value in self.valid_question_post(0).items()
+                        if key != "expected_contribution_revision"})
+        injected = client.post(form.action, {**payload, "scenario_id": "1"})
+        self.assertEqual(injected.status_code, 400)
+        self.assertContains(injected, "A standalone question cannot be attached", status_code=400)
+        invalid = client.post(form.action, {**payload, "choice_b": " a "})
+        self.assertContains(invalid, "Choices must be distinct after text normalization.", status_code=400)
+        redisplayed = _QuestionFormParser(invalid)
+        self.assertEqual(redisplayed.action, url)
+        self.assertEqual(redisplayed.data["question_text"], payload["question_text"])
+        self.assertEqual(redisplayed.data["choice_b"], " a ")
+        self.assertFalse(Question.objects.filter(contribution=self.contribution).exists())
+        self.assertEqual(client.post(redisplayed.action, {**redisplayed.data, "choice_b": "B"}).status_code, 302)
+        self.assertEqual(Question.objects.filter(contribution=self.contribution).count(), 1)
 
     def fill_questions(self, count):
         return Question.objects.bulk_create(
