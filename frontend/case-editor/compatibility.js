@@ -9,6 +9,14 @@ export function parse(html) {
   return new DOMParser().parseFromString(html, 'text/html').body;
 }
 
+function blockOnlyCell(node) {
+  const cellBlocks = ['p','h3','h4','table','ul','ol'];
+  return ['td','th'].includes(node.localName) && node.children.length > 0 &&
+    [...node.childNodes].every(child => child.nodeType === 8 ||
+      (child.nodeType === 3 && /^[\t\n\r ]*$/.test(child.textContent)) ||
+      (child.nodeType === 1 && cellBlocks.includes(child.localName)));
+}
+
 function safeNode(node, doc) {
   if (node.nodeType === 3) return doc.createTextNode(node.textContent);
   if (node.nodeType !== 1) return doc.createDocumentFragment();
@@ -112,6 +120,13 @@ function normalizeWordLists(body) {
 // not a new row-group node that would invalidate the established table engine.
 export function prepareLegacy(html) {
   const body = parse(html);
+  // Remove only the same non-semantic boundaries allowed by the comparison,
+  // before the schema parser can wrap indentation in invented paragraphs.
+  for (const cell of body.querySelectorAll('td,th')) {
+    if (blockOnlyCell(cell)) for (const child of [...cell.childNodes]) {
+      if (child.nodeType === 3 && /^[\t\n\r ]*$/.test(child.textContent)) child.remove();
+    }
+  }
   let group = 0;
   for (const table of body.querySelectorAll('table')) {
     const captions = [...table.children].filter(el => el.localName === 'caption');
@@ -172,8 +187,14 @@ export function semanticSignature(html) {
     const tag = node.localName;
     if (marks.has(tag)) return [...node.childNodes].map(child => visit(child, [...activeMarks,tag])).filter(x => x !== null).flat();
     const attrs = [...node.attributes].filter(a => !(a.name === 'class' && !a.value) && !(['rowspan', 'colspan', 'start'].includes(a.name) && a.value === '1'));
+    // HTML indentation around an exclusively block-based cell is not authored
+    // spacing. Never ignore NBSP, inline separators or mixed direct cell text.
+    const ignoreCellBoundaries = blockOnlyCell(node);
     const children = [];
-    for (const child of [...node.childNodes].filter(child => !(child.nodeType === 3 && !child.textContent.trim() && ['body','table','thead','tbody','tfoot','tr','ul','ol'].includes(tag))).map(child => visit(child, activeMarks)).filter(x => x !== null).flat()) {
+    for (const child of [...node.childNodes].filter(child => !(child.nodeType === 3 &&
+      ((ignoreCellBoundaries && /^[\t\n\r ]*$/.test(child.textContent)) ||
+       (!child.textContent.trim() && ['body','table','thead','tbody','tfoot','tr','ul','ol'].includes(tag)))))
+      .map(child => visit(child, activeMarks)).filter(x => x !== null).flat()) {
       const last = children.at(-1);
       if (child[0] === '#text' && last?.[0] === '#text' && JSON.stringify(child[1]) === JSON.stringify(last[1])) last[2] += child[2];
       else children.push(child);

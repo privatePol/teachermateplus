@@ -1,4 +1,4 @@
-.tmp-case-editor { min-height: 20rem; overflow: auto; }
+.tmp-case-editor { min-height: 20rem; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
 .tmp-case-editor table, .tmp-case-preview table, .tmp-case-content table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
 .tmp-case-editor th, .tmp-case-editor td, .tmp-case-preview th, .tmp-case-preview td, .tmp-case-content th, .tmp-case-content td { border: 1px solid #adb5bd; padding: .35rem .5rem; vertical-align: top; }
 .tmp-case-preview, .tmp-case-content { overflow-x: auto; }
@@ -18,12 +18,21 @@
 .tmp-case-editor .tmp-valign-top, .tmp-case-preview .tmp-valign-top, .tmp-case-content .tmp-valign-top { vertical-align: top; }
 .tmp-case-editor .tmp-valign-middle, .tmp-case-preview .tmp-valign-middle, .tmp-case-content .tmp-valign-middle { vertical-align: middle; }
 .tmp-case-editor .tmp-valign-bottom, .tmp-case-preview .tmp-valign-bottom, .tmp-case-content .tmp-valign-bottom { vertical-align: bottom; }
-.tmp-case-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-bottom: .65rem; }
+.tmp-case-toolbar { display: flex; flex-wrap: wrap; align-items: stretch; gap: .5rem; margin-bottom: .65rem; max-width: 100%; }
+.tmp-case-tool-group { flex: 0 1 auto; min-width: 0; max-width: 100%; padding: .4rem; border: 1px solid #cbd5ce; border-radius: .35rem; background: #f6f8f6; }
+.tmp-case-tool-label { display: block; margin-bottom: .3rem; font-size: .75rem; font-weight: 600; color: #334b3c; }
+.tmp-case-tool-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
+.tmp-case-tool-controls button { min-height: 2rem; padding: .25rem .45rem; font-size: .8rem; white-space: normal; }
+.tmp-case-paste-recovery { border: 1px solid #b7791f; padding: .75rem; margin-bottom: 1rem; overflow-wrap: anywhere; }
+.tmp-case-paste-recovery textarea { width: 100%; max-width: 100%; }
+.tmp-case-paste-recovery button { margin: .5rem .5rem 0 0; white-space: normal; }
+@media (max-width: 575px) { .tmp-case-tool-group { flex: 1 1 100%; } }
 .tmp-case-toolbar [aria-pressed="true"] { background: #175d40; color: white; }
 .tmp-case-toolbar :focus-visible, .tmp-case-editor :focus-visible { outline: 3px solid #1264a3; outline-offset: 2px; }
 .tmp-case-table-size { font-size: .85rem; }
 .tmp-case-table-size input { width: 4rem; }
-.tmp-case-editor .tiptap { min-height: 19rem; position: relative; white-space: pre-wrap; overflow-wrap: break-word; }
+.tmp-case-editor .tiptap { flex: 1 0 auto; width: 100%; min-height: 19rem; position: relative; white-space: pre-wrap; overflow-wrap: break-word; color: #212529; caret-color: #212529; cursor: text; }
+.tmp-case-editor:focus-within { outline: 2px solid #1264a3; outline-offset: 2px; }
 /* Avoid Firefox's pre-wrap/justify combination without collapsing authored spaces. */
 .tmp-preserve { white-space: break-spaces; }
 .tmp-preserve:empty { min-height: 1.5em; }

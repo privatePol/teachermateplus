@@ -96,6 +96,20 @@ def _realistic_word_accounting_case(*, table_count=5, row_count=16, column_count
 
 
 class ScenarioContentTests(SimpleTestCase):
+    def test_cell_boundary_whitespace_and_meaningful_editor_content_round_trip(self):
+        source = (
+            '<table><tbody><tr><td>\n'
+            '<p class="tmp-preserve">Cash &nbsp; balance</p>\n'
+            '<p class="tmp-preserve"></p>\n'
+            '<p class="tmp-preserve">Total<br><br>Next</p>\n'
+            '</td></tr></tbody></table>'
+        )
+        canonical = canonicalize_scenario_content(source).html
+        for expected in ('Cash &nbsp; balance', '<p class="tmp-preserve"></p>',
+                         'Total<br><br>Next', '<table>', '<td>'):
+            self.assertIn(expected, canonical)
+        self.assertEqual(canonicalize_scenario_content(canonical).html, canonical)
+
     def test_editor_semantics_preserve_blank_paragraphs_breaks_and_independent_alignment(self):
         source = (
             '<p class="tmp-align-justify tmp-indent-8 tmp-preserve">'
@@ -640,7 +654,9 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
 
     def test_case_editor_self_hosted_assets_and_disabled_save_until_initialized(self):
         response = self.client.get(reverse('departmental_exams:faculty_case_create', args=[self.contribution.id]))
-        self.assertContains(response, 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js')
+        self.assertContains(response, 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js?v=case-smoke-20260910')
+        self.assertContains(response, 'css/departmental_exam_case_editor.css?v=case-smoke-20260910')
+        self.assertContains(response, 'id="case-editor-label"')
         self.assertContains(response, 'data-case-save disabled')
         self.assertContains(response, 'role="toolbar"')
         self.assertContains(response, 'aria-live="polite"')

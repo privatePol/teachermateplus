@@ -109,14 +109,14 @@ test('mounted form preserves untouched original, provides accessible controls, s
   assert.equal(form.querySelector('[data-case-save]').disabled,false);
   assert.equal(mounted.currentContent(),'<p>Original</p>');
   mounted.editor.commands.selectAll();
-  const bold=[...form.querySelectorAll('button')].find(button=>button.textContent==='Bold'); bold.click();
+  const bold=form.querySelector('button[aria-label="Bold"]'); bold.click();
   assert.equal(bold.getAttribute('aria-pressed'),'true'); assert.match(mounted.currentContent(),/<strong>Original/);
   mounted.editor.destroy(); form.remove();
 });
 test('mounted toolbar and keyboard events exercise formatting and the existing grid engine', () => {
   const form=formFor('<p>Toolbar text</p>'); const {editor,currentContent}=mountCaseEditor(form);
   const click = label => {
-    const control=[...form.querySelectorAll('[data-case-toolbar] button')].find(el=>el.textContent===label);
+    const control=[...form.querySelectorAll('[data-case-toolbar] button')].find(el=>el.getAttribute('aria-label')===label);
     assert.ok(control,label); assert.equal(control.disabled,false,label); control.click();
     assert.equal(form.querySelector('[data-case-save]').disabled,false,label);
   };
@@ -141,7 +141,7 @@ test('lossy schema conversion fails closed and retains source', () => {
   const form=formFor('<p>Before</p><unknown>Keep me</unknown>'); mountCaseEditor(form);
   assert.equal(form.querySelector('[data-case-save]').disabled,true);
   assert.equal(form.querySelector('[data-case-original-source]').hidden,false);
-  assert.match(form.querySelector('textarea').value,/Keep me/);
+  assert.match(form.querySelector('[data-case-original-source] textarea').value,/Keep me/);
   assert.match(form.querySelector('[data-case-editor-errors]').textContent,/preserved/); form.remove();
 });
 test('mounted paste handler inserts safe Word content and rejects unsupported paste without replacement', () => {
@@ -183,6 +183,153 @@ test('built self-hosted bundle initializes the rendered form without injected CS
     assert.ok(page.window.document.querySelectorAll('[data-case-toolbar] button').length>30);
     assert.equal(page.window.document.querySelectorAll('style').length,0);
   } finally { page.window.close(); }
+});
+
+test('cell block boundary whitespace is equivalent without erasing semantic spacing', () => {
+  const pretty=normalizeClipboard('<table><tr><td>\n <p class="MsoNormal">Cash</p>\n <p class="MsoNormal">Total</p>\n</td></tr></table>');
+  const compact=pretty.replace(/>\s+</g,'><');
+  assert.equal(semanticSignature(pretty),semanticSignature(compact));
+  for (const html of [pretty,compact,legacy]) { const editor=make(html); assert.equal(semanticSignature(serializeEditor(editor,{preserve:false})),semanticSignature(html)); editor.destroy(); }
+  for (const [before,after] of [
+    ['<td>Cash balance</td>','<td>Cashbalance</td>'],
+    ['<td><strong>A</strong> <em>B</em></td>','<td><strong>A</strong><em>B</em></td>'],
+    ['<td><p>A</p>&nbsp;<p>B</p></td>','<td><p>A</p><p>B</p></td>'],
+    ['<td>Direct <p>A</p></td>','<td><p>A</p></td>'],
+    ['<td><p>A</p><p></p><p>B<br><br>C</p></td>','<td><p>A</p><p>B<br>C</p></td>']
+  ]) assert.notEqual(semanticSignature('<table><tr>'+before+'</tr></table>'),semanticSignature('<table><tr>'+after+'</tr></table>'));
+  const direct=make('<table><tr><td>Cash &nbsp; balance <strong>A</strong> <em>B</em></td></tr></table>');
+  assert.match(serializeEditor(direct),/Cash &nbsp; balance/); direct.destroy();
+  assert.throws(()=>make('<p>Keep <a href="/">meaningful link</a></p>'),/supported content/);
+});
+
+function pasteInto(editor,html,text='',files=[]) {
+  const event=new dom.window.Event('paste',{bubbles:true,cancelable:true});
+  Object.defineProperty(event,'clipboardData',{value:{files,getData:type=>type==='text/html' ? html : text}});
+  editor.view.dom.dispatchEvent(event); assert.equal(event.defaultPrevented,true);
+}
+test('rejected paste has bounded separate recovery, truthful state, retry and dismiss', () => {
+  const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
+  const html='<p>Rejected</p><img src="https://example.invalid/no-fetch">', text='Rejected plain';
+  mounted.editor.commands.selectAll(); const before=mounted.editor.state;
+  pasteInto(mounted.editor,html,text);
+  assert.equal(mounted.editor.state,before); assert.equal(mounted.currentContent(),'<p>Original</p>');
+  assert.match(form.querySelector('[data-case-editor-errors]').textContent,/Paste was not inserted. Your existing content is unchanged./);
+  assert.doesNotMatch(form.querySelector('[data-case-editor-status]').textContent,/Editor ready/);
+  assert.equal(form.querySelector('[data-case-clipboard=html]').value,html);
+  assert.equal(form.querySelector('[data-case-clipboard=text]').value,text);
+  assert.equal(form.querySelector('[data-case-paste-recovery] img'),null);
+  assert.equal(form.querySelector('[data-case-source]').value,'<p>Original</p>');
+  assert.equal(form.querySelector('[data-case-save]').disabled,false);
+  const submit=new dom.window.Event('submit',{cancelable:true}); form.dispatchEvent(submit); assert.equal(submit.defaultPrevented,false);
+  form.querySelector('[data-case-paste-recovery] button').click();
+  assert.equal(mounted.currentContent(),'<p>Original</p>');
+  form.querySelectorAll('[data-case-paste-recovery] button')[1].click();
+  assert.equal(form.querySelector('[data-case-paste-recovery]').hidden,true);
+  assert.equal(form.querySelector('[data-case-clipboard=html]').value,'');
+  pasteInto(mounted.editor,html,text); pasteInto(mounted.editor,'<p>Corrected</p>','Corrected');
+  assert.match(mounted.currentContent(),/Corrected/); assert.equal(form.querySelector('[data-case-editor-errors]').hidden,true);
+  mounted.editor.destroy(); form.remove();
+});
+test('oversized recovery is not retained and failed insertion is atomic', () => {
+  const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
+  pasteInto(mounted.editor,'X'.repeat(100001),'Y'.repeat(100001));
+  assert.equal(form.querySelector('[data-case-clipboard=html]').value,'');
+  assert.equal(form.querySelector('[data-case-clipboard=text]').value,'');
+  assert.equal(form.querySelector('[data-case-paste-recovery] button').disabled,true);
+  const before=mounted.editor.state;
+  mounted.editor.on('update',()=>{throw new Error('Synthetic insertion failure');});
+  pasteInto(mounted.editor,'<p>Replacement</p>');
+  assert.equal(mounted.editor.state,before); assert.equal(mounted.currentContent(),'<p>Original</p>');
+  mounted.editor.destroy(); form.remove();
+});
+test('fatal initialization and serialization prevent submission and retain original', () => {
+  const broken=formFor('<p>Before</p><unknown>Keep</unknown>'); mountCaseEditor(broken);
+  let submit=new dom.window.Event('submit',{cancelable:true}); broken.dispatchEvent(submit);
+  assert.equal(submit.defaultPrevented,true); assert.match(broken.querySelector('[data-case-original-source] textarea').value,/Keep/); broken.remove();
+  const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
+  mounted.editor.commands.insertContent('Edited'); mounted.editor.getHTML=()=>{throw new Error('Synthetic serialization failure');};
+  submit=new dom.window.Event('submit',{cancelable:true}); form.dispatchEvent(submit);
+  assert.equal(submit.defaultPrevented,true); assert.equal(form.querySelector('[data-case-save]').disabled,true);
+  assert.equal(form.querySelector('[data-case-preview-button]').disabled,true);
+  assert.equal(form.querySelector('[data-case-original-source] textarea').value,'<p>Original</p>');
+  mounted.editor.destroy(); form.remove();
+});
+test('empty paragraph, wrapper focus and grouped keyboard controls preserve selection', () => {
+  const form=formFor(''), {editor,currentContent}=mountCaseEditor(form);
+  assert.equal(editor.state.doc.firstChild.type.name,'paragraph');
+  form.querySelector('[data-case-rich-editor]').click(); assert.equal(document.activeElement,editor.view.dom);
+  editor.view.dispatch(editor.state.tr.insertText('Typed')); assert.match(currentContent(),/Typed/);
+  editor.commands.setTextSelection({from:1,to:3}); const selection=editor.state.selection;
+  form.querySelector('[data-case-rich-editor]').click(); assert.equal(editor.state.selection,selection);
+  assert.equal(form.querySelectorAll('[data-case-toolbar] [role=group]').length,6);
+  assert.equal(form.querySelectorAll('[data-case-toolbar] button').length,35);
+  const bold=form.querySelector('[aria-label=Bold]'); bold.focus();
+  bold.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+  assert.equal(document.activeElement.getAttribute('aria-label'),'Italic');
+  for (const b of form.querySelectorAll('[data-case-toolbar] button')) assert.equal(b.title,b.getAttribute('aria-label'));
+  editor.destroy(); form.remove();
+});
+test('Preview failure and success do not hide an unresolved rejected paste', async () => {
+  const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
+  const csrf=document.createElement('input');csrf.name='csrfmiddlewaretoken';csrf.value='test-only';form.append(csrf);
+  pasteInto(mounted.editor,'<img>','recovery');
+  const originalFetch=globalThis.fetch;
+  try {
+    for (const ok of [false,true]) {
+      globalThis.fetch=async()=>({ok,json:async()=>({errors:['Rejected by server'],html:'<p>Original</p>'})});
+      form.querySelector('[data-case-preview-button]').click(); await new Promise(resolve=>setTimeout(resolve,0));
+      assert.match(form.querySelector('[data-case-editor-status]').textContent,/Paste remains rejected/);
+      assert.equal(form.querySelector('[data-case-editor-errors]').hidden,false);
+      if (!ok) assert.match(form.querySelector('[data-case-preview-errors]').textContent,/Rejected by server/);
+    }
+    globalThis.fetch=async()=>{throw new Error('Synthetic network failure');};
+    form.querySelector('[data-case-preview-button]').click();await new Promise(resolve=>setTimeout(resolve,0));
+    assert.match(form.querySelector('[data-case-editor-status]').textContent,/not been validated/);
+  } finally {globalThis.fetch=originalFetch;mounted.editor.destroy();form.remove();}
+});
+
+test('a stale Preview response cannot validate newer edits; serialization failure is fatal', async () => {
+  const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
+  const csrf=document.createElement('input');csrf.name='csrfmiddlewaretoken';csrf.value='test-only';form.append(csrf);
+  const originalFetch=globalThis.fetch; let resolveResponse;
+  try {
+    globalThis.fetch=()=>new Promise(resolve=>{resolveResponse=resolve;});
+    form.querySelector('[data-case-preview-button]').click();
+    mounted.editor.commands.insertContent('New ');
+    resolveResponse({ok:true,json:async()=>({html:'<p>Old preview</p>'})});
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.doesNotMatch(form.querySelector('[data-case-preview]').innerHTML,/Old preview/);
+    assert.match(form.querySelector('[data-case-editor-status]').textContent,/Content changed/);
+    mounted.editor.getHTML=()=>{throw new Error('Synthetic serialization failure');};
+    form.querySelector('[data-case-preview-button]').click();
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(form.querySelector('[data-case-save]').disabled,true);
+    assert.match(form.querySelector('[data-case-editor-status]').textContent,/Editor unavailable/);
+  } finally {globalThis.fetch=originalFetch;mounted.editor.destroy();form.remove();}
+});
+test('recovery byte budget excludes oversized Unicode and file paste cannot be retried as text', () => {
+  const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
+  pasteInto(mounted.editor,'<img>'+ '\u20b1'.repeat(70000),'');
+  assert.equal(form.querySelector('[data-case-clipboard=html]').value,'');
+  pasteInto(mounted.editor,'<p>Text accompanying a file</p>','plain',[{}]);
+  assert.equal(form.querySelector('[data-case-paste-recovery] button').disabled,true);
+  assert.equal(mounted.currentContent(),'<p>Original</p>');
+  mounted.editor.destroy();form.remove();
+});
+test('final bundle initializes an empty typing surface with matching local CSS', () => {
+  const form=formFor(''); form.dataset.caseEditorForm='';
+  const page=new JSDOM(form.outerHTML,{url:'http://localhost/',pretendToBeVisual:true,runScripts:'outside-only'});form.remove();
+  try {
+    const style=page.window.document.createElement('style');
+    style.textContent=readFileSync(new URL('../../static/css/departmental_exam_case_editor.css',import.meta.url),'utf8');page.window.document.head.append(style);
+    page.window.document.querySelector('[data-case-rich-editor]').className='tmp-case-editor';
+    page.window.TextEncoder=TextEncoder;
+    page.window.eval(readFileSync(new URL('../../static/vendor/tiptap/3.31.3/tmp-case-editor.bundle.js',import.meta.url),'utf8'));
+    const editable=page.window.document.querySelector('[contenteditable=true]');
+    assert.ok(editable.querySelector('p'));assert.equal(page.window.getComputedStyle(editable).minHeight,'19rem');
+    page.window.document.querySelector('[data-case-rich-editor]').click();assert.equal(page.window.document.activeElement,editable);
+    assert.equal(page.window.document.querySelectorAll('[data-case-toolbar] [role=group]').length,6);
+  } finally {page.window.close();}
 });
 
 test('editor output round trips through the actual Python canonicalizer repeatedly', t => {

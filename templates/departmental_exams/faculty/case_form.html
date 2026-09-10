@@ -1,7 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% load static departmental_exam_content %}
 {% block title %}{% if scenario %}Edit{% else %}Create{% endif %} Case | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-smoke-20260910">{% endblock %}
 {% block faculty_content %}
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Contribution Workspace</a></li><li class="breadcrumb-item active">{% if scenario %}Edit Case{% else %}Create Case{% endif %}</li></ol></nav>
 <h1 class="h3">{% if scenario %}Edit Case / Scenario{% else %}Create Case-Based Question Group{% endif %}</h1>
@@ -14,7 +14,7 @@
     {% if form.section_id %}<div class="mb-3"><label class="form-label" for="{{ form.section_id.id_for_label }}">{{ form.section_id.label }} <span class="text-danger">*</span></label>{{ form.section_id }}{% for error in form.section_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>{% endif %}
     <div class="mb-3"><label class="form-label" for="{{ form.title.id_for_label }}">Title</label>{{ form.title }}{% for error in form.title.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
     <div class="mb-3">
-      <label class="form-label" for="case-rich-editor">Case / Scenario content <span class="text-danger">*</span></label>
+      <div class="form-label" id="case-editor-label">Case / Scenario content <span class="text-danger">*</span></div>
       <div class="tmp-case-toolbar" role="toolbar" aria-label="Case formatting and tables" data-case-toolbar></div>
       <div id="case-rich-editor" class="tmp-case-editor form-control" data-case-rich-editor>{{ editor_display_html }}</div>
       <div class="form-text" id="case-editor-help">Paste from Word with Ctrl+V. Enter creates a paragraph; Shift+Enter inserts a line break. Indentation has eight levels. Tab / Shift+Tab moves between table cells. For keyboard cell selection, choose Start cell selection, move to the last cell, then Extend cell selection and Merge cells. Clear text formatting keeps lists and table geometry.</div>
@@ -31,4 +31,4 @@
   </div>
 </form>
 {% endblock %}
-{% block extra_js %}{{ block.super }}<script src="{% static 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js' %}" defer></script>{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js' %}?v=case-smoke-20260910" defer></script>{% endblock %}
