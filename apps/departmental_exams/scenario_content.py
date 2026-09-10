@@ -42,11 +42,12 @@ INLINE_TAGS = {"strong", "em", "sup", "sub", "u"}
 # and every structural/request budget still apply, including to preserved blanks.
 INDENT_CLASSES = {f"tmp-indent-{level}" for level in range(1, 9)}
 VERTICAL_CLASSES = {f"tmp-valign-{value}" for value in ("top", "middle", "bottom")}
+ACCOUNTING_CLASSES = {"tmp-rule-single", "tmp-rule-double"}
 PRESERVE_CLASS = "tmp-preserve"
 BLOCK_TAGS = {"p", "h3", "h4"}
 ALLOWED_CLASSES = {
     tag: ALIGNMENT_CLASSES | (
-        INDENT_CLASSES | {PRESERVE_CLASS} if tag in BLOCK_TAGS else VERTICAL_CLASSES
+        INDENT_CLASSES | {PRESERVE_CLASS} if tag in BLOCK_TAGS else VERTICAL_CLASSES | ACCOUNTING_CLASSES
     )
     for tag in ALIGNABLE_TAGS
 }
@@ -88,6 +89,127 @@ def _bounded_positive(value, *, field, maximum):
     if not 1 <= number <= maximum:
         raise ValidationError(f"{field} must be from 1 to {maximum}.")
     return str(number)
+
+
+def _reject_accounting_border():
+    raise ValidationError(
+        "This border cannot be preserved as an accounting rule. Use explicit single/double "
+        "bottom rules on amount cells; paragraph, stylesheet and conflicting rules are not supported."
+    )
+
+
+def _inspect_border_css(css):
+    """Bounded inspection copy, not CSS rewriting: mask strings, separate tokens."""
+    output, quote, index = [], None, 0
+    while index < len(css):
+        char = css[index]
+        if quote:
+            if char == "\\":
+                index += 1
+                if index >= len(css):
+                    _reject_accounting_border()
+                output.append("  ")
+            elif char == quote:
+                output.append(char)
+                quote = None
+            else:
+                output.append(" ")
+        elif char in {"'", '"'}:
+            quote = char
+            output.append(char)
+        elif css[index:index + 2] == "/*":
+            end = css.find("*/", index + 2)
+            if end < 0:
+                _reject_accounting_border()
+            if (re.fullmatch(r"[\w-]", css[index - 1:index] if index else "", re.ASCII)
+                    and re.fullmatch(r"[\w-]", css[end + 2:end + 3], re.ASCII)):
+                _reject_accounting_border()
+            output.append(" ")
+            index = end + 1
+        else:
+            if char == "\\":
+                _reject_accounting_border()
+            output.append(char)
+        index += 1
+    if quote:
+        _reject_accounting_border()
+    return "".join(output)
+
+
+def _accounting_rule(tag, attributes):
+    """Finite bottom-rule import; CSS never survives this boundary."""
+    reject = _reject_accounting_border
+
+    selected = [c for c in attributes.get("class", "").split() if c.startswith("tmp-rule-")]
+    if (len(selected) > 1 or any(c not in ACCOUNTING_CLASSES for c in selected)
+            or (selected and tag not in {"td", "th"})):
+        reject()
+    rule = selected[0] if selected else None
+    declarations = [tuple(piece.strip() for piece in part.split(":", 1))
+                    for part in _inspect_border_css(attributes.get("style", "")).lower().split(";") if ":" in part]
+    borders = [(key, value) for key, value in declarations if re.match(r"^(?:mso-)?border", key)]
+    bottom = [(key, value) for key, value in borders if "bottom" in key]
+    if any("!" in value for _key, value in borders):
+        reject()
+    if any("bottom" not in key and re.search(r"\b(double|dashed|dotted|groove|ridge|hidden)\b", value)
+           for key, value in borders):
+        reject()
+    if not bottom:
+        return rule
+    if any(key not in {"border-bottom", "mso-border-bottom-alt"} for key, _value in bottom):
+        reject()
+    if (not selected and all(re.fullmatch(r"none|0(?:px|pt)?", value) for _key, value in bottom)
+            and all(re.fullmatch(r"none|0(?:px|pt)?", value) for key, value in borders
+                    if key in {"border", "mso-border-alt"})):
+        return None
+    if tag not in {"td", "th"}:
+        reject()
+    values = []
+    for key, value in bottom:
+        if key not in {"border-bottom", "mso-border-bottom-alt"}:
+            reject()
+        if re.fullmatch(r"none|0(?:px|pt)?", value):
+            values.append(None)
+            continue
+        tokens = value.split()
+        kind = next((t for t in tokens if t in {"none", "solid", "double"}), None)
+        width = next((t for t in tokens if re.fullmatch(r"(?:\d+(?:\.\d+)?|\.\d+)(pt|px)", t)), None)
+        color = next((t for t in tokens if t in {"black", "windowtext", "#000", "#000000"}), None)
+        if len(tokens) != 3 or not kind or not width or not color or float(width[:-2]) > 6:
+            reject()
+        values.append(None if kind == "none" or float(width[:-2]) == 0 else
+                      "tmp-rule-single" if kind == "solid" else "tmp-rule-double")
+    if len(set(values)) > 1 or (selected and rule != values[0]):
+        reject()
+    grid = next((value for key, value in borders if key in {"border", "mso-border-alt"}), None)
+    def normalized_width(token):
+        whole, _dot, fraction = token[:-2].partition(".")
+        tail = fraction.rstrip("0")
+        return (whole.lstrip("0") or "0") + ("." + tail if tail else "") + token[-2:]
+    def normalized_tokens(value):
+        return sorted("black" if token in {"windowtext", "#000", "#000000"} else
+                      normalized_width(token) if re.fullmatch(r"(?:\d+(?:\.\d+)?|\.\d+)(pt|px)", token) else token
+                      for token in (value or "").split())
+    def same(value):
+        return normalized_tokens(value) == normalized_tokens(bottom[0][1])
+    first_bottom = next(index for index, (key, _value) in enumerate(borders) if "bottom" in key)
+    if any(key in {"border", "mso-border-alt"} and index > first_bottom and not same(value)
+           for index, (key, value) in enumerate(borders)):
+        reject()
+    grids = [(key, value) for key, value in borders if key in {"border", "mso-border-alt"}]
+    seen_grids = {}
+    for key, value in grids:
+        normalized = normalized_tokens(value)
+        if key in seen_grids and seen_grids[key] != normalized:
+            reject()
+        seen_grids[key] = normalized
+    complete_grid = (grid and same(grid)) or all(
+        any(key in {f"border-{side}", f"mso-border-{side}-alt"} and same(value)
+            for key, value in borders) for side in ("top", "left", "right")
+    )
+    if complete_grid and values[0] == "tmp-rule-single" and not selected:
+        return None
+    return values[0]
 
 
 class _WordSemanticNormalizer(HTMLParser):
@@ -139,6 +261,7 @@ class _WordSemanticNormalizer(HTMLParser):
     def _safe_attrs(self, tag, attrs):
         attributes = {name.lower(): value or "" for name, value in attrs}
         result = []
+        accounting = _accounting_rule(tag, attributes)
         if tag in {"th", "td"}:
             for name in ("rowspan", "colspan"):
                 if attributes.get(name):
@@ -173,6 +296,8 @@ class _WordSemanticNormalizer(HTMLParser):
                         vertical = f"tmp-valign-{match.group(1).lower()}"
                 if vertical:
                     classes.append(vertical)
+                if accounting:
+                    classes.append(accounting)
             if classes:
                 result.append(("class", " ".join(classes)))
         return result
@@ -192,6 +317,9 @@ class _WordSemanticNormalizer(HTMLParser):
             self.stack.append((local, [], True))
             self.warnings.add("Unsupported active or embedded Word markup was removed.")
             return
+        # Validate unsupported inline/block border placement even when the
+        # wrapper itself would otherwise be unwrapped by normalization.
+        _accounting_rule(local, {name.lower(): value or "" for name, value in attrs})
         if semantic == ["br"]:
             self.output.append("<br>")
             return
@@ -555,6 +683,13 @@ def _prepare_scenario_content(raw_content, *, input_format="html", enforce_struc
             "A native Word equation was detected. Replace it with TMP LaTeX delimiters or Unicode symbols."
         )
     warnings = set()
+    if input_format != "text" and any(
+        "!" in value or ("bottom" in key.lower() and not re.fullmatch(r"none|0(?:px|pt)?", value.strip(), re.I))
+        or re.search(r"\b(double|dashed|dotted|groove|ridge|hidden)\b", value, re.I)
+        for css in re.findall(r"<style\b[^>]*>([\s\S]*?)</style>", raw_content, re.I)
+        for key, value in re.findall(r"((?:mso-)?border[\w-]*)\s*:\s*([^;{}]+)", _inspect_border_css(css), re.I)
+    ):
+        raise ValidationError("Stylesheet-defined accounting borders are not supported. Use explicit bottom rules on amount cells.")
     if WORD_METADATA_PATTERN.search(raw_content):
         warnings.add("Microsoft Word metadata was removed during normalization.")
     source = _plain_text_to_html(raw_content) if input_format == "text" else raw_content

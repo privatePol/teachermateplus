@@ -13,8 +13,10 @@ import HardBreak from '@tiptap/extension-hard-break';
 import TextAlign from '@tiptap/extension-text-align';
 import {Table, TableRow, TableCell, TableHeader} from '@tiptap/extension-table';
 import {UndoRedo, Gapcursor} from '@tiptap/extensions';
-import {fixTables, inSameTable, pointsAtCell} from '@tiptap/pm/tables';
-import {parse, prepareLegacy, assertCompatible} from './compatibility.js';
+import {closeHistory} from '@tiptap/pm/history';
+import {fixTables, inSameTable, pointsAtCell, CellSelection, cellAround, selectedRect,
+  TableMap, mergeCells, splitCell} from '@tiptap/pm/tables';
+import {parse, prepareLegacy, assertCompatible, compatibilityError} from './compatibility.js';
 
 const classAttribute = (prefix, values) => ({
   default: null,
@@ -40,6 +42,7 @@ const Formatting = Extension.create({
         keepSpacing: {default: false, parseHTML: el => el.classList.contains('tmp-preserve'), renderHTML: attrs => attrs.keepSpacing ? {class:'tmp-preserve'} : {}}
       }},
       {types: ['tableCell','tableHeader'], attributes: {
+        accountingRule: semanticAttribute('accountingRule','tmp-rule-', ['single','double']),
         cellAlign: semanticAttribute('cellAlign','tmp-align-', ['left','center','right','justify']),
         verticalAlign: semanticAttribute('verticalAlign','tmp-valign-', ['top','middle','bottom']),
         scope: {default:null, parseHTML: el => ['row','col','rowgroup','colgroup'].includes(el.getAttribute('scope')) ? el.getAttribute('scope') : null,
@@ -49,6 +52,16 @@ const Formatting = Extension.create({
   },
   addCommands() {
     return {
+      setAccountingRule: value => ({state,tr,dispatch}) => {
+        if (![null,'single','double'].includes(value)) return false;
+        const cells=[];
+        if (state.selection instanceof CellSelection) state.selection.forEachCell((node,pos)=>cells.push({node,pos}));
+        else { const cell=cellAround(state.selection.$from); if (cell) cells.push({node:cell.nodeAfter,pos:cell.pos}); }
+        const changed=cells.filter(({node})=>node.attrs.accountingRule!==value);
+        if (dispatch && changed.length) closeHistory(tr);
+        if (dispatch) for (const {node,pos} of changed) tr.setNodeMarkup(pos,null,{...node.attrs,accountingRule:value});
+        return changed.length>0;
+      },
       indentParagraph: delta => ({tr, state, dispatch}) => {
         let changed = false;
         state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
@@ -70,6 +83,52 @@ const GridRow = TableRow.extend({addAttributes() { return {
   rowGroup: {default: null, parseHTML: el => el.getAttribute('data-tmp-group'), renderHTML: attrs => attrs.rowGroup ? {'data-tmp-group':attrs.rowGroup} : {}}
 }; }});
 const GridTable = Table.extend({
+  addCommands() {
+    return {
+      ...this.parent?.(),
+      mergeCells: () => ({state,dispatch}) => {
+        if (!(state.selection instanceof CellSelection) || !mergeCells(state)) return false;
+        const rect=selectedRect(state), seen=new Set(), bottom=new Set();
+        let ambiguous=false;
+        for (let row=rect.top;row<rect.bottom;row++) for (let col=rect.left;col<rect.right;col++) {
+          const pos=rect.map.map[row*rect.map.width+col]; if (seen.has(pos)) continue; seen.add(pos);
+          const cell=rect.table.nodeAt(pos), edge=rect.map.findCell(pos).bottom;
+          if (edge===rect.bottom) bottom.add(cell.attrs.accountingRule);
+          else if (cell.attrs.accountingRule) ambiguous=true;
+        }
+        if (ambiguous || bottom.size>1) {
+          if (!dispatch) return true;
+          const error=new Error('Merge would lose or conflict with accounting rules. Remove the affected rules first, then merge and apply the required bottom rule.');
+          error.accountingConflict=true; throw error;
+        }
+        const rule=[...bottom][0] || null;
+        return mergeCells(state,dispatch ? transaction => {
+          const cell=transaction.selection.$anchorCell;
+          transaction.setNodeMarkup(cell.pos,null,{...cell.nodeAfter.attrs,accountingRule:rule});
+          dispatch(transaction);
+        } : undefined);
+      },
+      splitCell: () => ({state,dispatch}) => {
+        if (!splitCell(state)) return false;
+        const rect=selectedRect(state);
+        const cell=state.selection instanceof CellSelection ? state.selection.$anchorCell : cellAround(state.selection.$from);
+        const rule=cell?.nodeAfter.attrs.accountingRule;
+        return splitCell(state,dispatch ? transaction => {
+          if (rule) {
+            const table=transaction.doc.nodeAt(rect.tableStart-1), map=TableMap.get(table), seen=new Set();
+            for (let row=rect.top;row<rect.bottom;row++) for (let col=rect.left;col<rect.right;col++) {
+              const offset=map.map[row*map.width+col]; if (seen.has(offset)) continue; seen.add(offset);
+              const node=table.nodeAt(offset);
+              transaction.setNodeMarkup(rect.tableStart+offset,null,{
+                ...node.attrs,accountingRule:map.findCell(offset).bottom===rect.bottom ? rule : null
+              });
+            }
+          }
+          dispatch(transaction);
+        } : undefined);
+      }
+    };
+  },
   parseHTML() { return [{tag:'table', getAttrs: el => el.hasAttribute('data-tmp-empty') ? false : null}]; },
   addAttributes() { return {
     ...this.parent?.(),
@@ -119,7 +178,7 @@ export function createCaseEditor(element, html, options = {}) {
     if (html.trim()) assertCompatible(html, editor);
     // Do not let the upstream engine silently repair an accepted legacy grid
     // on the first edit (for example filling ragged rows or shrinking rowspans).
-    if (fixTables(editor.state)?.docChanged) throw new Error('This table would require a geometry change to edit safely. The original source is preserved.');
+    if (fixTables(editor.state)?.docChanged) throw compatibilityError('geometry','geometry','This table would require a geometry change to edit safely. The original source is preserved.');
   }
   catch (error) { editor.destroy(); throw error; }
   return editor;

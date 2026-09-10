@@ -50,6 +50,7 @@ from .models import (
     ExamScenario,
     FacultyContribution,
     Question,
+    QuestionBlueprintPlacement,
     QuestionImportBatch,
 )
 from .scenario_content import (
@@ -155,6 +156,64 @@ def _owner_contribution(request, contribution_id):
     return contribution
 
 
+def _case_presentation(contribution, questions, case_context):
+    """Owner-scoped display order only; never persist numbering or placements."""
+    if case_context is None:
+        return [], [], {}
+    _blueprint, sections = case_context
+    scenarios = list(
+        contribution.faculty_scenarios.select_related("section")
+        .prefetch_related("members__question").order_by("created_at", "id")
+    )
+    by_id = {question.id: question for question in questions}
+    linked_ids = set()
+    for scenario in scenarios:
+        scenario.ordered_members = sorted(
+            (member for member in scenario.members.all() if member.question_id in by_id),
+            key=lambda member: (member.position, member.id),
+        )
+        linked_ids.update(member.question_id for member in scenario.ordered_members)
+    placements = dict(
+        QuestionBlueprintPlacement.objects.filter(
+            question_id__in=by_id, blueprint=_blueprint
+        ).values_list("question_id", "section_id")
+    )
+    groups, numbers = [], {}
+    for section in sections or (None,):
+        section_id = section.id if section else None
+        cases = [case for case in scenarios if case.section_id == section_id]
+        standalone = [question for question in questions if question.id not in linked_ids
+                      and placements.get(question.id) == section_id]
+        for case in cases:
+            for member in case.ordered_members:
+                numbers[member.question_id] = len(numbers) + 1
+                member.question.presentation_number = numbers[member.question_id]
+        for question in standalone:
+            numbers[question.id] = len(numbers) + 1
+            question.presentation_number = numbers[question.id]
+        groups.append({"section": section, "cases": cases, "questions": standalone})
+    # CSV/legacy Draft questions may legitimately await an explicit placement.
+    # Recover only absent placements, never reinterpret a foreign/invalid one.
+    unplaced = [question for question in questions if sections
+                and question.id not in linked_ids and question.id not in placements]
+    if unplaced:
+        foreign_placements = QuestionBlueprintPlacement.objects.filter(
+            question_id__in=[question.id for question in unplaced]
+        ).exists()
+        if foreign_placements:
+            raise ValidationError("Saved question belongs to a different exam structure.")
+        for question in unplaced:
+            numbers[question.id] = len(numbers) + 1
+            question.presentation_number = numbers[question.id]
+            question.section_assignment_required = True
+        groups.append({"section": None, "cases": [], "questions": unplaced,
+                       "assignment_required": True})
+    # Invalid structure must not silently hide saved questions or Cases.
+    if set(numbers) != set(by_id) or sum(len(g["cases"]) for g in groups) != len(scenarios):
+        raise ValidationError("Saved Case/question section context is invalid. Ask an administrator to inspect it.")
+    return groups, scenarios, numbers
+
+
 def _workspace_context(request, contribution):
     questions = list(
         contribution.questions.filter(
@@ -204,27 +263,15 @@ def _workspace_context(request, contribution):
         )
     except (PermissionDenied, ValidationError):
         case_context = None
-    scenarios = []
-    linked_question_ids = set()
-    if case_context is not None:
-        scenarios = list(
-            contribution.faculty_scenarios.select_related("section")
-            .prefetch_related("members__question")
-            .order_by("created_at", "id")
-        )
-        for scenario in scenarios:
-            scenario.ordered_members = sorted(
-                scenario.members.all(), key=lambda member: (member.position, member.id)
-            )
-            linked_question_ids.update(
-                member.question_id for member in scenario.ordered_members
-            )
+    presentation_sections, scenarios, _numbers = _case_presentation(
+        contribution, questions, case_context
+    )
     return {
         "contribution": contribution,
         "questions": questions,
-        "standalone_questions": [
-            question for question in questions if question.id not in linked_question_ids
-        ],
+        "standalone_questions": (questions if case_context is None else
+                                 [q for group in presentation_sections for q in group["questions"]]),
+        "presentation_sections": presentation_sections,
         "faculty_cases": scenarios,
         "saved_count": saved_count,
         "quota": quota,
@@ -984,6 +1031,15 @@ def faculty_case_detail_view(request, contribution_id, scenario_id):
         scenario.members.select_related("question").order_by("position", "id")
     )
     tenant_id, campus_id = _scope(request)
+    questions = list(contribution.questions.filter(
+        Q(import_batch__isnull=True) | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+    ).order_by("position", "id"))
+    _groups, _cases, numbers = _case_presentation(
+        contribution, questions,
+        FacultyCasePolicy.context(contribution=contribution, tenant_id=tenant_id),
+    )
+    for member in members:
+        member.question.presentation_number = numbers[member.question_id]
     try:
         mutable = bool(
             ContributionAuthorizationService.require_mutable_locked(

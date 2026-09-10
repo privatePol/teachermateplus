@@ -1,7 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% load static departmental_exam_content %}
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-review-20260910">{% endblock %}
 {% block faculty_content %}
 <div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item active">{{ contribution.cycle_course.course.code }}</li></ol></nav>
@@ -82,10 +82,13 @@
     {% if saved_count == quota %}<a class="btn btn-success" href="{% url 'departmental_exams:contribution_submit' contribution.id %}">Final submission</a>{% endif %}
   </div>
 {% endif %}
-{% if faculty_cases %}
-  <section class="mb-4" aria-labelledby="case-groups-heading">
-    <h2 class="h4" id="case-groups-heading">Case-Based Questions</h2>
-    {% for scenario in faculty_cases %}
+{% if case_authoring_enabled %}
+  <p class="small text-muted">Question numbers follow section and Case order, not the order you added questions. These are workspace numbers, not final exam item numbers.</p>
+  {% for group in presentation_sections %}
+  <section class="mb-4" aria-label="{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}">
+    <h2 class="h4">{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}</h2>
+    {% if group.assignment_required %}<p class="alert alert-warning">These saved questions still need an Exam Section before Final Submission.{% if is_mutable %} Use Edit to select a frozen Exam Section.{% else %} Section assignment is unavailable while this contribution is read-only.{% endif %}</p>{% endif %}
+    {% for scenario in group.cases %}
       <article class="card shadow-sm mb-3">
         <div class="card-header d-flex flex-wrap justify-content-between gap-2">
           <div><strong>{{ scenario.title|default:"Case / Scenario" }}</strong>{% if scenario.section %} <span class="badge text-bg-secondary">{{ scenario.section.title }}</span>{% endif %}</div>
@@ -102,8 +105,13 @@
         </div>
       </article>
     {% endfor %}
+    {% if group.questions %}<h3 class="h5">Standalone MCQs</h3>{% endif %}
+    {% for question in group.questions %}
+      {% include "departmental_exams/faculty/_question_card.html" with show_global_reorder=False %}
+    {% endfor %}
   </section>
-{% endif %}
+  {% endfor %}
+{% else %}
 {% if standalone_questions %}
   <h2 class="h4">{% if case_authoring_enabled %}Standalone MCQs{% else %}Saved Questions{% endif %}</h2>
   {% if is_mutable and not case_authoring_enabled %}
@@ -121,6 +129,7 @@
   </div>
 {% elif not faculty_cases %}
   <div class="alert alert-info">No questions have been saved.</div>
+{% endif %}
 {% endif %}
 </div>
 {% if active_import %}

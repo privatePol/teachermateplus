@@ -43,3 +43,11 @@
 .tmp-case-editor .ProseMirror-gapcursor::after { content: ''; display: block; position: absolute; top: -2px; width: 20px; border-top: 1px solid black; }
 .tmp-case-editor .ProseMirror-focused .ProseMirror-gapcursor { display: block; }
 .tmp-case-editor caption, .tmp-case-preview caption, .tmp-case-content caption { caption-side: top; }
+/* Fixed semantic bottom overrides outrank the 1px collapsed grid. Removing a
+   rule restores that grid; these are cell borders, never text decoration. */
+:is(.tmp-case-editor,.tmp-case-preview,.tmp-case-content) :is(td,th).tmp-rule-single { border-bottom: 2px solid #000; }
+:is(.tmp-case-editor,.tmp-case-preview,.tmp-case-content) :is(td,th).tmp-rule-double { border-bottom: 3px double #000; }
+@media print {
+  .tmp-case-content, .tmp-case-preview, .tmp-case-editor { overflow: visible; }
+  .tmp-case-editor { min-height: 0; }
+}

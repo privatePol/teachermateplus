@@ -1,7 +1,12 @@
 from html.parser import HTMLParser
+import csv
+import io
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import Http404
 from django.test import Client, SimpleTestCase
 from django.urls import reverse
@@ -22,8 +27,12 @@ from .models import (
     ExamScenarioMember,
     ExaminationCycle,
     FacultyContribution,
+    GeneratedExamItem,
+    GeneratedExamSet,
+    ExamGenerationRevision,
     Question,
     QuestionBlueprintPlacement,
+    QuestionImportBatch,
 )
 from .scenario_content import (
     MAX_CANONICAL_CHARACTERS,
@@ -96,6 +105,59 @@ def _realistic_word_accounting_case(*, table_count=5, row_count=16, column_count
 
 
 class ScenarioContentTests(SimpleTestCase):
+    def test_shared_border_review_fixtures(self):
+        fixtures = json.loads((Path(__file__).resolve().parents[2] /
+                               'frontend/case-editor/border-fixtures.json').read_text(encoding='utf-8'))
+        for fixture in fixtures:
+            with self.subTest(fixture=fixture['name']):
+                import html
+                raw = ('<style>' + fixture['sheet'] + '</style>' if 'sheet' in fixture else '')
+                style = ' style="' + html.escape(fixture['style'], quote=True) + '"' if 'style' in fixture else ''
+                raw += f'<table><tr><td{style}>100</td></tr></table>'
+                if fixture.get('reject'):
+                    with self.assertRaises(ValidationError) as error:
+                        canonicalize_scenario_content(raw)
+                    self.assertNotIn('100', str(error.exception))
+                else:
+                    canonical = canonicalize_scenario_content(raw).html
+                    if fixture['rule']:
+                        self.assertIn('tmp-rule-' + fixture['rule'], canonical)
+                    else:
+                        self.assertNotIn('tmp-rule-', canonical)
+                    self.assertIn('100', canonical)
+                    self.assertEqual(canonicalize_scenario_content(canonical).html, canonical)
+
+    def test_accounting_rule_allowlist_import_and_idempotence(self):
+        for style, rule in (
+            ("border-bottom:1pt solid black", "single"),
+            ("mso-border-bottom-alt:double windowtext 3.0pt", "double"),
+            ("border-bottom:3px double #000;mso-border-bottom-alt:double black 3pt", "double"),
+        ):
+            raw = f'<table><tr><td style="{style}"><u>100</u></td></tr></table>'
+            canonical = canonicalize_scenario_content(raw).html
+            self.assertIn(f'tmp-rule-{rule}', canonical)
+            self.assertIn('<u>100</u>', canonical)
+            self.assertNotIn('style=', canonical)
+            self.assertEqual(canonicalize_scenario_content(canonical).html, canonical)
+        grid = '<table><tr><td style="border:1pt solid black;border-bottom:1pt solid black">100</td></tr></table>'
+        self.assertNotIn('tmp-rule', canonicalize_scenario_content(grid).html)
+        four_sides = '<table><tr><td style="border-top:solid windowtext 1.0pt;border-left:1pt solid black;border-right:solid black 1.0pt;border-bottom:1pt solid #000">100</td></tr></table>'
+        self.assertNotIn('tmp-rule', canonicalize_scenario_content(four_sides).html)
+        self.assertEqual(canonicalize_scenario_content('<p style="border-bottom:none">Ordinary</p>').html, '<p>Ordinary</p>')
+
+    def test_unsupported_accounting_borders_cannot_silently_disappear(self):
+        for raw in (
+            '<p style="border-bottom:1pt solid black">100</p>',
+            '<span style="border-bottom:1pt solid black">100</span>',
+            '<table><tr><td class="tmp-rule-single tmp-rule-double">100</td></tr></table>',
+            '<table><tr><td class="tmp-rule-unknown">100</td></tr></table>',
+            '<table><tr><td style="border-bottom:2px dotted red">100</td></tr></table>',
+            '<table><tr><td style="border-bottom:1pt solid black;mso-border-bottom-alt:3pt double black">100</td></tr></table>',
+            '<style>.amount {border-bottom:double black 3pt}</style><p>100</p>',
+        ):
+            with self.subTest(raw=raw), self.assertRaises(ValidationError):
+                canonicalize_scenario_content(raw)
+
     def test_cell_boundary_whitespace_and_meaningful_editor_content_round_trip(self):
         source = (
             '<table><tbody><tr><td>\n'
@@ -627,10 +689,105 @@ class FacultyCaseFixtureMixin(Stage5FixtureMixin):
 
 
 class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
+    def test_csv_import_unplaced_recovery_and_existing_edit_route(self):
+        from .csv_import import CSV_HEADERS
+        from .tests_questionnaire_print_release import QuestionnairePrintReleaseTests
+        scenario = self.save_case()
+        linked = self.add_question(scenario=scenario)
+        standalone = self.add_question(section=self.section_b, text='Placed standalone')
+        # Real, nonempty immutable snapshots: GETs must not renumber/rewrite them.
+        self.questions = [linked, standalone]
+        QuestionnairePrintReleaseTests._make_revision(self, self.parent, revision_number=1)
+        self.assertTrue(GeneratedExamItem.objects.filter(source_question__in=self.questions).exists())
+        self.contribution.refresh_from_db()
+        workspace_url = reverse('departmental_exams:contribution_workspace', args=[self.contribution.id])
+        before_page = self.client.get(workspace_url)
+        upload_url = reverse('departmental_exams:csv_upload', args=[self.contribution.id])
+        self.assertIn(upload_url, _response_hrefs(before_page))
+        upload_page = self.client.get(upload_url)
+        stream = io.StringIO(newline='')
+        writer = csv.writer(stream)
+        writer.writerow(CSV_HEADERS)
+        writer.writerow(['Imported unplaced first', 'A', 'B', 'C', 'D', 'B', 'moderate'])
+        writer.writerow(['Imported unplaced second', 'A', 'B', 'C', 'D', 'C', 'easy'])
+        upload = self.client.post(upload_url, {
+            **upload_page.context['form'].initial,
+            'csv_file': SimpleUploadedFile('review.csv', stream.getvalue().encode(), content_type='text/csv'),
+        })
+        self.assertEqual(upload.status_code, 302)
+        preview = self.client.get(upload['Location'])
+        batch = preview.context['batch']
+        confirm = self.client.post(reverse('departmental_exams:csv_confirm', args=[batch.token]),
+                                   preview.context['confirm_form'].initial)
+        self.assertEqual(confirm.status_code, 302)
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, QuestionImportBatch.Status.CONFIRMED)
+        imported = list(self.contribution.questions.filter(import_batch=batch).order_by('position', 'id'))
+        self.assertEqual(len(imported), 2)
+        self.assertFalse(QuestionBlueprintPlacement.objects.filter(question__in=imported).exists())
+        questions = list(self.contribution.questions.order_by('position', 'id'))
+        with self.assertRaisesRegex(ValidationError, 'Every question must be assigned'):
+            FacultyCasePolicy.validate_submission(contribution=self.contribution, questions=questions, tenant_id=self.tenant.id)
+        before = self._question_mutation_snapshot()
+        page = self.client.get(workspace_url)
+        self.assertEqual(self._displayed_question_pairs(page),
+                         [(linked.id, 1), (standalone.id, 2), (imported[0].id, 3), (imported[1].id, 4)])
+        self.assertContains(page, 'Section assignment required')
+        detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[self.contribution.id, scenario.id]))
+        self.assertEqual(self._displayed_question_pairs(detail), [(linked.id, 1)])
+        self.assertEqual(self._question_mutation_snapshot(), before)
+        # Resolve both through the existing rendered, revision-protected Edit form.
+        for question in imported:
+            edit_url = reverse('departmental_exams:question_edit', args=[self.contribution.id, question.id])
+            self.assertIn(edit_url, _response_hrefs(page))
+            edit = self.client.get(edit_url)
+            self.assertEqual(edit.status_code, 200)
+            form = _QuestionFormParser(edit)
+            self.assertIn(str(self.section_b.id), form.options['section_id'])
+            self.assertEqual(self.client.post(form.action, {**form.data, 'section_id': self.section_b.id}).status_code, 302)
+            self.assertEqual(QuestionBlueprintPlacement.objects.get(question=question).section_id, self.section_b.id)
+        self.assertNotContains(self.client.get(workspace_url), 'Section assignment required')
+        FacultyCasePolicy.validate_submission(contribution=self.contribution,
+                                             questions=list(self.contribution.questions.all()), tenant_id=self.tenant.id)
+
+    def _displayed_question_pairs(self, response):
+        import re
+        self.assertEqual(response.status_code, 200)
+        return [(int(pk), int(number)) for pk, number in re.findall(
+            r'class="card shadow-sm mb-3 question-card" data-question-id="(\d+)"[\s\S]*?class="question-position">(\d+)',
+            response.content.decode(),
+        )]
+
+    def test_interleaved_cases_display_contiguously_without_persistent_renumbering(self):
+        first_case = self.save_case(title="Problem 1")
+        second_case = self.save_case(title="Problem 2")
+        first = self.add_question(scenario=first_case, text="First")
+        second = self.add_question(scenario=second_case, text="Second")
+        later = self.add_question(scenario=first_case, text="Return to first Case")
+        standalone = self.add_question(text="Standalone")
+        before = self._question_mutation_snapshot()
+        workspace = self.client.get(reverse('departmental_exams:contribution_workspace', args=[self.contribution.id]))
+        self.assertEqual(self._displayed_question_pairs(workspace), [(first.id, 1), (later.id, 2), (second.id, 3), (standalone.id, 4)])
+        detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[self.contribution.id, second_case.id]))
+        self.assertEqual(self._displayed_question_pairs(detail), [(second.id, 3)])
+        self.assertEqual(self._question_mutation_snapshot(), before)
+
+    def test_standalone_only_first_section_precedes_cases_and_empty_cases_remain_visible(self):
+        case = self.save_case(title="Later section Case", section=self.section_b)
+        empty = self.save_case(title="Visible empty Case", section=self.section_b)
+        linked = self.add_question(scenario=case, section=self.section_b, text="Later section")
+        standalone = self.add_question(section=self.section_a, text="Earlier section")
+        response = self.client.get(reverse('departmental_exams:contribution_workspace', args=[self.contribution.id]))
+        self.assertEqual(self._displayed_question_pairs(response), [(standalone.id, 1), (linked.id, 2)])
+        self.assertContains(response, empty.title)
+        self.assertLess(response.content.index(b'Earlier section'), response.content.index(b'Later section Case'))
+        detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[self.contribution.id, case.id]))
+        self.assertEqual(self._displayed_question_pairs(detail), [(linked.id, 2)])
+
     def test_editor_formatting_create_edit_reopen_preview_detail_are_consistent(self):
         html = ('<p class="tmp-align-justify tmp-indent-2 tmp-preserve"><u>Case ₱500</u>'
                 '<br><br><br>Next</p><p class="tmp-preserve"></p>'
-                '<table><tr><td class="tmp-align-right tmp-valign-bottom">'
+                '<table><tr><td class="tmp-align-right tmp-valign-bottom tmp-rule-double">'
                 '<p class="tmp-align-left tmp-preserve">Cell</p></td></tr></table>')
         canonical = canonicalize_scenario_content(html).html
         scenario = None
@@ -654,8 +811,8 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
 
     def test_case_editor_self_hosted_assets_and_disabled_save_until_initialized(self):
         response = self.client.get(reverse('departmental_exams:faculty_case_create', args=[self.contribution.id]))
-        self.assertContains(response, 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js?v=case-smoke-20260910')
-        self.assertContains(response, 'css/departmental_exam_case_editor.css?v=case-smoke-20260910')
+        self.assertContains(response, 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js?v=case-review-20260910')
+        self.assertContains(response, 'css/departmental_exam_case_editor.css?v=case-review-20260910')
         self.assertContains(response, 'id="case-editor-label"')
         self.assertContains(response, 'data-case-save disabled')
         self.assertContains(response, 'role="toolbar"')
@@ -690,11 +847,15 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.contribution.refresh_from_db()
         return (
             self.contribution.revision,
-            list(self.contribution.questions.values_list("id", "revision")),
-            list(ExamScenarioMember.objects.values_list("scenario_id", "question_id", "position")),
+            list(self.contribution.questions.order_by('id').values_list(
+                "id", "revision", "position", "correct_answer", "question_text", "choice_a", "choice_b", "choice_c", "choice_d")),
+            list(ExamScenarioMember.objects.order_by('id').values_list("id", "scenario_id", "question_id", "position")),
             list(ExamScenario.objects.values_list("id", "revision")),
-            QuestionBlueprintPlacement.objects.count(),
+            list(QuestionBlueprintPlacement.objects.order_by('id').values()),
             AuditLog.objects.count(),
+            list(ExamGenerationRevision.objects.order_by('id').values()),
+            list(GeneratedExamSet.objects.order_by('id').values()),
+            list(GeneratedExamItem.objects.order_by('id').values()),
         )
 
     def test_linked_mcq_follows_rendered_navigation_with_csrf_and_owned_membership(self):
@@ -863,7 +1024,7 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
 
     def test_fifty_one_table_save_rejection_retains_safe_editor_and_source(self):
         raw = (
-            '<table onclick="alert(1)"><tr><td><p><strong>Account ₱500</strong></p>'
+            '<table onclick="alert(1)"><tr><td class="tmp-rule-double"><p><strong>Account ₱500</strong></p>'
             '</td></tr></table>'
         ) * 51
         preview = self.client.post(
@@ -884,6 +1045,7 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         body = response.content.decode()
         editor = body.split("data-case-rich-editor>", 1)[1].split("</div>", 1)[0]
         self.assertEqual(editor.count("<table>"), 51)
+        self.assertEqual(editor.count('tmp-rule-double'), 51)
         self.assertEqual(editor.count("<strong>Account ₱500</strong>"), 51)
         for forbidden in ("onclick", "&lt;table", "&lt;p&gt;", "&lt;strong&gt;"):
             self.assertNotIn(forbidden, editor)
@@ -1170,6 +1332,8 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
             expected_scenario_revision=scenario.revision,
         )
         self.assertTrue(changed)
+        detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[self.contribution.id, scenario.id]))
+        self.assertEqual(self._displayed_question_pairs(detail), [(second.id, 1), (first.id, 2)])
         self.assertEqual(
             list(scenario.members.order_by("position").values_list("question_id", flat=True)),
             [second.id, first.id],
@@ -1187,6 +1351,8 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         )
         self.assertTrue(ExamScenario.objects.filter(pk=scenario.id).exists())
         self.assertEqual(list(scenario.members.values_list("position", flat=True)), [1])
+        detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[self.contribution.id, scenario.id]))
+        self.assertEqual(self._displayed_question_pairs(detail), [(first.id, 1)])
 
     def test_submission_rejects_empty_case_unplaced_and_section_mismatch(self):
         scenario = self.save_case()
@@ -1430,3 +1596,8 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertIsNone(scenario.section_id)
         self.assertFalse(QuestionBlueprintPlacement.objects.filter(question=question).exists())
         self.assertEqual(question.exam_scenario_membership.scenario_id, scenario.id)
+        self.client.force_login(faculty)
+        workspace = self.client.get(reverse('departmental_exams:contribution_workspace', args=[contribution.id]))
+        self.assertEqual(self._displayed_question_pairs(workspace), [(question.id, 1)])
+        detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[contribution.id, scenario.id]))
+        self.assertEqual(self._displayed_question_pairs(detail), [(question.id, 1)])

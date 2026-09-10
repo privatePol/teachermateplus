@@ -1,9 +1,10 @@
 <article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}" data-scientific-group>
   <div class="card-body">
     <div class="d-flex justify-content-between gap-3">
-      <h3 class="h6">Question <span class="question-position">{{ question.position }}</span></h3>
+      <h3 class="h6">Question <span class="question-position">{{ question.presentation_number|default:question.position }}</span></h3>
       <span class="badge text-bg-light">{{ question.get_difficulty_display }} &middot; {{ question.get_entry_method_display }}</span>
     </div>
+    {% if question.section_assignment_required %}<p class="small text-warning">Section assignment required</p>{% endif %}
     <div class="mb-2" data-scientific-content>{{ question.question_text }}</div>
     <ol type="A" class="mb-2">
       <li{% if question.correct_answer == 'A' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_a }}</span></li>

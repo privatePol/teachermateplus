@@ -13,6 +13,135 @@ const {serializeEditor,normalizeClipboard,semanticSignature}=await import('./com
 const {mountCaseEditor}=await import('../../static/js/departmental_exam_case_editor.js');
 function make(html='<p>Accounting ₱1,250</p>') { const host=document.createElement('div'); document.body.append(host); return createCaseEditor(host,html); }
 function cellPositions(editor) { const result=[]; editor.state.doc.descendants((node,pos) => { if (['tableCell','tableHeader'].includes(node.type.name)) result.push(pos); }); return result; }
+const rules = editor => cellPositions(editor).map(pos=>editor.state.doc.nodeAt(pos).attrs.accountingRule);
+const borderFixtures=JSON.parse(readFileSync(new URL('./border-fixtures.json',import.meta.url),'utf8'));
+function borderFixtureHTML(fixture) {
+  const cell=document.createElement('td'); cell.textContent='100';
+  if ('style' in fixture) cell.setAttribute('style',fixture.style);
+  return ('sheet' in fixture ? '<style>'+fixture.sheet+'</style>' : '')+'<table><tr>'+cell.outerHTML+'</tr></table>';
+}
+test('shared border review fixtures preserve rules or reject without silent change', () => {
+  for (const fixture of borderFixtures) {
+    const raw=borderFixtureHTML(fixture);
+    if (fixture.reject) assert.throws(()=>normalizeClipboard(raw),error=>
+      error.diagnosticCode==='CASE_NORMALIZE_ATTRIBUTE' && !error.message.includes('100'),fixture.name);
+    else {
+      const editor=make(normalizeClipboard(raw));
+      assert.deepEqual(rules(editor),[fixture.rule],fixture.name);
+      const exported=serializeEditor(editor), reopened=make(exported);
+      assert.equal(serializeEditor(reopened),exported,fixture.name);
+      editor.destroy();reopened.destroy();
+    }
+  }
+});
+test('rejected border fixtures preserve editor state and recover both clipboard formats', () => {
+  for (const fixture of borderFixtures.filter(item=>item.reject)) {
+    const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
+    mounted.editor.commands.selectAll();const before=mounted.editor.state;
+    const raw=borderFixtureHTML(fixture);
+    pasteInto(mounted.editor,raw,'100');
+    assert.equal(mounted.editor.state,before,fixture.name);
+    assert.equal(mounted.currentContent(),'<p>Original</p>',fixture.name);
+    assert.equal(form.querySelector('[data-case-clipboard=html]').value,raw);
+    assert.equal(form.querySelector('[data-case-clipboard=text]').value,'100');
+    assert.equal(form.querySelector('[data-case-save]').disabled,false);
+    assert.match(form.querySelector('[data-case-editor-status]').textContent,/Paste rejected/);
+    mounted.editor.destroy();form.remove();
+  }
+});
+
+test('accounting current and mixed selections update all cells without changing geometry or marks', () => {
+  const editor=make('<table><tr><td class="tmp-rule-single tmp-align-right"><u>100</u></td><td>200</td></tr></table>');
+  const cells=cellPositions(editor);
+  editor.commands.setCellSelection({anchorCell:cells[1],headCell:cells[0]});
+  assert.equal(editor.commands.setAccountingRule('single'),true);
+  assert.deepEqual(rules(editor),['single','single']);
+  editor.commands.setAccountingRule('double'); assert.deepEqual(rules(editor),['double','double']);
+  editor.commands.setAccountingRule(null); assert.deepEqual(rules(editor),[null,null]);
+  editor.commands.undo(); assert.deepEqual(rules(editor),['double','double']);
+  editor.commands.redo(); assert.deepEqual(rules(editor),[null,null]);
+  assert.deepEqual(cellPositions(editor),cells); assert.match(serializeEditor(editor),/<u>100<\/u>/);
+  assert.match(serializeEditor(editor),/tmp-align-right/);
+  editor.commands.setTextSelection(cells[1]+2); editor.commands.setAccountingRule('double');
+  assert.deepEqual(rules(editor),[null,'double']); editor.destroy();
+});
+
+test('accounting merge preserves uniform outer bottom and split does not create interior rules', () => {
+  const editor=make('<table><tr><td>A</td><td>B</td></tr><tr><td class="tmp-rule-double">C</td><td class="tmp-rule-double">D</td></tr></table>');
+  const cells=cellPositions(editor); editor.commands.setCellSelection({anchorCell:cells[0],headCell:cells[3]});
+  assert.equal(editor.commands.mergeCells(),true); assert.deepEqual(rules(editor),['double']);
+  assert.match(serializeEditor(editor),/rowspan="2"/); assert.match(serializeEditor(editor),/colspan="2"/);
+  assert.equal(editor.commands.splitCell(),true); assert.deepEqual(rules(editor),[null,null,'double','double']);
+  for(const text of ['A','B','C','D']) assert.match(serializeEditor(editor),new RegExp(text));
+  editor.destroy();
+});
+
+test('ambiguous accounting merges reject atomically and mounted toolbar remains usable', () => {
+  for (const html of [
+    '<table><tr><td class="tmp-rule-single">A</td><td>B</td></tr></table>',
+    '<table><tr><td class="tmp-rule-single">A</td></tr><tr><td class="tmp-rule-double">B</td></tr></table>'
+  ]) {
+    const form=formFor(html), {editor}=mountCaseEditor(form), cells=cellPositions(editor);
+    editor.commands.setCellSelection({anchorCell:cells[0],headCell:cells.at(-1)});
+    const before=editor.state;
+    assert.throws(()=>editor.commands.mergeCells(),/Merge would lose/);
+    assert.equal(editor.state,before);
+    form.querySelector('[aria-label="Merge cells"]').click();
+    assert.match(form.querySelector('[data-case-editor-errors]').textContent,/Merge would lose/);
+    assert.equal(form.querySelector('[data-case-save]').disabled,false);
+    for(const label of ['Single Rule','Double Rule','Remove Rule']) form.querySelector(`[aria-label="${label}"]`).click();
+    assert.deepEqual(rules(editor),cells.map(()=>null)); editor.destroy();form.remove();
+  }
+});
+
+test('explicit Word bottom rules round trip; ordinary grids are not inferred as accounting', () => {
+  for(const [style,rule] of [['border-bottom:1pt solid black','single'],['mso-border-bottom-alt:double windowtext 3.0pt','double'],['border-bottom:3px double #000;mso-border-bottom-alt:double black 3pt','double']]) {
+    const editor=make(normalizeClipboard(`<table><tr><td style="${style}"><p>100</p></td></tr></table>`));
+    assert.deepEqual(rules(editor),[rule]); const saved=serializeEditor(editor), reopened=make(saved);
+    assert.equal(serializeEditor(reopened),saved); editor.destroy();reopened.destroy();
+  }
+  for(const style of ['border:solid windowtext 1.0pt','border:1pt solid black;border-bottom:1pt solid black','border:solid windowtext 1pt;border-bottom:1pt solid #000']) {
+    assert.doesNotMatch(normalizeClipboard(`<table><tr><td style="${style}">100</td></tr></table>`),/tmp-rule/);
+  }
+  assert.doesNotMatch(normalizeClipboard('<table><tr><td style="border-top:solid windowtext 1.0pt;border-left:1pt solid black;border-right:solid black 1.0pt;border-bottom:1pt solid #000">100</td></tr></table>'),/tmp-rule/);
+  assert.match(normalizeClipboard('<p style="border-bottom:none">Ordinary paragraph</p>'),/Ordinary paragraph/);
+});
+
+test('unsupported meaningful borders and malformed rule classes reject with private diagnostics', () => {
+  for(const html of [
+    '<p style="border-bottom:1pt solid black">Private amount</p>',
+    '<table><tr><td style="border-bottom:1pt dashed black">Private amount</td></tr></table>',
+    '<table><tr><td style="border-bottom:1pt solid red">Private amount</td></tr></table>',
+    '<table><tr><td style="border-bottom:1pt solid black;mso-border-bottom-alt:3pt double black">Private amount</td></tr></table>',
+    '<table><tr><td class="tmp-rule-single tmp-rule-double">Private amount</td></tr></table>',
+    '<style>.amount {border-bottom:3pt double black}</style><table><tr><td class="amount">Private amount</td></tr></table>'
+  ]) assert.throws(()=>normalizeClipboard(html),error=>error.diagnosticCode==='CASE_NORMALIZE_ATTRIBUTE' && !error.message.includes('Private amount'));
+  assert.throws(()=>make('<p class="unknown">Private amount</p>'),error=>error.diagnosticCode==='CASE_COMPARE_ATTRIBUTE' && !error.message.includes('Private amount'));
+});
+
+test('Word-marked uncertain blanks, NBSP and intentional breaks survive normalization', () => {
+  const raw='<p class="MsoNormal">A</p><p class="MsoNormal"><br></p><p class="MsoNormal">&nbsp;</p><p class="MsoNormal"></p><p class="MsoNormal">B<br>C</p>';
+  const normalized=normalizeClipboard(raw), editor=make(normalized);
+  assert.equal(new DOMParser().parseFromString(normalized,'text/html').querySelectorAll('p').length,5);
+  assert.equal(semanticSignature(serializeEditor(editor,{preserve:false})),semanticSignature(normalized));
+  editor.destroy();
+});
+
+test('first mismatch diagnostics are bounded categories and contain no source content', async () => {
+  const {assertCompatible,prepareLegacy}=await import('./compatibility.js');
+  for(const [original,changed,category] of [
+    ['<p>Private A</p>','<p>Private B</p>','TEXT'],
+    ['<p>Private A</p>','<p>PrivateA</p>','WHITESPACE'],
+    ['<p>Private</p><p>Other</p>','<p>Private</p>','PARAGRAPH'],
+    ['<p class="tmp-align-right">Private</p>','<p>Private</p>','ATTRIBUTE'],
+    ['<table><caption>Private</caption><tr><td>A</td></tr></table>','<table><tr><td>A</td></tr></table>','CAPTION'],
+    ['<table><thead><tr><td>Private</td></tr></thead></table>','<table><tr><td>Private</td></tr></table>','ROW_GROUP'],
+    ['<table><tr><td>Private</td><td>B</td></tr></table>','<table><tr><td>Private</td></tr></table>','GEOMETRY']
+  ]) assert.throws(()=>assertCompatible(original,{getHTML:()=>changed}),error=>
+    error.diagnosticCode===`CASE_COMPARE_${category}` && !error.message.includes('Private'));
+  assert.throws(()=>prepareLegacy('<table><caption>A</caption><caption>B</caption></table>'),error=>error.diagnosticCode==='CASE_PREPARE_CAPTION');
+  assert.throws(()=>serializeEditor({getHTML:()=>'<table><tr data-tmp-group="invalid:1"><td>A</td></tr></table>'}),error=>error.diagnosticCode==='CASE_SERIALIZE_ROW_GROUP');
+});
 const legacy='<h3>Case ₱ − α \\(x^2\\)</h3><p class="tmp-align-center">Narrative<br>Next</p><ol start="3"><li>First</li><li>Second</li></ol><table><caption><strong>Accounting</strong></caption><thead><tr><th scope="col" colspan="2">Header</th></tr></thead><tbody><tr><td rowspan="2" class="tmp-align-right">Cash</td><td><p>First</p><p>Second</p></td></tr><tr><td><table><tr><td>Nested</td></tr></table></td></tr></tbody><tfoot><tr><td colspan="2">Total</td></tr></tfoot></table>';
 test('legacy captions, groups, scope, nested/merged cells, Unicode and list starts round trip', () => {
   const editor=make(legacy);
@@ -79,9 +208,9 @@ test('undo and redo restore document state', () => {
   assert.equal(editor.commands.undo(),true); assert.equal(serializeEditor(editor),before);
   assert.equal(editor.commands.redo(),true); assert.equal(serializeEditor(editor),after); editor.destroy();
 });
-test('Word paste strips active markup, preserves supported formatting, compacts only Word blanks', () => {
+test('Word paste strips active markup but preserves uncertain Word blanks', () => {
   const html=normalizeClipboard('<p class="MsoNormal">&nbsp;</p><p class="MsoNormal"><span style="font-weight:bold;text-decoration:underline">₱500</span></p><script>bad()</script>');
-  assert.doesNotMatch(html,/script|bad|&nbsp;/); assert.match(html,/<strong><u>₱500<\/u><\/strong>/);
+  assert.doesNotMatch(html,/script|bad/); assert.match(html,/&nbsp;/); assert.match(html,/<strong><u>₱500<\/u><\/strong>/);
   assert.match(normalizeClipboard('<p>A</p><p></p><p>B</p>'),/<p class="tmp-preserve"><\/p>/);
   assert.throws(()=>normalizeClipboard('<img src="https://bad.invalid/image">'),/not supported/);
 });
@@ -213,6 +342,7 @@ test('rejected paste has bounded separate recovery, truthful state, retry and di
   mounted.editor.commands.selectAll(); const before=mounted.editor.state;
   pasteInto(mounted.editor,html,text);
   assert.equal(mounted.editor.state,before); assert.equal(mounted.currentContent(),'<p>Original</p>');
+  assert.match(form.querySelector('[data-case-editor-errors]').textContent,/CASE_NORMALIZE_UNKNOWN/);
   assert.match(form.querySelector('[data-case-editor-errors]').textContent,/Paste was not inserted. Your existing content is unchanged./);
   assert.doesNotMatch(form.querySelector('[data-case-editor-status]').textContent,/Editor ready/);
   assert.equal(form.querySelector('[data-case-clipboard=html]').value,html);
@@ -237,9 +367,11 @@ test('oversized recovery is not retained and failed insertion is atomic', () => 
   assert.equal(form.querySelector('[data-case-clipboard=text]').value,'');
   assert.equal(form.querySelector('[data-case-paste-recovery] button').disabled,true);
   const before=mounted.editor.state;
-  mounted.editor.on('update',()=>{throw new Error('Synthetic insertion failure');});
+  mounted.editor.on('update',()=>{ const error=new Error('Synthetic insertion failure'); error.diagnosticCode='untrusted'; throw error; });
   pasteInto(mounted.editor,'<p>Replacement</p>');
   assert.equal(mounted.editor.state,before); assert.equal(mounted.currentContent(),'<p>Original</p>');
+  assert.match(form.querySelector('[data-case-editor-errors]').textContent,/CASE_INSERT_UNKNOWN/);
+  assert.doesNotMatch(form.querySelector('[data-case-editor-errors]').textContent,/Synthetic insertion failure/);
   mounted.editor.destroy(); form.remove();
 });
 test('fatal initialization and serialization prevent submission and retain original', () => {
@@ -261,8 +393,8 @@ test('empty paragraph, wrapper focus and grouped keyboard controls preserve sele
   editor.view.dispatch(editor.state.tr.insertText('Typed')); assert.match(currentContent(),/Typed/);
   editor.commands.setTextSelection({from:1,to:3}); const selection=editor.state.selection;
   form.querySelector('[data-case-rich-editor]').click(); assert.equal(editor.state.selection,selection);
-  assert.equal(form.querySelectorAll('[data-case-toolbar] [role=group]').length,6);
-  assert.equal(form.querySelectorAll('[data-case-toolbar] button').length,35);
+  assert.equal(form.querySelectorAll('[data-case-toolbar] [role=group]').length,7);
+  assert.equal(form.querySelectorAll('[data-case-toolbar] button').length,38);
   const bold=form.querySelector('[aria-label=Bold]'); bold.focus();
   bold.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
   assert.equal(document.activeElement.getAttribute('aria-label'),'Italic');
@@ -328,18 +460,20 @@ test('final bundle initializes an empty typing surface with matching local CSS',
     const editable=page.window.document.querySelector('[contenteditable=true]');
     assert.ok(editable.querySelector('p'));assert.equal(page.window.getComputedStyle(editable).minHeight,'19rem');
     page.window.document.querySelector('[data-case-rich-editor]').click();assert.equal(page.window.document.activeElement,editable);
-    assert.equal(page.window.document.querySelectorAll('[data-case-toolbar] [role=group]').length,6);
+    assert.equal(page.window.document.querySelectorAll('[data-case-toolbar] [role=group]').length,7);
   } finally {page.window.close();}
 });
 
 test('editor output round trips through the actual Python canonicalizer repeatedly', t => {
   const canonicalize = html => JSON.parse(execFileSync('python', ['-B','-c',
     'import json,sys; from apps.departmental_exams.scenario_content import canonicalize_scenario_content; print(json.dumps(canonicalize_scenario_content(json.load(sys.stdin)).html))'], {
-    cwd:fileURLToPath(new URL('../..',import.meta.url)), input:JSON.stringify(html), encoding:'utf8',
+    cwd:fileURLToPath(new URL('../..',import.meta.url)), input:JSON.stringify(html), encoding:'utf8', stdio:['pipe','pipe','pipe'],
     // No Django setup/database/logging is initialized by this pure canonicalizer.
     env:{...process.env, PYTHON_DOTENV_DISABLED:'1', PYTHONIOENCODING:'utf-8', DJANGO_SETTINGS_MODULE:'config.settings.base', DJANGO_SECRET_KEY:'tmp-editor-canonicalizer-test-only'}
   }));
-  const fixtures=[legacy, '<p class="tmp-preserve tmp-align-justify tmp-indent-2"><u>Debit</u>  ₱1,250<br><br><br>\\(x^2\\)</p><p class="tmp-preserve"></p><table><tr><td class="tmp-align-right tmp-valign-middle"><p class="tmp-preserve tmp-align-left">Separate</p><p class="tmp-preserve">Paragraph</p></td></tr></table>'];
+  const fixtures=[legacy, '<p class="tmp-preserve tmp-align-justify tmp-indent-2"><u>Debit</u>  ₱1,250<br><br><br>\\(x^2\\)</p><p class="tmp-preserve"></p><table><tr><td class="tmp-align-right tmp-valign-middle tmp-rule-double"><p class="tmp-preserve tmp-align-left">Separate</p><p class="tmp-preserve">Paragraph</p></td></tr></table>',
+    normalizeClipboard('<p class="MsoNormal">A</p><p class="MsoNormal"><br></p><p class="MsoNormal">&nbsp;</p><p class="MsoNormal">B</p>'),
+    normalizeClipboard('<table><tr><td style="border-bottom:solid black 1pt">100</td><td style="border-bottom:double windowtext 3pt"><u>200</u></td></tr></table>')];
   // Mirrors the established Python accounting fixture: 4x6 tables, the same
   // merged cells, five narrative paragraphs and two meaningful p in column 3.
   for (const count of [14,25]) {
@@ -352,13 +486,39 @@ test('editor output round trips through the actual Python canonicalizer repeated
           if (table===1 && ((row===2 && col===1)||(row===3 && col===2))) continue;
           const span=table===1 && row===1 && col===1 ? ' rowspan="2"' : table===1 && row===3 && col===1 ? ' colspan="2"' : '';
           const value=`T${table}R${row}C${col} ₱1,250`;
-          raw+=`<td${span}><p class="MsoNormal">&nbsp;</p><p class="MsoNormal" style="text-align:right">${col===3 ? '<strong>'+value+'</strong>' : '<span>'+value+'</span>'}</p>${col===3 ? '<p style="text-align:right">Adjustment −25</p>' : ''}<p class="MsoNormal"><br></p></td>`;
+          raw+=`<td${span}><p class="MsoNormal" style="text-align:right">${col===3 ? '<strong>'+value+'</strong>' : '<span>'+value+'</span>'}</p>${col===3 ? '<p style="text-align:right">Adjustment −25</p>' : ''}</td>`;
         }
         raw+='</tr>';
       }
       raw+='</tbody></table>';
     }
     const normalized=normalizeClipboard(raw);
+    // Previously every cell had two uncertain blank paragraphs which were
+    // deleted. Keep that padded variant as a rejection check, not a promise
+    // to accept oversized content by erasing authored spacing.
+    // Original HEAD fixture: leading NBSP paragraph and trailing break paragraph
+    // per cell, not two newly appended paragraphs in a different order.
+    const paddedRaw=raw.replace(/(<td\b[^>]*>)/g,'$1<p class="MsoNormal">&nbsp;</p>')
+      .replaceAll('</td>','<p class="MsoNormal"><br></p></td>');
+    const padded=normalizeClipboard(paddedRaw);
+    const elements=html=>new DOMParser().parseFromString(html,'text/html').body.querySelectorAll('*').length;
+    // Independent historical representation: prior clipboard cleanup removed
+    // those blanks but marked all remaining paragraphs. Do not feed saved
+    // content back through the new raw-clipboard normalizer.
+    const historicalSaved=canonicalize(raw.replaceAll('class="MsoNormal"','class="tmp-preserve"')
+      .replaceAll('<p style=','<p class="tmp-preserve" style='));
+    assert.equal(canonicalize(normalized),historicalSaved);
+    const historicalEditor=make(historicalSaved);
+    assert.equal(canonicalize(serializeEditor(historicalEditor)),historicalSaved);
+    historicalEditor.destroy();
+    if (count===25) {
+      assert.ok(paddedRaw.length<100000 && new TextEncoder().encode(paddedRaw).length<200000);
+      assert.ok(padded.length>50000 && elements(padded)>2000);
+      assert.ok(historicalSaved.length<=50000 && elements(historicalSaved)<=2000);
+      assert.throws(()=>canonicalize(padded),/Canonical Case content may not exceed 50,000 characters/);
+      t.diagnostic(`Original padded 25: raw ${paddedRaw.length}; historical ${historicalSaved.length}/${elements(historicalSaved)} elements; newly normalized ${padded.length}/${elements(padded)} elements.`);
+    }
+    else fixtures.push(padded);
     t.diagnostic(`${count}-table accounting probe: raw ${raw.length} chars; normalized ${normalized.length} chars; canonical ${canonicalize(normalized).length} chars.`);
     fixtures.push(normalized);
   }

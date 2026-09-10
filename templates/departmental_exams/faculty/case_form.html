@@ -1,7 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% load static departmental_exam_content %}
 {% block title %}{% if scenario %}Edit{% else %}Create{% endif %} Case | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-smoke-20260910">{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-review-20260910">{% endblock %}
 {% block faculty_content %}
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Contribution Workspace</a></li><li class="breadcrumb-item active">{% if scenario %}Edit Case{% else %}Create Case{% endif %}</li></ol></nav>
 <h1 class="h3">{% if scenario %}Edit Case / Scenario{% else %}Create Case-Based Question Group{% endif %}</h1>
@@ -18,6 +18,7 @@
       <div class="tmp-case-toolbar" role="toolbar" aria-label="Case formatting and tables" data-case-toolbar></div>
       <div id="case-rich-editor" class="tmp-case-editor form-control" data-case-rich-editor>{{ editor_display_html }}</div>
       <div class="form-text" id="case-editor-help">Paste from Word with Ctrl+V. Enter creates a paragraph; Shift+Enter inserts a line break. Indentation has eight levels. Tab / Shift+Tab moves between table cells. For keyboard cell selection, choose Start cell selection, move to the last cell, then Extend cell selection and Merge cells. Clear text formatting keeps lists and table geometry.</div>
+      <p class="form-text">Select amount cells, then choose Single Rule or Double Rule. Remove Rule clears only the accounting bottom rule; the normal table grid and text underline remain. Conflicting rules must be removed before merging.</p>
       <p class="small" role="status" aria-live="polite" data-case-editor-status>Loading editor. Save remains disabled if the editor cannot load safely.</p>
       <noscript><p class="alert alert-warning">JavaScript is required to edit this Case safely. The saved content has not been changed.</p></noscript>
       <details data-case-original-source hidden><summary>Recover original source (Save disabled)</summary><textarea class="form-control font-monospace" aria-label="Original Case source" rows="8" readonly></textarea></details>
@@ -31,4 +32,4 @@
   </div>
 </form>
 {% endblock %}
-{% block extra_js %}{{ block.super }}<script src="{% static 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js' %}?v=case-smoke-20260910" defer></script>{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js' %}?v=case-review-20260910" defer></script>{% endblock %}

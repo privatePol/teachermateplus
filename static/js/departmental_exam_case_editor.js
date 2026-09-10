@@ -49,11 +49,15 @@ export function mountCaseEditor(form) {
     status.textContent='Paste error dismissed. Existing content remains editable. Use Preview before saving.';
     editor.view.focus();
   });
-  function fail() {
+  function diagnostic(error, phase) {
+    return /^CASE_(NORMALIZE|PREPARE|COMPARE|SERIALIZE|GEOMETRY|INSERT)_(TEXT|WHITESPACE|PARAGRAPH|ATTRIBUTE|CAPTION|ROW_GROUP|GEOMETRY)$/.test(error?.diagnosticCode)
+      ? error.diagnosticCode : `CASE_${phase}_UNKNOWN`;
+  }
+  function fail(error, phase='SERIALIZE') {
     failed = true; saveButton.disabled = true; previewButton.disabled = true;
     for (const control of toolbar.querySelectorAll('button,input')) control.disabled = true;
     if (editor && !editor.isDestroyed) editor.setEditable(false);
-    show(errors, [preservationError]);
+    show(errors, [preservationError, '['+diagnostic(error,phase)+']']);
     const recovery = form.querySelector('[data-case-original-source]');
     recovery.hidden = false; recovery.querySelector('textarea').value = original;
     status.textContent = 'Editor unavailable. Original source preserved; Save disabled.';
@@ -63,18 +67,21 @@ export function mountCaseEditor(form) {
     if (failed) throw new Error(preservationError);
     if (dirty) {
       try { source.value = serializeEditor(editor); }
-      catch (error) { fail(); throw error; }
+      catch (error) { fail(error); throw error; }
     }
     return source.value;
   }
   function insertPaste(html,text,files=false) {
     if (failed) return;
     const before=editor.state, wasDirty=dirty, previousSource=source.value, previousAnchor=anchorCell;
+    let phase='NORMALIZE';
     try {
       if (files) throw new Error('Images and embedded objects are not supported.');
       const normalized=normalizeClipboard(html,text);
       if (!normalized.trim()) throw new Error('No supported Case content was found.');
+      phase='PREPARE';
       const probe=createCaseEditor(document.createElement('div'),normalized); probe.destroy();
+      phase='INSERT';
       if (!editor.commands.insertContent(prepareLegacy(normalized),{parseOptions:{preserveWhitespace:'full'}})) {
         throw new Error('Paste could not be inserted at this position.');
       }
@@ -93,8 +100,19 @@ export function mountCaseEditor(form) {
       recoveryNote.textContent=retained
         ? 'Recovery copies are kept only in this page. Expand a source below to select and copy it. Retry at the current selection, paste corrected content, or dismiss this error. Save and Preview apply only to your existing content.'
         : 'The clipboard exceeds the recovery size limit; no recovery copy was retained. Copy a smaller selection from Word and paste again. Save and Preview apply only to your existing content.';
-      const reason=error.message===preservationError ? 'The clipboard could not be inserted without changing supported content.' : error.message;
-      show(errors,['Paste was not inserted. Your existing content is unchanged.',reason]);
+      const publicMessages = new Set([
+        'Images and embedded objects are not supported.',
+        'Native Word equations are not supported. Use TMP LaTeX or Unicode.',
+        'Pasted Case exceeds the request limit.', 'No supported Case content was found.',
+        'Paste could not be inserted at this position.',
+        'This Word list uses unsupported numbering. Paste the affected list as text, then apply Bullets or Numbered list in TMP. No content was inserted.',
+        'This border cannot be preserved as an accounting rule. Use explicit single/double bottom rules on amount cells; paragraph, stylesheet and conflicting rules are not supported.',
+        'Stylesheet-defined accounting borders are not supported. Apply explicit bottom rules to amount cells in Word or TMP.',
+        'This table would require a geometry change to edit safely. The original source is preserved.'
+      ]);
+      const reason=error.message===preservationError ? 'The clipboard could not be inserted without changing supported content.' :
+        publicMessages.has(error.message) ? error.message : 'Paste could not be inserted safely. Your existing content is unchanged.';
+      show(errors,['Paste was not inserted. Your existing content is unchanged.',reason,'['+diagnostic(error,phase)+']']);
       status.textContent='Paste rejected. Existing content is unchanged; Save and Preview remain available for that content only.';
     }
   }
@@ -126,7 +144,10 @@ export function mountCaseEditor(form) {
     button.setAttribute('aria-label',label);
     button.addEventListener('click', () => {
       try { command(); editor.commands.focus(); refresh(); }
-      catch { fail(); }
+      catch (error) {
+        if (error.accountingConflict) { show(errors,[error.message]); status.textContent='Merge rejected. Existing content and rules are unchanged.'; }
+        else fail(error);
+      }
     });
     groupControls.append(button); controls.push({button,active,enabled}); return button;
   }
@@ -206,6 +227,10 @@ export function mountCaseEditor(form) {
     for (const value of ['top','middle','bottom']) button('Cell vertical '+value,
       () => editor.chain().focus().setCellAttribute('verticalAlign',value).run(),
       () => editor.isActive('tableCell',{verticalAlign:value}) || editor.isActive('tableHeader',{verticalAlign:value}), () => cellPosition() !== null);
+    group('Accounting rules');
+    for (const [label,value] of [['Single Rule','single'],['Double Rule','double'],['Remove Rule',null]]) {
+      button(label,()=>editor.chain().focus().setAccountingRule(value).run(),null,()=>cellPosition()!==null);
+    }
     group('Undo/redo and clear formatting');
     button('Undo', () => editor.chain().focus().undo().run(), null, () => editor.can().undo());
     button('Redo', () => editor.chain().focus().redo().run(), null, () => editor.can().redo());
@@ -213,9 +238,9 @@ export function mountCaseEditor(form) {
     saveButton.disabled = false; previewButton.disabled = false;
     status.textContent='Editor ready. Enter creates a paragraph; Shift+Enter inserts a line break.';
     refresh();
-  } catch { host.innerHTML = safeHtml; fail(); }
+  } catch (error) { host.innerHTML = safeHtml; fail(error,'PREPARE'); }
   form.addEventListener('submit', event => {
-    try { currentContent(); } catch { event.preventDefault(); fail(); }
+    try { currentContent(); } catch (error) { event.preventDefault(); fail(error); }
   });
   previewButton.addEventListener('click', async () => {
     const request=++previewRequest;
