@@ -2588,6 +2588,9 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
 
 class AnswerKeyRelease(TimeStampedModel):
     _IMMUTABLE_FIELDS = (
+        "scope_kind",
+        "target_campus_id",
+        "recipient_course_id",
         "cycle_course_id",
         "generation_revision_id",
         "available_from",
@@ -2610,6 +2613,19 @@ class AnswerKeyRelease(TimeStampedModel):
         ExamGenerationRevision,
         on_delete=models.PROTECT,
         related_name="answer_key_releases",
+    )
+    class ScopeKind(models.TextChoices):
+        SCOPED = "SCOPED", "Campus/course scoped"
+        LEGACY_UNSCOPED = "LEGACY_UNSCOPED", "Legacy unscoped - reissue required"
+
+    scope_kind = models.CharField(max_length=16, choices=ScopeKind.choices, default=ScopeKind.SCOPED)
+    target_campus = models.ForeignKey(
+        "tenants.Campus", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="answer_key_releases",
+    )
+    recipient_course = models.ForeignKey(
+        CycleCourse, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="recipient_answer_key_releases",
     )
     available_from = models.DateTimeField()
     available_until = models.DateTimeField()
@@ -2641,8 +2657,15 @@ class AnswerKeyRelease(TimeStampedModel):
         db_table = "departmental_exam_answer_key_releases"
         constraints = [
             models.UniqueConstraint(
-                fields=["cycle_course", "active_marker"],
-                name="uq_de_key_release_active",
+                fields=["recipient_course", "target_campus", "active_marker"],
+                name="uq_de_key_target_active",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(scope_kind="SCOPED", target_campus__isnull=False, recipient_course__isnull=False)
+                    | models.Q(scope_kind="LEGACY_UNSCOPED", target_campus__isnull=True, recipient_course__isnull=True)
+                ),
+                name="ck_de_key_target_scope",
             ),
             models.CheckConstraint(
                 condition=models.Q(available_until__gt=models.F("available_from")),
@@ -2687,6 +2710,23 @@ class AnswerKeyRelease(TimeStampedModel):
         ]
 
     def clean(self):
+        if self.scope_kind == self.ScopeKind.SCOPED:
+            if not self.target_campus_id or not self.recipient_course_id:
+                raise ValidationError("An explicit target campus and recipient course are required.")
+            if self.cycle_course_id:
+                from .exam_units import resolve_examination_unit
+
+                recipient = self.recipient_course
+                if (
+                    self.target_campus.tenant_id != self.cycle_course.cycle.tenant_id
+                    or recipient.cycle_id != self.cycle_course.cycle_id
+                    or resolve_examination_unit(recipient).primary.id != self.cycle_course_id
+                    or not recipient.offering_snapshots.filter(campus_id=self.target_campus_id).exists()
+                ):
+                    raise ValidationError("Answer Key target does not belong to this examination scope.")
+        elif self.scope_kind != self.ScopeKind.LEGACY_UNSCOPED or self.target_campus_id or self.recipient_course_id:
+            raise ValidationError("Answer Key scope classification is invalid.")
+
         if (
             self.available_from
             and self.available_until

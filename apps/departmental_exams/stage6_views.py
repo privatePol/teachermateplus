@@ -63,6 +63,7 @@ from .forms import (
     BulkQuestionnairePrintReleaseForm,
     QuestionnairePrintReleaseForm,
 )
+from .exam_units import resolve_examination_unit
 from .questionnaire_printing import QuestionnairePrintReleaseService
 from .services import (
     CourseExamConfigurationConflict,
@@ -114,6 +115,10 @@ def _release_action_success(
             }
         )
     messages.success(request, message)
+    if section == "answer-key-releases":
+        campus = request.POST.get("target_campus_id", "")
+        if campus.isdigit():
+            return redirect(reverse("departmental_exams:questionnaire_print_release") + f"?section=answer-key-releases&target_campus_id={int(campus)}#answer-key-releases-pane")
     return redirect("departmental_exams:questionnaire_print_release")
 
 
@@ -1011,8 +1016,10 @@ def questionnaire_print_release_view(request):
                 "answer_key_releases",
                 queryset=AnswerKeyRelease.objects.select_related(
                     "generation_revision",
+                    "recipient_course__course",
                     "released_by",
                     "revoked_by",
+                    "target_campus",
                 ).order_by("-released_at", "-id"),
             ),
         )
@@ -1100,15 +1107,6 @@ def questionnaire_print_release_view(request):
     local_now = timezone.localtime(now).replace(second=0, microsecond=0)
     for course in courses:
         course.answer_key_release_history = list(course.answer_key_releases.all())
-        course.active_answer_key_release = next(
-            (
-                release
-                for release in course.answer_key_release_history
-                if release.status == AnswerKeyRelease.Status.ACTIVE
-                and release.active_marker == 1
-            ),
-            None,
-        )
 
     can_bulk_release = any(
         DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
@@ -1150,112 +1148,87 @@ def questionnaire_print_release_view(request):
         and equivalency_primary_by_course_id.get(course.id, course.id) == course.id
         for course in courses
     )
+    try:
+        target_campus_id = int(
+            request.POST.get("target_campus_id", "") if request.method == "POST"
+            else request.GET.get("target_campus_id", "")
+        )
+    except (TypeError, ValueError):
+        target_campus_id = None
     bulk_answer_key_rows = []
     bulk_answer_key_departments = {}
     bulk_answer_key_campuses = {}
+    request_campus_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
     for course in courses:
-        if (
-            not answer_key_release_map[course.id]
-            or equivalency_primary_by_course_id.get(course.id, course.id) != course.id
-        ):
+        if not answer_key_release_map[course.id]:
+            continue
+        unit = resolve_examination_unit(course)
+        if unit.primary.id != course.id:
             continue
         eligible_revisions = [
-            revision
-            for revision in course.generation_revisions.all()
+            revision for revision in course.generation_revisions.all()
             if AnswerKeyReleaseService.revision_is_eligible(revision)
         ]
-        if len(eligible_revisions) != 1:
-            continue
-        revision = eligible_revisions[0]
-        current_revision_release = next(
-            (
-                release
-                for release in course.answer_key_release_history
-                if release.generation_revision_id == revision.id
-            ),
-            None,
-        )
-        active_release = (
-            current_revision_release
-            if current_revision_release
-            and current_revision_release.status == AnswerKeyRelease.Status.ACTIVE
-            and current_revision_release.active_marker == 1
-            else None
-        )
-        unit_courses = unit_courses_by_primary_id.get(course.id, (course,))
-        row_departments = {}
-        row_campuses = {}
-        search_parts = []
-        for member in unit_courses:
-            search_parts.extend((member.course.code, member.course.title))
-            department = (
-                member.responsible_department or member.course.exam_department
-            )
-            if department is not None:
-                row_departments[department.id] = department
-                bulk_answer_key_departments[department.id] = department
-            for campus in member.print_release_campuses:
-                row_campuses[campus.id] = campus
+        for recipient in unit.members:
+            for snapshot in recipient.offering_snapshots.select_related("campus").all():
+                campus = snapshot.campus
+                if request_campus_ids is not None and campus.id not in request_campus_ids:
+                    continue
+                try:
+                    DepartmentalExamAuthorizationService.require_answer_key_target(
+                        user=request.user, cycle_course=course,
+                        recipient_course=recipient, target_campus_id=campus.id,
+                    )
+                except PermissionDenied:
+                    continue
                 bulk_answer_key_campuses[campus.id] = campus
-        release_status = AnswerKeyReleaseService.operational_status(
-            release=current_revision_release,
-            expected_revision=revision,
-            now=now,
-        )
-        filter_release_status = release_status
-        if active_release is None and course.active_answer_key_release is not None:
-            previous_active_status = AnswerKeyReleaseService.operational_status(
-                release=course.active_answer_key_release,
-                expected_revision=revision,
-                now=now,
-            )
-            if previous_active_status == "Superseded / No Longer Faculty Accessible":
-                filter_release_status = previous_active_status
-        bulk_answer_key_rows.append(
-            {
-                "value": f"{course.id}:{revision.id}",
-                "course": course,
-                "revision": revision,
-                "finalized_at": revision.locked_at or revision.generated_at,
-                "active_release": active_release,
-                "displayed_release": current_revision_release,
-                "search_text": " ".join(search_parts),
-                "departments": tuple(
-                    sorted(
-                        row_departments.values(),
-                        key=lambda department: (
-                            department.campus.code,
-                            department.code,
-                            department.id,
-                        ),
+                if campus.id != target_campus_id or len(eligible_revisions) != 1:
+                    continue
+                revision = eligible_revisions[0]
+                value = f"{course.id}:{revision.id}:{recipient.id}:{campus.id}"
+                if any(row["value"] == value for row in bulk_answer_key_rows):
+                    continue
+                history = [
+                    release for release in course.answer_key_release_history
+                    if release.scope_kind == AnswerKeyRelease.ScopeKind.SCOPED
+                    and release.recipient_course_id == recipient.id
+                    and release.target_campus_id == campus.id
+                ]
+                current_release = next((r for r in history if r.generation_revision_id == revision.id), None)
+                active = next((r for r in history if r.status == AnswerKeyRelease.Status.ACTIVE and r.active_marker == 1), None)
+                for release in history:
+                    release.operational_status = AnswerKeyReleaseService.operational_status(
+                        release=release, expected_revision=revision, now=now,
                     )
-                ),
-                "campuses": tuple(
-                    sorted(
-                        row_campuses.values(),
-                        key=lambda campus: (campus.name, campus.code, campus.id),
-                    )
-                ),
-                "release_status": release_status,
-                "filter_release_status": filter_release_status,
-            }
-        )
-    bulk_answer_key_department_options = tuple(
-        sorted(
-            bulk_answer_key_departments.values(),
-            key=lambda department: (
-                department.campus.code,
-                department.code,
-                department.id,
-            ),
-        )
-    )
-    bulk_answer_key_campus_options = tuple(
-        sorted(
-            bulk_answer_key_campuses.values(),
-            key=lambda campus: (campus.name, campus.code, campus.id),
-        )
-    )
+                release_status = AnswerKeyReleaseService.operational_status(
+                    release=current_release, expected_revision=revision, now=now,
+                )
+                department = recipient.responsible_department or recipient.course.exam_department
+                if department:
+                    bulk_answer_key_departments[department.id] = department
+                form = AnswerKeyReleaseForm(
+                    cycle_course=course, auto_id=f"id_key_{recipient.id}_{campus.id}_%s",
+                    initial={
+                        "cycle_course_id": course.id, "generation_revision": revision.id,
+                        "recipient_course_id": recipient.id, "target_campus_id": campus.id,
+                        "available_from": active.available_from if active else local_now,
+                        "available_until": active.available_until if active else local_now + timezone.timedelta(days=1),
+                    },
+                )
+                bulk_answer_key_rows.append({
+                    "value": value, "course": course, "recipient": recipient,
+                    "campus": campus, "revision": revision, "form": form, "history": history,
+                    "finalized_at": revision.locked_at or revision.generated_at,
+                    "active_release": active if active and active.generation_revision_id == revision.id else None,
+                    "target_active_release": active, "displayed_release": current_release,
+                    "search_text": f"{recipient.course.code} {recipient.course.title}",
+                    "departments": (department,) if department else (), "campuses": (campus,),
+                    "release_status": release_status,
+                    "filter_release_status": ("Superseded / No Longer Faculty Accessible"
+                        if active and active.generation_revision_id != revision.id else release_status),
+                })
+    bulk_answer_key_department_options = tuple(sorted(bulk_answer_key_departments.values(), key=lambda d: (d.code, d.id)))
+    bulk_answer_key_campus_options = tuple(sorted(bulk_answer_key_campuses.values(), key=lambda c: (c.name, c.id)))
     bulk_answer_key_choices = tuple(
         (
             row["value"],
@@ -1278,6 +1251,7 @@ def questionnaire_print_release_view(request):
     bulk_answer_key_form = BulkAnswerKeyReleaseForm(
         selection_choices=bulk_answer_key_choices,
         initial={
+            "target_campus_id": target_campus_id,
             "available_from": local_now,
             "available_until": local_now + timezone.timedelta(days=1),
         },
@@ -1488,6 +1462,8 @@ def questionnaire_print_release_view(request):
                 try:
                     AnswerKeyReleaseService.release(
                         cycle_course_id=course.id,
+                        target_campus_id=bound_answer_key_form.cleaned_data["target_campus_id"],
+                        recipient_course_id=bound_answer_key_form.cleaned_data["recipient_course_id"],
                         revision_id=bound_answer_key_form.cleaned_data[
                             "generation_revision"
                         ].id,
@@ -1609,96 +1585,10 @@ def questionnaire_print_release_view(request):
                 for revision in course.available_revisions
             )
         )
-        active_answer_key = course.active_answer_key_release
-        eligible_answer_key_revisions = [
-            revision
-            for revision in course.available_revisions
-            if AnswerKeyReleaseService.revision_is_eligible(revision)
-        ]
-        expected_answer_key_revision = (
-            eligible_answer_key_revisions[0]
-            if len(eligible_answer_key_revisions) == 1
-            else None
-        )
-        current_revision_answer_key_release = next(
-            (
-                release
-                for release in course.answer_key_release_history
-                if expected_answer_key_revision is not None
-                and release.generation_revision_id
-                == expected_answer_key_revision.id
-            ),
-            None,
-        )
-        course.answer_key_window_status = (
-            AnswerKeyReleaseService.operational_status(
-                release=current_revision_answer_key_release,
-                expected_revision=expected_answer_key_revision,
-                now=now,
-            )
-        )
-        course.answer_key_revision_superseded = bool(
-            active_answer_key
-            and AnswerKeyReleaseService.operational_status(
-                release=active_answer_key,
-                expected_revision=expected_answer_key_revision,
-                now=now,
-            )
-            == "Superseded / No Longer Faculty Accessible"
-        )
-        for answer_key_release in course.answer_key_release_history:
-            answer_key_release.operational_status = (
-                AnswerKeyReleaseService.operational_status(
-                    release=answer_key_release,
-                    expected_revision=expected_answer_key_revision,
-                    now=now,
-                )
-            )
-
-        if not course.can_manage_answer_key_release:
-            course.answer_key_release_form = None
-        elif (
-            bound_answer_key_form is not None
-            and course.id == bound_answer_key_course_id
-        ):
-            course.answer_key_release_form = bound_answer_key_form
-        else:
-            eligible_revisions = [
-                revision
-                for revision in course.available_revisions
-                if revision.current_marker == 1
-                and (
-                    (
-                        course.cycle.processing_mode
-                        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-                        and revision.status == ExamGenerationRevision.Status.GENERATED
-                    )
-                    or (
-                        course.cycle.processing_mode
-                        == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
-                        and revision.status == ExamGenerationRevision.Status.LOCKED
-                    )
-                )
-            ]
-            course.answer_key_release_form = AnswerKeyReleaseForm(
-                cycle_course=course,
-                auto_id=f"id_answer_key_course_{course.id}_%s",
-                initial={
-                    "cycle_course_id": course.id,
-                    "generation_revision": (
-                        eligible_revisions[0] if eligible_revisions else None
-                    ),
-                    "available_from": (
-                        active_answer_key.available_from
-                        if active_answer_key
-                        else local_now
-                    ),
-                    "available_until": (
-                        active_answer_key.available_until
-                        if active_answer_key
-                        else local_now + timezone.timedelta(days=1)
-                    ),
-                },
+        for release in course.answer_key_release_history:
+            eligible = [r for r in course.available_revisions if AnswerKeyReleaseService.revision_is_eligible(r)]
+            release.operational_status = AnswerKeyReleaseService.operational_status(
+                release=release, expected_revision=eligible[0] if len(eligible) == 1 else None, now=now,
             )
         if not course.can_manage_release:
             course.release_form = None
@@ -1723,6 +1613,27 @@ def questionnaire_print_release_view(request):
                     ),
                 },
             )
+    scoped_answer_key_history = []
+    for course in courses:
+        if not answer_key_release_map[course.id]:
+            continue
+        for release in course.answer_key_release_history:
+            if release.scope_kind != AnswerKeyRelease.ScopeKind.SCOPED or release.target_campus_id != target_campus_id:
+                continue
+            if request_campus_ids is not None and release.target_campus_id not in request_campus_ids:
+                continue
+            try:
+                DepartmentalExamAuthorizationService.require_answer_key_target(
+                    user=request.user, cycle_course=course, recipient_course=release.recipient_course,
+                    target_campus_id=release.target_campus_id, require_active_campus=False,
+                )
+            except PermissionDenied:
+                continue
+            scoped_answer_key_history.append(release)
+    if bound_answer_key_form is not None:
+        for row in bulk_answer_key_rows:
+            if str(row["recipient"].id) == request.POST.get("recipient_course_id"):
+                row["form"] = bound_answer_key_form
     if request.method == "POST" and _is_ajax_request(request) and status >= 400:
         action_form = {
             "bulk_release": bulk_form,
@@ -1755,6 +1666,8 @@ def questionnaire_print_release_view(request):
             "bulk_selection_rows": bulk_selection_rows,
             "bulk_selection_row_count": len(bulk_selection_rows),
             "bulk_selected_values": set(bulk_form["selections"].value() or ()),
+            "target_campus_id": target_campus_id,
+            "scoped_answer_key_history": scoped_answer_key_history,
             "bulk_answer_key_form": bulk_answer_key_form,
             "can_bulk_answer_key_release": can_bulk_answer_key_release,
             "bulk_answer_key_rows": bulk_answer_key_rows,
@@ -1779,6 +1692,7 @@ def answer_key_viewers_view(request, release_id):
         release_id=release_id,
         tenant_id=_tenant_id(request),
         actor=request.user,
+        request=request,
     )
     response = render(
         request,

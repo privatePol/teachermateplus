@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -589,7 +590,7 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             )
         self.assertEqual(resolved.id, release.id)
 
-    def test_secondary_contribution_sees_primary_answer_key_release(self):
+    def test_selected_secondary_contribution_sees_primary_owned_scoped_answer_key(self):
         fixture = self._ready_group()
         revision = self._revision(fixture["primary"])
         now = timezone.now()
@@ -600,6 +601,8 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             available_until=now + timezone.timedelta(minutes=1),
             released_by=self.admin,
             attestation_version="equivalency-test-v1",
+            recipient_course=fixture["secondary"],
+            target_campus=self.other_campus,
         )
         with patch(
             "apps.departmental_exams.answer_key_release._revision_is_current_final",
@@ -609,17 +612,22 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             return_value=True,
         ), patch(
             "apps.departmental_exams.answer_key_release."
-            "ContributionAuthorizationService.has_retained_current_print_eligibility",
-            return_value=True,
+            "ContributionAuthorizationService.retained_current_print_assignments",
+            side_effect=lambda *, contribution: (
+                SimpleNamespace(offering=SimpleNamespace(campus_id=contribution.source_campus_id)),
+            ),
         ):
             options = FacultyAnswerKeyReleaseService.available_options(
-                contributions=(fixture["contributions"][1],),
+                contributions=fixture["contributions"],
                 now=now,
             )
         self.assertEqual(
-            options[fixture["contributions"][1].id]["release_id"],
+            options[fixture["contributions"][1].id][0]["release_id"],
             release.id,
         )
+
+        self.assertNotIn(fixture["contributions"][0].id, options)
+        self.assertNotIn(fixture["contributions"][2].id, options)
 
     def test_manual_review_equivalency_fails_closed(self):
         cycle, primary, secondary, _configurations = self._pair()
@@ -846,6 +854,8 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
                 available_from=now,
                 available_until=now + timezone.timedelta(hours=1),
                 attestation_confirmed=True,
+                recipient_course_id=primary.id,
+                target_campus_id=self.campus.id,
             )
         revision = self._revision(primary, token="u" * 64)
         questionnaire_release = QuestionnairePrintRelease.objects.create(
@@ -862,6 +872,8 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             available_until=now + timezone.timedelta(hours=1),
             released_by=self.admin,
             attestation_version="equivalency-unit-auth-v1",
+            recipient_course=primary,
+            target_campus=self.campus,
         )
         with self.assertRaises(PermissionDenied):
             QuestionnairePrintReleaseService.revoke(
@@ -1370,6 +1382,8 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
                         available_until=now + timezone.timedelta(hours=1),
                         released_by=self.admin,
                         attestation_version="equivalency-retirement-v1",
+                        recipient_course=primary,
+                        target_campus=self.campus,
                     )
                 with self.assertRaises(ValidationError):
                     ExamCourseEquivalencyService.retire_group(

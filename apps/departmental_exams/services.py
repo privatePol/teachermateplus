@@ -1678,6 +1678,36 @@ class DepartmentalExamAuthorizationService:
         )
 
     @classmethod
+    def require_answer_key_target(
+        cls, *, user, cycle_course, recipient_course, target_campus_id, require_active_campus=True
+    ):
+        # Keep existing unit-wide Automatic authority and Manual reviewer ownership.
+        cls.require_answer_key_release(user=user, cycle_course=cycle_course)
+        from .exam_units import resolve_examination_unit
+
+        if (
+            recipient_course.cycle_id != cycle_course.cycle_id
+            or recipient_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
+            or resolve_examination_unit(recipient_course).primary.id != cycle_course.id
+            or not recipient_course.offering_snapshots.filter(
+                campus_id=target_campus_id,
+                campus__tenant_id=cycle_course.cycle.tenant_id,
+                **({"campus__is_active": True} if require_active_campus else {}),
+                offering__tenant_id=cycle_course.cycle.tenant_id,
+                offering__campus_id=target_campus_id,
+                offering__course_id=recipient_course.course_id,
+                offering__academic_year_id=cycle_course.cycle.academic_year_id,
+                offering__term_id=cycle_course.cycle.term_id,
+            ).exists()
+        ):
+            raise PermissionDenied("The Answer Key recipient course/campus is outside this examination unit.")
+        if not cls._has_scoped_permission(
+            user=user, permission=cls.RELEASE_ANSWER_KEYS_PERMISSION,
+            tenant_id=cycle_course.cycle.tenant_id, campus_id=target_campus_id,
+        ):
+            raise PermissionDenied("You do not have Answer Key release authority for the target campus.")
+
+    @classmethod
     def can_release_answer_keys(cls, *, user, cycle_course):
         try:
             cls.require_answer_key_release(user=user, cycle_course=cycle_course)

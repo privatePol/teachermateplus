@@ -185,14 +185,14 @@
       deselectUnavailableRows();
       updateSelectionState();
     });
-    [search, department, campus, status].forEach(function (control) {
+    [search, department, status].forEach(function (control) {
       control.addEventListener(control === search ? "input" : "change", applyFilters);
     });
     if (clear) {
       clear.addEventListener("click", function () {
         search.value = "";
         department.value = "";
-        campus.value = "";
+        // Clearing search filters does not change the explicit recipient campus.
         status.value = "";
         applyFilters();
         search.focus();
@@ -203,6 +203,19 @@
   }
 
   function initializeReleaseControls() {
+    const targetForm = document.getElementById("answer-key-target-form");
+    if (targetForm && !targetForm.dataset.initialized) {
+      const campus = targetForm.querySelector("select");
+      campus.addEventListener("change", function () {
+        root.querySelectorAll(".bulk-answer-key-selection").forEach(function (input) { input.checked = false; });
+        root.querySelectorAll('#answer-key-releases-pane form[method="post"] button, .bulk-answer-key-selection').forEach(function (control) {
+          control.disabled = true;
+        });
+        // Reload server-validated recipient rows; no old hidden targets can be submitted.
+        targetForm.requestSubmit();
+      });
+      targetForm.dataset.initialized = "true";
+    }
     initializeQuestionnaireSelection();
     initializeAnswerKeyFilters();
   }
@@ -235,7 +248,8 @@
       ".bulk-answer-key-selection" : ".bulk-release-selection";
     const preservedSelections = submittedAction.indexOf("bulk_") === 0 ? [] :
       selectedValues(currentBulkForm, selectionSelector);
-    const refreshUrl = payload.refresh_url + "?section=" + encodeURIComponent(section);
+    const refreshUrl = payload.refresh_url + "?section=" + encodeURIComponent(section) +
+      (section === "answer-key-releases" ? "&target_campus_id=" + encodeURIComponent(filterState.campus) : "");
     const response = await window.fetch(refreshUrl, {
       method: "GET",
       credentials: "same-origin",
@@ -248,6 +262,13 @@
     const refreshedPane = parsed.getElementById(section + "-pane");
     if (!refreshedPane) throw new Error("Updated release section is unavailable.");
 
+    if (section === "answer-key-releases") {
+      currentPane.innerHTML = refreshedPane.innerHTML;
+      restoreAnswerKeyFilterState(filterState);
+      restoreSelectedValues(document.getElementById("bulk-answer-key-release-form"), selectionSelector, preservedSelections);
+      initializeReleaseControls();
+      return;
+    }
     const bulkId = section === "answer-key-releases" ?
       "bulk-answer-key-release" : "bulk-print-release";
     const currentBulk = document.getElementById(bulkId);

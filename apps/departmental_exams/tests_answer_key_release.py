@@ -41,7 +41,7 @@ from .models import (
 from .stage4_test_support import Stage4TestCase
 
 
-class AnswerKeyReleaseTests(Stage4TestCase):
+class AnswerKeyReleaseFixture(Stage4TestCase):
     def setUp(self):
         super().setUp()
         self.release_manager = self.make_user(
@@ -215,6 +215,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             available_from=start or now - timezone.timedelta(minutes=5),
             available_until=end or now + timezone.timedelta(hours=2),
             attestation_confirmed=True,
+            recipient_course_id=self.parent.id,
+            target_campus_id=self.campus.id,
         )
 
     def _faculty_client(self):
@@ -256,6 +258,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
     def _master_rows(response):
         return [row for column in response.context["answer_columns"] for row in column]
 
+
+class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
     def test_model_lifecycle_constraints_immutability_and_delete_prohibition(self):
         release = self._release()
         self.assertEqual(release.attestation_version, ANSWER_KEY_RELEASE_ATTESTATION_VERSION)
@@ -275,6 +279,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
                 available_from=invalid_window,
                 available_until=invalid_window,
                 attestation_confirmed=True,
+                recipient_course_id=self.parent.id,
+                target_campus_id=self.campus.id,
             )
         with self.assertRaises(IntegrityError), transaction.atomic():
             AnswerKeyRelease.objects.create(
@@ -284,13 +290,15 @@ class AnswerKeyReleaseTests(Stage4TestCase):
                 available_until=timezone.now() + timezone.timedelta(hours=1),
                 released_by=self.release_manager,
                 attestation_version=ANSWER_KEY_RELEASE_ATTESTATION_VERSION,
+                recipient_course=self.parent,
+                target_campus=self.campus,
             )
 
     def test_admin_confirmation_is_required_and_exact_release_is_recorded(self):
         client = Client()
         client.force_login(self.release_manager)
         now = timezone.localtime().replace(second=0, microsecond=0)
-        payload = {
+        payload = {"target_campus_id": self.campus.id, "recipient_course_id": self.parent.id,
             "action": "answer_key_release",
             "cycle_course_id": self.parent.id,
             "generation_revision": self.r4.id,
@@ -300,7 +308,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             ),
         }
         denied = client.post(
-            reverse("departmental_exams:questionnaire_print_release"),
+            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}"),
             payload,
         )
         self.assertEqual(denied.status_code, 400)
@@ -313,7 +321,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
 
         payload["sessions_concluded"] = "on"
         allowed = client.post(
-            reverse("departmental_exams:questionnaire_print_release"),
+            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}"),
             payload,
         )
         self.assertEqual(allowed.status_code, 302)
@@ -347,6 +355,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
                 available_from=now,
                 available_until=now + timezone.timedelta(hours=1),
                 attestation_confirmed=True,
+                recipient_course_id=self.parent.id,
+                target_campus_id=self.campus.id,
             )
         other_parent = self.make_course(
             cycle=self.parent.cycle,
@@ -362,6 +372,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
                 available_from=now,
                 available_until=now + timezone.timedelta(hours=1),
                 attestation_confirmed=True,
+                recipient_course_id=other_parent.id,
+                target_campus_id=self.campus.id,
             )
 
     def test_before_inside_after_and_revoked_release_enforce_ui_and_direct_urls(self):
@@ -501,8 +513,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         )
         admin = Client()
         admin.force_login(self.release_manager)
-        page = admin.get(reverse("departmental_exams:questionnaire_print_release"))
-        self.assertContains(page, "The released revision was superseded.")
+        page = admin.get((reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}"))
+        self.assertContains(page, "Superseded / No Longer Faculty Accessible")
 
     def test_resources_never_exposes_answer_key(self):
         self._release()
@@ -628,6 +640,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             available_until=timezone.now() + timezone.timedelta(hours=1),
             released_by=self.release_manager,
             attestation_version=ANSWER_KEY_RELEASE_ATTESTATION_VERSION,
+            recipient_course=foreign_course,
+            target_campus=self.campus,
         )
         self.assertEqual(client.get(self._master_url(foreign_release.id)).status_code, 403)
 
@@ -841,11 +855,11 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         client = Client()
         client.force_login(self.release_manager)
         response = client.get(
-            reverse("departmental_exams:questionnaire_print_release")
+            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         )
         self.assertEqual(response.status_code, 200)
-        expected_value = f"{self.parent.id}:{self.r4.id}"
-        stale_value = f"{self.parent.id}:{r5.id}"
+        expected_value = f"{self.parent.id}:{self.r4.id}:{self.parent.id}:{self.campus.id}"
+        stale_value = f"{self.parent.id}:{r5.id}:{self.parent.id}:{self.campus.id}"
         self.assertContains(response, 'id="bulk-answer-key-release-form"', html=False)
         self.assertContains(response, 'id="bulk-answer-key-select-all"', html=False)
         self.assertContains(response, f'value="{expected_value}"', html=False)
@@ -929,21 +943,21 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         client = Client()
         client.force_login(self.release_manager)
         response = client.get(
-            reverse("departmental_exams:questionnaire_print_release")
+            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         )
         self.assertContains(
             response,
-            f'value="{manual_course.id}:{manual_revision.id}"',
+            f'value="{manual_course.id}:{manual_revision.id}:{manual_course.id}:{self.campus.id}"',
             html=False,
         )
         self.assertContains(
             response,
-            f'value="{primary.id}:{primary_revision.id}"',
+            f'value="{primary.id}:{primary_revision.id}:{primary.id}:{self.campus.id}"',
             html=False,
         )
         self.assertNotContains(
             response,
-            f'value="{secondary.id}:{secondary_revision.id}"',
+            f'value="{secondary.id}:{secondary_revision.id}:{secondary.id}:{self.campus.id}"',
             html=False,
         )
 
@@ -951,18 +965,18 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         now = timezone.now()
         with self.assertRaisesRegex(ValidationError, "all selected courses"):
             AnswerKeyReleaseService.bulk_release(
-                selections=((self.parent.id, self.r4.id),),
+                selections=((self.parent.id, self.r4.id, self.parent.id, self.campus.id),),
                 tenant_id=self.tenant.id,
                 actor=self.release_manager,
                 available_from=now,
                 available_until=now + timezone.timedelta(hours=1),
                 attestation_confirmed=False,
             )
-        with self.assertRaisesRegex(ValidationError, "only one revision"):
+        with self.assertRaisesRegex(ValidationError, "only once"):
             AnswerKeyReleaseService.bulk_release(
                 selections=(
-                    (self.parent.id, self.r4.id),
-                    (self.parent.id, self.r4.id),
+                    (self.parent.id, self.r4.id, self.parent.id, self.campus.id),
+                    (self.parent.id, self.r4.id, self.parent.id, self.campus.id),
                 ),
                 tenant_id=self.tenant.id,
                 actor=self.release_manager,
@@ -988,8 +1002,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         with self.assertRaisesRegex(ValidationError, "complete revision"):
             AnswerKeyReleaseService.bulk_release(
                 selections=(
-                    (self.parent.id, self.r4.id),
-                    (other_course.id, other_revision.id),
+                    (self.parent.id, self.r4.id, self.parent.id, self.campus.id),
+                    (other_course.id, other_revision.id, other_course.id, self.campus.id),
                 ),
                 tenant_id=self.tenant.id,
                 actor=self.release_manager,
@@ -1000,7 +1014,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         self.assertFalse(AnswerKeyRelease.objects.exists())
         with self.assertRaisesRegex(ValidationError, "does not belong"):
             AnswerKeyReleaseService.bulk_release(
-                selections=((self.parent.id, other_revision.id),),
+                selections=((self.parent.id, other_revision.id, self.parent.id, self.campus.id),),
                 tenant_id=self.tenant.id,
                 actor=self.release_manager,
                 available_from=now,
@@ -1018,18 +1032,18 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         other_revision = self._make_revision(1, cycle_course=other_course)
         local_start = timezone.localtime().replace(second=0, microsecond=0)
         local_end = local_start + timezone.timedelta(hours=2)
-        payload = {
+        payload = {"target_campus_id": self.campus.id,
             "action": "bulk_answer_key_release",
             "selections": (
-                f"{self.parent.id}:{self.r4.id}",
-                f"{other_course.id}:{other_revision.id}",
+                f"{self.parent.id}:{self.r4.id}:{self.parent.id}:{self.campus.id}",
+                f"{other_course.id}:{other_revision.id}:{other_course.id}:{self.campus.id}",
             ),
             "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
             "available_until": local_end.strftime("%Y-%m-%dT%H:%M"),
         }
         client = Client()
         client.force_login(self.release_manager)
-        url = reverse("departmental_exams:questionnaire_print_release")
+        url = (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         denied = client.post(url, payload)
         self.assertEqual(denied.status_code, 400)
         self.assertContains(
@@ -1055,7 +1069,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         now = timezone.now()
         with self.assertRaises(Http404):
             AnswerKeyReleaseService.bulk_release(
-                selections=((self.parent.id, self.r4.id),),
+                selections=((self.parent.id, self.r4.id, self.parent.id, self.campus.id),),
                 tenant_id=self.other_tenant.id,
                 actor=self.release_manager,
                 available_from=now,
@@ -1073,7 +1087,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         )
         with self.assertRaises(PermissionDenied):
             AnswerKeyReleaseService.bulk_release(
-                selections=((self.parent.id, self.r4.id),),
+                selections=((self.parent.id, self.r4.id, self.parent.id, self.campus.id),),
                 tenant_id=self.tenant.id,
                 actor=self.release_manager,
                 available_from=now,
@@ -1097,8 +1111,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         with self.assertRaises(PermissionDenied):
             AnswerKeyReleaseService.bulk_release(
                 selections=(
-                    (self.parent.id, self.r4.id),
-                    (unauthorized_course.id, unauthorized_revision.id),
+                    (self.parent.id, self.r4.id, self.parent.id, self.campus.id),
+                    (unauthorized_course.id, unauthorized_revision.id, unauthorized_course.id, self.campus.id),
                 ),
                 tenant_id=self.tenant.id,
                 actor=self.release_manager,
@@ -1127,8 +1141,8 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         with self.assertRaisesRegex(ValidationError, "current final revision"):
             AnswerKeyReleaseService.bulk_release(
                 selections=(
-                    (self.parent.id, self.r4.id),
-                    (other_course.id, stale_revision.id),
+                    (self.parent.id, self.r4.id, self.parent.id, self.campus.id),
+                    (other_course.id, stale_revision.id, other_course.id, self.campus.id),
                 ),
                 tenant_id=self.tenant.id,
                 actor=self.release_manager,
@@ -1147,7 +1161,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         start = timezone.now()
         end = start + timezone.timedelta(hours=2)
         first = AnswerKeyReleaseService.bulk_release(
-            selections=((self.parent.id, self.r4.id),),
+            selections=((self.parent.id, self.r4.id, self.parent.id, self.campus.id),),
             tenant_id=self.tenant.id,
             actor=self.release_manager,
             available_from=start,
@@ -1155,7 +1169,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             attestation_confirmed=True,
         )[0]
         retried = AnswerKeyReleaseService.bulk_release(
-            selections=((self.parent.id, self.r4.id),),
+            selections=((self.parent.id, self.r4.id, self.parent.id, self.campus.id),),
             tenant_id=self.tenant.id,
             actor=self.release_manager,
             available_from=start,
@@ -1169,7 +1183,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             1,
         )
         changed = AnswerKeyReleaseService.bulk_release(
-            selections=((self.parent.id, self.r4.id),),
+            selections=((self.parent.id, self.r4.id, self.parent.id, self.campus.id),),
             tenant_id=self.tenant.id,
             actor=self.release_manager,
             available_from=start,
@@ -1257,7 +1271,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         client = Client()
         client.force_login(self.release_manager)
         response = client.get(
-            reverse("departmental_exams:questionnaire_print_release")
+            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         )
         self.assertEqual(response.status_code, 200)
         current_row = next(
@@ -1291,7 +1305,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         client = Client()
         client.force_login(self.release_manager)
         response = client.get(
-            reverse("departmental_exams:questionnaire_print_release")
+            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         )
         self.assertEqual(response.status_code, 200)
         current_row = next(
@@ -1446,7 +1460,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         client = Client()
         client.force_login(self.release_manager)
         response = client.get(
-            reverse("departmental_exams:questionnaire_print_release")
+            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         )
 
         self.assertEqual(response.status_code, 200)
@@ -1501,7 +1515,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
             "matchesDepartment",
             "matchesCampus",
             'row.dataset.releaseStatus === statusValue',
-            "[search, department, campus, status].forEach",
+            "[search, department, status].forEach",
             'control === search ? "input" : "change"',
             'form.addEventListener("submit", function ()',
             "input.checked = !input.disabled && selected.has(input.value)",
@@ -1524,7 +1538,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
 
     def test_ajax_answer_key_release_is_safe_and_non_ajax_fallback_still_redirects(self):
         local_start = timezone.localtime().replace(second=0, microsecond=0)
-        payload = {
+        payload = {"target_campus_id": self.campus.id, "recipient_course_id": self.parent.id,
             "action": "answer_key_release",
             "cycle_course_id": self.parent.id,
             "generation_revision": self.r4.id,
@@ -1536,7 +1550,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         }
         client = Client()
         client.force_login(self.release_manager)
-        url = reverse("departmental_exams:questionnaire_print_release")
+        url = (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
 
         ajax = client.post(
             url,
@@ -1550,7 +1564,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         self.assertTrue(body["success"])
         self.assertEqual(body["section"], "answer-key-releases")
         self.assertEqual(body["affected_course_ids"], [self.parent.id])
-        self.assertEqual(body["refresh_url"], url)
+        self.assertEqual(body["refresh_url"], url.split("?")[0])
         self.assertEqual(AnswerKeyRelease.objects.count(), 1)
         serialized = str(body).lower()
         for confidential in (
@@ -1575,10 +1589,10 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         client = Client()
         client.force_login(self.release_manager)
         response = client.post(
-            reverse("departmental_exams:questionnaire_print_release"),
-            {
+            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}"),
+            {"target_campus_id": self.campus.id,
                 "action": "bulk_answer_key_release",
-                "selections": (f"{self.parent.id}:{self.r4.id}",),
+                "selections": (f"{self.parent.id}:{self.r4.id}:{self.parent.id}:{self.campus.id}",),
                 "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
                 "available_until": (
                     local_start + timezone.timedelta(hours=2)
@@ -1599,7 +1613,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
 
     def test_ajax_validation_stale_revision_and_direct_deny_stay_fail_closed(self):
         local_start = timezone.localtime().replace(second=0, microsecond=0)
-        payload = {
+        payload = {"target_campus_id": self.campus.id, "recipient_course_id": self.parent.id,
             "action": "answer_key_release",
             "cycle_course_id": self.parent.id,
             "generation_revision": self.r4.id,
@@ -1610,7 +1624,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         }
         client = Client()
         client.force_login(self.release_manager)
-        url = reverse("departmental_exams:questionnaire_print_release")
+        url = (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         headers = {
             "HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
             "HTTP_ACCEPT": "application/json",
@@ -1648,11 +1662,11 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         release = self._release()
         client = Client()
         client.force_login(self.release_manager)
-        url = reverse("departmental_exams:questionnaire_print_release")
+        url = (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
 
         response = client.post(
             url,
-            {"action": "answer_key_revoke", "release_id": release.id},
+            {"target_campus_id": self.campus.id, "action": "answer_key_revoke", "release_id": release.id},
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
             HTTP_ACCEPT="application/json",
         )
@@ -1661,7 +1675,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         self.assertTrue(response.json()["success"])
         release.refresh_from_db()
         self.assertEqual(release.status, AnswerKeyRelease.Status.REVOKED)
-        refreshed = client.get(url + "?section=answer-key-releases")
+        refreshed = client.get(url + "&section=answer-key-releases")
         row = next(
             item
             for item in refreshed.context["bulk_answer_key_rows"]
@@ -1680,10 +1694,10 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         local_start = timezone.localtime().replace(second=0, microsecond=0)
         client = Client()
         client.force_login(self.release_manager)
-        url = reverse("departmental_exams:questionnaire_print_release")
+        url = (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         response = client.post(
             url,
-            {
+            {"target_campus_id": self.campus.id, "recipient_course_id": self.parent.id,
                 "action": "answer_key_release",
                 "cycle_course_id": self.parent.id,
                 "generation_revision": self.r4.id,
@@ -1701,7 +1715,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         r5 = self._replace_current_revision(item_count=2)
 
         refreshed = client.get(
-            response.json()["refresh_url"] + "?section=answer-key-releases"
+            response.json()["refresh_url"] + f"?section=answer-key-releases&target_campus_id={self.campus.id}"
         )
         row = next(
             item
@@ -1717,7 +1731,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         self.assertIsNone(row["displayed_release"])
         content = refreshed.content.decode()
         current_row = content.split(
-            f'id="answer-key-row-{self.parent.id}"', 1
+            f'id="answer-key-row-{self.parent.id}-{self.campus.id}"', 1
         )[1].split("</tr>", 1)[0]
         self.assertNotIn(
             reverse(
@@ -1736,7 +1750,7 @@ class AnswerKeyReleaseTests(Stage4TestCase):
         local_start = timezone.localtime().replace(second=0, microsecond=0)
         client = Client()
         client.force_login(self.generation_manager)
-        url = reverse("departmental_exams:questionnaire_print_release")
+        url = (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
         headers = {
             "HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
             "HTTP_ACCEPT": "application/json",

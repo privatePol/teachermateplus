@@ -10,6 +10,7 @@
   </div>
 </header>
 
+<p><strong>{{ release.get_scope_kind_display }}</strong>{% if release.target_campus_id %} &middot; {{ release.target_campus.name }} &middot; Recipient {{ release.recipient_course.course.code }}{% else %} &middot; Historical target campus unknown; faculty access blocked pending scoped reissue.{% endif %}</p>
 <div class="alert alert-warning"><strong>Successful page opens only.</strong> This report counts authorized Faculty opens of the actual Set A or Set B Answer Key page. Menu visibility, denied requests, Answer Key printing, and Checking Master printing are not counted here.</div>
 
 <section class="card de-exam-card mb-4">

@@ -35,6 +35,8 @@ ANSWER_KEY_RELEASE_ATTESTATION_VERSION = "all-sessions-concluded-v1"
 @dataclass(frozen=True)
 class AnswerKeyAccessAuditContext:
     release_id: int
+    target_campus_id: int
+    recipient_course_id: int
     tenant_id: int
     cycle_id: int
     cycle_course_id: int
@@ -152,6 +154,9 @@ class AnswerKeyReleaseService:
             tenant=release.cycle_course.cycle.tenant_id,
             metadata={
                 "release_id": release.id,
+                "target_campus_id": release.target_campus_id,
+                "recipient_course_id": release.recipient_course_id,
+                "scope_kind": release.scope_kind,
                 "cycle_id": release.cycle_course.cycle_id,
                 "cycle_course_id": release.cycle_course_id,
                 "revision_id": release.generation_revision_id,
@@ -178,8 +183,21 @@ class AnswerKeyReleaseService:
         available_until,
         attestation_confirmed,
         request=None,
-        require_primary=False,
+        target_campus_id=None,
+        recipient_course_id=None,
     ):
+        try:
+            target_campus_id = int(target_campus_id)
+            recipient_course_id = int(recipient_course_id)
+            if min(target_campus_id, recipient_course_id) < 1:
+                raise ValueError
+        except (ValueError, TypeError) as exc:
+            raise ValidationError("An explicit target campus and recipient course are required.") from exc
+        if request is not None:
+            request_scope = getattr(request, "scope", {}) or {}
+            campus_ids = request_scope.get("campus_ids")
+            if campus_ids is not None and target_campus_id not in campus_ids:
+                raise PermissionDenied("The target campus is outside the active request scope.")
         cls._validate_window(
             available_from=available_from,
             available_until=available_until,
@@ -196,10 +214,16 @@ class AnswerKeyReleaseService:
             user=actor,
             cycle_course=course,
         )
-        if require_primary and resolve_examination_unit(course).primary.id != course.id:
-            raise ValidationError(
-                "Bulk Answer Key release accepts only the primary-owned revision for an examination unit."
-            )
+        unit = resolve_examination_unit(course, for_update=True)
+        if unit.primary.id != course.id:
+            raise ValidationError("Answer Key releases require the primary-owned exact revision.")
+        recipient = next((member for member in unit.members if member.id == recipient_course_id), None)
+        if recipient is None:
+            raise PermissionDenied("The recipient course is outside this examination unit.")
+        DepartmentalExamAuthorizationService.require_answer_key_target(
+            user=actor, cycle_course=course, recipient_course=recipient,
+            target_campus_id=target_campus_id,
+        )
         try:
             revision = (
                 ExamGenerationRevision.objects.select_for_update()
@@ -224,7 +248,9 @@ class AnswerKeyReleaseService:
             AnswerKeyRelease.objects.select_for_update()
             .select_related("cycle_course__cycle", "generation_revision")
             .filter(
-                cycle_course=course,
+                recipient_course=recipient,
+                target_campus_id=target_campus_id,
+                scope_kind=AnswerKeyRelease.ScopeKind.SCOPED,
                 status=AnswerKeyRelease.Status.ACTIVE,
                 active_marker=1,
             )
@@ -266,6 +292,9 @@ class AnswerKeyReleaseService:
             )
 
         release = AnswerKeyRelease(
+            scope_kind=AnswerKeyRelease.ScopeKind.SCOPED,
+            recipient_course=recipient,
+            target_campus_id=target_campus_id,
             cycle_course=course,
             generation_revision=revision,
             available_from=available_from,
@@ -308,26 +337,34 @@ class AnswerKeyReleaseService:
             )
         normalized = []
         course_ids = set()
+        target_keys = set()
+        target_campus_ids = set()
         for selection in selections:
             try:
-                cycle_course_id, revision_id = (int(value) for value in selection)
+                cycle_course_id, revision_id, recipient_id, campus_id = (int(value) for value in selection)
             except (TypeError, ValueError) as exc:
                 raise ValidationError(
                     {"selections": "One or more selected revisions are invalid."}
                 ) from exc
-            if cycle_course_id < 1 or revision_id < 1:
+            if min(cycle_course_id, revision_id, recipient_id, campus_id) < 1:
                 raise ValidationError(
                     {"selections": "One or more selected revisions are invalid."}
                 )
-            if cycle_course_id in course_ids:
+            if (recipient_id, campus_id) in target_keys:
                 raise ValidationError(
-                    {"selections": "Select only one revision for each course examination."}
+                    {"selections": "Select each recipient course/campus only once."}
                 )
             course_ids.add(cycle_course_id)
-            normalized.append((cycle_course_id, revision_id))
+            target_keys.add((recipient_id, campus_id))
+            target_campus_ids.add(campus_id)
+            normalized.append((cycle_course_id, revision_id, recipient_id, campus_id))
         if not normalized:
             raise ValidationError(
                 {"selections": "Select at least one current final course revision."}
+            )
+        if len(target_campus_ids) != 1:
+            raise ValidationError(
+                {"selections": "Select recipient courses from one target campus per submission."}
             )
 
         cycle_by_course = dict(
@@ -340,11 +377,11 @@ class AnswerKeyReleaseService:
             normalized,
             key=lambda selection: (
                 cycle_by_course.get(selection[0], 2**63),
-                selection[0],
+                selection[0], selection[2], selection[3],
             ),
         )
         releases = []
-        for cycle_course_id, revision_id in ordered:
+        for cycle_course_id, revision_id, recipient_id, campus_id in ordered:
             releases.append(
                 cls.release(
                     cycle_course_id=cycle_course_id,
@@ -355,7 +392,8 @@ class AnswerKeyReleaseService:
                     available_until=available_until,
                     attestation_confirmed=True,
                     request=request,
-                    require_primary=True,
+                    recipient_course_id=recipient_id,
+                    target_campus_id=campus_id,
                 )
             )
         return tuple(releases)
@@ -364,6 +402,8 @@ class AnswerKeyReleaseService:
     def operational_status(*, release, expected_revision=None, now=None):
         if release is None:
             return "Not released"
+        if release.scope_kind == AnswerKeyRelease.ScopeKind.LEGACY_UNSCOPED:
+            return "Legacy unscoped / Reissue required"
         if (
             expected_revision is None
             or release.generation_revision_id != expected_revision.id
@@ -403,6 +443,22 @@ class AnswerKeyReleaseService:
             .select_related("cycle_course__cycle", "generation_revision")
             .get(pk=release_id, cycle_course=course)
         )
+        if release.scope_kind == AnswerKeyRelease.ScopeKind.SCOPED:
+            if request is not None:
+                try:
+                    expected_campus = int(request.POST.get("target_campus_id", ""))
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError("An explicit target campus is required to revoke a scoped release.") from exc
+                if expected_campus != release.target_campus_id:
+                    raise PermissionDenied("The release does not belong to the selected target campus.")
+
+            DepartmentalExamAuthorizationService.require_answer_key_target(
+                user=actor, cycle_course=course, recipient_course=release.recipient_course,
+                target_campus_id=release.target_campus_id, require_active_campus=False,
+            )
+            scope = getattr(request, "scope", {}) or {}
+            if scope.get("campus_ids") is not None and release.target_campus_id not in scope["campus_ids"]:
+                raise PermissionDenied("The release is outside the active request scope.")
         if release.status != AnswerKeyRelease.Status.ACTIVE:
             raise ValidationError("Only the active Answer Key release may be revoked.")
         release.status = AnswerKeyRelease.Status.REVOKED
@@ -431,45 +487,49 @@ class AnswerKeyReleaseService:
 
 class FacultyAnswerKeyReleaseService:
     @staticmethod
+    def _matching_assignments(*, contribution, release):
+        if (
+            release.scope_kind != AnswerKeyRelease.ScopeKind.SCOPED
+            or release.recipient_course_id != contribution.cycle_course_id
+        ):
+            return ()
+        return tuple(
+            assignment
+            for assignment in ContributionAuthorizationService.retained_current_print_assignments(
+                contribution=contribution
+            )
+            if assignment.offering.campus_id == release.target_campus_id
+        )
+
+    @staticmethod
     def available_options(*, contributions, now=None):
         contributions = tuple(contributions)
         now = now or timezone.now()
-        primary_by_contribution = {
-            row.id: resolve_examination_unit(row.cycle_course).primary.id
-            for row in contributions
-        }
-        course_ids = set(primary_by_contribution.values())
-        releases = {
-            row.cycle_course_id: row
-            for row in AnswerKeyRelease.objects.filter(
-                cycle_course_id__in=course_ids,
-                status=AnswerKeyRelease.Status.ACTIVE,
-                active_marker=1,
-                available_from__lte=now,
-                available_until__gte=now,
-                generation_revision__cycle_course_id=F("cycle_course_id"),
-                generation_revision__current_marker=1,
-            ).select_related(
-                "generation_revision",
-                "generation_revision__cycle_course__cycle",
-            )
-            if _revision_is_current_final(row.generation_revision)
-        }
+        releases = list(AnswerKeyRelease.objects.filter(
+            recipient_course_id__in=[row.cycle_course_id for row in contributions],
+            scope_kind=AnswerKeyRelease.ScopeKind.SCOPED,
+            status=AnswerKeyRelease.Status.ACTIVE, active_marker=1,
+            available_from__lte=now, available_until__gte=now,
+            generation_revision__cycle_course_id=F("cycle_course_id"),
+            generation_revision__current_marker=1,
+        ).select_related("target_campus", "generation_revision__cycle_course__cycle"))
         options = {}
         for contribution in contributions:
-            release = releases.get(primary_by_contribution[contribution.id])
-            if (
-                not release
-                or not ContributionAuthorizationService.has_retained_current_print_eligibility(
-                    contribution=contribution
-                )
-                or not _complete_sets(release.generation_revision)
-            ):
-                continue
-            options[contribution.id] = {
-                "release_id": release.id,
-                "revision_number": release.generation_revision.revision_number,
-            }
+            primary_id = resolve_examination_unit(contribution.cycle_course).primary.id
+            for release in releases:
+                if (
+                    release.cycle_course_id == primary_id
+                    and _revision_is_current_final(release.generation_revision)
+                    and FacultyAnswerKeyReleaseService._matching_assignments(contribution=contribution, release=release)
+                    and _complete_sets(release.generation_revision)
+                ):
+                    options.setdefault(contribution.id, []).append({
+                        "release_id": release.id,
+                        "target_campus_id": release.target_campus_id,
+                        "recipient_course_id": release.recipient_course_id,
+                        "revision_number": release.generation_revision.revision_number,
+                        "campus_name": release.target_campus.name,
+                    })
         return options
 
     @staticmethod
@@ -491,9 +551,12 @@ class FacultyAnswerKeyReleaseService:
                 "cycle_course__cycle__academic_year",
                 "cycle_course__cycle__term",
                 "cycle_course__course",
+                "recipient_course__course",
                 "generation_revision__cycle_course__cycle",
             ).get(
                 pk=release_id,
+                scope_kind=AnswerKeyRelease.ScopeKind.SCOPED,
+                recipient_course_id=contribution.cycle_course_id,
                 cycle_course=primary_course,
                 cycle_course__cycle__tenant_id=contribution.cycle_course.cycle.tenant_id,
                 generation_revision__cycle_course=primary_course,
@@ -507,10 +570,11 @@ class FacultyAnswerKeyReleaseService:
             or now < release.available_from
             or now > release.available_until
             or not _revision_is_current_final(release.generation_revision)
+            or not _complete_sets(release.generation_revision)
         ):
             raise PermissionDenied("Answer Key access is outside the authorized release.")
-        if not ContributionAuthorizationService.has_retained_current_print_eligibility(
-            contribution=contribution
+        if not FacultyAnswerKeyReleaseService._matching_assignments(
+            contribution=contribution, release=release
         ):
             raise PermissionDenied("No current qualifying teaching assignment remains.")
         try:
@@ -576,8 +640,8 @@ class FacultyAnswerKeyReleaseService:
             "academic_year": cycle.academic_year.name,
             "term": cycle.term.name,
             "exam_period": cycle.get_exam_period_display(),
-            "course_code": release.cycle_course.course.code,
-            "course_title": release.cycle_course.course.title,
+            "course_code": release.recipient_course.course.code,
+            "course_title": release.recipient_course.course.title,
             "set_code": normalized_set,
             "revision_number": release.generation_revision.revision_number,
             "accessed_at": accessed_at,
@@ -593,6 +657,8 @@ class FacultyAnswerKeyReleaseService:
         }
         audit_context = AnswerKeyAccessAuditContext(
             release_id=release.id,
+            target_campus_id=release.target_campus_id,
+            recipient_course_id=release.recipient_course_id,
             tenant_id=tenant.id,
             cycle_id=cycle.id,
             cycle_course_id=release.cycle_course_id,
@@ -625,6 +691,8 @@ class FacultyAnswerKeyReleaseService:
             tenant=audit_context.tenant_id,
             metadata={
                 "release_id": audit_context.release_id,
+                "target_campus_id": audit_context.target_campus_id,
+                "recipient_course_id": audit_context.recipient_course_id,
                 "cycle_id": audit_context.cycle_id,
                 "cycle_course_id": audit_context.cycle_course_id,
                 "revision_id": audit_context.revision_id,
@@ -712,8 +780,8 @@ class FacultyAnswerKeyReleaseService:
             "academic_year": cycle.academic_year.name,
             "term": cycle.term.name,
             "exam_period": cycle.get_exam_period_display(),
-            "course_code": release.cycle_course.course.code,
-            "course_title": release.cycle_course.course.title,
+            "course_code": release.recipient_course.course.code,
+            "course_title": release.recipient_course.course.title,
             "set_code": normalized_set,
             "revision_number": release.generation_revision.revision_number,
             "final_item_count": final_item_count,
@@ -735,6 +803,8 @@ class FacultyAnswerKeyReleaseService:
             tenant=tenant.id,
             metadata={
                 "release_id": release.id,
+                "target_campus_id": release.target_campus_id,
+                "recipient_course_id": release.recipient_course_id,
                 "cycle_id": cycle.id,
                 "cycle_course_id": release.cycle_course_id,
                 "revision_id": release.generation_revision_id,
@@ -752,14 +822,16 @@ class FacultyAnswerKeyReleaseService:
 
 class AnswerKeyViewerReportService:
     @staticmethod
-    def report(*, release_id, tenant_id, actor):
+    def report(*, release_id, tenant_id, actor, request=None):
         try:
             release = AnswerKeyRelease.objects.select_related(
                 "cycle_course__cycle__tenant",
                 "cycle_course__cycle__academic_year",
                 "cycle_course__cycle__term",
                 "cycle_course__course",
+                "recipient_course__course",
                 "generation_revision",
+                "target_campus",
             ).get(
                 pk=release_id,
                 cycle_course__cycle__tenant_id=tenant_id,
@@ -773,6 +845,17 @@ class AnswerKeyViewerReportService:
             user=actor,
             cycle_course=release.cycle_course,
         )
+        if release.scope_kind == AnswerKeyRelease.ScopeKind.SCOPED:
+            DepartmentalExamAuthorizationService.require_answer_key_target(
+                user=actor, cycle_course=release.cycle_course,
+                recipient_course=release.recipient_course, target_campus_id=release.target_campus_id,
+                require_active_campus=False,
+            )
+        scope = getattr(request, "scope", {}) or {}
+        if (release.scope_kind == AnswerKeyRelease.ScopeKind.SCOPED
+                and scope.get("campus_ids") is not None
+                and release.target_campus_id not in scope["campus_ids"]):
+            raise PermissionDenied("The release is outside the active request scope.")
         events = AuditLog.objects.filter(
             tenant_id=tenant_id,
             entity_type="AnswerKeyRelease",
