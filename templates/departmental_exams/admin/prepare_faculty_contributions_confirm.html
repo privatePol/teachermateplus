@@ -1,6 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
+<p>This is the retained legacy preparation workflow. <a href="{% url 'departmental_exams:course_setup' cycle.id %}">Review explicit classification and selected-course setup</a> before opting an eligible never-opened exam into the new workflow.</p>
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_list' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_course_list' cycle.id %}">Course Examinations</a></li><li class="breadcrumb-item active">Prepare Faculty Contributions</li></ol></nav>
 <header class="de-exam-hero"><div><span class="badge text-bg-light text-dark mb-2">AUTOMATIC GENERATION</span><h1>Prepare Faculty Contributions</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }}</p></div></header>
 <div class="card de-exam-card"><div class="card-body p-4">

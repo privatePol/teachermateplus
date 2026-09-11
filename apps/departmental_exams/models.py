@@ -277,7 +277,51 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
                 raise ValidationError({field: "Value must be from 50 to 75."})
 
 
+_classification_write = ContextVar("exam_classification_write", default=False)
+
+
+@contextmanager
+def _classification_service_scope():
+    token = _classification_write.set(True)
+    try:
+        yield
+    finally:
+        _classification_write.reset(token)
+
+
+class _CycleCourseQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if "exam_classification" in kwargs and not _classification_write.get():
+            raise ValidationError("Use the authorized exam classification workflow.")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if "exam_classification" in fields and not _classification_write.get():
+            raise ValidationError("Use the authorized exam classification workflow.")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+
 class CycleCourse(TimeStampedModel):
+    objects = _CycleCourseQuerySet.as_manager()
+
+    class ExamClassification(models.TextChoices):
+        UNCLASSIFIED_LEGACY = "UNCLASSIFIED_LEGACY", "Legacy - classification unconfirmed"
+        STANDARDIZED = "STANDARDIZED", "Standardized"
+        DEPARTMENTAL = "DEPARTMENTAL", "Departmental"
+
+    exam_classification = models.CharField(
+        max_length=20, choices=ExamClassification.choices,
+        default=ExamClassification.UNCLASSIFIED_LEGACY,
+    )
+
+    def save(self, *args, **kwargs):
+        fields = kwargs.get("update_fields")
+        if self.pk and (fields is None or "exam_classification" in fields):
+            previous = type(self).objects.filter(pk=self.pk).values_list("exam_classification", flat=True).first()
+            if previous is not None and previous != self.exam_classification and not _classification_write.get():
+                raise ValidationError("Use the authorized exam classification workflow.")
+        return super().save(*args, **kwargs)
+
     class ExemptionCategory(models.TextChoices):
         PRACTICUM_OJT = "PRACTICUM_OJT", "Practicum / OJT"
         INTERNSHIP = "INTERNSHIP", "Internship"

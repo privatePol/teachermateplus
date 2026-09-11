@@ -99,6 +99,10 @@ def _is_ajax_request(request):
 def _release_action_success(
     request, *, message, section, affected_course_ids
 ):
+    refresh_url = reverse("departmental_exams:questionnaire_print_release")
+    cycle_status = request.GET.get("cycle_status")
+    if cycle_status in ("OPEN", "CLOSED", "DRAFT"):
+        refresh_url += "?cycle_status=" + cycle_status
     if _is_ajax_request(request):
         return JsonResponse(
             {
@@ -108,13 +112,11 @@ def _release_action_success(
                 "affected_course_ids": sorted(
                     {int(course_id) for course_id in affected_course_ids}
                 ),
-                "refresh_url": reverse(
-                    "departmental_exams:questionnaire_print_release"
-                ),
+                "refresh_url": refresh_url,
             }
         )
     messages.success(request, message)
-    return redirect("departmental_exams:questionnaire_print_release")
+    return redirect(refresh_url)
 
 
 def _release_form_errors(form):
@@ -154,6 +156,8 @@ def blueprint_configuration_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
     structured_lifecycle_enabled = (
+        (course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+         and course.exam_classification != "UNCLASSIFIED_LEGACY") or
         FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
             tenant_id=tenant_id
         )
@@ -926,12 +930,14 @@ def _has_automatic_summary_access(courses, permission_map):
 @portal_required("ADMIN")
 @require_GET
 def automatic_generation_summary_entry_view(request):
+    from .cycle_visibility import selected_cycle_status
     tenant_id = _tenant_id(request)
     DepartmentalExamAuthorizationService.require_enabled(tenant_id=tenant_id)
     courses = list(
         CycleCourse.objects.filter(
             cycle__tenant_id=tenant_id,
             cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+            cycle__status=selected_cycle_status(request.GET),
             inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
         )
         .select_related("cycle", "cycle__academic_year", "cycle__term")
@@ -950,11 +956,6 @@ def automatic_generation_summary_entry_view(request):
         for cycle_courses in courses_by_cycle.values()
         if _has_automatic_summary_access(cycle_courses, permission_map)
     )
-    if len(cycles) == 1:
-        return redirect(
-            "departmental_exams:automatic_generation_summary",
-            cycle_id=cycles[0].id,
-        )
     return render(
         request,
         "departmental_exams/admin/automatic_generation_summary_selector.html",
@@ -1071,6 +1072,11 @@ def questionnaire_print_release_view(request):
         raise PermissionDenied(
             "No generated course examination is available within your output authority."
         )
+    # Filter the operational list only; exact-release POST/direct routes keep
+    # their existing independent authority and lifecycle checks.
+    if request.method == "GET":
+        from .cycle_visibility import filter_cycle_rows
+        courses = filter_cycle_rows(courses, request.GET)
     for course in courses:
         seen_campus_ids = set()
         print_release_campuses = []

@@ -51,7 +51,7 @@
     <tbody>
       {% for row in rows %}<tr>
         <td class="readiness-row-number">{{ forloop.counter }}</td>
-        <td class="readiness-course"><strong>{{ row.cycle_course.course.code }}</strong><br>{{ row.cycle_course.course.title }}{% if row.cycle_course.inclusion_status == 'EXEMPT' %}<br><strong>EXEMPT</strong>{% endif %}</td>
+        <td class="readiness-course"><strong>{{ row.cycle_course.course.code }} {% include "departmental_exams/_classification_badge.html" with course=row.cycle_course %}</strong><br>{{ row.cycle_course.course.title }}{% if row.cycle_course.inclusion_status == 'EXEMPT' %}<br><strong>EXEMPT</strong>{% endif %}</td>
         <td class="readiness-campuses">{% if row.campuses %}{{ row.campuses|join:", " }}{% else %}No participating campus snapshot{% endif %}</td>
         <td class="readiness-final-items">{{ row.configuration.final_item_count|default:"Not configured" }}</td>
         <td class="readiness-progress">{% if row.contribution_progress is None %}Not applicable{% elif row.contribution_progress.expected_monitoring_volume is None %}Monitoring quota not configured{% else %}<strong>{{ row.contribution_progress.submitted_question_volume }} / {{ row.contribution_progress.expected_monitoring_volume }} submitted</strong>{% if row.contribution_progress.submitted_campuses %}<br>Submitted campuses:<ul>{% for campus in row.contribution_progress.submitted_campuses %}<li>{{ campus }}</li>{% endfor %}</ul>{% else %}<br>No campus has submitted questions yet.{% endif %}{% endif %}</td>

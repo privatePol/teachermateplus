@@ -220,6 +220,7 @@ def _visible_cycle_ids_for_user(*, user, tenant_id):
 
 @portal_required("ADMIN")
 def cycle_list_view(request):
+    from .cycle_visibility import selected_cycle_status
     tenant_id = _tenant_id(request)
     DepartmentalExamAuthorizationService.require_permission(
         user=request.user,
@@ -227,7 +228,7 @@ def cycle_list_view(request):
         tenant_id=tenant_id,
     )
     cycles = list(
-        ExaminationCycle.objects.filter(tenant_id=tenant_id)
+        ExaminationCycle.objects.filter(tenant_id=tenant_id, status=selected_cycle_status(request.GET))
         .select_related("academic_year", "term")
         .order_by("-created_at")
     )
@@ -366,6 +367,15 @@ def cycle_apply_defaults_view(request, cycle_id):
 @portal_required("ADMIN")
 @require_http_methods(["GET", "POST"])
 def prepare_faculty_contributions_view(request, cycle_id):
+    from .setup_views import setup_view
+
+    cycle = get_object_or_404(ExaminationCycle, pk=cycle_id, tenant_id=_tenant_id(request))
+    if not cycle.cycle_courses.exclude(exam_classification="UNCLASSIFIED_LEGACY").exists():
+        return _legacy_prepare_faculty_contributions_view(request, cycle_id)
+    return setup_view(request, cycle_id)
+
+
+def _legacy_prepare_faculty_contributions_view(request, cycle_id):
     tenant_id = _tenant_id(request)
     cycle = get_object_or_404(
         ExaminationCycle.objects.filter(
@@ -414,6 +424,8 @@ def prepare_faculty_contributions_view(request, cycle_id):
         {"cycle": cycle, "form": form},
         status=status,
     )
+
+
 
 
 def _cycle_transition_view(request, cycle_id, *, action):
@@ -510,7 +522,7 @@ def cycle_create_view(request):
     )
     form.fields["term"].queryset = Term.objects.filter(tenant_id=tenant_id, is_active=True)
     if request.method == "POST" and form.is_valid():
-        ExaminationCycleService.create_cycle(
+        cycle = ExaminationCycleService.create_cycle(
             user=request.user,
             tenant=form.cleaned_data["academic_year"].tenant,
             **form.cleaned_data,
@@ -520,7 +532,7 @@ def cycle_create_view(request):
             request,
             "Examination cycle created with active offerings grouped by course.",
         )
-        return redirect("departmental_exams:cycle_list")
+        return redirect("departmental_exams:cycle_configuration", cycle_id=cycle.id)
     return render(request, "departmental_exams/admin/cycle_form.html", {"form": form})
 
 
@@ -600,6 +612,8 @@ def cycle_course_list_view(request, cycle_id):
         raise PermissionDenied("You do not have current course examination access.")
     for course in courses:
         _prepare_cycle_course_campus_display(course)
+        from .setup_services import CourseSetupService
+        course.effective_configuration = CourseSetupService.effective(course)
         automatic_mode = (
             course.cycle.processing_mode
             == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
@@ -641,9 +655,12 @@ def assigned_course_examinations_view(request):
     """List only the grouped course examinations currently assigned to the user."""
     scope = _assigned_course_scope(request)
     base_courses = scope["base_courses"]
+    from .cycle_visibility import selected_cycle_status
+    base_courses = base_courses.filter(cycle__status=selected_cycle_status(request.GET))
     configurer_ids = scope["configurer_ids"]
     reviewer_ids = scope["reviewer_ids"]
-    automatic_courses = scope["automatic_courses"]
+    automatic_courses = [course for course in scope["automatic_courses"]
+                         if course.cycle.status == selected_cycle_status(request.GET)]
     automatic_ids = scope["automatic_ids"]
     automatic_manage_ids = scope["automatic_manage_ids"]
     automatic_inclusion_manage_ids = scope["automatic_inclusion_manage_ids"]
@@ -700,6 +717,9 @@ def assigned_course_examinations_view(request):
             cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user
         )
     automatic_courses_by_cycle = {}
+    from .setup_services import CourseSetupService
+    for course in courses:
+        course.effective_configuration = CourseSetupService.effective(course)
     for course in automatic_courses:
         if course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             continue
@@ -855,9 +875,10 @@ def _assigned_course_cycle_contexts(courses):
 def assigned_courses_print_view(request):
     """Render every course examination visible on Assigned Courses, without actions."""
     scope = _assigned_course_scope(request)
+    from .cycle_visibility import selected_cycle_status
     courses = list(
         _with_downstream_activity_flags(
-            scope["base_courses"].filter(id__in=scope["visible_ids"])
+            scope["base_courses"].filter(id__in=scope["visible_ids"], cycle__status=selected_cycle_status(request.GET))
         ).order_by("course__code", "course__title", "cycle_id", "id")
     )
     for print_number, course in enumerate(courses, start=1):
@@ -888,11 +909,13 @@ def assigned_courses_print_view(request):
 def exempt_courses_print_view(request):
     """Render all authorized Exempt course examinations without pagination."""
     scope = _assigned_course_scope(request)
+    from .cycle_visibility import selected_cycle_status
     courses = list(
         scope["base_courses"]
         .filter(
             id__in=scope["visible_ids"],
             inclusion_status=CycleCourse.InclusionStatus.EXEMPT,
+            cycle__status=selected_cycle_status(request.GET),
         )
         .order_by("course__code", "course__title", "id")
     )
@@ -1036,7 +1059,8 @@ def course_configuration_view(request, cycle_course_id):
             ),
         }
     )
-    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "action_flags": action_flags, "form": form, "close_form": close_form, "structured_exam_lifecycle_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(tenant_id=tenant_id)}, status=status)
+    from .setup_services import CourseSetupService
+    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "effective_configuration": CourseSetupService.effective(parent), "readiness": readiness, "action_flags": action_flags, "form": form, "close_form": close_form, "structured_exam_lifecycle_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(tenant_id=tenant_id)}, status=status)
 
 
 @portal_required("ADMIN")

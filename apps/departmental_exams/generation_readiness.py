@@ -501,6 +501,11 @@ class Stage6ReadinessService:
             cycle_course.cycle.processing_mode
             == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         )
+        if automatic_flat_mode:
+            from .setup_services import automatic_structure_blockers
+
+            for reason in automatic_structure_blockers(cycle_course):
+                cls._block(blockers, "AUTOMATIC_STRUCTURE_UNSUPPORTED", reason)
         if not exact_feasibility and not automatic_flat_mode:
             raise ValidationError(
                 "Exact feasibility can be skipped only for Automatic question-pool reporting."
@@ -932,6 +937,7 @@ class Stage6ReadinessService:
         identity_blocks = []
         automatic_identity_blocks = ()
         structural_codes = {
+            "AUTOMATIC_STRUCTURE_UNSUPPORTED",
             "NOT_INCLUDED",
             "CONFIGURATION_MISSING",
             "FINAL_COUNT_INVALID",

@@ -91,6 +91,8 @@ def configuration_compatibility_key(configuration):
 
 def _compatibility_errors(*, members, configurations):
     errors = []
+    if len({member.exam_classification for member in members}) > 1:
+        errors.append("Equivalency members must have the same explicit exam classification.")
     if len(members) < 2:
         errors.append("An equivalency group requires at least two active members.")
     cycles = {member.cycle_id for member in members}

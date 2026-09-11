@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Planning &amp; Readiness</title>
+  <title>Exam Readiness</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0 auto; max-width: 1200px; padding: 22px; color: #111; background: #fff; font: 11px/1.35 Arial, sans-serif; }
@@ -37,7 +37,7 @@
   <div class="toolbar print-controls"><button type="button" onclick="window.print()">Print</button></div>
   <header>
     <h2 class="institution">{{ tenant.name }}</h2>
-    <h1>Planning &amp; Readiness</h1>
+    <h1>Exam Readiness</h1>
     <p class="meta">{% for label, value in selected_filter_labels %}<strong>{{ label }}:</strong> {{ value }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}</p>
     <p class="meta"><strong>Generated/printed:</strong> {{ generated_at|date:"M j, Y g:i A T" }} (Asia/Manila)</p>
   </header>

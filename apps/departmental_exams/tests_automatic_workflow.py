@@ -1847,7 +1847,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             )
         )
         self.assertEqual(workspace_response.status_code, 200)
-        self.assertContains(workspace_response, "Automatic Generation Summary")
+        self.assertContains(workspace_response, "Exam Generation Status")
         self.assertNotContains(workspace_response, "Confidential Inputs")
         self.assertNotContains(workspace_response, "blueprint review")
 
@@ -2968,7 +2968,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             scenario_ids,
         )
 
-    def test_reopen_supersedes_r1_allows_input_change_and_generates_r2(self):
+    def test_reopen_supersedes_r1_and_generates_r2_with_flat_structure(self):
         parent, configuration, problem = self._ready_automatic_course()
         self._process_with_proved_selection(parent=parent, problem=problem)
         reopened = AutomaticContributionReopenService.reopen(
@@ -2990,36 +2990,10 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             )
         )
         blueprint = ExamBlueprint.objects.get(cycle_course=parent)
-        blueprint, changed = BlueprintMutationService.save_structure(
-            cycle_course_id=parent.id,
-            tenant_id=self.tenant.id,
-            actor=self.generation_manager,
-            expected_revision=blueprint.revision,
-            mode=ExamBlueprint.Mode.USE_SECTIONS,
-            sections=[
-                {
-                    "title": "Revised questionnaire",
-                    "instructions": "Answer every item.",
-                    "display_order": 1,
-                    "item_quota": 50,
-                }
-            ],
-        )
-        self.assertTrue(changed)
-        section = blueprint.sections.get()
-        QuestionBlueprintPlacement.objects.bulk_create(
-            [
-                QuestionBlueprintPlacement(
-                    blueprint=blueprint,
-                    question=question,
-                    section=section,
-                    placed_by=self.generation_manager,
-                )
-                for question in Question.objects.filter(
-                    contribution__cycle_course=parent
-                ).order_by("id")
-            ]
-        )
+        # Reopen's revised deadline/configuration is the changed input. Phase 1
+        # must not silently generate a flat exam from newly sectioned inputs.
+        self.assertEqual(blueprint.mode, ExamBlueprint.Mode.NO_SECTIONS)
+        self.assertFalse(blueprint.sections.exists())
         fresh_problem, readiness = Stage6ReadinessService.build_problem(
             cycle_course=parent
         )

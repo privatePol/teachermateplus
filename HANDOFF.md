@@ -1,11 +1,163 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-09-10
+Last updated by Codex: 2026-09-11
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+
+### Phase 1 code review and targeted remediation - 2026-09-11
+
+- Baseline verified: `feat/structured-case-rich-editor-phase2a`, HEAD `ef15d3492aba35fb0b4f7761b614623f43cca9c5`, empty index; 68 modified plus 11 new files, 1,313 insertions/177 deletions. Reviewed tracked changes and all 11 untracked files, not just the earlier report. Preserved the implementation and its exact 79-path manifest below. No new repository paths added by remediation.
+- RESOLVED P1 - historical Manual contract: explicitly classifying a never-opened Manual course caused Open to demand a blueprint even when the structured-lifecycle feature was off, and changed the old post-close blueprint route. Reproduced as a ValidationError before correction. `services.py`, `blueprint_services.py` and `stage6_views.py` now activate the additional classification-driven lifecycle only for Automatic; Manual still follows its existing tenant feature setting. Regression verifies Manual Open without a blueprint, subsequent post-close save, rendered mode and unchanged stored processing mode.
+- RESOLVED P1 - deadline check/closure race: the structural guard ran before acquiring the closure lock. A simulated intervening structure change returned an unsupported error only after intake had already become Closed. `automatic_workflow.py` now revalidates inside the locked closure transaction before any status mutation. The failing-before/passing-after regression asserts intake and closed_at remain unchanged. This deterministic interleaving probe is not proof of MariaDB scheduling.
+- RESOLVED P2 - incorrect Already open bypass: selected preview used only the primary's Open status before validating structure and other members. Unsupported legacy inputs or a partially open equivalency unit could be skipped while other selected courses opened. `setup_services.py` now validates every unit's compatibility/structure before reporting Already open; partially open units block the whole new selection. Manual and Closed units are preserved history. Two regressions failed before correction and verify fail-closed atomic behavior afterward.
+- Not a defect: valid No Sections questions have no explicit placement row; `QuestionBlueprintPlacement.section` is non-null. The guard against explicit placements remains unchanged. A real 50-row CSV preview/import/Final Submission regression passed with implicit No Sections placement and no Automatic structural blocker. Rendered Departmental GET/form POST/open, signed-token expiry/tampering/actor/tenant binding, grouped-campus direct DENY, CSRF, retry audit/roster counts and rollback audit/roster/callback behavior are additionally covered.
+- Remediation touched ten paths already in the original scope: `automatic_workflow.py`, `blueprint_services.py`, `services.py`, `stage6_views.py`, `setup_services.py`, `tests_unified_setup.py`, `tests_unified_migrations.py`, and the three project documents. Runtime changes are limited to the three findings. Models, migration implementations, safety budgets, sanitizer, accounting rules, editor assets, dependencies, locks/licenses and generation algorithms/snapshots are untouched by remediation. Bundle SHA256 remains `407C66995927EF1C961CFBB4EB727D3187B9E3913C1483F79AB0B90531022086`.
+- Current execution: first reproduction run 20 tests (17 passed, 2 failed, 1 error); after correcting Manual/Already open, 22 tests (21 passed, 1 failed), confirming the deadline closure defect. First post-fix matrix: 157 tests, 155 passed, zero failures/errors, two existing MariaDB-only skips, 19.399s. Final integration matrix: 427/427 passed, zero failures/errors/skips, 138.145s, including the strengthened retry/rollback/CSRF and migration assertions. Runs overlap; no summed distinct-test total is claimed. Expected negative-test CSRF and processor timeout/RuntimeError output and the duplicate `word/document.xml` fixture warning occurred; no unexplained warning or test failure remains.
+- New checks already completed: Django check zero issues; migration drift no changes; isolated migration plan includes both 0026 nodes; 44 changed templates compiled. An initial inline template probe had a Windows argument-quoting error, then succeeded via an external read-only probe. No application error or browser acceptance is implied. All Django execution uses the previously documented dotenv-disabled dummy-secret/temp SQLite/log/LocMemCache settings, `python -B -m django`, and disposable in-memory test databases. Test-only migration execution is isolated.
+- Historical failure reconciliation: the fresh 428-run's four failures map to the Automatic assigned-page label, forbidden sectioned Automatic regeneration fixture, release-page label and pre-existing persisted difficulty summary assertion. The 356-run repeats regeneration/release failures, adds four mixed-mode monitoring fixtures needing Open cycle state, one lifecycle-row Draft filter error and two monitoring-link query expectations; the 53-run adds assigned/print labels and explicit Draft-print context. Their corrections are in the changed tests/view/templates and all affected modules are included in the new focused matrices. Previous 174/174 and 87/87 runs remain recorded, overlapping evidence, not newly executed results or repaired broad-run totals. The reused-database seed failure was environmental, not application acceptance; all current runs create fresh disposable databases.
+- User staging evidence: PASS at the baseline `ef15d349...` for numbering, accounting rules, Word paste for the tested sample, structured CSV section recovery through Edit, and No Sections CSV upload/Final Submission. This supersedes earlier blanket-pending wording only for that exact reported scope. No new browser smoke was performed here; Phase 1 setup/accessibility, additional clipboard samples, cross-browser/CSP/network and applicable Print/PDF checks remain pending.
+- Migration review: `departmental_exams.0026_cycle_course_exam_classification` depends on unchanged `0025_faculty_case_rich_content`; non-null varchar(20), no new index/constraint, existing rows unknown. `navigation.0026_exam_workflow_labels` follows navigation 0025, uses historical apps and the selected DB alias, and changes only exact portal/group/code/old-label matches. Forward/reverse preserve custom labels and every non-label menu field/permission link. Fresh migration seeds flow through this rename; no new runtime seed dependency. Expanded actual forward tests compare all old fields across six historical mode/status combinations, including sections, placements, questions, Cases and generation revision evidence.
+- Deployment/rollback remain separately authorized: back up, quiesce relevant writers, apply both migrations and switch matching code/templates before restoring writers. New code needs the column; old insert writers cannot rely on a retained DB default. MariaDB DDL is not assumed transactionally reversible. Reversing classification loses classification evidence; reversing labels affects exact new labels only. Older code lacks the new structural safeguards, so opened classified intake requires coordinated recovery rather than a blind code rollback.
+- MariaDB NOT TESTED: no `mariadb`, `mysql` or `docker` command was found on PATH; no explicitly disposable MariaDB instance/credentials were supplied. No shared database or credentials were inspected. Required isolated plan: have an operator provide a dedicated localhost-only MariaDB instance and test-only user restricted to a disposable `test_tmp_phase1_review` schema; use an external settings module with dotenv off, dummy Django secret/temp logs and `ENGINE=django.db.backends.mysql`, explicit localhost port/test user and `TEST.NAME=test_tmp_phase1_review`. Assert `connection.mysql_is_mariadb` and InnoDB, then run `python -B -m django test apps.departmental_exams.tests_unified_migrations apps.departmental_exams.tests_unified_setup apps.departmental_exams.tests_structured_exam_lifecycle.StructuredExamLifecycleConcurrencyTests --settings=phase1_mariadb_disposable --noinput`. Require both existing scheduling tests to run without skips; separately exercise two-connection classification-vs-Open and duplicate confirmed-batch contention (one winner, stale/frozen loser or idempotent retry, one roster/audit set), plus a structure writer waiting against deadline closure. Measure forward/reverse DDL and confirm retained old fields/permissions with these synthetic fixtures. No instance setup, migration or concurrency result is claimed here.
+- Final gate: PASS for code review, targeted remediation and supported focused automated validation; no confirmed blocking defect remains. Recommend Commit Preparation, separately authorized. Browser and MariaDB checks are still required before claiming their acceptance. Final index empty, HEAD/branch unchanged; 68 modified and 11 untracked repository files, the same exact 79 paths in the manifest below. Final combined diff: 1,622 insertions/177 deletions (tracked 547/177 plus 1,075 new-file lines). Tracked/new-file whitespace checks pass (Git no-index exit 1 indicates added-file differences, not whitespace errors). No staging, commit, push, deployment, restart, dependency change or non-test migration occurred; repository logs/secrets untouched.
+
+Newly executed passing matrices (same external isolated environment as below; `DJANGO_SETTINGS_MODULE=phase1_memory_settings`):
+
+```powershell
+python -B -m django test apps.departmental_exams.tests_unified_setup apps.departmental_exams.tests_unified_migrations apps.departmental_exams.tests_automatic_preparation apps.departmental_exams.tests_structured_exam_lifecycle apps.departmental_exams.tests_exam_course_equivalency apps.departmental_exams.tests_stage4_workflow apps.departmental_exams.tests_stage4_authorization --noinput --no-color --verbosity 1 --testrunner phase1_runner.CompactRunner
+python -B -m django test apps.departmental_exams.tests_unified_setup apps.departmental_exams.tests_unified_migrations apps.departmental_exams.tests_automatic_workflow apps.departmental_exams.tests_stage5_csv apps.departmental_exams.tests_docx_import apps.departmental_exams.tests_faculty_cases apps.departmental_exams.tests_automatic_summary_navigation apps.departmental_exams.tests_questionnaire_print_release apps.departmental_exams.tests_automatic_generation_readiness_report apps.departmental_exams.tests_contributor_monitoring_presentation apps.departmental_exams.tests_contributor_monitoring_print apps.departmental_exams.tests_contributor_monitoring_draft_print apps.departmental_exams.tests_contributor_monitoring_faculty_submission_print apps.departmental_exams.tests_exempt_courses_print apps.departmental_exams.tests_planning_readiness apps.admin_portal.tests_help_guide apps.faculty_portal.tests_help_guide --noinput --no-color --verbosity 1 --testrunner phase1_runner.CompactRunner
+python -B -m django check --no-color
+python -B -m django makemigrations --check --dry-run --no-color
+python -B -m django migrate --plan --no-color
+python -B -m django shell --no-imports -c "import phase1_review_template_probe"
+```
+
+The last probe is outside the repository under the existing temporary validation directory; it only compiles the changed template paths. Test-only migrations executed through Django's disposable test databases. No frontend/browser suite was rerun because the editor assets are unchanged; the user's baseline browser evidence is preserved above.
+
+### Unified examination setup - Phase 1 implementation and focused validation
+
+- Gate: IMPLEMENTATION + FOCUSED VALIDATION only. Started with clean branch `feat/structured-case-rich-editor-phase2a`, HEAD `ef15d3492aba35fb0b4f7761b614623f43cca9c5`. No staging, commit, push, deployment, restart, dependency change or non-test migration authorized/performed. Protected source checkout and repository logs/secrets are untouched. Final working tree: 68 modified tracked files plus 11 new files, 79 total; combined diff 1,313 insertions and 177 deletions (including untracked-file contents). Index remains empty, HEAD unchanged, no unrelated residual changes. Exact file manifest below.
+- Implemented server-owned Automatic creation, explicit Standardized/Departmental/legacy-unknown unit classification, first-open freeze, effective-default display without GET writes, atomic signed selected opening, preserved legacy Prepare/Manual routes, Automatic unsupported-structure guards, list-boundary cycle visibility and five stable-route navigation renames. Grouped opening validates all members before using the shared lifecycle/roster/audit mutation tail. Standardized No Sections is materialized on explicit opening, never by viewing a page.
+- Historical impact: existing course exams migrate to unknown without changing mode, Cases, sections or snapshots. Explicit classification is available only for authorized never-opened Draft units. Automatic sections/Cases/placements are blocked on new opening, governed reopening, readiness and deadline processing even for historical Automatic rows; no structure is rewritten to satisfy the guard. Historical frozen/read/print access and Manual structured workflows remain. Pre-cycle Exam Readiness retains academic assignment scope rather than a global cycle filter.
+- Migrations: `departmental_exams.0026_cycle_course_exam_classification` (AddField, existing rows unknown) and `navigation.0026_exam_workflow_labels` (idempotent exact portal/group/code/old-label updates; custom labels, routes and permission links preserved). Existing departmental migration 0025, sanitizer/budgets, Tiptap assets, package/lock/license files and generation/printing algorithms are unchanged.
+- Newly executed final checks: `python -B -m django check --no-color` zero issues; `makemigrations --check --dry-run --no-color` no changes; isolated `migrate --plan --no-color` exit zero and includes both new 0026 migrations. Tracked and new-file whitespace checks passed (Windows LF/CRLF notices only). Actual forward migration on representative legacy Draft/Open/Closed, Manual/Automatic, rich-Case and generation-revision fixtures passed, including in the final test run. All 44 changed templates also compiled successfully in an isolated read-only Django template probe; this is not browser/layout acceptance.
+- Development-run evidence (not final acceptance): initial fixture/imported-TestCase discovery and legacy Prepare route defects were corrected. A reused test database produced 6 failures/95 errors/2 skips in 428 tests, dominated by migration-seed rows removed by TransactionTestCase flush; no production data was involved. Fresh-database runs then completed: 428 tests in 611.527s (422 passed, 4 failed, 2 skipped); 356 in 370.367s (345 passed, 8 failed, 1 error, 2 skipped); 53 in 29.019s (49 passed, 4 failed). Failures exposed stale UI/filter expectations and the now-forbidden Automatic sectioned regeneration fixture; a summary assertion also omitted difficulty totals already present in immutable HEAD. These are not reported as passing suites. Corrected fixtures retain historical Manual/frozen behavior and use supported flat Automatic regeneration; new negative tests cover unsupported Prepare/open/reopen/worker/generation readiness. An incidental default cycle-status query parameter was removed from legacy monitoring links, while explicitly selected filters are retained.
+- Isolation: all Django commands use `python -B -m django`, dotenv disabled, dummy secret, local base settings, temporary SQLite/log paths under `C:\Users\Lenovo\AppData\Local\Temp\tmp-unified-20260911`, and LocMemCache. External `phase1_settings.py` adds a disposable file test database, test-only fast password hasher and test hosts; `phase1_memory_settings.py` changes only the TEST database to in-memory SQLite. External `phase1_runner.CompactRunner` only truncates oversized assertion-response lines, not tests/assertions. No staging/production settings/data or repository logs/secrets were accessed. Disposable test databases were destroyed; no non-test migration occurred.
+- Browser: computer-use skill initialized, but native app enumeration failed with missing pipe (os error 2); connected browser inventory returned no apps/browsers. No browser acceptance is claimed. MariaDB DDL duration/locking/concurrency remains untested. Prior actual Word clipboard rejection and Firefox/Chromium, accessibility, CSP/network and Print/PDF acceptance remain pending.
+- Deployment/rollback: separately authorize matching code/templates plus both migrations. Preserve historical data and classification evidence. Reverse field migration loses classification; older code lacks the new guard, so rollback after classified intake opens requires coordinated writer quiescence and an explicit recovery plan. Approval policy, Case-aware generation, snapshots and questionnaire printing changes remain deferred.
+- Gate result: implementation and focused automated validation complete; code review is required before Commit Preparation. Final corrective run: 174/174 passed in 37.749s, zero failures/errors/skips, covering all failures from the fresh broad runs and final setup, migration, reports, help and release changes. This is overlapping coverage, not an additional 174 distinct tests to sum with earlier runs. The broad 428/356 suites were not rerun wholesale after corrections. Their remaining passing coverage includes CSV/DOCX recovery, rich Cases, authorization, legacy Prepare, equivalency and frozen lifecycle. Two MariaDB/InnoDB scheduling tests were skipped under SQLite in each broad run; expected negative-test CSRF, timeout/error-path output, duplicate ZIP-member fixture warning and Git line-ending notices were observed. Earlier frontend/editor runs remain historical evidence, not rerun in this phase. Final presentation follow-up after completing the DEPTAL badges: 87/87 passed in 14.645s, zero failures/errors/skips, including rendered administrative list/print/monitoring/administration routes. This overlaps the 174-test run; no combined distinct-test total is claimed.
+
+
+
+#### Phase 1 executed regression commands
+
+Commands below are in execution order: fresh 428-test matrix, 356-test integration follow-up, 53-test setup/print probe, final passing 174-test corrective run. All use the isolated environment above; the last two use `DJANGO_SETTINGS_MODULE=phase1_memory_settings`. The final command is the verified final-code result, not a claim that earlier failed matrices passed.
+
+```powershell
+python -B -m django test apps.departmental_exams.tests_unified_setup apps.departmental_exams.tests_unified_migrations apps.departmental_exams.tests_automatic_preparation apps.departmental_exams.tests_automatic_workflow apps.departmental_exams.tests_exam_course_equivalency apps.departmental_exams.tests_structured_exam_lifecycle apps.departmental_exams.tests_stage4_workflow apps.departmental_exams.tests_stage4_authorization apps.departmental_exams.tests_automatic_summary_navigation apps.departmental_exams.tests_questionnaire_print_release apps.departmental_exams.tests_planning_readiness apps.departmental_exams.tests_stage5_csv apps.departmental_exams.tests_docx_import apps.departmental_exams.tests_faculty_cases apps.faculty_portal.tests_help_guide --noinput --no-color --verbosity 1
+
+python -B -m django test apps.departmental_exams.tests_unified_setup apps.departmental_exams.tests_unified_migrations apps.departmental_exams.tests_automatic_preparation apps.departmental_exams.tests_automatic_workflow apps.departmental_exams.tests_exam_course_equivalency apps.departmental_exams.tests_structured_exam_lifecycle apps.departmental_exams.tests_stage4_workflow apps.departmental_exams.tests_stage4_authorization apps.departmental_exams.tests_automatic_summary_navigation apps.departmental_exams.tests_questionnaire_print_release apps.departmental_exams.tests_planning_readiness apps.departmental_exams.tests_automatic_generation_readiness_report apps.departmental_exams.tests_contributor_monitoring_presentation apps.departmental_exams.tests_contributor_monitoring_print apps.departmental_exams.tests_contributor_monitoring_draft_print apps.departmental_exams.tests_contributor_monitoring_faculty_submission_print apps.admin_portal.tests_help_guide --noinput --no-color --verbosity 1 --testrunner phase1_runner.CompactRunner
+
+python -B -m django test apps.departmental_exams.tests_unified_setup apps.departmental_exams.tests_exempt_courses_print --noinput --no-color --verbosity 1 --testrunner phase1_runner.CompactRunner
+
+python -B -m django test apps.departmental_exams.tests_unified_setup apps.departmental_exams.tests_unified_migrations apps.departmental_exams.tests_automatic_workflow.AutomaticWorkflowTests.test_mode_aware_assigned_course_actions_preserve_manual_workflow apps.departmental_exams.tests_automatic_workflow.AutomaticWorkflowTests.test_reopen_supersedes_r1_and_generates_r2_with_flat_structure apps.departmental_exams.tests_questionnaire_print_release apps.departmental_exams.tests_automatic_generation_readiness_report apps.departmental_exams.tests_contributor_monitoring_presentation apps.departmental_exams.tests_contributor_monitoring_print apps.departmental_exams.tests_contributor_monitoring_draft_print apps.departmental_exams.tests_contributor_monitoring_faculty_submission_print apps.admin_portal.tests_help_guide apps.departmental_exams.tests_exempt_courses_print --noinput --no-color --verbosity 1 --testrunner phase1_runner.CompactRunner
+```
+
+Final presentation follow-up (in-memory isolated settings, 87/87 passed):
+
+```powershell
+python -B -m django test apps.departmental_exams.tests_unified_setup apps.departmental_exams.tests_exempt_courses_print apps.departmental_exams.tests_contributor_monitoring_presentation apps.departmental_exams.tests_contributor_monitoring_print apps.departmental_exams.tests_planning_readiness --noinput --no-color --verbosity 1 --testrunner phase1_runner.CompactRunner
+```
+
+Narrow integration additions: `setup_services.py`/`setup_views.py` implement signed selected-unit setup; `cycle_visibility.py` centralizes list-only filtering; classification/filter partials avoid divergent labels; navigation migration updates persisted labels without permissions changes. The two administrative course print reports follow the selected status; generated questionnaire printing is unchanged. Pre-cycle academic planning rows have no course-exam classification, so they do not infer or display DEPTAL. Exact working-tree scope follows.
+
+#### Phase 1 exact working-tree file manifest (79 files; 68 modified, 11 new)
+
+```text
+CHANGE_LOG.md
+HANDOFF.md
+TEACHERMATEPLUS_CONTEXT.md
+apps/admin_portal/help_guide.py
+apps/admin_portal/tests_help_guide.py
+apps/departmental_exams/automatic_generation_readiness.py
+apps/departmental_exams/automatic_workflow.py
+apps/departmental_exams/blueprint_services.py
+apps/departmental_exams/cycle_visibility.py
+apps/departmental_exams/exam_units.py
+apps/departmental_exams/faculty_views.py
+apps/departmental_exams/forms.py
+apps/departmental_exams/generation_readiness.py
+apps/departmental_exams/migrations/0026_cycle_course_exam_classification.py
+apps/departmental_exams/models.py
+apps/departmental_exams/monitoring_views.py
+apps/departmental_exams/planning_readiness.py
+apps/departmental_exams/planning_readiness_views.py
+apps/departmental_exams/services.py
+apps/departmental_exams/setup_services.py
+apps/departmental_exams/setup_views.py
+apps/departmental_exams/stage6_views.py
+apps/departmental_exams/tests_automatic_generation_readiness_report.py
+apps/departmental_exams/tests_automatic_summary_navigation.py
+apps/departmental_exams/tests_automatic_workflow.py
+apps/departmental_exams/tests_exempt_courses_print.py
+apps/departmental_exams/tests_planning_readiness.py
+apps/departmental_exams/tests_questionnaire_print_release.py
+apps/departmental_exams/tests_structured_exam_lifecycle.py
+apps/departmental_exams/tests_unified_migrations.py
+apps/departmental_exams/tests_unified_setup.py
+apps/departmental_exams/urls.py
+apps/departmental_exams/views.py
+apps/faculty_portal/help_guide.py
+apps/navigation/migrations/0026_exam_workflow_labels.py
+templates/departmental_exams/_classification_badge.html
+templates/departmental_exams/_cycle_filter.html
+templates/departmental_exams/admin/_answer_key_release_pane.html
+templates/departmental_exams/admin/_questionnaire_release_pane.html
+templates/departmental_exams/admin/assigned_course_examination_list.html
+templates/departmental_exams/admin/assigned_courses_print.html
+templates/departmental_exams/admin/automatic_contribution_reopen.html
+templates/departmental_exams/admin/automatic_generation_audit_result.html
+templates/departmental_exams/admin/automatic_generation_audit_result_print.html
+templates/departmental_exams/admin/automatic_generation_readiness.html
+templates/departmental_exams/admin/automatic_generation_readiness_print.html
+templates/departmental_exams/admin/automatic_generation_summary.html
+templates/departmental_exams/admin/automatic_generation_summary_selector.html
+templates/departmental_exams/admin/blueprint_configuration.html
+templates/departmental_exams/admin/blueprint_review.html
+templates/departmental_exams/admin/contributor_monitoring.html
+templates/departmental_exams/admin/contributor_monitoring_draft_print.html
+templates/departmental_exams/admin/contributor_monitoring_print.html
+templates/departmental_exams/admin/course_classification.html
+templates/departmental_exams/admin/course_configuration.html
+templates/departmental_exams/admin/course_contribution_confirm.html
+templates/departmental_exams/admin/course_override_remove_confirm.html
+templates/departmental_exams/admin/course_setup.html
+templates/departmental_exams/admin/cycle_configuration.html
+templates/departmental_exams/admin/cycle_course_administration.html
+templates/departmental_exams/admin/cycle_course_list.html
+templates/departmental_exams/admin/cycle_course_transition_confirm.html
+templates/departmental_exams/admin/cycle_form.html
+templates/departmental_exams/admin/cycle_list.html
+templates/departmental_exams/admin/error.html
+templates/departmental_exams/admin/exempt_courses_print.html
+templates/departmental_exams/admin/generated_revision_detail.html
+templates/departmental_exams/admin/generation_selection_audit_print.html
+templates/departmental_exams/admin/generation_workspace.html
+templates/departmental_exams/admin/planning_readiness.html
+templates/departmental_exams/admin/planning_readiness_print.html
+templates/departmental_exams/admin/prepare_faculty_contributions_confirm.html
+templates/departmental_exams/admin/prepare_faculty_contributions_result.html
+templates/departmental_exams/admin/questionnaire_print_release.html
+templates/departmental_exams/admin/roster_action_confirm.html
+templates/departmental_exams/admin/stage6_error.html
+templates/departmental_exams/faculty/case_detail.html
+templates/departmental_exams/faculty/contribution_list.html
+templates/departmental_exams/faculty/contribution_workspace.html
+```
+
 ### Targeted Review Remediation - 2026-09-10
 - Baseline: branch `feat/structured-case-rich-editor-phase2a`, HEAD `4b9d23a0e26c96fca6aa8a5b927c0ecd2d4e7f93`; preserved the existing 19-file 629-insertion/64-deletion implementation and empty index. No staging, commit, push, deployment, restart, dependency installation or non-test migration is authorized.
 - Finding 1 corrected: absent-placement CSV/legacy standalone questions appear exactly once in an owner-scoped final **Section assignment required** group, in stored order with continuous display numbers. Workspace and existing Case-detail GETs succeed. The existing revision-protected Edit form resolves placement into a frozen section; no new mutation workflow or fabricated assignment. Final Submission still rejects missing placement. Foreign/invalid structure is not broadly swallowed.

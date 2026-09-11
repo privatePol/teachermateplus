@@ -1,6 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% load static tz %}
 {% block admin_content %}
+{% include "departmental_exams/_cycle_filter.html" %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
 <style>
   .de-release-center {
@@ -36,10 +37,10 @@
   }
 </style>
 
-<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Release Center</li></ol></nav>
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Release Exam for Printing</li></ol></nav>
 <header class="de-exam-hero">
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
-    <div><span class="badge text-bg-light text-dark mb-2">CONFIDENTIAL EXAM OUTPUT</span><h1>Departmental Exam Release Center</h1><p>Manage Questionnaire and Faculty Answer Key releases in separate operational workspaces without changing their independent rules.</p></div>
+    <div><span class="badge text-bg-light text-dark mb-2">CONFIDENTIAL EXAM OUTPUT</span><h1>Release Exam for Printing</h1><p>Manage Questionnaire and Faculty Answer Key releases in separate operational workspaces without changing their independent rules.</p></div>
     <a class="btn btn-light btn-sm" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Departmental Exam Builder</a>
   </div>
 </header>

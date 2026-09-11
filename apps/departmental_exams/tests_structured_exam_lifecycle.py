@@ -36,6 +36,18 @@ from .stage4_test_support import Stage4TestCase, Stage4TransactionTestCase
 
 
 class StructuredExamLifecycleTests(Stage4TestCase):
+    def _historical_open(self, parent, configuration, *, actor):
+        """Retained pre-Phase-1 frozen fixture, not a permitted new Automatic open."""
+        unit, blueprint, sections = StructuredExamLifecyclePolicy.validate_for_open(
+            cycle_course=parent, configuration=configuration)
+        configuration.workflow_status = "OPEN"
+        configuration.opened_at = timezone.now()
+        configuration.opened_by = actor
+        configuration.save(update_fields=["workflow_status", "opened_at", "opened_by"])
+        StructuredExamLifecyclePolicy.freeze(unit=unit, blueprint=blueprint,
+            sections=sections, final_item_count=configuration.final_item_count, actor=actor)
+        return configuration
+
     def _enable_structured(self):
         SystemSettingService.set(
             FeatureSettingsService.DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED_KEY,
@@ -461,7 +473,7 @@ class StructuredExamLifecycleTests(Stage4TestCase):
         self._enable_structured()
         _cycle, group, parents, configurations = self._automatic_unit(size=3)
         blueprint = self._save_sections(parents[0], actor=self.admin)
-        self._open(parents[0], configurations[0], actor=self.admin)
+        self._historical_open(parents[0], configurations[0], actor=self.admin)
 
         with self.assertRaisesRegex(ValidationError, "ownership cannot change"):
             ExamCourseEquivalencyService.replace_members(
@@ -507,7 +519,7 @@ class StructuredExamLifecycleTests(Stage4TestCase):
         self._enable_structured()
         _cycle, _group, parents, configurations = self._automatic_unit(size=2)
         blueprint = self._save_sections(parents[0], actor=self.admin)
-        self._open(parents[0], configurations[0], actor=self.admin)
+        self._historical_open(parents[0], configurations[0], actor=self.admin)
         blueprint.refresh_from_db()
         original_actor_ids = {
             "structure_frozen_by_id": blueprint.structure_frozen_by_id,
@@ -775,7 +787,9 @@ class StructuredExamLifecycleTests(Stage4TestCase):
             member_ids=tuple(parent.id for parent in parents),
             actor=self.admin,
         )
-        blueprint = self._save_sections(parents[1], actor=self.admin)
+        blueprint, _ = BlueprintMutationService.save_structure(
+            cycle_course_id=parents[1].id, tenant_id=self.tenant.id,
+            actor=self.admin, expected_revision=0, mode="NO_SECTIONS", sections=[])
 
         opened = self._open(parents[1], configurations[1], actor=self.admin)
         blueprint.refresh_from_db()
@@ -837,7 +851,7 @@ class StructuredExamLifecycleTests(Stage4TestCase):
             for parent in parents
         )
         self._save_sections(parents[0], actor=self.admin)
-        self._open(parents[0], configurations[0], actor=self.admin)
+        self._historical_open(parents[0], configurations[0], actor=self.admin)
         self._save_sections(parents[1], actor=self.admin)
 
         with self.assertRaisesRegex(ValidationError, "ownership cannot change"):
@@ -894,7 +908,7 @@ class StructuredExamLifecycleTests(Stage4TestCase):
             final_source="DEFAULT",
         )
         self._save_sections(parents[0], actor=self.admin)
-        self._open(parents[0], configurations[0], actor=self.admin)
+        self._historical_open(parents[0], configurations[0], actor=self.admin)
 
         with self.assertRaisesRegex(ValidationError, "propagation would conflict"):
             self._save_cycle_final_default(cycle=cycle, value=60)
@@ -917,7 +931,7 @@ class StructuredExamLifecycleTests(Stage4TestCase):
             final_source="DEFAULT",
         )
         self._save_sections(parents[0], actor=self.admin)
-        self._open(parents[0], configurations[0], actor=self.admin)
+        self._historical_open(parents[0], configurations[0], actor=self.admin)
         configurations[1].final_item_count_source = (
             CourseExamConfiguration.ValueSource.OVERRIDE
         )
@@ -957,7 +971,7 @@ class StructuredExamLifecycleTests(Stage4TestCase):
         self._enable_structured()
         _cycle, _group, parents, configurations = self._automatic_unit(size=2)
         self._save_sections(parents[0], actor=self.admin)
-        self._open(parents[0], configurations[0], actor=self.admin)
+        self._historical_open(parents[0], configurations[0], actor=self.admin)
         alias_configuration = configurations[1]
         alias_configuration.final_item_count = 60
 

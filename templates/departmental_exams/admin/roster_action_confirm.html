@@ -1,9 +1,9 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
-<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contributor_monitoring' %}{% if filter_query %}?{{ filter_query }}{% endif %}">Contributor Completion Monitoring</a></li><li class="breadcrumb-item active">Roster Action</li></ol></nav>
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contributor_monitoring' %}{% if filter_query %}?{{ filter_query }}{% endif %}">Faculty Contribution Status</a></li><li class="breadcrumb-item active">Roster Action</li></ol></nav>
 <h1 class="h3">{{ action|title }} contributor roster</h1>
 <div class="alert alert-warning">This exact-scoped POST reevaluates each concrete assignment and campus independently. It never deletes contributions, questions, or source history and provides no manual authorization bypass.</div>
-<div class="card mb-3"><div class="card-body"><strong>{{ cycle_course.course.code }} — {{ cycle_course.course.title }}</strong><br>{{ cycle_course.cycle.academic_year }} · {{ cycle_course.cycle.term }} · {{ cycle_course.cycle.get_exam_period_display }}</div></div>
+<div class="card mb-3"><div class="card-body"><strong>{{ cycle_course.course.code }} — {{ cycle_course.course.title }} {% include "departmental_exams/_classification_badge.html" with course=cycle_course %}</strong><br>{{ cycle_course.cycle.academic_year }} · {{ cycle_course.cycle.term }} · {{ cycle_course.cycle.get_exam_period_display }}</div></div>
 <form method="post" novalidate>
   {% csrf_token %}
   {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}

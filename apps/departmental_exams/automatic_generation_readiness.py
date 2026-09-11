@@ -23,7 +23,7 @@ from .services import DepartmentalExamAuthorizationService
 class AutomaticGenerationReadinessReport:
     """Compose aggregate, read-only Automatic Generation management readiness."""
 
-    FILTER_PARAMETER_NAMES = ("cycle", "period", "course")
+    FILTER_PARAMETER_NAMES = ("cycle", "period", "course", "cycle_status")
     SUMMARY_STATUSES = (
         ("Exact Feasibility Pending", "EXACT FEASIBILITY PENDING"),
         ("Waiting for Deadline", "WAITING FOR DEADLINE"),
@@ -81,10 +81,15 @@ class AutomaticGenerationReadinessReport:
                 "cycle_id", flat=True
             )
         )
+        from .cycle_visibility import selected_cycle_status
+        visible_status = selected_cycle_status(self.params)
+        authorized_course_ids = set(base.filter(pk__in=authorized_course_ids,
+            cycle__status=visible_status).values_list("pk", flat=True))
         cycle_choices = list(
             ExaminationCycle.objects.filter(
                 pk__in=authorized_cycle_ids,
                 tenant_id=self.tenant_id,
+                status=visible_status,
                 processing_mode=(
                     ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
                 ),

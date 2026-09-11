@@ -38,7 +38,7 @@ class AutomaticGenerationSummaryNavigationTests(Stage4TestCase):
         )
 
     def _automatic_cycle(self, suffix):
-        cycle = self.make_cycle(scope_suffix=suffix)
+        cycle = self.make_cycle(scope_suffix=suffix, status="OPEN")
         cycle.processing_mode = ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         cycle.save(update_fields=["processing_mode", "updated_at"])
         self.make_course(cycle=cycle, department=None, code=f"AUTO-{suffix}")
@@ -87,18 +87,17 @@ class AutomaticGenerationSummaryNavigationTests(Stage4TestCase):
         )
         return user
 
-    def test_one_applicable_cycle_redirects_to_its_dynamic_summary_url(self):
+    def test_one_open_cycle_keeps_status_selector_and_dynamic_summary_link(self):
         cycle = self._automatic_cycle("one-dynamic")
 
         response = self.client.get(self.entry_url)
 
-        self.assertRedirects(
+        self.assertContains(
             response,
             reverse(
                 "departmental_exams:automatic_generation_summary",
                 args=[cycle.id],
             ),
-            fetch_redirect_response=False,
         )
 
     def test_multiple_applicable_cycles_render_selector(self):
@@ -201,7 +200,7 @@ class AutomaticGenerationSummaryNavigationTests(Stage4TestCase):
             portal="ADMIN",
             code="DE_EXAM_CONTRIBUTOR_MONITORING",
         )
-        self.assertEqual(item.label, "Automatic Generation Summary")
+        self.assertEqual(item.label, "Exam Generation Status")
         self.assertEqual(
             item.route_name,
             "departmental_exams:automatic_generation_summary_entry",

@@ -61,7 +61,7 @@
   {% for course in courses %}
   <section class="course-report">
     <header class="course-heading">
-      <h2>{{ forloop.counter }}. {{ course.course.code }} &mdash; {{ course.course.title }}</h2>
+      <h2>{{ forloop.counter }}. {{ course.course.code }} &mdash; {{ course.course.title }} {% include "departmental_exams/_classification_badge.html" with course=course %}</h2>
     </header>
     <table>
       <thead><tr><th>Contributor</th><th>Campus</th><th>Progress</th><th>Workflow</th><th>Deadline</th></tr></thead>

@@ -1,6 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
+<p class="alert alert-info">New examination cycles use Automatic Generation. Existing cycles retain their stored workflows.</p>
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_list' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Create Examination Cycle</li></ol></nav>
 <header class="de-exam-hero"><div class="d-flex justify-content-between gap-3 flex-wrap"><div><h1>Create Examination Cycle</h1><p>Capture active offerings once and group them into one shared examination per course.</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:cycle_list' %}">Back to Departmental Exam Builder</a></div></header>
 <div class="card de-exam-card"><div class="card-body">

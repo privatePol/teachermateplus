@@ -39,7 +39,7 @@ def _admin_error_response(request, *, status):
     else:
         title = "Roster request could not be processed"
         explanation = "The roster action or submitted confirmation is missing or invalid. No roster change was made."
-        next_action = "Return to Contributor Completion and start the action again."
+        next_action = "Return to Faculty Contribution Status and start the action again."
     return render(
         request,
         "departmental_exams/admin/error.html",
@@ -79,6 +79,8 @@ def _monitoring_scope_context(request):
             user=request.user, tenant_id=tenant_id
         )
     )
+    from .cycle_visibility import filter_cycle_rows
+    visible_courses = filter_cycle_rows(visible_courses, request.GET)
     cycles_by_id = {
         course.cycle_id: course.cycle for course in visible_courses
     }
@@ -148,6 +150,8 @@ def _monitoring_scope_context(request):
             else raw_contributor_id if invalid_contributor_filter else ""
         ),
     }
+    if request.GET.get("cycle_status") in ("OPEN", "DRAFT", "CLOSED"):
+        selected_filters["cycle_status"] = request.GET["cycle_status"]
     filter_query = urlencode(
         {key: value for key, value in selected_filters.items() if value}
     )
@@ -656,7 +660,7 @@ def roster_action_view(request, cycle_course_id, action):
     filter_query = urlencode(
         {
             key: request.GET.get(key)
-            for key in ("cycle", "period", "course", "contributor")
+            for key in ("cycle", "period", "course", "contributor", "cycle_status")
             if request.GET.get(key)
         }
     )

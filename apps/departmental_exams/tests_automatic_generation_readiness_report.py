@@ -188,13 +188,13 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         return parent, configuration, campuses, offerings
 
     def _mixed_mode_monitoring_courses(self, *, suffix):
-        manual_cycle = self.make_cycle(scope_suffix=f"{suffix}-manual")
+        manual_cycle = self.make_cycle(scope_suffix=f"{suffix}-manual", status="OPEN")
         manual = self.make_course(cycle=manual_cycle, code=f"{suffix}-MANUAL")
         self.make_configuration(manual)
         manual.course.title = f"{suffix} Manual Review"
         manual.course.save(update_fields=["title", "updated_at"])
 
-        included_cycle = self.make_cycle(scope_suffix=f"{suffix}-included")
+        included_cycle = self.make_cycle(scope_suffix=f"{suffix}-included", status="OPEN")
         included_cycle.processing_mode = (
             ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         )
@@ -207,7 +207,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         included.course.title = f"{suffix} Automatic Included"
         included.course.save(update_fields=["title", "updated_at"])
 
-        exempt_cycle = self.make_cycle(scope_suffix=f"{suffix}-exempt")
+        exempt_cycle = self.make_cycle(scope_suffix=f"{suffix}-exempt", status="OPEN")
         exempt_cycle.processing_mode = (
             ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         )
@@ -1106,7 +1106,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
         with patch.object(
             Stage6ReadinessService, "evaluate_automatic_pool"
         ) as lifecycle_evaluator:
-            lifecycle_row = self._screen(parent).context["rows"][0]
+            lifecycle_row = self._screen(parent, cycle_status="DRAFT").context["rows"][0]
         self.assertEqual(lifecycle_row["generation_status"], "BLOCKED")
         self.assertEqual(
             lifecycle_row["action_items"], ("Open the examination cycle.",)

@@ -1,6 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% block title %}Question Bank | TeacherMate+{% endblock %}
 {% block faculty_content %}
+{% include "departmental_exams/_cycle_filter.html" with faculty_only=True %}
 <div class="d-flex justify-content-between align-items-start mb-3">
   <div>
     <h1 class="h3 mb-1">Question Bank</h1>
@@ -15,12 +16,12 @@
           <div class="card-body">
             <div class="d-flex justify-content-between gap-3">
               <div>
-                <h2 class="h5 mb-1">{{ contribution.cycle_course.course.code }} — {{ contribution.cycle_course.course.title }}</h2>
+                <h2 class="h5 mb-1">{{ contribution.cycle_course.course.code }} — {{ contribution.cycle_course.course.title }} {% include "departmental_exams/_classification_badge.html" with course=contribution.cycle_course %}</h2>
                 <p class="text-muted small mb-2">{{ contribution.cycle_course.cycle.get_exam_period_display }} · {{ contribution.cycle_course.cycle.academic_year }} · {{ contribution.cycle_course.cycle.term }}</p>
               </div>
               <div class="text-end">
                 <span class="badge {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}text-bg-secondary{% elif contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.is_reopened_draft %}text-bg-info{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
-                  {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% elif contribution.is_reopened_draft %}Reopened Draft{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
+                  {% if contribution.cycle_course.cycle.status == 'CLOSED' %}Closed cycle / {{ contribution.get_status_display }} / Read-only{% elif contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% elif contribution.is_reopened_draft %}Reopened Draft{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
                 </span>
               </div>
             </div>
@@ -76,6 +77,6 @@
     {% endfor %}
   </div>
 {% else %}
-  <div class="alert alert-info">No contribution roster record is available yet. An authorized course configurer must initialize or synchronize the roster; viewing this page does not create records.</div>
+  <div class="alert alert-info">No contribution roster record matches this cycle status in your authorized scope. Choose Open or Past / Closed above. If an Open exam has no roster yet, an authorized course configurer must initialize or synchronize it; viewing this page does not create records.</div>
 {% endif %}
 {% endblock %}

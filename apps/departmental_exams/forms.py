@@ -92,11 +92,10 @@ class ExaminationCycleForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-select")
-        self.fields["processing_mode"].required = False
 
     class Meta:
         model = ExaminationCycle
-        fields = ["academic_year", "term", "exam_period", "processing_mode"]
+        fields = ["academic_year", "term", "exam_period"]
 
     def clean(self):
         cleaned = super().clean()
@@ -105,12 +104,6 @@ class ExaminationCycleForm(forms.ModelForm):
         if academic_year and term and (term.tenant_id != academic_year.tenant_id or term.academic_year_id != academic_year.id):
             self.add_error("term", "Choose a term belonging to the selected academic year and tenant.")
         return cleaned
-
-    def clean_processing_mode(self):
-        return (
-            self.cleaned_data.get("processing_mode")
-            or ExaminationCycle.ProcessingMode.MANUAL_REVIEW
-        )
 
 class ExaminationCycleConfigurationForm(forms.ModelForm):
     expected_updated_at = forms.CharField(
@@ -168,6 +161,8 @@ class ExaminationCycleConfigurationForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["processing_mode"].required = False
+        self.fields["processing_mode"].disabled = True
+        self.fields["processing_mode"].widget = forms.HiddenInput()
         self.fields["processing_mode"].widget.attrs.setdefault("class", "form-select")
         self.fields["automatic_campus_contribution_policy"].widget.attrs.setdefault(
             "class", "form-select"

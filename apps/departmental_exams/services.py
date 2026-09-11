@@ -600,6 +600,8 @@ class ExaminationCycleConfigurationService:
         if expected_updated_at != cls.transition_token(cycle):
             raise CourseExamConfigurationConflict("The examination cycle changed after this page was loaded.")
         processing_mode = processing_mode or cycle.processing_mode
+        if processing_mode != cycle.processing_mode and cycle.cycle_courses.exclude(exam_classification="UNCLASSIFIED_LEGACY").exists():
+            raise ValidationError("New unified cycles retain Automatic Generation.")
         if processing_mode not in ExaminationCycle.ProcessingMode.values:
             raise ValidationError("Unsupported examination processing mode.")
         if cycle.status != ExaminationCycle.Status.DRAFT and processing_mode != cycle.processing_mode:
@@ -2311,6 +2313,8 @@ class ExaminationCycleService:
     @classmethod
     @transaction.atomic
     def create_cycle(cls, *, user, tenant, academic_year, term, exam_period, processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW, request=None):
+        # The public creation contract is Automatic, including tampered callers.
+        processing_mode = ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         DepartmentalExamAuthorizationService.require_permission(
             user=user,
             permission="departmental_exams.manage_cycles",
@@ -2358,6 +2362,7 @@ class ExaminationCycleService:
                 cycle_course = CycleCourse(
                     cycle=cycle,
                     course=offering.course,
+                    exam_classification=CycleCourse.ExamClassification.STANDARDIZED,
                     responsible_department=offering.course.exam_department,
                 )
                 cycle_course.full_clean()
@@ -2696,6 +2701,21 @@ class CourseExamConfigurationService:
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
         cls._require_active_responsible_department(parent)
         cls._require_cycle_open_for_workflow(parent)
+        from .setup_services import CourseSetupService
+
+        if parent.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+            from .exam_units import resolve_examination_unit
+            unit = resolve_examination_unit(parent, for_update=True, validate=False)
+            if unit.grouped and parent.exam_classification != "UNCLASSIFIED_LEGACY":
+                return CourseSetupService.open_group_locked(unit, requested=parent,
+                    actor=user, expected_revision=expected_revision, request=request)
+            initially_missing = configuration is None
+            if configuration is None and expected_revision not in (0, None):
+                raise CourseExamConfigurationConflict("The configuration changed. Review setup again.")
+            CourseSetupService.prepare_structure(parent, actor=user, request=request)
+            configuration = CourseExamConfiguration.objects.filter(cycle_course=parent).first()
+            if initially_missing and configuration is not None and expected_revision in (0, None):
+                expected_revision = configuration.revision
         if not configuration:
             raise ValidationError("Configure this course examination before opening contribution.")
         if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN:
@@ -2710,11 +2730,25 @@ class CourseExamConfigurationService:
         structured_lifecycle = None
         from .blueprint_services import StructuredExamLifecyclePolicy
 
-        if StructuredExamLifecyclePolicy.enabled(tenant_id=tenant_id):
+        unified_automatic = (
+            parent.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            and parent.exam_classification != "UNCLASSIFIED_LEGACY"
+        )
+        if StructuredExamLifecyclePolicy.enabled(tenant_id=tenant_id) or unified_automatic:
             structured_lifecycle = StructuredExamLifecyclePolicy.validate_for_open(
                 cycle_course=parent,
                 configuration=configuration,
             )
+        return cls._open_validated_locked(parent=parent, configuration=configuration,
+            user=user, expected_revision=expected_revision,
+            structured_lifecycle=structured_lifecycle, request=request)
+
+    @classmethod
+    def _open_validated_locked(cls, *, parent, configuration, user,
+                               expected_revision, structured_lifecycle, request=None):
+        """Shared mutation tail. Caller holds locks and validates the entire unit."""
+        from .blueprint_services import StructuredExamLifecyclePolicy
+
         before = cls._configuration_payload(configuration)
         configuration.workflow_status = CourseExamConfiguration.WorkflowStatus.OPEN
         if not configuration.opened_at:

@@ -79,6 +79,7 @@ class ExemptCoursesPrintTests(TestCase):
             name="Other Term",
         )
         cls.cycle = ExaminationCycle.objects.create(
+            status=ExaminationCycle.Status.OPEN,
             tenant=cls.tenant,
             academic_year=cls.year,
             term=cls.term,
@@ -86,6 +87,7 @@ class ExemptCoursesPrintTests(TestCase):
             created_by=cls._user("cycle-creator", cls.tenant, cls.campus_a),
         )
         cls.other_cycle = ExaminationCycle.objects.create(
+            status=ExaminationCycle.Status.OPEN,
             tenant=cls.other_tenant,
             academic_year=cls.other_year,
             term=cls.other_term,
@@ -206,6 +208,7 @@ class ExemptCoursesPrintTests(TestCase):
             reason="Approved capstone assessment pathway.",
         )
         cls.automatic_cycle = ExaminationCycle.objects.create(
+            status=ExaminationCycle.Status.OPEN,
             tenant=cls.tenant,
             academic_year=cls.year,
             term=cls.term,
@@ -359,11 +362,22 @@ class ExemptCoursesPrintTests(TestCase):
             "departmental_exams:assigned_course_examinations"
         )
 
+    def test_cycle_status_matches_list_and_print_without_hiding_historical_access(self):
+        original = self.client.get(self.all_print_url).context["courses"]
+        expected_ids = {course.id for course in original}
+        self.assertTrue(expected_ids)
+        ExaminationCycle.objects.filter(pk=self.cycle.pk).update(status="CLOSED")
+        self.assertFalse(self.client.get(self.all_print_url).context["courses"])
+        historical = self.client.get(self.all_print_url, {"cycle_status": "CLOSED"})
+        self.assertEqual({course.id for course in historical.context["courses"]}, expected_ids)
+        listing = self.client.get(self.assigned_url, {"cycle_status": "CLOSED"})
+        self.assertContains(listing, f'href="{self.all_print_url}?cycle_status=CLOSED"')
+
     def test_print_button_appears_for_authorized_assigned_courses_user(self):
         response = self.client.get(self.assigned_url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Print Exempt Courses")
-        self.assertContains(response, f'href="{self.print_url}"')
+        self.assertContains(response, f'href="{self.print_url}?cycle_status=OPEN"')
         self.assertContains(response, 'target="_blank"')
 
     def test_print_route_returns_successfully(self):
@@ -480,7 +494,7 @@ class ExemptCoursesPrintTests(TestCase):
     def test_existing_assigned_courses_page_still_works(self):
         response = self.client.get(self.assigned_url)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Assigned Course Examinations")
+        self.assertContains(response, "Manage Course Exams")
         self.assertContains(response, self.exempt_alpha.course.code)
         self.assertContains(response, self.included.course.code)
 
@@ -579,7 +593,7 @@ class ExemptCoursesPrintTests(TestCase):
         response = self.client.get(self.assigned_url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "PRINT ALL")
-        self.assertContains(response, f'href="{self.all_print_url}"')
+        self.assertContains(response, f'href="{self.all_print_url}?cycle_status=OPEN"')
         self.assertContains(response, "Print Exempt Courses")
 
     def test_print_all_route_loads_as_get_only_printer_friendly_html(self):
@@ -622,7 +636,8 @@ class ExemptCoursesPrintTests(TestCase):
         )
 
     def test_print_all_includes_cycle_responsibility_configuration_and_readiness(self):
-        response = self.client.get(self.all_print_url)
+        ExaminationCycle.objects.filter(pk=self.cycle.pk).update(status="DRAFT")
+        response = self.client.get(self.all_print_url, {"cycle_status": "DRAFT"})
         for heading in (
             "No.",
             "Course Code",

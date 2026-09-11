@@ -420,6 +420,8 @@ def contribution_list_view(request):
     contributions = list(
         ContributionSelector.owner_queryset(user=request.user, tenant_id=tenant_id)
     )
+    from .cycle_visibility import filter_cycle_rows
+    contributions = filter_cycle_rows(contributions, request.GET, cycle_of=lambda row: row.cycle_course.cycle, allow_draft=False)
     print_options = FacultyQuestionnairePrintService.available_options(
         contributions=contributions,
     )

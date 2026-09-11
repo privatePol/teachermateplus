@@ -3,8 +3,9 @@
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
 {% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-review-20260910">{% endblock %}
 {% block faculty_content %}
+{% include "departmental_exams/_classification_badge.html" with course=contribution.cycle_course %}
 <div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
-<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item active">{{ contribution.cycle_course.course.code }}</li></ol></nav>
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}?cycle_status={{ contribution.cycle_course.cycle.status }}">Question Bank</a></li><li class="breadcrumb-item active">{{ contribution.cycle_course.course.code }}</li></ol></nav>
 <div class="card shadow-sm mb-3">
   <div class="card-body">
     <div class="d-flex flex-wrap justify-content-between gap-3">

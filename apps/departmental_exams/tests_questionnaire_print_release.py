@@ -1198,7 +1198,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         release_url = reverse("departmental_exams:questionnaire_print_release")
         initial_page = client.get(release_url)
         self.assertEqual(initial_page.status_code, 200)
-        self.assertContains(initial_page, "Questionnaire Print Release")
+        self.assertContains(initial_page, "Release Exam for Printing")
         now = timezone.localtime().replace(second=0, microsecond=0)
         response = client.post(
             release_url,
@@ -1464,6 +1464,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                 {
                     "set_code": "A",
                     "total": 2,
+                    "difficulty": {"EASY": 1, "MODERATE": 1, "DIFFICULT": 0},
                     "campuses": (
                         {
                             "campus_code": "PRIVATE-CAMPUS",
@@ -1478,6 +1479,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                 {
                     "set_code": "B",
                     "total": 2,
+                    "difficulty": {"EASY": 1, "MODERATE": 1, "DIFFICULT": 0},
                     "campuses": (
                         {
                             "campus_code": "PRIVATE-CAMPUS",

@@ -161,7 +161,7 @@ class PlanningReadinessAuthorizationService:
             permission_code=permission_code,
         )
         if not scope.allows_anything():
-            raise PermissionDenied("Planning & Readiness is unavailable in your current exact scope.")
+            raise PermissionDenied("Exam Readiness is unavailable in your current exact scope.")
         return scope
 
 

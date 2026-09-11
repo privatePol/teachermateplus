@@ -32,7 +32,7 @@ class PlanningReadinessSeedTests(TestCase):
         item = MenuItem.objects.get(portal="ADMIN", code="DE_EXAM_PLANNING_READINESS")
         assigned = MenuItem.objects.get(portal="ADMIN", code="DE_EXAM_ASSIGNED_COURSES")
         contributor = MenuItem.objects.get(portal="ADMIN", code="DE_EXAM_CONTRIBUTOR_MONITORING")
-        self.assertEqual(item.label, "Planning & Readiness")
+        self.assertEqual(item.label, "Exam Readiness")
         self.assertEqual(item.route_name, "departmental_exams:planning_readiness")
         self.assertGreater(item.sort_order, assigned.sort_order)
         self.assertLess(item.sort_order, contributor.sort_order)

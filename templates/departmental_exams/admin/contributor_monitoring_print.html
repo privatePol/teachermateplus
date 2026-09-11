@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Contributor Completion Monitoring</title>
+  <title>Faculty Contribution Status</title>
   <style>
     :root { color-scheme: light; }
     * { box-sizing: border-box; }
@@ -39,7 +39,7 @@
 <body>
   <div class="toolbar print-controls"><button class="print-button" type="button" onclick="window.print()">Print</button></div>
   <header>
-    <h1>Contributor Completion Monitoring</h1>
+    <h1>Faculty Contribution Status</h1>
     <p class="meta"><strong>Academic Year / Term / Examination Period:</strong> {% if cycle_contexts %}{{ cycle_contexts|join:"; " }}{% else %}No authorized course examinations in the current filtered scope{% endif %}</p>
     <p class="meta"><strong>Generated/printed:</strong> {{ generated_at|date:"M j, Y g:i A T" }} (Asia/Manila)</p>
   </header>
@@ -52,7 +52,7 @@
   {% for course in courses %}
   <section class="course-report">
     <header class="course-heading">
-      <h2>{{ course.print_number }}. {{ course.course.code }} &mdash; {{ course.course.title }}</h2>
+      <h2>{{ course.print_number }}. {{ course.course.code }} &mdash; {{ course.course.title }} {% include "departmental_exams/_classification_badge.html" with course=course %}</h2>
       <p class="course-meta">
         <strong>Campus/es:</strong> {% if course.print_campus_names %}{{ course.print_campus_names|join:", " }}{% else %}&mdash;{% endif %}
         &nbsp;|&nbsp; <strong>Contribution Deadline:</strong> {% if course.configuration.active_contribution_deadline %}{{ course.configuration.active_contribution_deadline|date:"M j, Y g:i A" }}{% else %}&mdash;{% endif %}

@@ -77,7 +77,7 @@ def planning_readiness_print_view(request):
     )
     combined_scope = view_scope.intersection(print_scope)
     if not combined_scope.allows_anything():
-        raise PermissionDenied("Planning & Readiness print access is unavailable in your shared exact scope.")
+        raise PermissionDenied("Exam Readiness print access is unavailable in your shared exact scope.")
     response = render(
         request,
         "departmental_exams/admin/planning_readiness_print.html",

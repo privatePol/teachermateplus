@@ -1,0 +1,7 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<h1>Course Exam Classification</h1><p>{{ cycle_course.course }} — {{ cycle_course.get_exam_classification_display }}</p>
+{% if legacy %}<div class="alert alert-warning">This historical record has no confirmed classification. Saving other settings never classifies it. Confirm the choice explicitly here.</div>{% endif %}
+<p>Unchecked means Standardized (No Sections). Departmental permits explicit blueprint configuration; it does not require Cases. Phase 1 Automatic opening supports No Sections without Cases only. Classification freezes at first Open.</p>
+<form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary" type="submit">Save classification</button></form>
+{% endblock %}

@@ -3,7 +3,7 @@
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Confidential Inputs</li></ol></nav>
-<header class="de-exam-hero"><div><h1>Confidential Blueprint Review</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div></header>
+<header class="de-exam-hero"><div><h1>Confidential Blueprint Review</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }} {% include "departmental_exams/_classification_badge.html" with course=cycle_course %}</p></div></header>
 {% include "departmental_exams/admin/_stage6_readiness.html" %}
 {% if locked_revision %}<div class="de-locked-panel mb-3"><span class="badge text-bg-dark mb-2">LOCKED</span><h2 class="h5">Confidential blueprint inputs are frozen.</h2><p class="mb-2">Placements, sections, scenario text, and scenario membership are no longer editable after final lock.</p><a class="btn btn-light" href="{% url 'departmental_exams:generated_revision_detail' locked_revision.id %}">Review Final Locked Exam</a></div>{% elif not can_edit %}<div class="alert alert-info">Close faculty contribution and configure the blueprint before confidential classification and scenario work.</div>{% else %}
 <div class="alert alert-warning">Confidential reviewer workspace. Do not copy question or scenario content into broad monitoring or configuration records.</div>

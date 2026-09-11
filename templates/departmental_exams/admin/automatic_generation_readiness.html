@@ -23,7 +23,8 @@
 </style>
 {% endblock %}
 {% block admin_content %}
-<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contributor_monitoring' %}">Contributor Completion Monitoring</a></li><li class="breadcrumb-item active">Automatic Generation Readiness</li></ol></nav>
+{% include "departmental_exams/_cycle_filter.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contributor_monitoring' %}">Faculty Contribution Status</a></li><li class="breadcrumb-item active">Automatic Generation Readiness</li></ol></nav>
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
   <div><h1 class="h3 mb-1">Automatic Generation Readiness</h1><p class="text-muted mb-0">Aggregate readiness for Automatic Generation only. This report is read-only and never starts generation.</p></div>
@@ -32,6 +33,7 @@
 <div class="alert alert-info py-2 my-3">Contribution Progress is for monitoring only and is based on the configured contribution quota and campuses where the course is offered. Automatic generation may proceed with a smaller submitted pool when permitted by the configured generation policy and all readiness requirements are satisfied.</div>
 
 <form method="get" class="card shadow-sm mb-3" aria-label="Automatic generation readiness filters">
+<input type="hidden" name="cycle_status" value="{{ request.GET.cycle_status|default:'OPEN' }}">
   <div class="card-body"><div class="row g-3 align-items-end">
     <div class="col-lg-5"><label class="form-label" for="readiness-cycle">Examination Cycle</label><select class="form-select" id="readiness-cycle" name="cycle" required><option value="">Select one authorized cycle</option>{% for cycle in cycle_choices %}<option value="{{ cycle.id }}"{% if cycle.id == selected_cycle_id %} selected{% endif %}>{{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }}</option>{% endfor %}</select></div>
     <div class="col-lg-2"><label class="form-label" for="readiness-period">Period</label><select class="form-select" id="readiness-period" name="period"><option value="">Cycle period</option>{% for value, label in period_choices %}<option value="{{ value }}"{% if value == selected_period %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
@@ -49,7 +51,7 @@
     <tbody>
       {% for row in rows %}<tr>
         <td class="readiness-row-number">{{ forloop.counter }}</td>
-        <td class="readiness-course"><strong>{{ row.cycle_course.course.code }}</strong><br><span class="small">{{ row.cycle_course.course.title }}</span>{% if row.cycle_course.inclusion_status == 'EXEMPT' %}<br><span class="badge text-bg-warning">EXEMPT</span>{% endif %}</td>
+        <td class="readiness-course"><strong>{{ row.cycle_course.course.code }} {% include "departmental_exams/_classification_badge.html" with course=row.cycle_course %}</strong><br><span class="small">{{ row.cycle_course.course.title }}</span>{% if row.cycle_course.inclusion_status == 'EXEMPT' %}<br><span class="badge text-bg-warning">EXEMPT</span>{% endif %}</td>
         <td class="readiness-campuses">{% if row.campuses %}{{ row.campuses|join:", " }}{% else %}<span class="text-danger">No participating campus snapshot</span>{% endif %}</td>
         <td class="readiness-final-items">{{ row.configuration.final_item_count|default:"Not configured" }}</td>
         <td class="readiness-progress">{% if row.contribution_progress is None %}<span class="text-muted">Not applicable</span>{% elif row.contribution_progress.expected_monitoring_volume is None %}<span class="text-danger">Monitoring quota not configured</span>{% else %}<strong>{{ row.contribution_progress.submitted_question_volume }} / {{ row.contribution_progress.expected_monitoring_volume }} submitted</strong>{% if row.contribution_progress.submitted_campuses %}<div class="small mt-1">Submitted campuses:</div><ul class="small mb-0 ps-3">{% for campus in row.contribution_progress.submitted_campuses %}<li>{{ campus }}</li>{% endfor %}</ul>{% else %}<div class="small mt-1">No campus has submitted questions yet.</div>{% endif %}{% endif %}</td>

@@ -7,12 +7,15 @@ from . import (
     planning_readiness_views,
     reporting_views,
     stage6_views,
+    setup_views,
     views,
 )
 
 app_name = "departmental_exams"
 
 urlpatterns = [
+    path("admin-portal/departmental-exams/cycles/<int:cycle_id>/setup/", setup_views.setup_view, name="course_setup"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/classification/", setup_views.classification_view, name="course_classification"),
     path(
         "faculty/departmental-exams/resources/",
         faculty_views.resources_view,

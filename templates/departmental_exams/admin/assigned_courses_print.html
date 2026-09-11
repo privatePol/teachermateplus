@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Assigned Course Examinations</title>
+  <title>Manage Course Exams</title>
   <style>
     @page { size: Letter landscape; margin: .35in; }
     * { box-sizing: border-box; }
@@ -49,7 +49,7 @@
   <header>
     <div class="institution">National College of Business and Arts</div>
     <div class="builder">TeacherMatePlus Departmental Exam Builder</div>
-    <h1>Assigned Course Examinations</h1>
+    <h1>Manage Course Exams</h1>
   </header>
   <section class="meta" aria-label="Report context">
     <div><strong>Generated:</strong> {{ generated_at|date:"M j, Y g:i A" }} Asia/Manila</div>
@@ -70,7 +70,7 @@
       <tbody>
         {% for item in courses %}<tr>
           <td>{{ item.print_number }}</td>
-          <td><strong>{% if item.course.code %}{{ item.course.code }}{% else %}&mdash;{% endif %}</strong></td>
+          <td><strong>{% if item.course.code %}{{ item.course.code }}{% else %}&mdash;{% endif %}</strong> {% include "departmental_exams/_classification_badge.html" with course=item %}</td>
           <td>{% if item.course.title %}{{ item.course.title }}{% else %}&mdash;{% endif %}</td>
           <td>{{ item.cycle.academic_year }}</td>
           <td>{{ item.cycle.term }}</td>

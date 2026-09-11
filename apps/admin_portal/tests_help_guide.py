@@ -308,7 +308,7 @@ class AdminHelpGuideTests(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("admin_portal:guide"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Planning &amp; Readiness")
+        self.assertContains(response, "Exam Readiness")
         self.assertContains(response, "unassigned courses appear only with global department scope")
 
     def test_admin_guide_can_restore_legacy_template(self):

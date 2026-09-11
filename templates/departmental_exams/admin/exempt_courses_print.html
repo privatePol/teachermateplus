@@ -60,7 +60,7 @@
       <thead><tr><th>Course Code</th><th>Course Title</th><th>Exam Department</th><th>Campus / Campuses</th><th>Exemption Category</th><th>Exemption Reason</th></tr></thead>
       <tbody>
         {% for item in courses %}<tr>
-          <td><strong>{% if item.course.code %}{{ item.course.code }}{% else %}&mdash;{% endif %}</strong></td>
+          <td><strong>{% if item.course.code %}{{ item.course.code }}{% else %}&mdash;{% endif %}</strong> {% include "departmental_exams/_classification_badge.html" with course=item %}</td>
           <td>{% if item.course.title %}{{ item.course.title }}{% else %}&mdash;{% endif %}</td>
           <td>{% if item.responsible_department %}{{ item.responsible_department }}{% else %}&mdash;{% endif %}</td>
           <td>{% if item.included_campuses %}{{ item.included_campuses|join:", " }}{% else %}&mdash;{% endif %}</td>

@@ -1,8 +1,9 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
-<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Contributor Completion Monitoring</li></ol></nav>
+{% include "departmental_exams/_cycle_filter.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Faculty Contribution Status</li></ol></nav>
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-  <h1 class="h3 mb-0">Contributor Completion Monitoring</h1>
+  <h1 class="h3 mb-0">Faculty Contribution Status</h1>
   <div class="d-flex flex-wrap gap-2">
     {% if show_automatic_generation_readiness %}<a class="btn btn-primary" href="{% url 'departmental_exams:automatic_generation_readiness' %}">Automatic Generation Readiness</a>{% endif %}
     {% if selected_cycle_id %}<a class="btn btn-primary" href="{% url 'departmental_exams:contributor_monitoring_draft_print' selected_cycle_id %}" target="_blank" rel="noopener">Print All Draft Contributions</a>{% else %}<button class="btn btn-primary" type="button" disabled title="Select an examination cycle and apply the filter first.">Print All Draft Contributions</button>{% endif %}
@@ -13,6 +14,7 @@
 <p class="text-muted">Aggregate progress only. This page never fetches or displays question text, choices, answers, fingerprints, or preview payloads.</p>
 
 <form method="get" class="card shadow-sm mb-3" aria-label="Contributor monitoring filters">
+<input type="hidden" name="cycle_status" value="{{ request.GET.cycle_status|default:'OPEN' }}">
   <div class="card-body"><div class="row g-3 align-items-end">
     <div class="col-lg-3"><label class="form-label" for="monitor-cycle">Examination Cycle</label><select class="form-select" id="monitor-cycle" name="cycle"><option value="">All authorized cycles</option>{% for cycle in cycle_choices %}<option value="{{ cycle.id }}"{% if cycle.id == selected_cycle_id %} selected{% endif %}>{{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }}</option>{% endfor %}</select></div>
     <div class="col-lg-2"><label class="form-label" for="monitor-period">Examination Period</label><select class="form-select" id="monitor-period" name="period"><option value="">Midterm and Final</option>{% for value, label in period_choices %}<option value="{{ value }}"{% if value == selected_period %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
@@ -25,7 +27,7 @@
 {% for course in courses %}
 <div class="card shadow-sm mb-3"><div class="card-body">
   <div class="d-flex flex-wrap justify-content-between gap-3">
-    <div><div class="small fw-semibold text-uppercase text-primary">{{ course.cycle.academic_year }} / {{ course.cycle.term }} / {{ course.cycle.get_exam_period_display }}</div><h2 class="h5">{{ course.course.code }} — {{ course.course.title }} {% if course.inclusion_status == 'EXEMPT' %}<span class="badge text-bg-warning">{{ course.get_inclusion_status_display }}</span>{% endif %}</h2><p class="small text-muted mb-0">{% if course.responsible_department %}{{ course.responsible_department }}{% elif course.cycle.processing_mode == 'AUTOMATIC_GENERATION' %}No Exam Department assigned (optional in Automatic Generation){% else %}No active responsible department{% endif %}</p></div>
+    <div><div class="small fw-semibold text-uppercase text-primary">{{ course.cycle.academic_year }} / {{ course.cycle.term }} / {{ course.cycle.get_exam_period_display }}</div><h2 class="h5">{{ course.course.code }} — {{ course.course.title }} {% include "departmental_exams/_classification_badge.html" with course=course %} {% if course.inclusion_status == 'EXEMPT' %}<span class="badge text-bg-warning">{{ course.get_inclusion_status_display }}</span>{% endif %}</h2><p class="small text-muted mb-0">{% if course.responsible_department %}{{ course.responsible_department }}{% elif course.cycle.processing_mode == 'AUTOMATIC_GENERATION' %}No Exam Department assigned (optional in Automatic Generation){% else %}No active responsible department{% endif %}</p></div>
     {% if course.can_configure and course.inclusion_status == 'INCLUDED' %}<div>{% if course.configuration.contributor_roster_initialized_at %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:roster_action' course.id 'synchronize' %}{% if filter_query %}?{{ filter_query }}{% endif %}">Synchronize roster</a>{% else %}<a class="btn btn-sm btn-primary" href="{% url 'departmental_exams:roster_action' course.id 'initialize' %}{% if filter_query %}?{{ filter_query }}{% endif %}">Initialize roster</a>{% endif %}</div>{% endif %}
   </div>
   <p class="mt-2"><strong>Roster:</strong> {% if course.configuration.contributor_roster_initialized_at %}Initialized · revision {{ course.configuration.contributor_roster_revision }}{% else %}Not initialized{% endif %}</p>

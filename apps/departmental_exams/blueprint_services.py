@@ -542,9 +542,22 @@ class BlueprintMutationService:
         DepartmentalExamAuthorizationService.require_blueprint_structure_management(
             user=actor, cycle_course=requested_course
         )
+        if requested_course.exam_classification == "STANDARDIZED" and (mode != "NO_SECTIONS" or sections):
+            raise ValidationError("Standardized exams use No Sections. Explicitly classify this Draft unit as Departmental first.")
+        unified_automatic = (
+            requested_course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            and requested_course.exam_classification != "UNCLASSIFIED_LEGACY"
+        )
+        if unified_automatic:
+            from .setup_services import CourseSetupService
+            from .exam_units import resolve_examination_unit
+
+            setup_unit = resolve_examination_unit(requested_course, for_update=True, validate=False)
+            for member in setup_unit.members:
+                CourseSetupService.materialize(member, actor=actor, request=request)
         course = requested_course
         structured_configurations = None
-        if FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+        if unified_automatic or FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
             tenant_id=tenant_id
         ):
             from .exam_units import resolve_examination_unit

@@ -184,6 +184,18 @@ class FacultyContributionPreparationService:
                 "The examination cycle changed after this page was loaded."
             )
 
+        # New unified units use the same atomic, selected setup contract even
+        # when called through the older Prepare service entry point.
+        if any(course.exam_classification != "UNCLASSIFIED_LEGACY" for course in courses):
+            from .setup_services import CourseSetupService
+
+            rows = CourseSetupService.preview(cycle=cycle, actor=actor, selected_ids=[c.id for c in courses])
+            token = CourseSetupService.confirmation(cycle=cycle, actor=actor, rows=rows)
+            CourseSetupService.open_selection(cycle=cycle, actor=actor, token=token, request=request)
+            prepared = [cls._item(r["course"], status="Prepared", reason="Contributions opened", recommended_action="Faculty may begin contribution work.") for r in rows if r["status"] == "Ready"]
+            already = [cls._item(r["course"], status="Already Prepared", reason="Already open", recommended_action="No action needed.") for r in rows if r["status"] == "Already open"]
+            return {"total_considered": len(rows), "successfully_prepared": len(rows), "contributions_opened": len(prepared), "rosters_initialized": len(prepared), "already_prepared_count": len(already), "needs_attention_count": 0, "preserved_count": 0, "prepared": prepared, "already_prepared": already, "needs_attention": [], "preserved": []}
+
         opened = 0
         initialized = 0
         already_prepared = []
@@ -530,6 +542,14 @@ class AutomaticExamDeadlineService:
             cycle__tenant_id=tenant_id,
         )
         cycle_course_id = resolve_examination_unit(requested_course).primary.id
+        from .setup_services import automatic_structure_blockers
+
+        structure_blockers = automatic_structure_blockers(requested_course)
+        if structure_blockers:
+            return AutomaticProcessingResult(
+                cycle_course_id, "BLOCKED", "AUTOMATIC_STRUCTURE_UNSUPPORTED",
+                " ".join(structure_blockers),
+            )
         preparation = cls._close_due_intake(
             cycle_course_id=cycle_course_id,
             tenant_id=tenant_id,
@@ -680,6 +700,16 @@ class AutomaticExamDeadlineService:
         ):
             return AutomaticProcessingResult(
                 course.id, "SKIPPED", "NOT_APPLICABLE", "Course is not applicable."
+            )
+        # The outer diagnostic read is not authoritative: a legacy structure
+        # writer may commit while this worker waits for the cycle lock.
+        from .setup_services import automatic_structure_blockers
+
+        structure_blockers = automatic_structure_blockers(course)
+        if structure_blockers:
+            return AutomaticProcessingResult(
+                course.id, "BLOCKED", "AUTOMATIC_STRUCTURE_UNSUPPORTED",
+                " ".join(structure_blockers),
             )
         deadline = configuration.active_contribution_deadline
         if deadline is None or now < deadline:
@@ -924,6 +954,10 @@ class AutomaticContributionReopenService:
         )
         if cycle.status != ExaminationCycle.Status.OPEN:
             raise ValidationError("Only an Open cycle permits contribution reopen.")
+        from .setup_services import automatic_structure_blockers
+        structure_blockers = automatic_structure_blockers(course)
+        if structure_blockers:
+            raise ValidationError(structure_blockers)
         if configuration is None or any(
             configurations.get(member.id) is None
             or configurations[member.id].workflow_status

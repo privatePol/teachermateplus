@@ -1,0 +1,9 @@
+<form method="get" class="d-flex gap-2 align-items-center mb-3">
+{% for key, value in request.GET.items %}{% if key != 'cycle_status' and key != 'page' and key != 'cycle' %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+<label for="exam-cycle-status">Cycles</label>
+<select id="exam-cycle-status" name="cycle_status" class="form-select w-auto">
+<option value="OPEN"{% if request.GET.cycle_status != 'CLOSED' and request.GET.cycle_status != 'DRAFT' %} selected{% endif %}>Open cycles</option>
+{% if not faculty_only %}<option value="DRAFT"{% if request.GET.cycle_status == 'DRAFT' %} selected{% endif %}>Draft setup</option>{% endif %}
+<option value="CLOSED"{% if request.GET.cycle_status == 'CLOSED' %} selected{% endif %}>Past / Closed cycles</option>
+</select><button class="btn btn-outline-primary" type="submit">Show cycles</button>
+</form>
