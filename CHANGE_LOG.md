@@ -1,3 +1,8 @@
+## 2026-09-12 - Exam-cycle UI readiness clarity
+
+- Renamed the shared successful configuration label from `Ready to Open` to `Configuration Ready`; readiness booleans and authoritative opening validation are unchanged. The Manage Course Exams overview now directs users to Prepare Faculty Contributions for complete opening requirements.
+- Renamed the classified-cycle setup page to `Prepare Faculty Contributions` and added a breadcrumb back to `Manage Course Exams`, without changing routes, menu identifiers, permissions, or lifecycle behavior.
+
 ## 2026-09-11 - Campus/course-scoped Faculty Answer Key releases
 
 - Require an explicit target campus and recipient courses for single/bulk release. Campus selection reloads authorized rows and clears selections; other campuses require separate submissions. Search/Department/Status remain display filters.

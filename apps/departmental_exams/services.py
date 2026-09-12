@@ -240,7 +240,7 @@ class CourseExamConfigurationReadinessService:
         return {
             "ready": ready,
             "blockers": blockers,
-            "label": "Ready to Open" if ready else blockers[0],
+            "label": "Configuration Ready" if ready else blockers[0],
             "can_open": ready and configuration and configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.OPEN,
         }
 

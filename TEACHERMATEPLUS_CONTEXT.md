@@ -1,3 +1,7 @@
+## 2026-09-12 - Exam-cycle UI readiness clarity
+
+`Configuration Ready` means the saved/effective course configuration passes the existing lightweight configuration checks; it does not assert full opening eligibility. Use `Prepare Faculty Contributions` for authoritative structure, Faculty-source, classification, examination-unit, lifecycle, and permission checks. The preparation page remains the opening boundary and continues to block unsupported Automatic explicit-section/Case structures. Its breadcrumb returns to `Manage Course Exams`; routes, permissions, readiness controls, and opening services are unchanged.
+
 ## 2026-09-11 - Campus/course-scoped Faculty Answer Key releases
 
 - Require an explicit target campus and recipient courses for single/bulk release. Campus selection reloads authorized rows and clears selections; other campuses require separate submissions. Search/Department/Status remain display filters.

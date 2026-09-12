@@ -1,9 +1,10 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
-<h1>Manage Course Exams</h1>
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Manage Course Exams</a></li><li class="breadcrumb-item active" aria-current="page">Prepare Faculty Contributions</li></ol></nav>
+<h1>Prepare Faculty Contributions</h1>
 <p>Departmental Exams are marked DEPTAL. Standardized exams use No Sections automatically.</p>
 <p>{{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }} — Cycle: {{ cycle.get_status_display }}</p>
-<p>Cycle defaults → select courses → configure exceptions → review readiness → open confirmed selection.</p>
+<p>Cycle defaults → select courses → configure exceptions → review opening requirements → open confirmed selection.</p>
 <p><strong>Cycle contributor instructions:</strong> {{ cycle.contributor_instructions|default:"None configured" }}</p>
 <p><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Cycle defaults</a> · <a href="{% url 'departmental_exams:assigned_course_examinations' %}">Manage Course Exams</a></p>
 {% if setup_error %}<div class="alert alert-warning" role="alert">{{ setup_error }}</div>{% endif %}

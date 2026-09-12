@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from .automatic_workflow import AutomaticContributionReopenService, AutomaticExamDeadlineService, FacultyContributionPreparationService
 from .forms import ExaminationCycleForm
-from .models import CourseExamConfiguration, CycleCourse, ExaminationCycle, ExamBlueprint
+from .models import CourseExamConfiguration, CycleCourse, ExaminationCycle, ExamBlueprint, ExamSection, FacultyContribution
 from .services import CourseExamConfigurationService, CourseExamConfigurationConflict, ExaminationCycleService
 from .setup_services import CourseSetupService, automatic_structure_blockers
 from .stage4_test_support import Stage4TestCase
@@ -146,18 +146,66 @@ class UnifiedSetupTests(Stage4TestCase):
             actor=self.bulk_manager, classification="DEPARTMENTAL",
             expected_state=CourseSetupService.fingerprint(course))
         course.refresh_from_db()
+        configuration = CourseSetupService.materialize(course, actor=self.bulk_manager)
         blueprint = ExamBlueprint.objects.create(cycle_course=course, mode="USE_SECTIONS", created_by=self.admin, updated_by=self.admin)
+        ExamSection.objects.create(
+            blueprint=blueprint, title="Part I: Problem Solving", display_order=1, item_quota=20
+        )
+        ExamSection.objects.create(
+            blueprint=blueprint, title="Part II: Multiple Choice", display_order=2, item_quota=30
+        )
         self.assertTrue(automatic_structure_blockers(course))
+        self.client.force_login(self.bulk_manager)
+        overview = self.client.get(reverse("departmental_exams:assigned_course_examinations"))
+        self.assertEqual(overview.status_code, 200)
+        self.assertContains(overview, "Configuration Ready")
+        self.assertContains(
+            overview,
+            "Configuration Ready does not confirm opening eligibility. "
+            "Use Prepare Faculty Contributions to check opening requirements.",
+        )
+        for route, args in (
+            ("assigned_courses_print", []),
+            ("cycle_course_list", [cycle.id]),
+            ("course_configuration", [course.id]),
+        ):
+            with self.subTest(configuration_label_consumer=route):
+                consumer = self.client.get(
+                    reverse("departmental_exams:" + route, args=args)
+                )
+                self.assertEqual(consumer.status_code, 200)
+                self.assertContains(consumer, "Configuration Ready")
+        preparation = self.client.get(
+            reverse("departmental_exams:prepare_faculty_contributions", args=[cycle.id])
+        )
+        self.assertEqual(preparation.status_code, 200)
+        self.assertContains(preparation, "<h1>Prepare Faculty Contributions</h1>", html=True)
+        self.assertContains(
+            preparation,
+            '<a href="{}">Manage Course Exams</a>'.format(
+                reverse("departmental_exams:assigned_course_examinations")
+            ),
+            html=True,
+        )
+        self.assertEqual(preparation.context["rows"][0]["status"], "Blocked")
+        expected_reason = (
+            "Explicit Exam Sections are not supported by Automatic generation in Phase 1. "
+            "Contributions cannot open for this structure yet."
+        )
+        self.assertIn(expected_reason, preparation.context["rows"][0]["reasons"])
         rows, token = self.rows_token(cycle, [course])
         self.assertEqual(rows[0]["status"], "Blocked")
         with self.assertRaises(CourseExamConfigurationConflict):
             CourseSetupService.open_selection(cycle=cycle, actor=self.bulk_manager, token=token)
         with self.assertRaises(ValidationError):
             CourseExamConfigurationService.open_for_contribution(cycle_course_id=course.id,
-                tenant_id=self.tenant.id, user=self.bulk_manager, expected_revision=0)
+                tenant_id=self.tenant.id, user=self.bulk_manager, expected_revision=configuration.revision)
+        configuration.refresh_from_db()
+        self.assertEqual(configuration.workflow_status, "DRAFT")
+        self.assertFalse(FacultyContribution.objects.filter(cycle_course=course).exists())
         result = AutomaticExamDeadlineService.process_course(cycle_course_id=course.id, tenant_id=self.tenant.id)
         self.assertEqual(result.code, "AUTOMATIC_STRUCTURE_UNSUPPORTED")
-        self.assertFalse(CourseExamConfiguration.objects.exists())
+        blueprint.sections.all().delete()
         blueprint.mode = "NO_SECTIONS"
         blueprint.save()
         rows, token = self.rows_token(cycle, [course])
