@@ -1,3 +1,11 @@
+## 2026-09-11 - Campus/course-scoped Faculty Answer Key releases
+
+- Require an explicit target campus and recipient courses for single/bulk release. Campus selection reloads authorized rows and clears selections; other campuses require separate submissions. Search/Department/Status remain display filters.
+- Persist protected recipient course/campus targets against the exact primary-owned revision, including equivalent member isolation. Target-specific uniqueness, retries, replacement, revocation, history and Who Viewed preserve independent releases.
+- Faculty list, direct Set A/B views, prints and Checking Masters require retained current qualifying assignments matching the released target. Preserve existing authorization, direct DENY, feature flags, attestation, lifecycle and questionnaire independence.
+- Migration 0027, after the existing rich-editor/classification migrations 0025 and 0026, classifies existing records LEGACY_UNSCOPED without rewriting original fields or audits; those releases grant no Faculty access pending explicit scoped reissue. Reversal refuses to remove scope when any scoped release history exists.
+- Migration application, deployment, and service restart remain separately gated; see HANDOFF.md for validation and rollout prerequisites.
+
 # TEACHERMATEPLUS_CONTEXT.md
 
 ## Unified examination setup - Phase 1 foundation (2026-09-11)

@@ -550,6 +550,8 @@ class BulkAnswerKeyReleaseForm(forms.Form):
         "have concluded."
     )
 
+    target_campus_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+
     selections = forms.MultipleChoiceField(
         choices=(),
         error_messages={
@@ -591,21 +593,23 @@ class BulkAnswerKeyReleaseForm(forms.Form):
         course_ids = set()
         for value in self.cleaned_data["selections"]:
             try:
-                course_id, revision_id = (int(part) for part in value.split(":", 1))
+                course_id, revision_id, recipient_id, campus_id = (int(part) for part in value.split(":"))
             except (TypeError, ValueError) as exc:
                 raise forms.ValidationError(
                     "One or more selected revisions are invalid."
                 ) from exc
-            if course_id in course_ids:
+            if (recipient_id, campus_id) in course_ids:
                 raise forms.ValidationError(
-                    "Select only one revision for each course examination."
+                    "Select each recipient course/campus only once."
                 )
-            course_ids.add(course_id)
-            selections.append((course_id, revision_id))
+            course_ids.add((recipient_id, campus_id))
+            selections.append((course_id, revision_id, recipient_id, campus_id))
         return tuple(selections)
 
     def clean(self):
         cleaned = super().clean()
+        if any(row[3] != cleaned.get("target_campus_id") for row in cleaned.get("selections", ())):
+            self.add_error("selections", "Every selected course must match the explicit target campus.")
         available_from = cleaned.get("available_from")
         available_until = cleaned.get("available_until")
         if (
@@ -626,6 +630,8 @@ class AnswerKeyReleaseForm(forms.Form):
         "before releasing the Answer Key to faculty."
     )
 
+    target_campus_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    recipient_course_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     cycle_course_id = forms.IntegerField(widget=forms.HiddenInput)
     generation_revision = forms.ModelChoiceField(
         queryset=ExamGenerationRevision.objects.none(),

@@ -433,7 +433,7 @@ def contribution_list_view(request):
             (contribution.saved_question_count / contribution.quota_snapshot) * 100
         )
         contribution.questionnaire_print = print_options.get(contribution.id)
-        contribution.answer_key_release = answer_key_options.get(contribution.id)
+        contribution.answer_key_releases = answer_key_options.get(contribution.id, ())
         contribution.is_reopened_draft = (
             ContributionAuthorizationService.has_authorized_reopened_existing_draft_authority(
                 user=request.user,

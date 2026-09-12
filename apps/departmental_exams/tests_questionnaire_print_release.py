@@ -605,9 +605,10 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             'id="questionnaire-releases-pane"', 1
         )[1].split('id="answer-key-releases-pane"', 1)
         campus_header = f"&middot; {self.campus.name}</div>"
-        # The deduplicated campus appears once in each Release Center tab.
+        # Questionnaire headers remain deduplicated. Answer Key recipients now require an explicit target.
         self.assertEqual(questionnaire_pane.count(campus_header), 1)
-        self.assertEqual(answer_key_pane.count(campus_header), 1)
+        self.assertEqual(answer_key_pane.count(campus_header), 0)
+        self.assertContains(response, "Target Campus (required)")
 
     def test_bulk_list_shows_one_current_r1_and_server_derived_badge(self):
         ExamGenerationRevision.objects.filter(pk=self.r2.pk).update(
