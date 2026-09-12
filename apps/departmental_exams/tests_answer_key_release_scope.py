@@ -205,6 +205,59 @@ class AnswerKeyScopeTests(AnswerKeyReleaseFixture):
         self.assertEqual(client.post(url, payload).status_code, 302)
         self.assertEqual(AnswerKeyRelease.objects.get().target_campus_id, self.campus.id)
 
+    def test_closed_cycle_campus_loader_preserves_query_state_and_answer_key_pane(self):
+        self.parent.cycle.status = self.parent.cycle.Status.CLOSED
+        self.parent.cycle.save(update_fields=["status", "updated_at"])
+        client = Client()
+        client.force_login(self.release_manager)
+
+        response = client.get(
+            reverse("departmental_exams:questionnaire_print_release"),
+            {
+                "cycle_status": "CLOSED",
+                "section": "answer-key-releases",
+                "target_campus_id": self.campus.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["current_cycle_status"], "CLOSED")
+        self.assertEqual(response.context["initial_release_section"], "answer-key-releases")
+        self.assertEqual(response.context["target_campus_id"], self.campus.id)
+        self.assertTrue(response.context["courses"])
+        self.assertTrue(
+            all(course.cycle.status == "CLOSED" for course in response.context["courses"])
+        )
+        self.assertContains(
+            response,
+            'action="{}#answer-key-releases-pane"'.format(
+                reverse("departmental_exams:questionnaire_print_release")
+            ),
+            html=False,
+        )
+        self.assertContains(
+            response,
+            '<input type="hidden" name="cycle_status" value="CLOSED">',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<input type="hidden" name="section" value="answer-key-releases">',
+            html=True,
+        )
+
+        invalid = client.get(
+            reverse("departmental_exams:questionnaire_print_release"),
+            {"cycle_status": "NOT_A_STATUS", "section": "answer-key-releases"},
+        )
+        self.assertEqual(invalid.status_code, 200)
+        self.assertEqual(invalid.context["current_cycle_status"], "OPEN")
+        self.assertContains(
+            invalid,
+            '<input type="hidden" name="cycle_status" value="OPEN">',
+            html=True,
+        )
+
     def test_who_viewed_is_per_target_and_scope_metadata_is_safe(self):
         first = self.release_target()
         other = self.release_target(campus=self.other_campus)

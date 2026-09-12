@@ -975,7 +975,10 @@ def automatic_generation_summary_entry_view(request):
 @portal_required("ADMIN")
 @require_http_methods(["GET", "POST"])
 def questionnaire_print_release_view(request):
+    from .cycle_visibility import selected_cycle_status
+
     tenant_id = _tenant_id(request)
+    current_cycle_status = selected_cycle_status(request.GET)
     courses = list(
         CycleCourse.objects.filter(
             cycle__tenant_id=tenant_id,
@@ -1678,6 +1681,7 @@ def questionnaire_print_release_view(request):
             "bulk_selection_rows": bulk_selection_rows,
             "bulk_selection_row_count": len(bulk_selection_rows),
             "bulk_selected_values": set(bulk_form["selections"].value() or ()),
+            "current_cycle_status": current_cycle_status,
             "target_campus_id": target_campus_id,
             "scoped_answer_key_history": scoped_answer_key_history,
             "bulk_answer_key_form": bulk_answer_key_form,

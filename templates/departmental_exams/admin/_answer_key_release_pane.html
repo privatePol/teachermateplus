@@ -5,7 +5,8 @@
   <p class="small mb-0">Answer Keys keep their own exact current-final revision, availability window, attestation, revocation lifecycle, and Who Viewed history.</p>
 </div>
 
-<form method="get" id="answer-key-target-form" class="card card-body mb-3">
+<form method="get" action="{% url 'departmental_exams:questionnaire_print_release' %}#answer-key-releases-pane" id="answer-key-target-form" class="card card-body mb-3">
+  <input type="hidden" name="cycle_status" value="{{ current_cycle_status }}">
   <input type="hidden" name="section" value="answer-key-releases">
   <label class="form-label fw-semibold" for="answer-key-campus-filter">Target Campus (required)</label>
   <select class="form-select" id="answer-key-campus-filter" name="target_campus_id" required>
