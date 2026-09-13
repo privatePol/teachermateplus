@@ -37,6 +37,7 @@
     .no-erasures { margin-top: 6px !important; font-weight: 800; text-align: center; }
     .questions { padding-bottom: 0.08in; }
     .question { margin: 0 0 12px; break-inside: avoid-page; page-break-inside: avoid; }
+    .questionnaire-ending { break-inside: avoid-page; page-break-inside: avoid; }
     .question-line { display: grid; grid-template-columns: 28px 1fr; gap: 5px; font-weight: 600; break-after: avoid-page; page-break-after: avoid; }
     .choices { margin: 5px 0 0 33px; padding-left: 22px; columns: 2; column-gap: 42px; break-inside: avoid-page; page-break-inside: avoid; }
     .choices li { margin: 2px 0; padding-left: 3px; break-inside: avoid-page; page-break-inside: avoid; }
@@ -80,7 +81,7 @@
     </header>
     <section class="exam-heading">
       <div class="exam-period">{{ exam_period }}</div>
-      <h1>DEPARTMENTAL EXAMINATIONS</h1>
+      <h1>{{ exam_heading }}</h1>
       <div class="course-title">{{ course_title }}</div>
       <div class="course-code">{{ course_code }}</div>
       <div class="set-label">SET {{ set_code }}</div>
@@ -92,13 +93,17 @@
     </div>
     <section class="questions" aria-label="Multiple-choice questions">
       {% for item in items %}
+        {% if forloop.last %}<div class="questionnaire-ending">{% endif %}
         <article class="question" data-scientific-group>
           <div class="question-line"><span>{{ item.position }}.</span><span data-scientific-content>{{ item.question_text }}</span></div>
           <ol class="choices" type="A">{% for choice in item.choices %}<li><span data-scientific-content>{{ choice }}</span></li>{% endfor %}</ol>
         </article>
+        {% if forloop.last %}
+          <footer class="confidential-footer">CONFIDENTIAL &bull; {{ course_code }} &bull; SET {{ set_code }} &bull; Revision R{{ revision_number }} &bull; Printed {{ printed_at|date:"M j, Y g:i A" }}</footer>
+        </div>
+        {% endif %}
       {% endfor %}
     </section>
-    <footer class="confidential-footer">CONFIDENTIAL &bull; {{ course_code }} &bull; SET {{ set_code }} &bull; Revision R{{ revision_number }} &bull; Printed {{ printed_at|date:"M j, Y g:i A" }}</footer>
   </main>
 </body>
 </html>

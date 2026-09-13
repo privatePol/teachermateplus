@@ -1,3 +1,9 @@
+## 2026-09-13 - Questionnaire and Checking Master print corrections
+
+- Faculty and Admin Set A/B questionnaires now derive their heading from the authoritative course examination classification: `STANDARDIZED EXAMINATIONS` or `DEPARTMENTAL EXAMINATIONS`. Unconfirmed legacy records use the neutral `EXAMINATIONS` heading instead of being guessed. Existing generated snapshots are not rewritten.
+- Pre-Shaded Checking Master correct-answer circles now retain a solid print/PDF fill when browser Background graphics is disabled. The blank student Answer Sheet remains unshaded. Questionnaire pagination keeps the final question with the normal-flow confidentiality footer to avoid footer-only trailing pages without restoring the former overlay-prone fixed footer.
+- Authorization, exact-revision binding, release windows, revocation/history, generation selection, answers, sanitizer/budgets, dependencies, and migrations are unchanged. No migration is required.
+
 ## 2026-09-12 - Exam-cycle UI readiness clarity
 
 - Renamed the shared successful configuration label from `Ready to Open` to `Configuration Ready`; readiness booleans and authoritative opening validation are unchanged. The Manage Course Exams overview now directs users to Prepare Faculty Contributions for complete opening requirements.

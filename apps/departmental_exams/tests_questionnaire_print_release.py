@@ -36,8 +36,12 @@ from .models import (
     Question,
     QuestionnairePrintRelease,
 )
-from .questionnaire_printing import QuestionnairePrintReleaseService
+from .questionnaire_printing import (
+    QuestionnairePrintReleaseService,
+    _questionnaire_exam_heading,
+)
 from .stage4_test_support import Stage4TestCase
+from .setup_services import CourseSetupService
 
 
 MANILA = ZoneInfo("Asia/Manila")
@@ -76,6 +80,14 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         cycle.processing_mode = ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         cycle.save(update_fields=["processing_mode", "updated_at"])
         self.parent = self.make_course(cycle=cycle, department=None, code="PRINT-101")
+        CourseSetupService.classify(
+            course_id=self.parent.pk,
+            tenant_id=self.tenant.pk,
+            actor=self.manager_user,
+            classification=CycleCourse.ExamClassification.STANDARDIZED,
+            expected_state=CourseSetupService.fingerprint(self.parent),
+        )
+        self.parent.refresh_from_db()
         self.configuration = self.make_configuration(
             self.parent,
             workflow=CourseExamConfiguration.WorkflowStatus.CLOSED,
@@ -416,6 +428,10 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                 )
                 self.assertContains(
                     response,
+                    ".questionnaire-ending { break-inside: avoid-page; page-break-inside: avoid; }",
+                )
+                self.assertContains(
+                    response,
                     ".confidential-footer { position: static; margin-top: 0.25in;",
                 )
                 self.assertNotContains(
@@ -427,6 +443,27 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                     '<section class="questions" aria-label="Multiple-choice questions">',
                     html=False,
                 )
+                body = response.content.decode()
+                self.assertEqual(body.count('class="confidential-footer"'), 1)
+                self.assertLess(
+                    body.rfind('class="question"'),
+                    body.find('class="confidential-footer"'),
+                )
+
+    def test_questionnaire_heading_uses_confirmed_classification_and_neutral_legacy(self):
+        self.assertEqual(
+            _questionnaire_exam_heading(CycleCourse.ExamClassification.STANDARDIZED),
+            "STANDARDIZED EXAMINATIONS",
+        )
+        self.assertEqual(
+            _questionnaire_exam_heading(CycleCourse.ExamClassification.DEPARTMENTAL),
+            "DEPARTMENTAL EXAMINATIONS",
+        )
+        self.assertEqual(
+            _questionnaire_exam_heading(CycleCourse.ExamClassification.UNCLASSIFIED_LEGACY),
+            "EXAMINATIONS",
+        )
+        self.assertEqual(_questionnaire_exam_heading("UNKNOWN"), "EXAMINATIONS")
 
     def test_unknown_paper_size_falls_back_to_letter_without_reflection(self):
         release = self._release()
@@ -1382,7 +1419,8 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                     response,
                     self.parent.cycle.get_exam_period_display(),
                 )
-                self.assertContains(response, "DEPARTMENTAL EXAMINATIONS")
+                self.assertContains(response, "STANDARDIZED EXAMINATIONS")
+                self.assertNotContains(response, "DEPARTMENTAL EXAMINATIONS")
                 self.assertContains(response, self.parent.course.title)
                 self.assertContains(response, self.parent.course.code)
                 self.assertContains(response, f"SET {set_code}")

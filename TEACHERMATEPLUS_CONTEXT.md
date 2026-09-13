@@ -12,6 +12,12 @@
 
 # TEACHERMATEPLUS_CONTEXT.md
 
+## Questionnaire and Checking Master print corrections - 2026-09-13
+
+The shared Faculty/Admin Set A/B questionnaire renderer maps the protected `CycleCourse.exam_classification` to `STANDARDIZED EXAMINATIONS` or `DEPARTMENTAL EXAMINATIONS`; `UNCLASSIFIED_LEGACY` and any unexpected value fail to the neutral `EXAMINATIONS` heading. Classification is frozen before generated history can exist, so a generated revision can use its course examination's guarded classification without rewriting stored revision/item snapshots. No legacy value is inferred or backfilled.
+
+The Pre-Shaded Checking Master uses print-color preservation on correct-answer bubbles so Chromium print/PDF retains solid answers even when Background graphics is disabled; blank student Answer Sheets are separate and unchanged. The questionnaire footer remains in normal flow with its reserved bottom margin, while the final question and footer form one break-safe ending to avoid a footer-only last page when they fit together. Exact-revision, authorization, release, audit, confidentiality, generation, paper-size, sanitizer, rich-editor, and safety-budget contracts are unchanged. No migration is required.
+
 ## Unified examination setup - Phase 1 foundation (2026-09-11)
 
 New cycles are always Automatic Generation at the public creation service, regardless of submitted mode. The historical model default is retained for legacy fixtures/readers; the cycle snapshot creation service explicitly labels new course exams `STANDARDIZED`. Existing rows receive `UNCLASSIFIED_LEGACY`, not inferred Standardized/Departmental values. Existing Manual cycles (including Finals) are not converted. Explicit classification uses the authorized examination-unit service, an optimistic fingerprint, cycle/member locks and audit. It is frozen by first-open/configuration, frozen-blueprint or downstream-history evidence; unrelated saves never classify a course.

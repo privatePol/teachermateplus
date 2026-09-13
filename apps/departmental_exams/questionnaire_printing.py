@@ -51,6 +51,15 @@ QUESTIONNAIRE_PAPER_SIZES = {
 }
 DEFAULT_QUESTIONNAIRE_PAPER_SIZE = "letter"
 
+QUESTIONNAIRE_EXAM_HEADINGS = {
+    CycleCourse.ExamClassification.STANDARDIZED: "STANDARDIZED EXAMINATIONS",
+    CycleCourse.ExamClassification.DEPARTMENTAL: "DEPARTMENTAL EXAMINATIONS",
+}
+
+
+def _questionnaire_exam_heading(exam_classification):
+    return QUESTIONNAIRE_EXAM_HEADINGS.get(exam_classification, "EXAMINATIONS")
+
 
 def _questionnaire_paper_context(value):
     normalized = (value or "").strip().lower()
@@ -108,6 +117,9 @@ def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None
         "exam_period": cycle.get_exam_period_display(),
         "course_code": revision.cycle_course.course.code,
         "course_title": revision.cycle_course.course.title,
+        "exam_heading": _questionnaire_exam_heading(
+            revision.cycle_course.exam_classification
+        ),
         "set_code": generated_set.set_code,
         "revision_number": revision.revision_number,
         "printed_at": timezone.now().astimezone(MANILA_TIMEZONE),

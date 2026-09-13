@@ -533,6 +533,8 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, "FOR FACULTY CHECKING ONLY")
                 self.assertContains(response, f"SET {set_code}")
+                self.assertContains(response, "-webkit-print-color-adjust: exact;")
+                self.assertContains(response, "print-color-adjust: exact;")
                 self.assertNotContains(response, "Private Set")
                 self.assertNotContains(response, "Confidential key source")
                 self.assertNotContains(response, "Pair Code")
