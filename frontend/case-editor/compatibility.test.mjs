@@ -338,6 +338,49 @@ function pasteInto(editor,html,text='',files=[]) {
   Object.defineProperty(event,'clipboardData',{value:{files,getData:type=>type==='text/html' ? html : text}});
   editor.view.dom.dispatchEvent(event); assert.equal(event.defaultPrevented,true);
 }
+const capturedWordGrid='border-top:none;border-left: none;border-bottom:solid windowtext 1.0pt;'+
+  'border-right:solid windowtext 1.0pt;mso-border-top-alt:solid windowtext .5pt;'+
+  'mso-border-left-alt:solid windowtext .5pt;mso-border-alt:solid windowtext .5pt';
+test('captured Word collapsed grid accepts alternate width without inventing an accounting rule', () => {
+  const normalize=style=>normalizeClipboard(`<table><tr><td style="${style}">100</td></tr></table>`);
+  assert.doesNotMatch(normalize(capturedWordGrid),/tmp-rule/);
+  for (const style of [
+    capturedWordGrid.replace('border-right:solid windowtext 1.0pt;',''),
+    capturedWordGrid.replace('border-bottom:solid windowtext 1.0pt','border-bottom:solid windowtext 2.0pt'),
+    capturedWordGrid.replace('border-bottom:solid windowtext 1.0pt','border-bottom:double windowtext 3.0pt'),
+    capturedWordGrid.replace('mso-border-left-alt:solid windowtext .5pt','mso-border-left-alt:solid windowtext 2pt'),
+    capturedWordGrid+';border:none', capturedWordGrid+';border-bottom:solid red 1pt',
+    capturedWordGrid+';border-top:none',
+  ]) assert.throws(()=>normalize(style),error=>error.diagnosticCode==='CASE_NORMALIZE_ATTRIBUTE');
+  for (const kind of ['solid','double']) assert.match(
+    normalize(`border-bottom:3pt ${kind} black`),new RegExp('tmp-rule-'+(kind==='solid'?'single':'double')));
+});
+test('captured Word grid and structural indentation preserve three tables through paste and reopen', () => {
+  // Retains the exact failing border declarations and 5/7/7-row geometry,
+  // including the merged heading and third-table thead, without exam content.
+  const table=(rows,columns,merged=false)=>'\n<table>\n'+Array.from({length:rows},(_,r)=>
+    (r===0 && columns===4 ? '<thead>\n' : r===0 ? '<tbody>\n' : '')+
+    ' <tr>\n'+(merged && r===0 ? '<td colspan="2"><p>Heading</p></td>' :
+      Array.from({length:columns},(_,c)=>`  <td style="${capturedWordGrid}">\n   <p style="text-align:right">R${r}C${c}  100</p>\n  </td>\n`).join(''))+
+    '</tr>\n'+(r===0 && columns===4 ? '</thead>\n<tbody>\n' : '')).join('')+'</tbody>\n</table>\n';
+  const raw='<!doctype html><html><head><style>table.MsoNormalTable {mso-style-name:"Table Normal"}</style></head><body>\n'+
+    '<p>Keep  spacing\tand a break<br>Next line</p>\n'+table(5,2,true)+table(7,2)+table(7,4)+'</body></html>';
+  const normalized=normalizeClipboard(raw), form=formFor(''), mounted=mountCaseEditor(form);
+  pasteInto(mounted.editor,raw,'This fallback must not replace the tables');
+  const saved=mounted.currentContent(), parsed=new DOMParser().parseFromString(saved,'text/html');
+  assert.equal(form.querySelector('[data-case-editor-errors]').hidden,true);
+  assert.equal(parsed.querySelectorAll('table').length,3);
+  assert.equal(parsed.querySelectorAll('tr').length,19);
+  assert.equal(parsed.querySelectorAll('td,th').length,51);
+  assert.equal(parsed.querySelectorAll('[colspan="2"]').length,1);
+  assert.equal(parsed.querySelectorAll('thead').length,1);
+  assert.equal(parsed.querySelectorAll('.tmp-align-right').length,50);
+  assert.doesNotMatch(saved,/tmp-rule/);
+  assert.match(saved,/Keep  spacing\tand a break<br>Next line/);
+  assert.equal(semanticSignature(saved),semanticSignature(normalized));
+  const reopened=make(saved);assert.equal(serializeEditor(reopened),saved);
+  reopened.destroy();mounted.editor.destroy();form.remove();
+});
 test('Word full-document accounting table paste preserves structure and applicable formatting', () => {
   // Reduced from the staging evidence: the retained 44,516-character clipboard
   // payload was unavailable, so this covers its observed table shape and styles.

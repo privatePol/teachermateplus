@@ -43,6 +43,20 @@ are not evidence of browser acceptance.
 
 ## Canonical compatibility
 
+The retained three-table Word payload (2026-09-14) exposed a complete collapsed
+solid-grid variant: CSS top/left `none`, equal solid bottom/right edges, and
+equal solid MSO top/left/all-edge fallbacks at a different supported width.
+Only that complete declaration pattern bypasses the conflicting-shorthand
+accounting rejection; it becomes the ordinary TMP table grid, not a total rule.
+Incomplete, conflicting and unsupported accounting declarations still reject.
+Before Tiptap parsing, ASCII-only indentation under body/table/row groups/rows
+and lists is removed, matching the existing semantic comparison boundary.
+Paragraph whitespace, meaningful cell text, NBSP and explicit blank paragraphs
+are preserved. This prevents indentation from becoming invented cells/rows.
+The complete retained payload has been replayed locally through the rebuilt
+Chrome bundle and server canonicalizer; native desktop Word paste and
+authenticated staging Preview/save/print remain separate acceptance steps.
+
 The Python sanitizer is authoritative and retains every prior safety budget.
 The additive `RICH_HTML_V1` allowlist includes `u`, `tmp-align-justify`, bounded
 `tmp-indent-1` through `tmp-indent-8`, cell `tmp-valign-top/middle/bottom`, and

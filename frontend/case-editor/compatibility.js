@@ -86,11 +86,24 @@ export function accountingRule(node) {
   const normalizedTokens = value => value.split(/\s+/).map(token=>['windowtext','#000','#000000'].includes(token) ? 'black' :
     /^(?:\d+(?:\.\d+)?|\.\d+)(pt|px)$/.test(token) ? normalizedWidth(token) : token).sort().join(' ');
   const same = value => normalizedTokens(value)===normalizedTokens(bottom[0][1]);
+  // Word's collapsed grid omits the shared top/left CSS edges, but supplies
+  // all three MSO fallback declarations at another width. This complete solid
+  // grid is not an accounting rule or a later CSS shorthand override.
+  const wordGridKeys=['border-top','border-left','border-bottom','border-right',
+    'mso-border-top-alt','mso-border-left-alt','mso-border-alt'];
+  const valueFor = key => declarations.find(([name])=>name===key)?.[1];
+  const wordCollapsedGrid=cell && !selected.length && explicit==='single' &&
+    declarations.length===wordGridKeys.length &&
+    wordGridKeys.every(key=>declarations.filter(([name])=>name===key).length===1) &&
+    valueFor('border-top')==='none' && valueFor('border-left')==='none' &&
+    same(valueFor('border-right')) && parseBorder(valueFor('mso-border-alt'))==='single' &&
+    ['mso-border-top-alt','mso-border-left-alt'].every(key=>
+      normalizedTokens(valueFor(key))===normalizedTokens(valueFor('mso-border-alt')));
   // A later all-edge shorthand can erase/change a bottom rule. Accept only
   // equivalent grids; ambiguous CSS/MSO overrides fail before any insertion.
   const firstBottom=declarations.findIndex(([key])=>key.includes('bottom'));
   if (declarations.some(([key,value],index)=>['border','mso-border-alt'].includes(key) &&
-      index>firstBottom && !same(value))) reject();
+      index>firstBottom && !same(value) && !(wordCollapsedGrid && key==='mso-border-alt'))) reject();
   const grids=declarations.filter(([key])=>['border','mso-border-alt'].includes(key));
   const seenGrids=new Map();
   for (const [key,value] of grids) {
@@ -98,7 +111,7 @@ export function accountingRule(node) {
     if (seenGrids.has(key) && seenGrids.get(key)!==normalized) reject();
     seenGrids.set(key,normalized);
   }
-  const completeGrid=(grid && same(grid[1])) || ['top','left','right'].every(side=>
+  const completeGrid=wordCollapsedGrid || (grid && same(grid[1])) || ['top','left','right'].every(side=>
     declarations.some(([key,value])=>["border-"+side,"mso-border-"+side+"-alt"].includes(key) && same(value)));
   if (completeGrid && explicit === 'single' && !selected.length) return null;
   rule=explicit;
@@ -274,6 +287,11 @@ export function prepareLegacy(html) {
   const body = parse(html);
   // Remove only the same non-semantic boundaries allowed by the comparison,
   // before the schema parser can wrap indentation in invented paragraphs.
+  for (const parent of [body,...body.querySelectorAll('table,thead,tbody,tfoot,tr,ul,ol')]) {
+    for (const child of [...parent.childNodes]) {
+      if (child.nodeType===3 && /^[\t\n\r ]*$/.test(child.textContent)) child.remove();
+    }
+  }
   for (const cell of body.querySelectorAll('td,th')) {
     if (blockOnlyCell(cell)) for (const child of [...cell.childNodes]) {
       if (child.nodeType === 3 && /^[\t\n\r ]*$/.test(child.textContent)) child.remove();
