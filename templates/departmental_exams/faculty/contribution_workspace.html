@@ -1,7 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% load static departmental_exam_content %}
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-review-20260910">{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-navigation-20260914">{% endblock %}
 {% block faculty_content %}
 {% include "departmental_exams/_classification_badge.html" with course=contribution.cycle_course %}
 <div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
@@ -46,6 +46,7 @@
 {% elif active_import %}
   <div class="alert alert-info" role="status">
     <strong>An interrupted question import is available.</strong>
+    {% if active_import.target_section_id %}<div><strong>Add these questions to section:</strong> {{ active_import.target_section.title }}</div>{% endif %}
     <div data-import-progress-text>{{ active_import.committed_rows }} / {{ active_import.total_rows }} rows committed ({{ active_import_progress.percentage }}%).</div>
     {% if active_import.failure_message %}<div class="mt-2" data-import-server-message>{{ active_import.failure_message }}</div>{% else %}<div class="mt-2" data-import-server-message hidden></div>{% endif %}
     <div class="progress mt-2" role="progressbar" aria-label="Persisted question import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ active_import_progress.percentage }}">
@@ -92,18 +93,23 @@
     {% for scenario in group.cases %}
       <article class="card shadow-sm mb-3">
         <div class="card-header d-flex flex-wrap justify-content-between gap-2">
-          <div><strong>{{ scenario.title|default:"Case / Scenario" }}</strong>{% if scenario.section %} <span class="badge text-bg-secondary">{{ scenario.section.title }}</span>{% endif %}</div>
-          <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:faculty_case_detail' contribution.id scenario.id %}">View Case</a>
+          <div>
+            <div><strong>{{ scenario.title|default:"Case / Scenario" }}</strong>{% if scenario.section %} <span class="badge text-bg-secondary">{{ scenario.section.title }}</span>{% endif %}</div>
+            <div class="small text-muted">{{ scenario.ordered_members|length }} Linked Question{{ scenario.ordered_members|length|pluralize }}</div>
+          </div>
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <button id="workspace-case-toggle-{{ scenario.id }}" class="btn btn-sm btn-outline-secondary tmp-case-collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#workspace-case-{{ scenario.id }}" aria-expanded="false" aria-controls="workspace-case-{{ scenario.id }}"><span data-case-collapse-label>Show Case</span></button>
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:faculty_case_detail' contribution.id scenario.id %}">View Case</a>
+          </div>
         </div>
-        <div class="card-body">
+        <div id="workspace-case-{{ scenario.id }}" class="collapse tmp-case-collapse" role="region" aria-labelledby="workspace-case-toggle-{{ scenario.id }}"><div class="card-body">
           <div class="tmp-case-content mb-3" data-scientific-content>{{ scenario.stimulus|scenario_content:scenario.content_format }}</div>
-          <p class="small text-muted mb-2">{{ scenario.ordered_members|length }} Linked Question{{ scenario.ordered_members|length|pluralize }}</p>
           {% for member in scenario.ordered_members %}
             {% include "departmental_exams/faculty/_question_card.html" with question=member.question show_global_reorder=False %}
           {% empty %}
             <div class="alert alert-warning mb-0">This Case has no Linked Questions yet.</div>
           {% endfor %}
-        </div>
+        </div></div>
       </article>
     {% endfor %}
     {% if group.questions %}<h3 class="h5">Standalone MCQs</h3>{% endif %}
@@ -144,6 +150,7 @@
 {% endif %}
 {% endblock %}
 {% block extra_js %}{{ block.super }}
+<script src="{% static 'js/departmental_exam_case_disclosure.js' %}?v=case-navigation-20260914"></script>
 <script>
 (() => {
   const list = document.getElementById("question-list");

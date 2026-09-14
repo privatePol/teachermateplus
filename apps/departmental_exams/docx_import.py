@@ -946,7 +946,7 @@ class QuestionDOCXImportService(QuestionCSVImportService):
     @transaction.atomic
     def create_preview(
         cls, *, contribution_id, uploaded_file, user, tenant_id, campus_id,
-        expected_contribution_revision,
+        expected_contribution_revision, target_section_id=None,
     ):
         _cycle, _course, configuration, contribution = Stage5LockService.lock_contribution(
             contribution_id=contribution_id, user=user, tenant_id=tenant_id
@@ -962,6 +962,11 @@ class QuestionDOCXImportService(QuestionCSVImportService):
         ContributionAuthorizationService.require_no_active_import(contribution=contribution)
         ContributionAuthorizationService.require_revision(
             contribution=contribution, expected_revision=expected_contribution_revision
+        )
+        from .import_sections import resolve_import_section
+        target_section = resolve_import_section(
+            contribution=contribution, tenant_id=tenant_id,
+            section_id=target_section_id, for_update=True,
         )
         existing_questions = list(Question.objects.filter(contribution=contribution).order_by("pk"))
         ContributionAuthorizationService.require_add_capacity(
@@ -998,6 +1003,7 @@ class QuestionDOCXImportService(QuestionCSVImportService):
             status=(QuestionImportBatch.Status.READY if error_count == 0 and valid_rows else QuestionImportBatch.Status.INVALID),
             source_format=QuestionImportBatch.SourceFormat.DOCX,
             contribution_revision_snapshot=contribution.revision,
+            target_section=target_section,
             file_sha256=parsed.raw_sha256,
             filename_sha256=parsed.filename_sha256,
             total_rows=len(data_rows),
@@ -1046,6 +1052,11 @@ class QuestionDOCXImportService(QuestionCSVImportService):
             raise ValidationError("Only a staged Word preview can be edited.")
         if timezone.now() >= batch.expires_at:
             raise ContributionExpired("This confidential Word preview has expired.")
+        from .import_sections import resolve_import_section
+        resolve_import_section(
+            contribution=contribution, tenant_id=tenant_id,
+            section_id=batch.target_section_id, for_update=True,
+        )
         row = QuestionImportRow.objects.select_for_update().filter(
             batch=batch, row_number=row_number
         ).first()

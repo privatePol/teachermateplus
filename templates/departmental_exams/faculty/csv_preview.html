@@ -3,6 +3,7 @@
 {% block faculty_content %}
 <div data-import-page data-question-import-controller data-status-url="{% url 'departmental_exams:csv_status' batch.token %}">
 <h1 class="h3">Confidential CSV preview</h1>
+{% if batch.target_section_id %}<p><strong>Add these questions to section:</strong> {{ batch.target_section.title }}</p>{% endif %}
 <p class="text-muted">This owner-only preview expires {{ batch.expires_at|date:"M j, Y g:i A" }}. Confirmation uses the server-stored rows, not browser-submitted question content.</p>
 <div class="row g-2 mb-3">
   <div class="col-6 col-md-3 col-xl"><div class="card h-100"><div class="card-body"><strong>{{ existing_count }}</strong><br>Existing</div></div></div>

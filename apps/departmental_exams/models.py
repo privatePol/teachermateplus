@@ -1235,6 +1235,13 @@ class QuestionImportBatch(TimeStampedModel):
         max_length=4, choices=SourceFormat.choices, default=SourceFormat.CSV
     )
     contribution_revision_snapshot = models.PositiveIntegerField()
+    target_section = models.ForeignKey(
+        "ExamSection",
+        on_delete=models.PROTECT,
+        related_name="question_import_batches",
+        null=True,
+        blank=True,
+    )
     file_sha256 = models.CharField(max_length=64)
     filename_sha256 = models.CharField(max_length=64)
     total_rows = models.PositiveSmallIntegerField(default=0)

@@ -15,6 +15,14 @@
   {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}
   {% for hidden in form.hidden_fields %}{{ hidden }}{% if hidden.errors %}<div class="alert alert-danger" role="alert">The page state is missing or invalid. Reload and try again.</div>{% endif %}{% endfor %}
   <div class="mb-3">
+    {% if form.target_section_id %}
+    <div class="mb-3">
+      <label class="form-label" for="{{ form.target_section_id.id_for_label }}">{{ form.target_section_id.label }} <span class="text-danger" aria-hidden="true">*</span></label>
+      {{ form.target_section_id }}
+      {% for error in form.target_section_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+      <div class="form-text">All questions in this file will be added as standalone MCQs in this section.</div>
+    </div>
+    {% endif %}
     <label class="form-label" for="{{ form.csv_file.id_for_label }}">{{ form.csv_file.label }} <span class="text-danger" aria-hidden="true">*</span></label>
     {{ form.csv_file }}
     {% if form.csv_file.help_text %}<div class="form-text">{{ form.csv_file.help_text }}</div>{% endif %}

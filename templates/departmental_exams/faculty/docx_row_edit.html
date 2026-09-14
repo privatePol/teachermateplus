@@ -1,6 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% block faculty_content %}
 <h1 class="h3">Fix Word question {{ row.row_number|add:"-1" }}</h1>
+{% if batch.target_section_id %}<p><strong>Add these questions to section:</strong> {{ batch.target_section.title }}</p>{% endif %}
 <p class="text-muted">Saving re-runs the authoritative question validation and duplicate checks. It changes only this server-staged DOCX row.</p>
 <form method="post" class="card shadow-sm" novalidate><div class="card-body">
   {% csrf_token %}{% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}

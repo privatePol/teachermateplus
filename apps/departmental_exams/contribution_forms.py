@@ -129,7 +129,29 @@ class QuestionReorderForm(ContributionRevisionForm):
             raise forms.ValidationError("Question order is malformed.")
 
 
-class QuestionCSVUploadForm(ContributionRevisionForm):
+class QuestionImportUploadForm(ContributionRevisionForm):
+    def __init__(self, *args, sections=(), **kwargs):
+        self._import_sections = sections
+        super().__init__(*args, **kwargs)
+
+    def configure_dynamic_fields(self):
+        if self._import_sections:
+            self.fields["target_section_id"] = forms.ChoiceField(
+                label="Add these questions to section",
+                choices=[("", "Select Exam Section"), *(
+                    (str(section.id), section.title) for section in self._import_sections
+                )],
+                required=True,
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+        if not self._import_sections and self.data.get("target_section_id"):
+            raise forms.ValidationError("Section targeting is unavailable for this contribution.")
+        return cleaned
+
+
+class QuestionCSVUploadForm(QuestionImportUploadForm):
     csv_file = forms.FileField(
         help_text="UTF-8 CSV only, maximum 2 MB and 200 nonblank data rows."
     )
@@ -139,7 +161,7 @@ class QuestionCSVConfirmForm(BootstrapFormMixin, forms.Form):
     file_sha256 = forms.CharField(max_length=64, widget=forms.HiddenInput)
 
 
-class QuestionDOCXUploadForm(ContributionRevisionForm):
+class QuestionDOCXUploadForm(QuestionImportUploadForm):
     docx_file = forms.FileField(
         help_text="Word .docx only, maximum 2 MB and 200 detected questions."
     )

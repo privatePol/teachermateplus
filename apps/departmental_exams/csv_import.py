@@ -24,7 +24,8 @@ from .contribution_services import (
     QuestionPayloadService,
     Stage5LockService,
 )
-from .models import Question, QuestionImportBatch, QuestionImportRow
+from .models import Question, QuestionBlueprintPlacement, QuestionImportBatch, QuestionImportRow
+from .import_sections import ImportSectionError, resolve_import_section, validate_import_placements
 
 
 CSV_HEADERS = (
@@ -248,6 +249,7 @@ class QuestionCSVParser:
 
 class QuestionCSVImportService:
     SAFE_FAILURE_MESSAGES = {
+        "IMPORT_SECTION_CHANGED": "Import stopped because its target section is missing or no longer valid. Unpublished partial rows were discarded. Upload the file again and select 'Add these questions to section'. Completed imports and existing questions are unchanged.",
         "AUTHORIZATION_CHANGED": "Import stopped because current access or assignment eligibility changed. Partial imported rows were discarded; start a fresh CSV preview when access is restored.",
         "STALE_CONTRIBUTION": "Import stopped because the contribution changed after preview. Partial imported rows were discarded; start a fresh CSV preview.",
         "QUOTA_CHANGED": "Import stopped because the available question quota changed. Partial imported rows were discarded; review the workspace and start a fresh CSV preview.",
@@ -296,6 +298,7 @@ class QuestionCSVImportService:
         tenant_id,
         campus_id,
         expected_contribution_revision,
+        target_section_id=None,
     ):
         parsed = QuestionCSVParser.parse(uploaded_file)
         _cycle, _course, configuration, contribution = Stage5LockService.lock_contribution(
@@ -316,6 +319,10 @@ class QuestionCSVImportService:
         ContributionAuthorizationService.require_revision(
             contribution=contribution,
             expected_revision=expected_contribution_revision,
+        )
+        target_section = resolve_import_section(
+            contribution=contribution, tenant_id=tenant_id,
+            section_id=target_section_id, for_update=True,
         )
         # The locked contribution revision serializes Stage 5 writers. Preview
         # creation does not lock question rows before its newly created batch,
@@ -381,6 +388,7 @@ class QuestionCSVImportService:
             status=status,
             source_format=QuestionImportBatch.SourceFormat.CSV,
             contribution_revision_snapshot=contribution.revision,
+            target_section=target_section,
             file_sha256=parsed.raw_sha256,
             filename_sha256=parsed.filename_sha256,
             total_rows=len(data_rows),
@@ -466,6 +474,8 @@ class QuestionCSVImportService:
             "failure_code": batch.failure_code,
             "failure_message": batch.failure_message,
             "contribution_id": batch.contribution_id,
+            "target_section_id": batch.target_section_id,
+            "target_section_title": batch.target_section.title if batch.target_section_id else "",
         }
 
     @classmethod
@@ -503,6 +513,8 @@ class QuestionCSVImportService:
         if batch.status == QuestionImportBatch.Status.CONFIRMED:
             return configuration, contribution, batch, [], [], []
         if batch.status == QuestionImportBatch.Status.FAILED:
+            if batch.failure_code == "IMPORT_SECTION_CHANGED":
+                raise ImportSectionError(batch.failure_message)
             if batch.failure_code == "QUOTA_CHANGED":
                 raise ContributionQuotaReached(contribution.quota_snapshot)
             if batch.failure_code == "STALE_CONTRIBUTION":
@@ -524,6 +536,11 @@ class QuestionCSVImportService:
             request_tenant_id=tenant_id,
             request_campus_id=campus_id,
         )
+        target_section = resolve_import_section(
+            contribution=contribution, tenant_id=tenant_id,
+            section_id=batch.target_section_id, for_update=True,
+        )
+        batch.target_section = target_section
         if batch.status == QuestionImportBatch.Status.READY and QuestionImportBatch.objects.filter(
             contribution=contribution,
             status__in=QuestionImportBatch.active_statuses(),
@@ -570,6 +587,9 @@ class QuestionCSVImportService:
             raise ContributionConflict(
                 "This preview is stale because the contribution changed. Upload the CSV again."
             )
+        validate_import_placements(
+            questions=imported_questions, section=target_section, actor_id=user.id,
+        )
         return configuration, contribution, batch, rows, imported_questions, other_questions
 
     @classmethod
@@ -631,6 +651,25 @@ class QuestionCSVImportService:
                 for row, payload in cleaned_rows
             ],
             batch_size=IMPORT_CHUNK_SIZE,
+        )
+        # Requery by durable row identity; do not depend on bulk-create PK return
+        # behavior. Questions and placements commit (or roll back) together.
+        created_questions = list(Question.objects.filter(
+            contribution=contribution, import_batch=batch,
+            import_row_number__in=[row.row_number for row in chunk_rows],
+        ).order_by("import_row_number", "pk"))
+        if len(created_questions) != len(chunk_rows):
+            raise ValidationError("The imported question count is inconsistent.")
+        if batch.target_section_id:
+            QuestionBlueprintPlacement.objects.bulk_create([
+                QuestionBlueprintPlacement(
+                    question=question, section=batch.target_section,
+                    blueprint_id=batch.target_section.blueprint_id,
+                    placed_by=user,
+                ) for question in created_questions
+            ])
+        validate_import_placements(
+            questions=created_questions, section=batch.target_section, actor_id=user.id,
         )
         committed_rows = len(imported_questions) + len(chunk_rows)
         now = timezone.now()
@@ -706,6 +745,7 @@ class QuestionCSVImportService:
                 "cycle_course_id": contribution.cycle_course_id,
                 "batch_id": batch.id,
                 "source_format": batch.source_format,
+                "target_section_id": batch.target_section_id,
                 "token_sha256": hashlib.sha256(str(batch.token).encode("ascii")).hexdigest(),
                 "filename_sha256": batch.filename_sha256,
                 "row_count": batch.total_rows,
@@ -828,6 +868,9 @@ class QuestionCSVImportService:
             .filter(contribution=contribution, import_batch=batch)
             .order_by("pk")
         )
+        QuestionBlueprintPlacement.objects.filter(
+            question__contribution=contribution, question__import_batch=batch,
+        ).delete()
         Question.objects.filter(contribution=contribution, import_batch=batch).delete()
         QuestionImportRow.objects.filter(batch=batch).delete()
         now = timezone.now()
@@ -862,6 +905,12 @@ class QuestionCSVImportService:
         except Http404:
             raise
         except ContributionExpired:
+            raise
+        except ImportSectionError:
+            cls._record_terminal_failure(
+                token=kwargs["token"], user=kwargs["user"], tenant_id=kwargs["tenant_id"],
+                failure_code="IMPORT_SECTION_CHANGED",
+            )
             raise
         except PermissionDenied:
             cls._record_terminal_failure(

@@ -689,7 +689,7 @@ class FacultyCaseFixtureMixin(Stage5FixtureMixin):
 
 
 class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
-    def test_csv_import_unplaced_recovery_and_existing_edit_route(self):
+    def test_historical_csv_import_unplaced_recovery_and_existing_edit_route(self):
         from .csv_import import CSV_HEADERS
         from .tests_questionnaire_print_release import QuestionnairePrintReleaseTests
         scenario = self.save_case()
@@ -712,6 +712,7 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         writer.writerow(['Imported unplaced second', 'A', 'B', 'C', 'D', 'C', 'easy'])
         upload = self.client.post(upload_url, {
             **upload_page.context['form'].initial,
+            'target_section_id': self.section_b.id,
             'csv_file': SimpleUploadedFile('review.csv', stream.getvalue().encode(), content_type='text/csv'),
         })
         self.assertEqual(upload.status_code, 302)
@@ -724,6 +725,10 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertEqual(batch.status, QuestionImportBatch.Status.CONFIRMED)
         imported = list(self.contribution.questions.filter(import_batch=batch).order_by('position', 'id'))
         self.assertEqual(len(imported), 2)
+        # Simulate a completed pre-0029 import: historical NULL targets and
+        # absent placements remain recoverable through the existing Edit route.
+        QuestionImportBatch.objects.filter(pk=batch.pk).update(target_section=None)
+        QuestionBlueprintPlacement.objects.filter(question__in=imported).delete()
         self.assertFalse(QuestionBlueprintPlacement.objects.filter(question__in=imported).exists())
         questions = list(self.contribution.questions.order_by('position', 'id'))
         with self.assertRaisesRegex(ValidationError, 'Every question must be assigned'):
@@ -771,6 +776,103 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[self.contribution.id, second_case.id]))
         self.assertEqual(self._displayed_question_pairs(detail), [(second.id, 3)])
         self.assertEqual(self._question_mutation_snapshot(), before)
+
+    def test_case_disclosures_keep_navigation_visible_ordered_and_print_safe(self):
+        rich_case = self.save_case(
+            title="Accounting Case",
+            html=(
+                '<table><tr><td>Account</td><td class="tmp-align-right '
+                'tmp-rule-double">100</td></tr></table>'
+            ),
+        )
+        other_case = self.save_case(title="Independent Case")
+        first = self.add_question(scenario=rich_case, text="First linked")
+        second = self.add_question(scenario=rich_case, text="Second linked")
+        third = self.add_question(scenario=other_case, text="Other linked")
+        standalone = self.add_question(section=self.section_b, text="Standalone remains visible")
+
+        workspace = self.client.get(reverse(
+            "departmental_exams:contribution_workspace", args=[self.contribution.id],
+        ))
+        self.assertEqual(
+            self._displayed_question_pairs(workspace),
+            [(first.id, 1), (second.id, 2), (third.id, 3), (standalone.id, 4)],
+        )
+        for scenario, count in ((rich_case, 2), (other_case, 1)):
+            target = f"workspace-case-{scenario.id}"
+            self.assertContains(
+                workspace,
+                f'id="workspace-case-toggle-{scenario.id}" class="btn btn-sm '
+                'btn-outline-secondary tmp-case-collapse-toggle" type="button" '
+                'data-bs-toggle="collapse"',
+                html=False,
+            )
+            self.assertContains(
+                workspace,
+                f'data-bs-target="#{target}" aria-expanded="false" aria-controls="{target}"',
+                html=False,
+            )
+            self.assertContains(
+                workspace,
+                f'id="{target}" class="collapse tmp-case-collapse" role="region"',
+                html=False,
+            )
+            self.assertContains(workspace, f"{count} Linked Question", html=False)
+            self.assertIn(
+                reverse(
+                    "departmental_exams:faculty_case_detail",
+                    args=[self.contribution.id, scenario.id],
+                ),
+                _response_hrefs(workspace),
+            )
+            rendered = workspace.content.decode()
+            panel_start = rendered.index(f'id="{target}"')
+            self.assertNotIn("data-bs-toggle", rendered[panel_start:rendered.index("</article>", panel_start)])
+        self.assertContains(workspace, "Show Case", count=2)
+        self.assertContains(workspace, 'class="tmp-align-right tmp-rule-double"', html=False)
+
+        detail = self.client.get(reverse(
+            "departmental_exams:faculty_case_detail",
+            args=[self.contribution.id, rich_case.id],
+        ))
+        target = f"case-narrative-{rich_case.id}"
+        self.assertEqual(self._displayed_question_pairs(detail), [(first.id, 1), (second.id, 2)])
+        self.assertContains(
+            detail,
+            f'data-bs-target="#{target}" aria-expanded="false" aria-controls="{target}"',
+            html=False,
+        )
+        self.assertContains(detail, 'type="button" data-bs-toggle="collapse"', html=False)
+        self.assertContains(
+            detail,
+            f'id="{target}" class="collapse tmp-case-collapse" role="region"',
+            html=False,
+        )
+        self.assertContains(detail, "2 Linked Questions")
+        self.assertContains(detail, "Show Case", count=1)
+        self.assertContains(
+            detail,
+            reverse(
+                "departmental_exams:faculty_case_question_create",
+                args=[self.contribution.id, rich_case.id],
+            ),
+        )
+
+        root = Path(__file__).resolve().parents[2]
+        script = (root / "static/js/departmental_exam_case_disclosure.js").read_text(encoding="utf-8")
+        stylesheet = (root / "static/css/departmental_exam_case_editor.css").read_text(encoding="utf-8")
+        for event in ("show.bs.collapse", "hide.bs.collapse"):
+            self.assertIn(event, script)
+        self.assertIn('button.setAttribute("aria-expanded", String(expanded))', script)
+        self.assertIn('expanded ? "Hide Case" : "Show Case"', script)
+        self.assertIn(".tmp-case-collapse-toggle:focus-visible", stylesheet)
+        self.assertIn(".tmp-case-collapse.collapse, .tmp-case-collapse.collapsing", stylesheet)
+        self.assertIn("display: block !important", stylesheet)
+        print_template = (
+            root / "templates/departmental_exams/faculty/questionnaire_print.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('class="questionnaire-case"', print_template)
+        self.assertNotIn("tmp-case-collapse", print_template)
 
     def test_standalone_only_first_section_precedes_cases_and_empty_cases_remain_visible(self):
         case = self.save_case(title="Later section Case", section=self.section_b)

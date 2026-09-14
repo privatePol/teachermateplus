@@ -45,6 +45,7 @@ from .contribution_services import (
 from .faculty_case_services import FacultyCaseMutationService, FacultyCasePolicy
 from .csv_import import CSV_FILENAME, QuestionCSVImportService
 from .docx_import import QuestionDOCXImportService
+from .import_sections import ImportSectionError, import_section_choices
 from .models import (
     ExamBlueprint,
     ExamScenario,
@@ -1220,6 +1221,7 @@ def csv_upload_view(request, contribution_id):
         request.POST or None,
         request.FILES or None,
         initial={"expected_contribution_revision": contribution.revision},
+        sections=import_section_choices(contribution=contribution, tenant_id=_scope(request)[0]),
     )
     if request.method == "POST" and form.is_valid():
         tenant_id, campus_id = _scope(request)
@@ -1231,6 +1233,7 @@ def csv_upload_view(request, contribution_id):
                 tenant_id=tenant_id,
                 campus_id=campus_id,
                 expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
+                target_section_id=form.cleaned_data.get("target_section_id"),
             )
         except (ContributionConflict, ValidationError) as exc:
             return _error_response(request, exc)
@@ -1468,6 +1471,7 @@ def docx_upload_view(request, contribution_id):
     form = QuestionDOCXUploadForm(
         request.POST or None, request.FILES or None,
         initial={"expected_contribution_revision": contribution.revision},
+        sections=import_section_choices(contribution=contribution, tenant_id=_scope(request)[0]),
     )
     if request.method == "POST" and form.is_valid():
         try:
@@ -1478,6 +1482,7 @@ def docx_upload_view(request, contribution_id):
                 tenant_id=tenant_id,
                 campus_id=campus_id,
                 expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
+                target_section_id=form.cleaned_data.get("target_section_id"),
             )
         except (ContributionConflict, ValidationError) as exc:
             return _error_response(request, exc)
@@ -1558,6 +1563,13 @@ def docx_row_edit_view(request, token, row_number):
                 user=request.user, tenant_id=tenant_id, campus_id=campus_id,
                 expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
             )
+        except ImportSectionError as exc:
+            return render(request, "departmental_exams/faculty/error.html", {
+                "error_title": "Import target section unavailable",
+                "error_explanation": "No staged content was changed.",
+                "error_next_action": exc.messages[0],
+                "return_url": reverse("departmental_exams:contribution_workspace", args=[batch.contribution_id]),
+            }, status=400)
         except (ContributionConflict, ContributionExpired, ValidationError) as exc:
             return _error_response(request, exc)
         messages.success(request, f"Word question {row_number - 1} was revalidated and staged.")

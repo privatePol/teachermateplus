@@ -3,6 +3,7 @@
 {% block faculty_content %}
 <div data-import-page data-question-import-controller data-status-url="{% url 'departmental_exams:docx_status' batch.token %}">
   <h1 class="h3">Step 2 — Review &amp; Fix</h1>
+{% if batch.target_section_id %}<p><strong>Add these questions to section:</strong> {{ batch.target_section.title }}</p>{% endif %}
   <p class="text-muted">This owner-only staged preview expires {{ batch.expires_at|date:"M j, Y g:i A" }}. Edits and final import use server-stored rows; browser-submitted rows are never trusted at confirmation.</p>
   <div class="row g-2 mb-3"><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.total_rows }}</strong><br>Detected</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.valid_rows }}</strong><br>Valid</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.error_count }}</strong><br>Errors</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ remaining }}</strong><br>Quota remaining</div></div></div></div>
   {% if batch.error_count %}<div class="alert alert-danger">Fix every staged row error before import. Unsupported document structures require a corrected Word file and a new upload.</div>{% endif %}

@@ -33,6 +33,7 @@
 .tmp-case-table-size input { width: 4rem; }
 .tmp-case-editor .tiptap { flex: 1 0 auto; width: 100%; min-height: 19rem; position: relative; white-space: pre-wrap; overflow-wrap: break-word; color: #212529; caret-color: #212529; cursor: text; }
 .tmp-case-editor:focus-within { outline: 2px solid #1264a3; outline-offset: 2px; }
+.tmp-case-collapse-toggle:focus-visible { outline: 3px solid #1264a3; outline-offset: 2px; }
 /* Avoid Firefox's pre-wrap/justify combination without collapsing authored spaces. */
 .tmp-preserve { white-space: break-spaces; }
 .tmp-preserve:empty { min-height: 1.5em; }
@@ -50,4 +51,12 @@
 @media print {
   .tmp-case-content, .tmp-case-preview, .tmp-case-editor { overflow: visible; }
   .tmp-case-editor { min-height: 0; }
+  .tmp-case-collapse-toggle { display: none !important; }
+  .tmp-case-collapse.collapse, .tmp-case-collapse.collapsing {
+    display: block !important;
+    height: auto !important;
+    visibility: visible !important;
+    overflow: visible !important;
+    transition: none !important;
+  }
 }

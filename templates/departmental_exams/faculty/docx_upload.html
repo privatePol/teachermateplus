@@ -13,7 +13,16 @@
   <div class="alert alert-danger" data-import-error role="alert" hidden></div>
   <form method="post" enctype="multipart/form-data" class="card shadow-sm" data-question-upload-form data-import-mode="docx" data-import-label="Word file" novalidate><div class="card-body">
     {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}
     {% for hidden in form.hidden_fields %}{{ hidden }}{% if hidden.errors %}<div class="alert alert-danger">The page state is invalid. Reload and try again.</div>{% endif %}{% endfor %}
+    {% if form.target_section_id %}
+    <div class="mb-3">
+      <label class="form-label" for="{{ form.target_section_id.id_for_label }}">{{ form.target_section_id.label }} <span class="text-danger" aria-hidden="true">*</span></label>
+      {{ form.target_section_id }}
+      {% for error in form.target_section_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+      <div class="form-text">All questions in this file will be added as standalone MCQs in this section.</div>
+    </div>
+    {% endif %}
     <label class="form-label" for="{{ form.docx_file.id_for_label }}">{{ form.docx_file.label }}</label>
     {{ form.docx_file }}
     <div class="form-text">{{ form.docx_file.help_text }}</div>
