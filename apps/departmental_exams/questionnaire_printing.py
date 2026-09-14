@@ -86,13 +86,19 @@ def _questionnaire_paper_context(value):
 def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None):
     if generated_set.generation_revision_id != revision.id:
         raise PermissionDenied("The generated questionnaire set is unavailable.")
-    item_rows = list(
-        generated_set.items.order_by("position").values(
-            "position",
-            "question_text_snapshot",
-            "choices_snapshot",
-        )
+    from .structured_snapshots import ALGORITHM_VERSION, verify_structured_set
+    snapshot_fields = (
+        "position", "question_text_snapshot", "choices_snapshot",
+        "section_id_snapshot", "section_title_snapshot", "section_instructions_snapshot",
+        "scenario_id_snapshot", "scenario_title_snapshot", "scenario_stimulus_snapshot",
+        "scenario_content_format_snapshot", "scenario_member_position_snapshot",
     )
+    if revision.algorithm_version == ALGORITHM_VERSION:
+        snapshots = list(generated_set.items.order_by("position"))
+        verify_structured_set(generated_set, snapshots, algorithm_version=revision.algorithm_version)
+        item_rows = [{field: getattr(item, field) for field in snapshot_fields} for item in snapshots]
+    else:
+        item_rows = list(generated_set.items.order_by("position").values(*snapshot_fields))
     if (
         len(item_rows) != generated_set.item_count
         or [row["position"] for row in item_rows]
@@ -128,6 +134,13 @@ def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None
                 "position": row["position"],
                 "question_text": row["question_text_snapshot"],
                 "choices": tuple(row["choices_snapshot"] or ()),
+                "section_id": row["section_id_snapshot"],
+                "section_title": row["section_title_snapshot"],
+                "section_instructions": row["section_instructions_snapshot"],
+                "case_start": bool(row["scenario_id_snapshot"] and row["scenario_member_position_snapshot"] == 1),
+                "case_title": row["scenario_title_snapshot"],
+                "case_content": row["scenario_stimulus_snapshot"],
+                "case_format": row["scenario_content_format_snapshot"],
             }
             for row in item_rows
         ),
@@ -168,6 +181,8 @@ class QuestionnairePrintReleaseService:
 
     @staticmethod
     def _require_valid_revision(*, revision, require_current_generated=False):
+        from .structured_snapshots import verify_revision_structure
+        verify_revision_structure(revision)
         if require_current_generated and (
             revision.current_marker != 1
             or revision.status != ExamGenerationRevision.Status.GENERATED
@@ -535,6 +550,11 @@ class FacultyQuestionnairePrintService:
         cycle = release.cycle_course.cycle
         tenant = cycle.tenant
         printed_at = timezone.now().astimezone(MANILA_TIMEZONE)
+        context = _sanitized_questionnaire_context(
+            revision=release.generation_revision,
+            generated_set=generated_set,
+            paper_size=paper_size,
+        )
         AuditService.log_event(
             action="DE_QUESTIONNAIRE_PRINT_SET_ACCESSED",
             portal="FACULTY",
@@ -553,11 +573,6 @@ class FacultyQuestionnairePrintService:
                 "printed_at": printed_at,
             },
             request=request,
-        )
-        context = _sanitized_questionnaire_context(
-            revision=release.generation_revision,
-            generated_set=generated_set,
-            paper_size=paper_size,
         )
         context["printed_at"] = printed_at
         return context

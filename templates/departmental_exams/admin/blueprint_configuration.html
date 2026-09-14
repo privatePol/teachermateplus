@@ -1,7 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
-{% if cycle_course.cycle.processing_mode == 'AUTOMATIC_GENERATION' %}<div class="alert alert-warning">Phase 1 Automatic generation supports No Sections without Cases. You may plan Departmental sections here, but contribution opening and generation will remain blocked until those requirements are supported end to end. Existing structure is never removed automatically.</div>{% endif %}
+{% if cycle_course.cycle.processing_mode == 'AUTOMATIC_GENERATION' %}{% include "departmental_exams/admin/_case_preparation_guidance.html" %}{% endif %}
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Exam Blueprint</li></ol></nav>
 <header class="de-exam-hero"><div><h1>{% if structured_lifecycle_enabled %}Exam Structure / Blueprint{% else %}Stage 6 Blueprint{% endif %}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }} {% include "departmental_exams/_classification_badge.html" with course=cycle_course %}</p></div></header>
 {% if structured_lifecycle_enabled %}<div class="alert alert-info">Configure the questionnaire structure before opening faculty contribution. The first successful Open permanently freezes this structure.</div>{% else %}{% include "departmental_exams/admin/_stage6_readiness.html" %}{% endif %}

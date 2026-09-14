@@ -1,4 +1,4 @@
-{% load static %}{% get_media_prefix as MEDIA_URL %}
+{% load static departmental_exam_content %}{% get_media_prefix as MEDIA_URL %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ course_code }} — Set {{ set_code }} Questionnaire</title>
   {% include "departmental_exams/_scientific_notation_assets.html" %}
+  <link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">
   <style>
     @page { size: {{ paper_css_size }} portrait; margin: 0.55in 0.6in 0.85in; }
     * { box-sizing: border-box; }
@@ -38,6 +39,10 @@
     .questions { padding-bottom: 0.08in; }
     .question { margin: 0 0 12px; break-inside: avoid-page; page-break-inside: avoid; }
     .questionnaire-ending { break-inside: avoid-page; page-break-inside: avoid; }
+    .questionnaire-section, .questionnaire-case h3 { break-after: avoid-page; }
+    .questionnaire-case { font-weight: normal; }
+    .questionnaire-case table { max-width: 100%; overflow-wrap: anywhere; }
+    .questionnaire-case tr { break-inside: avoid-page; }
     .question-line { display: grid; grid-template-columns: 28px 1fr; gap: 5px; font-weight: 600; break-after: avoid-page; page-break-after: avoid; }
     .choices { margin: 5px 0 0 33px; padding-left: 22px; columns: 2; column-gap: 42px; break-inside: avoid-page; page-break-inside: avoid; }
     .choices li { margin: 2px 0; padding-left: 3px; break-inside: avoid-page; page-break-inside: avoid; }
@@ -93,6 +98,8 @@
     </div>
     <section class="questions" aria-label="Multiple-choice questions">
       {% for item in items %}
+        {% ifchanged item.section_id %}{% if item.section_id %}<header class="questionnaire-section"><h2>{{ item.section_title }}</h2>{% if item.section_instructions %}<p>{{ item.section_instructions }}</p>{% endif %}</header>{% endif %}{% endifchanged %}
+        {% if item.case_start %}<aside class="questionnaire-case"><h3>{{ item.case_title|default:"Case / Scenario" }}</h3><div class="tmp-case-content" data-scientific-content>{{ item.case_content|scenario_content:item.case_format }}</div></aside>{% endif %}
         {% if forloop.last %}<div class="questionnaire-ending">{% endif %}
         <article class="question" data-scientific-group>
           <div class="question-line"><span>{{ item.position }}.</span><span data-scientific-content>{{ item.question_text }}</span></div>

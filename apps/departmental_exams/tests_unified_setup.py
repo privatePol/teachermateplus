@@ -189,8 +189,8 @@ class UnifiedSetupTests(Stage4TestCase):
         )
         self.assertEqual(preparation.context["rows"][0]["status"], "Blocked")
         expected_reason = (
-            "Explicit Exam Sections are not supported by Automatic generation in Phase 1. "
-            "Contributions cannot open for this structure yet."
+            "Explicit Exam Sections require enabled Departmental Case-aware Automatic generation. "
+            "Contributions cannot open for this structure until that prerequisite is met."
         )
         self.assertIn(expected_reason, preparation.context["rows"][0]["reasons"])
         rows, token = self.rows_token(cycle, [course])

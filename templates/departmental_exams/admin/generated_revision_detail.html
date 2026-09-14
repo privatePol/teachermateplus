@@ -1,5 +1,6 @@
 {% extends "admin_portal/base.html" %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
+{% load static departmental_exam_content %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li>{% if automatic_mode %}<li class="breadcrumb-item"><a href="{% url 'departmental_exams:automatic_generation_summary' cycle_course.cycle_id %}">Exam Generation Status</a></li>{% endif %}<li class="breadcrumb-item active">Generated Revision</li></ol></nav>
@@ -32,7 +33,7 @@
   <div class="card-body p-4">
     {% for item in generated_set.ordered_items %}
       {% ifchanged item.section_id_snapshot %}<div class="de-generation-section rounded p-3 mb-3 mt-2"><h3 class="h5 mb-1">{{ item.section_title_snapshot }}</h3>{% if item.section_instructions_snapshot %}<p class="text-muted mb-0">{{ item.section_instructions_snapshot }}</p>{% endif %}</div>{% endifchanged %}
-      {% if item.scenario_id_snapshot and item.scenario_member_position_snapshot == 1 %}<aside class="de-generation-scenario mb-2"><div class="small text-uppercase fw-bold text-warning-emphasis">Scenario{% if item.scenario_title_snapshot %}: {{ item.scenario_title_snapshot }}{% endif %}</div><p class="mb-0 mt-2">{{ item.scenario_stimulus_snapshot }}</p></aside>{% endif %}
+      {% if item.scenario_id_snapshot and item.scenario_member_position_snapshot == 1 %}<aside class="de-generation-scenario mb-2"><div class="small text-uppercase fw-bold text-warning-emphasis">Scenario{% if item.scenario_title_snapshot %}: {{ item.scenario_title_snapshot }}{% endif %}</div><div class="tmp-case-content mt-2" data-scientific-content>{{ item.scenario_stimulus_snapshot|scenario_content:item.scenario_content_format_snapshot }}</div></aside>{% endif %}
       <article class="de-generation-question mb-3{% if item.scenario_id_snapshot %} ms-md-3{% endif %}" data-scientific-group>
         <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><span class="badge text-bg-light border text-dark">Item {{ item.position }}</span><span class="small text-muted">{{ item.campus_code_snapshot }} &middot; {{ item.get_difficulty_snapshot_display }}{% if item.scenario_id_snapshot %} &middot; Scenario member {{ item.scenario_member_position_snapshot }}{% endif %}</span></div>
         <p class="fw-semibold mb-2" data-scientific-content>{{ item.question_text_snapshot }}</p>

@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from apps.auditlog.models import AuditLog
 from apps.core.services.audit import AuditService
+from apps.core.services.features import FeatureSettingsService
 from .exam_units import resolve_examination_unit, validate_examination_unit
 from .models import (
     CourseExamConfiguration, CycleCourse, ExaminationCycle, ExamBlueprint,
@@ -22,6 +23,15 @@ from .services import (
 )
 
 
+def case_aware_automatic_enabled(course):
+    return (
+        course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        and course.exam_classification == CycleCourse.ExamClassification.DEPARTMENTAL
+        and FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+            tenant_id=course.cycle.tenant_id)
+    )
+
+
 def automatic_structure_blockers(course):
     """Reject unsupported inputs even on legacy Automatic retry/worker routes."""
     if course.cycle.processing_mode != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
@@ -29,10 +39,37 @@ def automatic_structure_blockers(course):
     unit = resolve_examination_unit(course, validate=False)
     blueprints = ExamBlueprint.objects.filter(cycle_course_id__in=unit.member_ids)
     reasons = []
+    if case_aware_automatic_enabled(unit.primary):
+        rows = list(blueprints)
+        if len(rows) != 1 or rows[0].cycle_course_id != unit.primary.id:
+            return ["Configure exactly one primary-owned Departmental blueprint; conflicting or alias-owned blueprints require administrative reconciliation."]
+        if any(member.exam_classification != "DEPARTMENTAL" for member in unit.members):
+            reasons.append("Equivalent examination-unit members must have consistent Departmental classification.")
+        blueprint = rows[0]
+        sections = list(blueprint.sections.order_by("display_order", "id"))
+        configurations = [CourseSetupService.effective(member) for member in unit.members]
+        final_count = configurations[0].final_item_count
+        if final_count is None or any(config.final_item_count != final_count for config in configurations):
+            reasons.append("Configure one authoritative final item count across the examination unit.")
+        if blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS:
+            if sections:
+                reasons.append("No Sections mode cannot retain explicit sections.")
+        elif blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS:
+            if (not sections or any(not row.title.strip() or row.item_quota < 1 or row.display_order < 1 for row in sections)
+                    or len({row.display_order for row in sections}) != len(sections)
+                    or sum(row.item_quota for row in sections) != final_count):
+                reasons.append("Configure positive ordered section quotas that sum to the exact final item count.")
+        else:
+            reasons.append("The Departmental blueprint mode is invalid.")
+        if any(config.opened_at for config in configurations) and (
+            blueprint.structure_frozen_at is None or blueprint.structure_final_item_count != final_count
+        ):
+            reasons.append("Opened Departmental contributions require a valid permanently frozen blueprint.")
+        return reasons
     if blueprints.exclude(mode=ExamBlueprint.Mode.NO_SECTIONS).exists() or ExamSection.objects.filter(blueprint__in=blueprints).exists():
-        reasons.append("Explicit Exam Sections are not supported by Automatic generation in Phase 1. Contributions cannot open for this structure yet.")
+        reasons.append("Explicit Exam Sections require enabled Departmental Case-aware Automatic generation. Contributions cannot open for this structure until that prerequisite is met.")
     if ExamScenario.objects.filter(blueprint__in=blueprints).exists():
-        reasons.append("Case narratives and Linked Question groups require Case-aware Automatic generation, which is deferred.")
+        reasons.append("Case narratives and Linked Question groups require enabled Departmental Case-aware Automatic generation.")
     if QuestionBlueprintPlacement.objects.filter(blueprint__in=blueprints).exists():
         reasons.append("Section placements cannot be ignored by Automatic generation. Administrative review is required.")
     if len(blueprints) > 1 or any(b.cycle_course_id != unit.primary.id for b in blueprints):
@@ -183,7 +220,7 @@ class CourseSetupService:
                 if course.exam_classification == "UNCLASSIFIED_LEGACY":
                     reasons.append("Explicit classification is required for this legacy course before using unified setup.")
                 if course.exam_classification == "DEPARTMENTAL" and not ExamBlueprint.objects.filter(cycle_course=course).exists():
-                    reasons.append("Configure the Departmental exam blueprint. NO_SECTIONS is supported in Phase 1.")
+                    reasons.append("Configure the Departmental exam blueprint. Explicit sections and Cases require the enabled Structured Case/Scenario Exam Lifecycle.")
                 status = "Blocked" if reasons else "Ready"
             rows.append({"course": course, "configuration": config, "status": status, "reasons": list(dict.fromkeys(reasons)), "fingerprint": cls.fingerprint(course), "member_ids": list(unit.member_ids)})
         return rows
@@ -274,6 +311,6 @@ class CourseSetupService:
         blueprints = ExamBlueprint.objects.filter(cycle_course_id__in=unit.member_ids)
         if not blueprints.exists():
             if course.exam_classification == "DEPARTMENTAL":
-                raise ValidationError("Configure the Departmental blueprint before opening. NO_SECTIONS is supported in Phase 1.")
+                raise ValidationError("Configure the Departmental blueprint before opening.")
             blueprint = ExamBlueprint.objects.create(cycle_course=unit.primary, mode="NO_SECTIONS", revision=1, created_by=actor, updated_by=actor)
             AuditService.log_event(action="DE_EXAM_STANDARD_STRUCTURE_CREATED", portal="ADMIN", entity_type="ExamBlueprint", entity_id=blueprint.id, actor=actor, tenant=course.cycle.tenant_id, metadata={"cycle_course_id": unit.primary.id, "mode": "NO_SECTIONS"}, request=request)

@@ -730,6 +730,9 @@ def generated_revision_detail_view(request, revision_id):
             generated_set.items.all(),
             key=lambda item: item.position,
         )
+        from .structured_snapshots import verify_structured_set
+        verify_structured_set(generated_set, generated_set.ordered_items,
+                              algorithm_version=revision.algorithm_version)
     history = (
         list(
             ExamGenerationRevision.objects.filter(cycle_course=revision.cycle_course)

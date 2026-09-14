@@ -156,7 +156,7 @@ class FacultyHelpGuideTests(TestCase):
             "Unsupported Word numbering is rejected",
             "Existing table captions are preserved",
             "Save is disabled", "Case narratives only, not MCQ text or choices",
-            "Case-aware exam generation and printing are not included",
+            "Departmental Automatic generation and printing preserve whole Cases",
         ):
             self.assertContains(response, wording)
 

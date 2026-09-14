@@ -144,6 +144,7 @@ class GeneratedExamIntegrityService:
             "scenario_revision_snapshot": authoritative.scenario_revision,
             "scenario_title_snapshot": authoritative.scenario_title,
             "scenario_stimulus_snapshot": authoritative.scenario_stimulus,
+            "scenario_content_format_snapshot": authoritative.scenario_content_format,
             "scenario_member_position_snapshot": (
                 authoritative.scenario_member_position
             ),

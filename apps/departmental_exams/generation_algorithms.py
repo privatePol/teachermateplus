@@ -98,6 +98,7 @@ class IdentityBlock:
     vector: tuple[int, ...]
     members: tuple[IdentityMember, ...]
     logical_group_id: str | None = None
+    logical_fingerprints: tuple[str, ...] = ()
 
     @property
     def size(self):

@@ -421,6 +421,8 @@ class AutomaticGenerationReadinessReport:
                     f"If practical, add {missing} usable {shortage['label']} questions "
                     "to better match the preferred mix."
                 )
+            elif shortage["dimension"] == "section":
+                actions.append(f"Add whole Cases or standalone MCQs to provide {missing} more usable questions in {shortage['label']}.")
             elif shortage["dimension"] == "total":
                 actions.append(f"Add {missing} more usable unique questions.")
         blocker_codes = {item["code"] for item in pool.get("blockers", ())}
@@ -464,6 +466,8 @@ class AutomaticGenerationReadinessReport:
             if warning["code"] == "MISSING_CAMPUS_REPRESENTATION":
                 for campus_name in warning.get("campus_names", ()):
                     warnings.append(f"No usable submitted questions from {campus_name}.")
+            elif warning["code"] in {"UNUSABLE_CASE_EXCLUDED", "UNPLACED_SINGLETONS_EXCLUDED", "INVALID_QUESTIONS_EXCLUDED"}:
+                warnings.append(warning["message"])
         return tuple(dict.fromkeys(warnings))
 
     def _pre_roster_status(self, *, course, configuration, current):
@@ -533,7 +537,7 @@ class AutomaticGenerationReadinessReport:
             )
         if pool is None:
             return preliminary_status, preliminary_actions
-        if pool.get("invalid_question_count"):
+        if pool.get("invalid_question_count") and not pool.get("structured_automatic"):
             count = pool["invalid_question_count"]
             return "BLOCKED", (
                 f"Resolve {count} unusable Submitted question row"

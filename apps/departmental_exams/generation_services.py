@@ -102,9 +102,11 @@ class ExamGenerationService:
             .filter(cycle_course_id__in=unit.member_ids)
             .order_by("cycle_course_id")
         )
+        from .setup_services import case_aware_automatic_enabled
+        structured_automatic = case_aware_automatic_enabled(course)
         blueprint = None
         if (
-            cycle.processing_mode
+            structured_automatic or cycle.processing_mode
             == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
         ):
             blueprint = (
@@ -126,7 +128,8 @@ class ExamGenerationService:
             )
             scenarios = list(
                 ExamScenario.objects.select_for_update()
-                .filter(blueprint=blueprint, contribution__isnull=True)
+                .filter(blueprint=blueprint)
+                .filter(**({} if structured_automatic else {"contribution__isnull": True}))
                 .order_by("id")
             )
             list(
@@ -288,6 +291,8 @@ class ExamGenerationService:
             None,
         )
         if duplicate is not None:
+            from .structured_snapshots import verify_revision_structure
+            verify_revision_structure(duplicate)
             return GenerationOutcome(revision=duplicate, reused=True)
 
         if configuration is None or (not automatic_mode and blueprint is None):
@@ -308,6 +313,9 @@ class ExamGenerationService:
             raise GenerationConflict("Generation inputs changed. Refresh the workspace.")
 
         current = cls._current_revision(revisions)
+        if current is not None:
+            from .structured_snapshots import verify_revision_structure
+            verify_revision_structure(current)
         current_number = current.revision_number if current else 0
         try:
             expected_revision = int(expected_current_revision)
@@ -324,7 +332,7 @@ class ExamGenerationService:
 
         next_revision = max((row.revision_number for row in revisions), default=0) + 1
         hmac_context = {
-            "algorithm_version": GENERATION_ALGORITHM_VERSION,
+            "algorithm_version": problem.algorithm_version,
             "tenant_id": course.cycle.tenant_id,
             "cycle_id": course.cycle_id,
             "cycle_course_id": course.id,
@@ -386,7 +394,7 @@ class ExamGenerationService:
             status=ExamGenerationRevision.Status.GENERATED,
             current_marker=1,
             source_input_fingerprint=problem.input_fingerprint,
-            algorithm_version=GENERATION_ALGORITHM_VERSION,
+            algorithm_version=problem.algorithm_version,
             generated_at=timezone.now(),
             generated_by=actor,
             generation_trigger=generation_trigger,
@@ -431,7 +439,7 @@ class ExamGenerationService:
             else:
                 difficulty_snapshot = problem.difficulty_quotas
             difficulty_counts_by_set[set_code] = dict(difficulty_snapshot)
-            generated_set = GeneratedExamSet.objects.create(
+            generated_set = GeneratedExamSet(
                 generation_revision=revision,
                 set_code=set_code,
                 campus_quotas_snapshot=problem.campus_quotas,
@@ -456,6 +464,7 @@ class ExamGenerationService:
             set_a_members = ordered_members_by_set.get(GeneratedExamSet.SetCode.A)
             if (
                 automatic_mode
+                and problem.algorithm_version != "automatic-case-v1"
                 and set_code == GeneratedExamSet.SetCode.B
                 and set_a_selected_ids is not None
                 and set_a_members is not None
@@ -488,16 +497,18 @@ class ExamGenerationService:
                 str(block_id) for block_id in selected_ids
             )
             ordered_members_by_set[set_code] = ordered_members
-            GeneratedExamItem.objects.bulk_create(
-                [
-                    cls._item_snapshot(
-                        generated_set=generated_set,
-                        position=position,
-                        data=problem.questions[member.source_id],
-                    )
-                    for position, member in enumerate(ordered_members, start=1)
-                ]
-            )
+            snapshots = [cls._item_snapshot(generated_set=generated_set, position=position,
+                                            data=problem.questions[member.source_id])
+                         for position, member in enumerate(ordered_members, start=1)]
+            if problem.algorithm_version == "automatic-case-v1":
+                from .structured_snapshots import content_digest, verify_structured_set
+                generated_set.structured_content_digest = content_digest(generated_set, snapshots)
+                verify_structured_set(generated_set, snapshots, algorithm_version=problem.algorithm_version)
+            generated_set.save()
+            # Assign the now-persisted parent explicitly before bulk insertion.
+            for item in snapshots:
+                item.generated_set = generated_set
+            GeneratedExamItem.objects.bulk_create(snapshots)
 
         reason_metadata = {}
         if reason:
@@ -510,6 +521,7 @@ class ExamGenerationService:
         selection_metadata = {}
         if automatic_mode:
             selection_metadata = {
+                "case_pool_warnings": list(problem.pool_warnings),
                 "difficulty_target": dict(problem.difficulty_quotas),
                 "difficulty_actual": difficulty_counts_by_set,
                 "difficulty_deviation": selection.difficulty_deviation,
@@ -688,6 +700,7 @@ class ExamGenerationService:
             scenario_revision_snapshot=data.scenario_revision,
             scenario_title_snapshot=data.scenario_title,
             scenario_stimulus_snapshot=data.scenario_stimulus,
+            scenario_content_format_snapshot=data.scenario_content_format,
             scenario_member_position_snapshot=data.scenario_member_position,
         )
 

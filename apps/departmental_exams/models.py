@@ -2022,7 +2022,8 @@ class QuestionBlueprintPlacement(TimeStampedModel):
         if self.blueprint_id and self.section_id and self.section.blueprint_id != self.blueprint_id:
             raise ValidationError("Placement section must belong to the same blueprint.")
         if self.blueprint_id and self.question_id:
-            if self.question.contribution.cycle_course_id != self.blueprint.cycle_course_id:
+            from .exam_units import contribution_matches_structure
+            if not contribution_matches_structure(contribution=self.question.contribution, blueprint=self.blueprint):
                 raise ValidationError("Placement question must belong to the same course examination.")
             contribution = self.question.contribution
             if contribution.status != FacultyContribution.Status.SUBMITTED and not (
@@ -2101,6 +2102,7 @@ class ExamScenario(TimeStampedModel):
             raise ValidationError({"stimulus": "Scenario text is required."})
         if self.content_format not in self.ContentFormat.values:
             raise ValidationError({"content_format": "Scenario content format is invalid."})
+        from .exam_units import contribution_matches_structure
         if self.blueprint_id:
             if self.blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS:
                 if not self.section_id or self.section.blueprint_id != self.blueprint_id:
@@ -2109,7 +2111,7 @@ class ExamScenario(TimeStampedModel):
                 raise ValidationError("No Sections scenarios use the implicit section.")
             if (
                 self.contribution_id
-                and self.contribution.cycle_course_id != self.blueprint.cycle_course_id
+                and not contribution_matches_structure(contribution=self.contribution, blueprint=self.blueprint)
             ):
                 raise ValidationError(
                     "Faculty Case contribution must belong to the same course examination."
@@ -2158,7 +2160,8 @@ class ExamScenarioMember(TimeStampedModel):
 
     def clean(self):
         if self.scenario_id and self.question_id:
-            if self.question.contribution.cycle_course_id != self.scenario.blueprint.cycle_course_id:
+            from .exam_units import contribution_matches_structure
+            if not contribution_matches_structure(contribution=self.question.contribution, blueprint=self.scenario.blueprint):
                 raise ValidationError("Scenario questions must belong to the same course examination.")
             contribution = self.question.contribution
             if self.scenario.contribution_id is not None:
@@ -2904,6 +2907,7 @@ class GeneratedExamSet(TimeStampedModel):
     campus_quotas_snapshot = models.JSONField(default=dict)
     difficulty_quotas_snapshot = models.JSONField(default=dict)
     section_quotas_snapshot = models.JSONField(default=dict)
+    structured_content_digest = models.CharField(max_length=64, blank=True, default="")
     item_count = models.PositiveSmallIntegerField()
 
     class Meta:
@@ -2989,7 +2993,11 @@ class GeneratedExamItem(TimeStampedModel):
     scenario_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
     scenario_revision_snapshot = models.PositiveIntegerField(null=True, blank=True)
     scenario_title_snapshot = models.CharField(max_length=200, blank=True)
-    scenario_stimulus_snapshot = models.TextField(max_length=5000, blank=True)
+    scenario_stimulus_snapshot = models.TextField(max_length=50000, blank=True)
+    scenario_content_format_snapshot = models.CharField(
+        max_length=20, choices=ExamScenario.ContentFormat.choices,
+        default=ExamScenario.ContentFormat.PLAIN_TEXT,
+    )
     scenario_member_position_snapshot = models.PositiveSmallIntegerField(
         null=True,
         blank=True,

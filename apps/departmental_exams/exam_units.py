@@ -552,3 +552,15 @@ class ExamCourseEquivalencyService:
             },
         )
         return group
+
+def contribution_matches_structure(*, contribution, blueprint):
+    """Preserve legacy exact-course placement; Automatic may use its primary blueprint."""
+    course = contribution.cycle_course
+    if course.id == blueprint.cycle_course_id:
+        return True
+    from .setup_services import case_aware_automatic_enabled
+    if (not case_aware_automatic_enabled(course)
+            or course.cycle_id != blueprint.cycle_course.cycle_id):
+        return False
+    unit = resolve_examination_unit(course)
+    return unit.primary.id == blueprint.cycle_course_id and course.id in unit.member_ids

@@ -1,3 +1,10 @@
+## 2026-09-14 - Phase 3 Case-aware Automatic generation
+
+- Enabled structured Departmental Automatic contributions behind the existing Case lifecycle feature, with one frozen primary blueprint, exact section quotas, equivalent-contributor ownership and authoritative pre-deadline Case validation. Unsupported configurations remain guarded.
+- Added bounded whole-Case/singleton Set A/B selection: linked order is fixed; unusable Cases are excluded in full with warnings; exact campus/section/item allocation and logical duplicate policy remain hard. Proven shortages/Case-size mismatches differ from processing-budget exhaustion. Difficulty targets are preferred and reported against actual results without discarding hard-feasible results on soft-search exhaustion.
+- Versioned rich-content snapshots, fingerprints and integrity checks preserve narratives, sanitized tables/accounting rules and member order through regeneration, historical preview and shared Admin/Faculty printing. No live narrative fallback; Answer Key target scope and legacy Manual/flat workflows remain protected.
+- Setup and guides explain optional common Case sizes and mixed whole Cases/standalone preparation. Migration 0028 adds snapshot capacity/type/digest, defaults historical interpretation to plain text without narrative backfill and prevents destructive reversal after structured history exists. Applied only to disposable test databases; see HANDOFF.md for validation and remaining acceptance.
+
 ## 2026-09-13 - Questionnaire and Checking Master print corrections
 
 - Faculty and Admin Set A/B questionnaires now derive their heading from the authoritative course examination classification: `STANDARDIZED EXAMINATIONS` or `DEPARTMENTAL EXAMINATIONS`. Unconfirmed legacy records use the neutral `EXAMINATIONS` heading instead of being guessed. Existing generated snapshots are not rewritten.

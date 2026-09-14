@@ -61,6 +61,11 @@ def _revision_is_current_final(revision):
 
 
 def _complete_sets(revision):
+    from .structured_snapshots import verify_revision_structure
+    try:
+        verify_revision_structure(revision)
+    except PermissionDenied:
+        return False
     rows = list(
         GeneratedExamSet.objects.filter(generation_revision=revision).values(
             "id",

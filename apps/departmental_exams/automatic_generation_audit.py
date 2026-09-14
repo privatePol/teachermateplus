@@ -118,17 +118,19 @@ class AutomaticGenerationAuditService:
         return expected == item.source_question_digest
 
     @classmethod
-    def _source_digest_valid(cls, source):
+    def _source_digest_valid(cls, source, *, allow_excluded_invalid=False):
         choices = source.choices_snapshot
         if (
             source.source_question_revision < 1
             or not GeneratedExamIntegrityService.SHA256_RE.fullmatch(
                 source.source_question_digest or ""
             )
-            or not (source.question_text_snapshot or "").strip()
+            or (not (source.question_text_snapshot or "").strip()
+                and not (allow_excluded_invalid and not source.eligible_for_generation))
             or not isinstance(choices, list)
             or len(choices) != 4
-            or any(not str(choice).strip() for choice in choices)
+            or (any(not str(choice).strip() for choice in choices)
+                and not (allow_excluded_invalid and not source.eligible_for_generation))
             or source.correct_answer_snapshot not in {"A", "B", "C", "D"}
         ):
             return False
@@ -163,6 +165,11 @@ class AutomaticGenerationAuditService:
         }
         all_items = items_by_code["A"] + items_by_code["B"]
         findings = []
+        from .structured_snapshots import ALGORITHM_VERSION, verify_structured_set
+        if revision.algorithm_version == ALGORITHM_VERSION:
+            for generated_set in generated_sets:
+                verify_structured_set(generated_set, items_by_code[generated_set.set_code],
+                                      algorithm_version=revision.algorithm_version)
         expected_count = revision.final_item_count_snapshot
         generation_event = (
             AuditLog.objects.filter(
@@ -553,7 +560,8 @@ class AutomaticGenerationAuditService:
                 )
             )
             valid_source_digests = sum(
-                cls._source_digest_valid(source) for source in source_rows
+                cls._source_digest_valid(source, allow_excluded_invalid=revision.algorithm_version == "automatic-case-v1")
+                for source in source_rows
             )
             source_digests_ok = valid_source_digests == len(source_rows)
             findings.append(

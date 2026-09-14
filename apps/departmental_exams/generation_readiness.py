@@ -103,6 +103,7 @@ class GenerationQuestion:
     scenario_title: str = ""
     scenario_stimulus: str = ""
     scenario_member_position: int | None = None
+    scenario_content_format: str = "PLAIN_TEXT"
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,8 @@ class GenerationProblem:
     source_audit_questions: tuple[GenerationSourceQuestion, ...]
     logical_identity_version: str
     automatic_selection: IdentitySelectionResult | None = None
+    algorithm_version: str = GENERATION_ALGORITHM_VERSION
+    pool_warnings: tuple[dict, ...] = ()
 
 
 def _generation_question_source_digest(question):
@@ -501,6 +504,8 @@ class Stage6ReadinessService:
             cycle_course.cycle.processing_mode
             == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         )
+        from .setup_services import case_aware_automatic_enabled
+        structured_automatic = case_aware_automatic_enabled(cycle_course)
         if automatic_flat_mode:
             from .setup_services import automatic_structure_blockers
 
@@ -515,7 +520,7 @@ class Stage6ReadinessService:
         ).first()
         blueprint = (
             None
-            if automatic_flat_mode
+            if automatic_flat_mode and not structured_automatic
             else ExamBlueprint.objects.filter(cycle_course=cycle_course).first()
         )
 
@@ -630,7 +635,7 @@ class Stage6ReadinessService:
 
         section_rows = []
         section_quotas = {}
-        if automatic_flat_mode:
+        if automatic_flat_mode and not structured_automatic:
             if final_count is not None:
                 section_quotas = {0: final_count}
         elif blueprint is None:
@@ -667,10 +672,36 @@ class Stage6ReadinessService:
             include_source_audit=not question_pool_only,
             **pool_kwargs,
         )
+        structured_members = []
+        structured_placements = {}
+        structured_input = {}
+        if structured_automatic and blueprint is not None:
+            from .structured_generation import assess_whole_units
+            # Include excluded input state as well: stale-input rejection cannot
+            # depend only on the selected/usable subset.
+            structured_input = {
+                "scenarios": list(ExamScenario.objects.filter(blueprint=blueprint).order_by("id").values(
+                    "id", "revision", "contribution_id", "section_id", "title", "stimulus", "content_format")),
+                "members": list(ExamScenarioMember.objects.filter(scenario__blueprint=blueprint).order_by("id").values(
+                    "id", "scenario_id", "question_id", "position")),
+                "placements": list(QuestionBlueprintPlacement.objects.filter(blueprint=blueprint).order_by("id").values(
+                    "question_id", "section_id", "revision")),
+                "sections": [(row.id, row.title, row.instructions, row.display_order, row.item_quota) for row in section_rows],
+                "sources": [(row.source_id, row.source_digest, row.eligible_for_generation, row.exclusion_code)
+                            for row in source_audit_questions],
+            }
+            eligible_questions, source_audit_questions, structured_placements, structured_members, unit_warnings, excluded_count = assess_whole_units(
+                blueprint=blueprint, unit=unit, questions=eligible_questions,
+                audit_questions=source_audit_questions, sections=section_rows)
+            warnings.extend(unit_warnings)
+            if invalid_question_count:
+                cls._warn(warnings, "INVALID_QUESTIONS_EXCLUDED",
+                          f"{invalid_question_count} unusable Submitted MCQs were excluded; any linked Case was excluded in full.")
+            invalid_question_count += excluded_count
         submitted_question_count = len(eligible_questions)
         duplicate_question_count = 0
         automatic_question_groups = {}
-        if invalid_question_count and not question_pool_only:
+        if invalid_question_count and not question_pool_only and not structured_automatic:
             cls._block(
                 blockers,
                 "ELIGIBLE_POOL_INVALID",
@@ -749,7 +780,7 @@ class Stage6ReadinessService:
                 )
 
         eligible_ids = {question.id for question in eligible_questions}
-        placement_by_question = {}
+        placement_by_question = dict(structured_placements)
         if (
             not automatic_flat_mode
             and blueprint is not None
@@ -800,8 +831,11 @@ class Stage6ReadinessService:
                 )
                 .order_by("id")
             )
-        valid_scenario_members = []
-        for scenario in scenarios:
+        valid_scenario_members = list(structured_members)
+        if structured_automatic:
+            scenarios = [scenario for scenario, _members in structured_members]
+            scenario_question_ids = {m.question_id for _scenario, members in structured_members for m in members}
+        for scenario in (() if structured_automatic else scenarios):
             members = list(scenario.members.all())
             member_ids = [member.question_id for member in members]
             valid = bool((scenario.stimulus or "").strip())
@@ -860,7 +894,7 @@ class Stage6ReadinessService:
                 question.difficulty for question in eligible_questions
             )
         available_by_section = Counter()
-        if automatic_flat_mode or (
+        if (automatic_flat_mode and not structured_automatic) or (
             blueprint is not None and blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
         ):
             available_by_section[0] = (
@@ -968,7 +1002,7 @@ class Stage6ReadinessService:
             def vector_for(question):
                 section_key = (
                     0
-                    if automatic_flat_mode
+                    if (automatic_flat_mode and not structured_automatic)
                     or blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
                     else placement_by_question[question.id]
                 )
@@ -1039,7 +1073,7 @@ class Stage6ReadinessService:
                                 ),
                                 campus=question.contribution.source_campus_id,
                                 difficulty=question.difficulty,
-                                section_id=0,
+                                section_id=(placement_by_question.get(question.id, 0) if structured_automatic else 0),
                             ),
                         ),
                         logical_group_id=(
@@ -1050,7 +1084,37 @@ class Stage6ReadinessService:
                     )
                     for question in eligible_questions
                 )
-                automatic_selection = solve_automatic_identity_aware_two_sets(
+                if structured_automatic:
+                    from .whole_unit_selection import solve_whole_unit_two_sets
+                    member_ids = {m.question_id for _scenario, members in structured_members for m in members}
+                    singleton_by_id = {block.members[0].source_id: block for block in automatic_identity_blocks}
+                    automatic_identity_blocks = tuple(
+                        block for block in automatic_identity_blocks if block.members[0].source_id not in member_ids
+                    ) + tuple(
+                        IdentityBlock(
+                            block_id=f"scenario:{scenario.id}",
+                            vector=tuple(sum(question_vectors[m.question_id][j] for m in members) for j in range(len(margins))),
+                            members=tuple(IdentityMember(
+                                source_id=m.question_id,
+                                contributor_id=singleton_by_id[m.question_id].members[0].contributor_id,
+                                campus=singleton_by_id[m.question_id].members[0].campus,
+                                difficulty=singleton_by_id[m.question_id].members[0].difficulty,
+                                section_id=singleton_by_id[m.question_id].members[0].section_id,
+                                member_order=m.position,
+                            ) for m in members),
+                            logical_fingerprints=tuple(singleton_by_id[m.question_id].logical_group_id for m in members),
+                        ) for scenario, members in structured_members
+                    )
+                if structured_automatic:
+                    from .whole_unit_selection import unreachable_margins
+                    labels = ("Final exam items", *(automatic_campus_labels[key] for key in campus_order),
+                              *(section_labels.get(key, "Questionnaire") for key in section_order))
+                    for index in unreachable_margins(margins=margins, blocks=automatic_identity_blocks):
+                        cls._block(blockers, "CASE_SIZE_MISMATCH",
+                            f"{labels[index]} requires exactly {margins[index]} MCQs, but the available whole-Case sizes and standalone questions cannot total that quota.",
+                            label=labels[index], required=margins[index])
+                selector = solve_whole_unit_two_sets if structured_automatic else solve_automatic_identity_aware_two_sets
+                automatic_selection = selector(
                     margins=margins,
                     blocks=automatic_identity_blocks,
                     campus_quotas=campus_quotas,
@@ -1098,6 +1162,9 @@ class Stage6ReadinessService:
                     blockers,
                     "HARD_CONSTRAINTS_INFEASIBLE",
                     (
+                        "Valid whole Cases and standalone MCQs cannot jointly meet the exact section and campus quotas; no Case was split. "
+                        "Check Case sizes against each frozen section quota and the configured campus allocation."
+                        if structured_automatic else
                         "Two equivalent sets cannot satisfy the required hard questionnaire allocation across campus and item-count constraints."
                         if automatic_flat_mode
                         else "Two equivalent sets cannot satisfy all hard margins and scenario bundles."
@@ -1209,6 +1276,7 @@ class Stage6ReadinessService:
             "invalid_question_count": invalid_question_count,
             "duplicate_question_count": duplicate_question_count,
             "automatic_pool": automatic_flat_mode,
+            "structured_automatic": structured_automatic,
             "question_pool_only": question_pool_only,
             "aggregate_requirements_met": aggregate_requirements_met,
             "exact_feasibility_evaluated": bool(
@@ -1272,7 +1340,7 @@ class Stage6ReadinessService:
             for question in eligible_questions:
                 section_id = (
                     0
-                    if automatic_flat_mode
+                    if (automatic_flat_mode and not structured_automatic)
                     or blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
                     else placement_by_question[question.id]
                 )
@@ -1308,10 +1376,11 @@ class Stage6ReadinessService:
                     scenario_revision=scenario.revision if scenario else None,
                     scenario_title=scenario.title if scenario else "",
                     scenario_stimulus=scenario.stimulus if scenario else "",
+                    scenario_content_format=scenario.content_format if scenario else "PLAIN_TEXT",
                     scenario_member_position=scenario_data[1] if scenario_data else None,
                 )
 
-            for scenario, members in valid_scenario_members:
+            for scenario, members in (() if structured_automatic else valid_scenario_members):
                 identity_blocks.append(
                     IdentityBlock(
                         block_id=f"scenario:{scenario.id}",
@@ -1380,7 +1449,7 @@ class Stage6ReadinessService:
             roster_boundary = roster.boundary_sha256 if roster else ""
             structure_revision = (
                 AUTOMATIC_FLAT_STRUCTURE_REVISION
-                if automatic_flat_mode
+                if automatic_flat_mode and not structured_automatic
                 else blueprint.revision
             )
             fingerprint_payload = {
@@ -1409,6 +1478,7 @@ class Stage6ReadinessService:
                         "scenario_member_position": item.scenario_member_position,
                         "scenario_title": item.scenario_title,
                         "scenario_stimulus": item.scenario_stimulus,
+                        **({"scenario_content_format": item.scenario_content_format} if structured_automatic else {}),
                     }
                     for item in sorted(
                         generation_questions.values(), key=lambda row: row.source_id
@@ -1434,8 +1504,11 @@ class Stage6ReadinessService:
                         for member in unit.members
                     ],
                 }
+            if structured_automatic:
+                fingerprint_payload["whole_unit_schema"] = "automatic-case-v1"
+                fingerprint_payload["structured_input"] = structured_input
             if automatic_flat_mode:
-                fingerprint_payload["structure_mode"] = "AUTOMATIC_FLAT"
+                fingerprint_payload["structure_mode"] = "AUTOMATIC_CASE_V1" if structured_automatic else "AUTOMATIC_FLAT"
                 fingerprint_payload["automatic_dedupe_policy"] = "normalized-text-v3"
                 fingerprint_payload["automatic_policies"] = {
                     "campus_contribution": (
@@ -1448,6 +1521,7 @@ class Stage6ReadinessService:
             problem = GenerationProblem(
                 cycle_course=cycle_course,
                 configuration=configuration,
+                algorithm_version=("automatic-case-v1" if structured_automatic else GENERATION_ALGORITHM_VERSION),
                 blueprint=blueprint,
                 final_count=final_count,
                 margins=margins,
@@ -1471,5 +1545,7 @@ class Stage6ReadinessService:
                 automatic_selection=(
                     automatic_selection if automatic_flat_mode else None
                 ),
+                pool_warnings=tuple(w for w in warnings if w["code"] in {
+                    "UNUSABLE_CASE_EXCLUDED", "UNPLACED_SINGLETONS_EXCLUDED", "INVALID_QUESTIONS_EXCLUDED"}),
             )
         return problem, report

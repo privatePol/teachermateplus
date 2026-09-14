@@ -32,16 +32,17 @@ class FacultyCasePolicy:
             contribution.cycle_course.cycle.processing_mode
             == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
         )
-        if not enabled or not manual:
+        from .setup_services import case_aware_automatic_enabled
+        if not enabled or not (manual or case_aware_automatic_enabled(contribution.cycle_course)):
             if required:
                 raise PermissionDenied(
-                    "Case authoring is available only for the enabled structured Manual Review workflow."
+                    "Case authoring requires enabled structured Manual Review or Departmental Automatic generation."
                 )
             return None
         unit = resolve_examination_unit(
             contribution.cycle_course, for_update=for_update
         )
-        if unit.primary.id != contribution.cycle_course_id:
+        if manual and unit.primary.id != contribution.cycle_course_id:
             raise PermissionDenied("Faculty Case ownership must use the authoritative examination unit.")
         queryset = ExamBlueprint.objects
         if for_update:
@@ -173,7 +174,7 @@ class FacultyCasePolicy:
         if context is None:
             if ExamScenario.objects.filter(contribution=contribution).exists():
                 raise ValidationError(
-                    "This contribution contains Case-Based Questions, but the structured Manual Review workflow is unavailable."
+                    "This contribution contains Cases, but its structured workflow is unavailable."
                 )
             return
         blueprint, sections = context
@@ -236,6 +237,14 @@ class FacultyCasePolicy:
                 raise ValidationError("A Case belongs to a different exam structure.")
             if member_counts[scenario.id] == 0:
                 raise ValidationError("Each Case must contain at least one Linked Question.")
+            if contribution.cycle_course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+                from .contribution_services import QuestionPayloadService
+                ordered = [member for member in members if member.scenario_id == scenario.id]
+                if [member.position for member in ordered] != list(range(1, len(ordered) + 1)):
+                    raise ValidationError("Reorder this Case's Linked Questions to restore a complete sequence before Final Submission.")
+                fingerprints = [QuestionPayloadService.question_fingerprint(member.question.question_text) for member in ordered]
+                if len(fingerprints) != len(set(fingerprints)):
+                    raise ValidationError("A Case contains duplicate logical MCQs. Give each Linked Question a distinct stem before Final Submission.")
             canonical = canonicalize_scenario_content(scenario.stimulus).html
             if (
                 scenario.content_format != ExamScenario.ContentFormat.RICH_HTML_V1

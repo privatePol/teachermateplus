@@ -378,7 +378,8 @@ class FacultyContributionPreparationService:
 
 def readiness_blocker_text(report):
     code = ((report.get("blockers") or [{}])[0]).get("code", "")
-    shortages = report.get("shortages") or ()
+    shortages = [row for row in report.get("shortages", ())
+                 if not (report.get("automatic_pool") and row.get("dimension") == "difficulty")]
     if shortages:
         shortage = shortages[0]
         label = shortage.get("label", "questions")
@@ -574,6 +575,8 @@ class AutomaticExamDeadlineService:
 
         current = ExamGenerationService.current_for_course(cycle_course=course)
         if current is not None:
+            from .structured_snapshots import verify_revision_structure
+            verify_revision_structure(current)
             exempt_result = cls._record_status_authoritatively(
                 cycle_course_id=course.id,
                 tenant_id=tenant_id,
@@ -1160,7 +1163,10 @@ class AutomaticGenerationSummaryService:
         common,
         optimization_evidence,
     ):
-        warnings = []
+        warnings = [row for row in optimization_evidence.get("case_pool_warnings", ())
+                    if isinstance(row, dict) and row.get("code") in {
+                        "UNUSABLE_CASE_EXCLUDED", "UNPLACED_SINGLETONS_EXCLUDED", "INVALID_QUESTIONS_EXCLUDED"}
+                    and isinstance(row.get("message"), str)]
         if audit_snapshot is not None and audit_snapshot.redundant_copy_count:
             warnings.append(
                 {
