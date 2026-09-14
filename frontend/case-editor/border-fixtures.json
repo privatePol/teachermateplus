@@ -32,7 +32,7 @@
   {"name":"bottom important","style":"border-bottom:3pt double black!important","reject":true},
   {"name":"Word fallback","style":"border-bottom:3pt double black;mso-border-bottom-alt:double windowtext 3pt","rule":"double"},
   {"name":"commented ordinary grid","style":"/* Word */border:solid windowtext .5pt","rule":null},
-  {"name":"commented stylesheet rule","sheet":"td {border-bottom/**/:3pt double black}","reject":true},
+    {"name":"commented stylesheet rule","sheet":"td {border-bottom/**/:3pt double black}","reject":true,"clientRule":"double"},
   {"name":"unclosed stylesheet comment","sheet":"/* td {border-bottom:3pt double black}","reject":true},
   {"name":"ordinary stylesheet grid","sheet":"td {border:1pt solid black}","rule":null},
   {"name":"important stylesheet overrides inline rule","sheet":"td {border:1pt solid black!important}","style":"border-bottom:3pt double black","reject":true},

@@ -757,6 +757,12 @@ def question_create_view(request, contribution_id, scenario_id=None):
             if getattr(question, "duplicate_warning", False):
                 messages.warning(request, "This question resembles another question you have saved. It was saved because duplicates are warning-only.")
             messages.success(request, "Linked Question added." if scenario else "Question added.")
+            if scenario:
+                return redirect(
+                    "departmental_exams:faculty_case_detail",
+                    contribution_id=contribution.id,
+                    scenario_id=scenario.id,
+                )
             return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
     return render(
         request,

@@ -97,8 +97,9 @@ bottom rules and no internal rule that would disappear; ambiguous merges reject
 without dispatch. Split retains a rule on the bottommost resulting cells only.
 Dedicated rule commands never change row/column counts or merged spans.
 
-Supported Word imports are explicit `td/th` inline `border-bottom` and/or
-`mso-border-bottom-alt` shorthands: three tokens in any order, `solid` or `double`,
+Supported Word imports are `td/th` `border-bottom` and/or
+`mso-border-bottom-alt` shorthands from inline styles or matching embedded style
+rules: three tokens in any order, `solid` or `double`,
 one positive width up to 6 in `pt` or `px`, and `black`, `windowtext`, `#000` or
 `#000000`. These map to single/double semantics, not original pixel thickness.
 `none`, `0`, `0pt`, `0px` mean no rule. Equivalent declarations must agree on
@@ -106,20 +107,23 @@ single/double/unset. A bottom shorthand duplicating an all-edge solid `border`
 or `mso-border-alt` grid, or matching explicit top/left/right edges, is not inferred
 to be an accounting rule (token order, equivalent decimal width spelling and
 the supported black color aliases are ignored for this comparison).
-Ordinary solid grids remain normalized to TMP's grid. Unsupported bottom
-longhands, colors, widths, dashed/dotted/double non-bottom borders, conflicting
-rule declarations, and rules on paragraphs/other wrappers reject explicitly.
-Style blocks containing bottom-rule or double/dashed/dotted declarations reject
-conservatively: no stylesheet cascade or Word paragraph-border inference is
-implemented. External stylesheet fidelity is unsupported; no external resources
-are fetched. This is not a whole-table border editor or universal Word fidelity.
+Ordinary solid grids and table/row wrapper borders remain normalized to TMP's
+grid. A supported bottom rule on the final direct paragraph/heading in a cell is
+promoted to that cell; a rule that cannot be mapped to the cell bottom rejects.
+Embedded selectors are considered only when they match a cell or such a final
+cell block. Unused and wrapper-only rules are irrelevant. Unsupported bottom
+longhands, colors, widths, dashed/dotted/double non-bottom borders and conflicting
+applicable declarations reject explicitly. External stylesheet fidelity is
+unsupported; no external resources are fetched. This is not a whole-table border
+editor or universal Word fidelity.
 
 Review hardening: a linear inspection scanner masks quoted strings and replaces
 closed CSS comments only at safe token boundaries; it does not rewrite stored
 content or join split identifiers/values. Comments before a property/colon or
 between whitespace-separated tokens preserve supported rules. Split tokens,
 unclosed comments/strings and unquoted escapes reject. Rule-bearing style blocks
-are detected after this scan and still reject conservatively.
+are detected after this scan and reject when they apply to supported accounting
+targets but cannot be represented safely.
 
 Later all-edge shorthands conflicting with an earlier bottom declaration reject
 atomically instead of inventing an accounting rule. Reversed order (grid/none,

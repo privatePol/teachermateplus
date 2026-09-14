@@ -23,11 +23,11 @@ function borderFixtureHTML(fixture) {
 test('shared border review fixtures preserve rules or reject without silent change', () => {
   for (const fixture of borderFixtures) {
     const raw=borderFixtureHTML(fixture);
-    if (fixture.reject) assert.throws(()=>normalizeClipboard(raw),error=>
+    if (fixture.reject && !fixture.clientRule) assert.throws(()=>normalizeClipboard(raw),error=>
       error.diagnosticCode==='CASE_NORMALIZE_ATTRIBUTE' && !error.message.includes('100'),fixture.name);
     else {
       const editor=make(normalizeClipboard(raw));
-      assert.deepEqual(rules(editor),[fixture.rule],fixture.name);
+      assert.deepEqual(rules(editor),[fixture.clientRule ?? fixture.rule],fixture.name);
       const exported=serializeEditor(editor), reopened=make(exported);
       assert.equal(serializeEditor(reopened),exported,fixture.name);
       editor.destroy();reopened.destroy();
@@ -35,7 +35,7 @@ test('shared border review fixtures preserve rules or reject without silent chan
   }
 });
 test('rejected border fixtures preserve editor state and recover both clipboard formats', () => {
-  for (const fixture of borderFixtures.filter(item=>item.reject)) {
+  for (const fixture of borderFixtures.filter(item=>item.reject && !item.clientRule)) {
     const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
     mounted.editor.commands.selectAll();const before=mounted.editor.state;
     const raw=borderFixtureHTML(fixture);
@@ -104,17 +104,19 @@ test('explicit Word bottom rules round trip; ordinary grids are not inferred as 
     assert.doesNotMatch(normalizeClipboard(`<table><tr><td style="${style}">100</td></tr></table>`),/tmp-rule/);
   }
   assert.doesNotMatch(normalizeClipboard('<table><tr><td style="border-top:solid windowtext 1.0pt;border-left:1pt solid black;border-right:solid black 1.0pt;border-bottom:1pt solid #000">100</td></tr></table>'),/tmp-rule/);
+  assert.match(normalizeClipboard('<table><tr><td><p style="border-bottom:3pt double black">100</p></td></tr></table>'),/<td class="tmp-rule-double">/);
   assert.match(normalizeClipboard('<p style="border-bottom:none">Ordinary paragraph</p>'),/Ordinary paragraph/);
 });
 
 test('unsupported meaningful borders and malformed rule classes reject with private diagnostics', () => {
   for(const html of [
     '<p style="border-bottom:1pt solid black">Private amount</p>',
+    '<table><tr><td><p style="border-bottom:1pt solid black">Private amount</p><p>Later text</p></td></tr></table>',
     '<table><tr><td style="border-bottom:1pt dashed black">Private amount</td></tr></table>',
     '<table><tr><td style="border-bottom:1pt solid red">Private amount</td></tr></table>',
     '<table><tr><td style="border-bottom:1pt solid black;mso-border-bottom-alt:3pt double black">Private amount</td></tr></table>',
     '<table><tr><td class="tmp-rule-single tmp-rule-double">Private amount</td></tr></table>',
-    '<style>.amount {border-bottom:3pt double black}</style><table><tr><td class="amount">Private amount</td></tr></table>'
+    '<style>.amount {border-bottom:1pt dashed black}</style><table><tr><td class="amount">Private amount</td></tr></table>'
   ]) assert.throws(()=>normalizeClipboard(html),error=>error.diagnosticCode==='CASE_NORMALIZE_ATTRIBUTE' && !error.message.includes('Private amount'));
   assert.throws(()=>make('<p class="unknown">Private amount</p>'),error=>error.diagnosticCode==='CASE_COMPARE_ATTRIBUTE' && !error.message.includes('Private amount'));
 });
@@ -336,6 +338,33 @@ function pasteInto(editor,html,text='',files=[]) {
   Object.defineProperty(event,'clipboardData',{value:{files,getData:type=>type==='text/html' ? html : text}});
   editor.view.dom.dispatchEvent(event); assert.equal(event.defaultPrevented,true);
 }
+test('Word full-document accounting table paste preserves structure and applicable formatting', () => {
+  // Reduced from the staging evidence: the retained 44,516-character clipboard
+  // payload was unavailable, so this covers its observed table shape and styles.
+  const rows=[
+    ['Cash and cash equivalents','P6,110,000.00'],
+    ['Trade and other receivables','2,081,706.00'],
+    ['Inventories','1,000,000.00'],
+    ['Accounts payable','4,075,000.00'],
+  ].map(([label,amount])=>`<tr style="border-bottom:solid windowtext 1pt"><td style="border:solid windowtext 1pt"><p class="MsoNormal">${label}</p></td><td class="WordAmount" style="border:solid windowtext 1pt;text-align:right"><p class="MsoNormal">${amount}</p></td></tr>`).join('');
+  const html='<!doctype html><html xmlns:o="urn:schemas-microsoft-com:office:office"><head><style><!--'+
+    '.UnusedWordBorder {border-bottom:1pt dashed red} table.MsoTableGrid {border-bottom:solid windowtext 1pt} '+
+    'td.WordAmount {border-bottom:double windowtext 3pt}--></style></head><body><!--StartFragment-->'+
+    '<div class="WordSection1"><table class="MsoTableGrid" style="border-bottom:solid windowtext 1pt;border-collapse:collapse"><tbody>'+
+    '<tr><td colspan="2" style="border:solid windowtext 1pt;text-align:center"><p class="MsoNormal"><strong><em>From Statement of Financial Position (SFP)</em></strong></p></td></tr>'+
+    rows+'</tbody></table></div><!--EndFragment--></body></html>';
+  const form=formFor(''), mounted=mountCaseEditor(form);
+  pasteInto(mounted.editor,html,'From Statement of Financial Position');
+  const saved=mounted.currentContent(), parsed=new DOMParser().parseFromString(saved,'text/html');
+  assert.equal(parsed.querySelectorAll('table').length,1);
+  assert.equal(parsed.querySelectorAll('tr').length,5);
+  assert.equal(parsed.querySelector('td').getAttribute('colspan'),'2');
+  assert.equal(parsed.querySelectorAll('td.tmp-align-right').length,4);
+  assert.equal(parsed.querySelectorAll('td.tmp-rule-double').length,4);
+  assert.equal(form.querySelector('[data-case-editor-errors]').hidden,true);
+  const reopened=make(saved); assert.equal(serializeEditor(reopened),saved);
+  reopened.destroy(); mounted.editor.destroy(); form.remove();
+});
 test('rejected paste has bounded separate recovery, truthful state, retry and dismiss', () => {
   const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);
   const html='<p>Rejected</p><img src="https://example.invalid/no-fetch">', text='Rejected plain';
@@ -359,6 +388,32 @@ test('rejected paste has bounded separate recovery, truthful state, retry and di
   pasteInto(mounted.editor,html,text); pasteInto(mounted.editor,'<p>Corrected</p>','Corrected');
   assert.match(mounted.currentContent(),/Corrected/); assert.equal(form.querySelector('[data-case-editor-errors]').hidden,true);
   mounted.editor.destroy(); form.remove();
+});
+test('accounting rejection keeps content and shows fixed recovery guidance while unexpected failures stay generic', () => {
+  const borderForm=formFor('<p>Original</p>'), borderMounted=mountCaseEditor(borderForm);
+  const borderBefore=borderMounted.editor.state;
+  pasteInto(borderMounted.editor,'<table><tr><td style="border-bottom:1pt dashed black">Amount</td></tr></table>','Amount');
+  const borderErrors=borderForm.querySelector('[data-case-editor-errors]').textContent;
+  assert.equal(borderMounted.editor.state,borderBefore);
+  assert.equal(borderMounted.currentContent(),'<p>Original</p>');
+  assert.match(borderErrors,/This pasted border cannot be represented safely\./);
+  assert.doesNotMatch(borderErrors,/Paste could not be inserted safely\./);
+  borderMounted.editor.destroy(); borderForm.remove();
+
+  const unexpectedForm=formFor('<p>Original</p>'), unexpectedMounted=mountCaseEditor(unexpectedForm);
+  const OriginalTextEncoder=globalThis.TextEncoder;
+  let encodeCalls=0;
+  globalThis.TextEncoder=class { encode(value) {
+    if (!encodeCalls++) throw new Error('Private encoder fault');
+    return new OriginalTextEncoder().encode(value);
+  } };
+  try { pasteInto(unexpectedMounted.editor,'<p>Replacement</p>','Replacement'); }
+  finally { globalThis.TextEncoder=OriginalTextEncoder; }
+  const unexpectedErrors=unexpectedForm.querySelector('[data-case-editor-errors]').textContent;
+  assert.equal(unexpectedMounted.currentContent(),'<p>Original</p>');
+  assert.match(unexpectedErrors,/Paste could not be inserted safely\. Your existing content is unchanged\./);
+  assert.doesNotMatch(unexpectedErrors,/Private encoder fault/);
+  unexpectedMounted.editor.destroy(); unexpectedForm.remove();
 });
 test('oversized recovery is not retained and failed insertion is atomic', () => {
   const form=formFor('<p>Original</p>'), mounted=mountCaseEditor(form);

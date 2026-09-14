@@ -16,7 +16,7 @@ export function compatibilityError(phase, category, message = preservationError)
 // Explicit bottom shorthands only. Ordinary all-edge solid grid borders are
 // not accounting rules. Never copy source CSS into the canonical document.
 function rejectBorder() { throw compatibilityError('normalize','attribute',
-    'This border cannot be preserved as an accounting rule. Use explicit single/double bottom rules on amount cells; paragraph, stylesheet and conflicting rules are not supported.'); };
+    'This pasted border cannot be represented safely. Keep accounting lines as a single or double bottom border on an amount cell or its final paragraph, then paste again. No content was inserted.'); };
 // Inspection copy only: mask strings and replace comments with token boundaries.
 // Never concatenate partial identifiers or interpret escapes as property names.
 function inspectBorderCSS(css) {
@@ -39,9 +39,14 @@ function inspectBorderCSS(css) {
 }
 export function accountingRule(node) {
   const reject=rejectBorder;
+  const cell = ['td', 'th'].includes(node.localName);
   const selected = [...node.classList].filter(c => /^tmp-rule-/.test(c));
   if (selected.some(c => !['tmp-rule-single','tmp-rule-double'].includes(c)) || selected.length > 1) reject();
-  if (selected.length && !['td','th'].includes(node.localName)) reject();
+  if (selected.length && !cell) reject();
+  // Word repeats structural borders on tables/rows and may place a supported
+  // accounting bottom rule on the final paragraph inside an amount cell.
+  // Only cells and those candidate blocks participate in accounting import.
+  if (!cell && !blocks.has(node.localName)) return null;
   let rule = selected[0]?.replace('tmp-rule-','') || null;
   const declarations = inspectBorderCSS(node.getAttribute('style') || '').toLowerCase().split(';')
     .filter(part=>part.includes(':'))
@@ -55,7 +60,6 @@ export function accountingRule(node) {
   if (!selected.length && bottom.every(([,value])=>/^(none|0(?:px|pt)?)$/.test(value)) &&
       declarations.filter(([key])=>['border','mso-border-alt'].includes(key))
         .every(([,value])=>/^(none|0(?:px|pt)?)$/.test(value))) return null;
-  if (!['td','th'].includes(node.localName)) reject();
   const parseBorder = value => {
     if (/^(none|0(?:px|pt)?)$/.test(value)) return null;
     const tokens=value.split(/\s+/), kind=tokens.find(t=>['none','solid','double'].includes(t));
@@ -99,6 +103,57 @@ export function accountingRule(node) {
   if (completeGrid && explicit === 'single' && !selected.length) return null;
   rule=explicit;
   return rule;
+}
+
+function accountingTarget(node) {
+  if (['td','th'].includes(node.localName)) return node;
+  if (!blocks.has(node.localName) || !['td','th'].includes(node.parentElement?.localName)) return null;
+  for (let sibling=node.nextSibling;sibling;sibling=sibling.nextSibling) {
+    if (sibling.nodeType===1 || (sibling.nodeType===3 && sibling.textContent.trim())) return null;
+  }
+  return node.parentElement;
+}
+
+function assignAccountingRule(target, rule) {
+  if (!rule) return;
+  const selected=[...target.classList].filter(value=>/^tmp-rule-/.test(value));
+  if (selected.length && !selected.includes('tmp-rule-'+rule)) rejectBorder();
+  target.classList.add('tmp-rule-'+rule);
+}
+
+function promoteInlineAccountingRules(body) {
+  for (const block of body.querySelectorAll('p,h3,h4')) {
+    const rule=accountingRule(block);
+    if (!rule) continue;
+    const target=accountingTarget(block);
+    if (!target) rejectBorder();
+    assignAccountingRule(target,rule);
+  }
+}
+
+function promoteStylesheetAccountingRules(html, body) {
+  for (const [,source] of html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) {
+    // Word wraps style blocks in legacy HTML comment markers.
+    const css=inspectBorderCSS(source).replace(/<!--|-->/g,' ');
+    for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector=match[1].trim(), declarations=match[2];
+      if (!/(?:^|;)\s*(?:mso-)?border[\w-]*\s*:/i.test(declarations)) continue;
+      let matched;
+      try { matched=[...body.querySelectorAll(selector)]; }
+      catch { rejectBorder(); }
+      const targets=[];
+      for (const node of matched) {
+        if (!['td','th'].includes(node.localName) && !(blocks.has(node.localName) && node.closest('td,th'))) continue;
+        const target=accountingTarget(node);
+        if (!target) rejectBorder();
+        targets.push(target);
+      }
+      if (!targets.length) continue;
+      const probe=document.createElement('td'); probe.setAttribute('style',declarations);
+      const rule=accountingRule(probe);
+      for (const target of targets) assignAccountingRule(target,rule);
+    }
+  }
 }
 
 export function parse(html) {
@@ -165,15 +220,8 @@ export function normalizeClipboard(html, text = '') {
   // Reject resource-bearing elements before even building an inert clipboard DOM.
   if (/<(?:img|svg|object|embed|iframe|[\w-]+:shape|[\w-]+:imagedata)\b/i.test(html)) throw new Error('Images and embedded objects are not supported.');
   const body = parse(html);
-  // Word may place CSS in the document head. Do not silently discard a rule
-  // requiring cascade evaluation; ordinary solid grid styles remain eligible.
-  const stylesheetRule=[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].some(([,css])=>
-    [...inspectBorderCSS(css).matchAll(/((?:mso-)?border[\w-]*)\s*:\s*([^;{}]+)/gi)].some(([,key,value])=>
-      value.includes('!') || (key.toLowerCase().includes('bottom') && !/^(none|0(?:px|pt)?)$/i.test(value.trim())) ||
-      /\b(double|dashed|dotted|groove|ridge|hidden)\b/i.test(value)));
-  if (stylesheetRule) {
-    throw compatibilityError('normalize','attribute','Stylesheet-defined accounting borders are not supported. Apply explicit bottom rules to amount cells in Word or TMP.');
-  }
+  promoteStylesheetAccountingRules(html,body);
+  promoteInlineAccountingRules(body);
   normalizeWordLists(body);
   const clean = document.createElement('div');
   for (const child of body.childNodes) clean.append(safeNode(child, document));

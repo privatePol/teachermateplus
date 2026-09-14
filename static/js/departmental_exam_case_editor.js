@@ -106,6 +106,7 @@ export function mountCaseEditor(form) {
         'Pasted Case exceeds the request limit.', 'No supported Case content was found.',
         'Paste could not be inserted at this position.',
         'This Word list uses unsupported numbering. Paste the affected list as text, then apply Bullets or Numbered list in TMP. No content was inserted.',
+        'This pasted border cannot be represented safely. Keep accounting lines as a single or double bottom border on an amount cell or its final paragraph, then paste again. No content was inserted.',
         'This border cannot be preserved as an accounting rule. Use explicit single/double bottom rules on amount cells; paragraph, stylesheet and conflicting rules are not supported.',
         'Stylesheet-defined accounting borders are not supported. Apply explicit bottom rules to amount cells in Word or TMP.',
         'This table would require a geometry change to edit safely. The original source is preserved.'

@@ -869,11 +869,53 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
             "apps.departmental_exams.faculty_views.QuestionMutationService.create",
             wraps=QuestionMutationService.create,
         ) as create:
-            self.assertEqual(client.post(form.action, payload).status_code, 302)
+            response = client.post(form.action, payload)
+        case_detail_url = reverse(
+            "departmental_exams:faculty_case_detail",
+            args=[self.contribution.id, scenario.id],
+        )
+        self.assertRedirects(response, case_detail_url)
         self.assertEqual(create.call_args.kwargs["scenario_id"], scenario.id)
         question = self.contribution.questions.get()
         self.assertEqual(question.exam_scenario_membership.scenario_id, scenario.id)
         self.assertEqual(question.blueprint_placement.section_id, scenario.section_id)
+        detail = client.get(case_detail_url)
+        self.assertContains(
+            detail,
+            reverse(
+                "departmental_exams:faculty_case_question_create",
+                args=[self.contribution.id, scenario.id],
+            ),
+        )
+        self.assertEqual(
+            list(scenario.members.values_list("question_id", "position")),
+            [(question.id, 1)],
+        )
+
+        standalone_url = reverse(
+            "departmental_exams:question_create", args=[self.contribution.id]
+        )
+        standalone = _QuestionFormParser(client.get(standalone_url))
+        standalone_response = client.post(
+            standalone.action,
+            {
+                **self._complete_question_form(
+                    standalone, "Standalone redirect regression"
+                ),
+                "section_id": str(self.section_a.id),
+            },
+        )
+        self.assertRedirects(
+            standalone_response,
+            reverse(
+                "departmental_exams:contribution_workspace",
+                args=[self.contribution.id],
+            ),
+        )
+        self.assertEqual(
+            list(scenario.members.values_list("question_id", "position")),
+            [(question.id, 1)],
+        )
 
     def test_linked_form_rejects_missing_tampered_case_and_fixed_section(self):
         scenario = self.save_case()
