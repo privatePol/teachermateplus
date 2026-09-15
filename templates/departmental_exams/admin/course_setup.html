@@ -1,26 +1,66 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
+{% with cycle=rows.0.course.cycle|default:cycle %}
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Manage Course Exams</a></li><li class="breadcrumb-item active" aria-current="page">Prepare Faculty Contributions</li></ol></nav>
-<h1>Prepare Faculty Contributions</h1>
+<h1>{% if single_course_confirmation %}Review and open course{% else %}Prepare Faculty Contributions{% endif %}</h1>
 {% include "departmental_exams/admin/_case_preparation_guidance.html" %}
-<p>Departmental Exams are marked DEPTAL. Standardized exams use No Sections automatically.</p>
+<p>DEPTAL is the examination classification, not a readiness result. Eligible never-opened DEPTAL courses use <strong>No Sections — default (created on Open)</strong> unless an authorized configurator saves an optional explicit structure first. Viewing readiness never creates a database record.</p>
 <p>{{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }} — Cycle: {{ cycle.get_status_display }}</p>
-<p>Cycle defaults → select courses → configure exceptions → review opening requirements → open confirmed selection.</p>
+<p>Cycle defaults → course configuration → optional exam structure → prepare and open contributions → monitor submissions → generation status → release and print.</p>
 <p><strong>Cycle contributor instructions:</strong> {{ cycle.contributor_instructions|default:"None configured" }}</p>
 <p><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Cycle defaults</a> · <a href="{% url 'departmental_exams:assigned_course_examinations' %}">Manage Course Exams</a></p>
 {% if setup_error %}<div class="alert alert-warning" role="alert">{{ setup_error }}</div>{% endif %}
-{% if completed %}<div class="alert alert-success">The confirmed selection was processed. Already-open courses were preserved.</div>{% endif %}
+{% if completed %}<div class="alert alert-success">The confirmed selection was processed. Existing open courses and history were preserved.</div>{% endif %}
 <form method="post">{% csrf_token %}
-{% if confirmation %}<input type="hidden" name="confirmation" value="{{ confirmation }}"><div class="alert alert-info">Confirm this exact selection. If any selected course changes or becomes blocked, no course will open.</div>{% endif %}
-<div class="table-responsive"><table class="table"><thead><tr><th>Select</th><th>Course</th><th>Effective settings</th><th>Readiness</th><th>Exceptions</th></tr></thead><tbody>
-{% for row in rows %}<tr><td>{% if not confirmation and not completed %}<input type="checkbox" name="courses" value="{{ row.course.id }}" aria-label="Select {{ row.course.course.code }}">{% endif %}</td>
-<td>{{ row.course.course.code }} — {{ row.course.course.title }}<br>{{ row.course.get_exam_classification_display }}</td>
-<td>Faculty quota: {{ row.configuration.questions_required_per_faculty|default_if_none:"Not configured" }} ({{ row.configuration.questions_required_per_faculty_source|default:"NOT CONFIGURED" }})<br>Final items: {{ row.configuration.final_item_count|default_if_none:"Not configured" }} ({{ row.configuration.final_item_count_source|default:"NOT CONFIGURED" }})<br>Deadline: {{ row.configuration.contribution_deadline|default:"Not configured" }} ({{ row.configuration.contribution_deadline_source|default:"NOT CONFIGURED" }})<br>Coverage: {{ row.configuration.coverage|default:"Not configured" }} ({{ row.configuration.coverage_source|default:"NOT CONFIGURED" }})</td>
-<td>{% include "departmental_exams/_classification_badge.html" with course=row.course %} {{ row.status }}{% for reason in row.reasons %}<div class="small">{{ reason }}</div>{% endfor %}</td>
-<td>{% if row.status == 'Ready' or row.status == 'Blocked' %}<a href="{% url 'departmental_exams:course_classification' row.course.id %}">Classification</a> · <a href="{% url 'departmental_exams:course_configuration' row.course.id %}">Override settings</a>{% if row.course.exam_classification == 'DEPARTMENTAL' %} · <a href="{% url 'departmental_exams:blueprint_configuration' row.course.id %}">Exam Structure</a>{% endif %}{% endif %}</td></tr>
+{% if confirmation %}<input type="hidden" name="confirmation" value="{{ confirmation }}"><div class="alert alert-info"><strong>Review {{ selected_unit_count }} course examination unit{{ selected_unit_count|pluralize }}</strong> covering {{ selected_member_count }} course record{{ selected_member_count|pluralize }}. Confirm this exact selection. If any selected course changes, expires, or becomes blocked, no course will open.</div>{% endif %}
+{% if not confirmation and not completed %}<div class="row g-2 align-items-end mb-3"><div class="col-md-6"><label class="form-label" for="course-ready-filter">Filter courses</label><input class="form-control" id="course-ready-filter" type="search" placeholder="Course code or title"></div><div class="col-md-3"><label class="form-label" for="readiness-filter">Readiness</label><select class="form-select" id="readiness-filter"><option value="">All readiness states</option><option>Ready</option><option>Blocked</option><option>Already open</option><option>Preserved history</option><option>Exempt</option></select></div><div class="col-md-3"><button class="btn btn-outline-primary w-100" type="button" id="select-all-ready">Select all ready courses</button></div></div><p class="small" id="selected-course-count" role="status" aria-live="polite">0 ready courses selected</p>{% endif %}
+<div class="table-responsive"><table class="table"><thead><tr><th>Select</th><th>Course examination unit</th><th>Effective settings</th><th>Readiness</th><th>Configuration</th></tr></thead><tbody>
+{% for row in rows %}<tr data-course-row data-course-search="{{ row.course.course.code|lower }} {{ row.course.course.title|lower }}" data-readiness="{{ row.status }}"><td>{% if not confirmation and not completed %}<input class="ready-course-selector" type="checkbox" name="courses" value="{{ row.course.id }}" aria-label="Select ready course {{ row.course.course.code }}"{% if row.status != 'Ready' %} disabled aria-disabled="true"{% endif %}>{% endif %}</td>
+<td>{{ row.course.course.code }} — {{ row.course.course.title }}<br>{% include "departmental_exams/_classification_badge.html" with course=row.course %}<div class="small text-muted">{{ row.member_ids|length }} course record{{ row.member_ids|length|pluralize }} in this examination unit</div>{% if confirmation %}<div>Member course records: {{ row.member_ids|join:", " }}</div><div>General instructions: {{ row.configuration.general_instructions|default:"None" }}</div><div>Additional instructions: {{ row.configuration.additional_instructions|default:"None" }}</div>{% for section in row.sections %}<div>Section {{ section.display_order }}: {{ section.title }} — {{ section.item_quota }} items. {{ section.instructions }}</div>{% endfor %}{% endif %}</td>
+<td>Faculty quota: {{ row.configuration.questions_required_per_faculty|default_if_none:"Not configured" }} ({{ row.configuration.questions_required_per_faculty_source|default:"NOT CONFIGURED" }})<br>Final items: {{ row.configuration.final_item_count|default_if_none:"Not configured" }} ({{ row.configuration.final_item_count_source|default:"NOT CONFIGURED" }})<br>Deadline: {{ row.configuration.contribution_deadline|default:"Not configured" }} ({{ row.configuration.contribution_deadline_source|default:"NOT CONFIGURED" }})<br>Coverage: {{ row.configuration.coverage|default:"Not configured" }} ({{ row.configuration.coverage_source|default:"NOT CONFIGURED" }})<br><strong>Exam structure:</strong> {{ row.structure_display }}</td>
+<td>{% include "departmental_exams/admin/_setup_readiness_badge.html" with status=row.status %}{% for reason in row.reasons %}<div class="small mt-1">{{ reason }}</div>{% endfor %}</td>
+<td>{% if row.status == 'Ready' or row.status == 'Blocked' %}<a href="{% url 'departmental_exams:course_classification' row.course.id %}">Classification</a> · <a href="{% url 'departmental_exams:course_configuration' row.course.id %}">Course configuration</a>{% if row.can_configure_structure %} · <a href="{% url 'departmental_exams:blueprint_configuration' row.course.id %}">Optional exam structure</a>{% endif %}{% elif row.status == 'Already open' %}<a href="{% url 'departmental_exams:course_configuration' row.course.id %}">View configuration</a> · <a href="{% url 'departmental_exams:contributor_monitoring' %}?cycle={{ row.course.cycle_id }}&amp;course={{ row.course.course_id }}&amp;cycle_status={{ row.course.cycle.status }}">Monitor submissions</a>{% elif row.status == 'Preserved history' %}<a href="{% url 'departmental_exams:course_configuration' row.course.id %}">View preserved configuration</a> · <a href="{% url 'departmental_exams:automatic_generation_summary' row.course.cycle_id %}">Generation status</a>{% endif %}</td></tr>
 {% empty %}<tr><td colspan="5">No course exams are available within your authorized scope.</td></tr>{% endfor %}
 </tbody></table></div>
-{% if not completed %}<button class="btn btn-success" type="submit">{% if confirmation %}Open confirmed selection{% else %}Review selected courses{% endif %}</button>{% endif %}
+{% if not completed %}<button class="btn btn-success" type="submit"{% if not confirmation %} id="review-ready-courses" disabled{% endif %}>{% if confirmation %}Open confirmed selection{% else %}Review selected courses{% endif %}</button>{% endif %}
 <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_setup' cycle.id %}">Refresh selection</a>
 </form>
+{% if not confirmation and not completed %}<script>
+(() => {
+  const rows = [...document.querySelectorAll('[data-course-row]')];
+  const search = document.getElementById('course-ready-filter');
+  const readiness = document.getElementById('readiness-filter');
+  const selectAll = document.getElementById('select-all-ready');
+  const count = document.getElementById('selected-course-count');
+  const review = document.getElementById('review-ready-courses');
+  const selectors = rows.map(row => row.querySelector('.ready-course-selector')).filter(Boolean);
+  const sync = () => {
+    const selected = selectors.filter(box => box.checked).length;
+    count.textContent = `${selected} ready course${selected === 1 ? '' : 's'} selected`;
+    review.disabled = selected === 0;
+  };
+  const applyFilters = () => {
+    const term = search.value.trim().toLowerCase();
+    const state = readiness.value;
+    rows.forEach(row => {
+      const visible = (!term || row.dataset.courseSearch.includes(term)) && (!state || row.dataset.readiness === state);
+      row.hidden = !visible;
+      const box = row.querySelector('.ready-course-selector');
+      if (!visible && box) box.checked = false;
+    });
+    sync();
+  };
+  selectAll.addEventListener('click', () => {
+    selectors.forEach(box => {
+      if (!box.disabled && !box.closest('[data-course-row]').hidden) box.checked = true;
+    });
+    sync();
+  });
+  search.addEventListener('input', applyFilters);
+  readiness.addEventListener('change', applyFilters);
+  selectors.forEach(box => box.addEventListener('change', sync));
+  sync();
+})();
+</script>{% endif %}
+{% endwith %}
 {% endblock %}

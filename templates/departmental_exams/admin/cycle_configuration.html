@@ -36,7 +36,7 @@
     {% if lifecycle_flags.can_open_cycle %}<a class="btn btn-success" href="{% url 'departmental_exams:cycle_open' cycle.id %}">Open Cycle</a>{% endif %}
     {% if lifecycle_flags.can_close_cycle %}<a class="btn btn-warning" href="{% url 'departmental_exams:cycle_close' cycle.id %}">Close Cycle</a>{% endif %}
     {% if can_view_course_examinations %}<a class="btn btn-outline-secondary" href="{% url 'departmental_exams:cycle_course_list' cycle.id %}">Course Examinations</a><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contributor_monitoring' %}?cycle={{ cycle.id }}&amp;cycle_status={{ cycle.status }}">Faculty Contribution Status</a>{% endif %}
-    {% if can_manage_automatic_generation %}<a class="btn btn-primary" href="{% url 'departmental_exams:prepare_faculty_contributions' cycle.id %}">Prepare Faculty Contributions</a><a class="btn btn-outline-primary" href="{% url 'departmental_exams:automatic_generation_summary' cycle.id %}">Exam Generation Status</a>{% endif %}
+    {% if can_manage_automatic_generation %}<a class="btn btn-primary" href="{% url 'departmental_exams:course_setup' cycle.id %}">Prepare Faculty Contributions</a><a class="btn btn-outline-primary" href="{% url 'departmental_exams:automatic_generation_summary' cycle.id %}">Exam Generation Status</a>{% endif %}
     {% if safe_delete.eligible %}
       <a class="btn btn-outline-danger" href="{% url 'departmental_exams:cycle_delete' cycle.id %}">Delete Examination Cycle</a>
     {% else %}

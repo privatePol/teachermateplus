@@ -175,9 +175,14 @@ class AdminHelpGuideTests(TestCase):
         self.assertIn("shared across its listed campuses", topic["steps"][1])
         self.assertIn("Configuration Ready does not confirm opening eligibility", topic["steps"][1])
         self.assertIn("Prepare Faculty Contributions", topic["steps"][1])
+        self.assertIn("Ready, Blocked, Already open, Preserved history, and Exempt", topic["steps"][1])
+        self.assertIn("does not automatically assign", topic["steps"][2])
+        self.assertIn("does not grant any permission", topic["steps"][2])
         self.assertIn("cycle-wide contribution deadline", topic["steps"][6])
         self.assertIn("NOT CONFIGURED", topic["steps"][7])
         self.assertIn("Structured Case/Scenario Exam Lifecycle", topic["steps"][7])
+        self.assertIn("No Sections — default (created on Open)", topic["steps"][7])
+        self.assertIn("Cases remain permitted", topic["steps"][7])
         self.assertIn("permanently freezes", topic["steps"][7])
         contributor_topic = next(
             topic

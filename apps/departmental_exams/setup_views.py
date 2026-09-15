@@ -3,6 +3,8 @@ from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
+from apps.core.services.features import FeatureSettingsService
+
 from .models import CycleCourse, ExaminationCycle
 from .services import CourseExamConfigurationConflict, DepartmentalExamAuthorizationService
 from .setup_services import CourseSetupService
@@ -39,7 +41,7 @@ def setup_view(request, cycle_id):
                 if not selected:
                     raise ValidationError("Select at least one course.")
                 rows = CourseSetupService.preview(cycle=cycle, actor=request.user, selected_ids=selected)
-                if all(row["status"] in ("Ready", "Already open") for row in rows):
+                if all(row["status"] == "Ready" for row in rows):
                     token = CourseSetupService.confirmation(cycle=cycle, actor=request.user, rows=rows)
                 else:
                     error = "No courses opened. Remove blocked, exempt or historical courses before confirming."
@@ -47,7 +49,20 @@ def setup_view(request, cycle_id):
             error = " ".join(exc.messages)
             status = 409 if isinstance(exc, CourseExamConfigurationConflict) else 400
             rows = CourseSetupService.preview(cycle=cycle, actor=request.user)
-    return render(request, "departmental_exams/admin/course_setup.html", {"cycle": cycle, "rows": rows, "confirmation": token, "setup_error": error, "completed": completed}, status=status)
+    return render(request, "departmental_exams/admin/course_setup.html", {
+        "cycle": cycle,
+        "rows": rows,
+        "confirmation": token,
+        "setup_error": error,
+        "completed": completed,
+        "selected_unit_count": len(rows) if token else 0,
+        "selected_member_count": sum(len(row["member_ids"]) for row in rows) if token else 0,
+        "structured_exam_lifecycle_enabled": (
+            FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                tenant_id=cycle.tenant_id
+            )
+        ),
+    }, status=status)
 
 
 @portal_required("ADMIN")

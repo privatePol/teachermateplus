@@ -610,9 +610,14 @@ def cycle_course_list_view(request, cycle_id):
     courses = list(courses.order_by("course__code"))
     if not courses:
         raise PermissionDenied("You do not have current course examination access.")
+    from .setup_services import CourseSetupService
+    setup_rows_by_course_id = {}
+    if cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+        for row in CourseSetupService.preview(cycle=cycle, actor=request.user):
+            for member_id in row["member_ids"]:
+                setup_rows_by_course_id[member_id] = row
     for course in courses:
         _prepare_cycle_course_campus_display(course)
-        from .setup_services import CourseSetupService
         course.effective_configuration = CourseSetupService.effective(course)
         automatic_mode = (
             course.cycle.processing_mode
@@ -631,6 +636,23 @@ def cycle_course_list_view(request, cycle_id):
         course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
             cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user
         )
+        setup_row = setup_rows_by_course_id.get(course.id)
+        course.setup_status = (
+            setup_row["status"]
+            if setup_row
+            else (
+                "Exempt"
+                if course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT
+                else "Preserved history"
+            )
+        )
+        course.setup_reasons = setup_row["reasons"] if setup_row else []
+        course.structure_display = (
+            setup_row["structure_display"] if setup_row else "Preserved configuration"
+        )
+        course.can_configure_structure = bool(
+            setup_row and setup_row["can_configure_structure"]
+        )
     return render(
         request,
         "departmental_exams/admin/cycle_course_list.html",
@@ -644,6 +666,11 @@ def cycle_course_list_view(request, cycle_id):
                 and all(
                     course.id in automatic_manage_ids
                     for course in automatic_included_courses
+                )
+            ),
+            "structured_exam_lifecycle_enabled": (
+                FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                    tenant_id=tenant_id
                 )
             ),
         },
@@ -725,8 +752,20 @@ def assigned_course_examinations_view(request):
         )
     automatic_courses_by_cycle = {}
     from .setup_services import CourseSetupService
+    automatic_setup_rows_by_course_id = {}
+    automatic_cycles = {course.cycle_id: course.cycle for course in automatic_courses}
+    for automatic_cycle in automatic_cycles.values():
+        for row in CourseSetupService.preview(cycle=automatic_cycle, actor=request.user):
+            for member_id in row["member_ids"]:
+                automatic_setup_rows_by_course_id[member_id] = row
     for course in courses:
         course.effective_configuration = CourseSetupService.effective(course)
+        setup_row = automatic_setup_rows_by_course_id.get(course.id)
+        if setup_row:
+            course.setup_status = setup_row["status"]
+            course.setup_reasons = setup_row["reasons"]
+            course.structure_display = setup_row["structure_display"]
+            course.can_configure_structure = setup_row["can_configure_structure"]
     for course in automatic_courses:
         if course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             continue
@@ -1039,6 +1078,14 @@ def course_configuration_view(request, cycle_course_id):
     action_flags = _course_action_flags(
         parent=parent, configuration=configuration, readiness=readiness
     )
+    setup_row = None
+    if parent.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+        from .setup_services import CourseSetupService
+
+        setup_rows = CourseSetupService.preview(
+            cycle=parent.cycle, actor=request.user, selected_ids={parent.id}
+        )
+        setup_row = setup_rows[0] if setup_rows else None
     initial = {"expected_revision": configuration.revision if configuration else 0}
     if configuration:
         initial.update({"questions_required_per_faculty_mode": configuration.questions_required_per_faculty_source or "DEFAULT", "final_item_count_mode": configuration.final_item_count_source or "DEFAULT", "contribution_deadline_mode": configuration.contribution_deadline_source or "DEFAULT", "coverage_mode": configuration.coverage_source or ("OVERRIDE" if configuration.coverage else "DEFAULT")})
@@ -1068,7 +1115,7 @@ def course_configuration_view(request, cycle_course_id):
         }
     )
     from .setup_services import CourseSetupService
-    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "effective_configuration": CourseSetupService.effective(parent), "readiness": readiness, "action_flags": action_flags, "form": form, "close_form": close_form, "structured_exam_lifecycle_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(tenant_id=tenant_id)}, status=status)
+    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "effective_configuration": CourseSetupService.effective(parent), "readiness": readiness, "action_flags": action_flags, "setup_row": setup_row, "form": form, "close_form": close_form, "structured_exam_lifecycle_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(tenant_id=tenant_id)}, status=status)
 
 
 @portal_required("ADMIN")
@@ -1098,7 +1145,50 @@ def course_remove_overrides_view(request, cycle_course_id):
 def _course_contribution_transition_view(request, cycle_course_id, *, action):
     tenant_id = _tenant_id(request)
     parent, configuration, readiness = _course_configuration_context(tenant_id=tenant_id, cycle_course_id=cycle_course_id, user=request.user)
-    if not configuration:
+    if action == "open" and parent.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+        from .setup_services import CourseSetupService
+
+        error, status = "", 200
+        if request.method == "POST":
+            try:
+                CourseSetupService.open_selection(
+                    cycle=parent.cycle, actor=request.user,
+                    token=request.POST.get("confirmation", ""),
+                    required_course_id=parent.id, request=request,
+                )
+            except (CourseExamConfigurationConflict, ValidationError) as exc:
+                error, status = " ".join(exc.messages), 409
+            else:
+                return redirect("departmental_exams:course_configuration", cycle_course_id=parent.id)
+        rows = CourseSetupService.preview(cycle=parent.cycle, actor=request.user, selected_ids=[parent.id])
+        if request.method == "GET" and (not rows or rows[0]["status"] != "Ready"):
+            raise Http404("This examination unit is not ready to open.")
+        return render(request, "departmental_exams/admin/course_setup.html", {
+            "cycle": parent.cycle, "rows": rows, "setup_error": error,
+            "single_course_confirmation": True,
+            "confirmation": CourseSetupService.confirmation(cycle=parent.cycle, actor=request.user, rows=rows) if status == 200 else "",
+            "selected_unit_count": len(rows),
+            "selected_member_count": sum(len(row["member_ids"]) for row in rows),
+        }, status=status)
+    effective_open_available = False
+    displayed_configuration = configuration
+    if not configuration and action == "open" and (
+        parent.cycle.processing_mode
+        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+    ):
+        from .setup_services import CourseSetupService
+
+        rows = CourseSetupService.preview(
+            cycle=parent.cycle, actor=request.user, selected_ids={parent.id}
+        )
+        effective_open_available = bool(rows and rows[0]["status"] == "Ready")
+        displayed_configuration = CourseSetupService.effective(parent)
+        readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
+            cycle_course=parent,
+            configuration=displayed_configuration,
+            user=request.user,
+        )
+    elif not configuration:
         raise Http404("Course configuration does not exist.")
     action_flags = _course_action_flags(
         parent=parent, configuration=configuration, readiness=readiness
@@ -1109,10 +1199,16 @@ def _course_contribution_transition_view(request, cycle_course_id, *, action):
         and parent.cycle.status == ExaminationCycle.Status.OPEN
         and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN
     )
-    if not action_flags[f"can_{action}"] and not close_lifecycle_available:
+    if (
+        not action_flags[f"can_{action}"]
+        and not close_lifecycle_available
+        and not effective_open_available
+    ):
         raise Http404("This course contribution action is not available in its current lifecycle state.")
     form_class = {"open": CourseContributionOpenForm, "close": CourseContributionCloseForm, "reopen": CourseContributionReopenForm, "revert": CourseExamConfigurationRevertForm}[action]
-    transition_initial = {"expected_revision": configuration.revision}
+    transition_initial = {
+        "expected_revision": configuration.revision if configuration else 0
+    }
     if action == "close":
         transition_initial["expected_roster_revision"] = (
             configuration.contributor_roster_revision
@@ -1135,7 +1231,7 @@ def _course_contribution_transition_view(request, cycle_course_id, *, action):
         else:
             messages.success(request, "Course contribution workflow updated." if changed else "Course contribution workflow is already in that state.")
             return redirect("departmental_exams:course_configuration", cycle_course_id=parent.id)
-    return render(request, "departmental_exams/admin/course_contribution_confirm.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "form": form, "action": action}, status=status)
+    return render(request, "departmental_exams/admin/course_contribution_confirm.html", {"cycle_course": parent, "configuration": displayed_configuration, "readiness": readiness, "form": form, "action": action, "effective_default": configuration is None}, status=status)
 
 
 @portal_required("ADMIN")

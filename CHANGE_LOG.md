@@ -1,3 +1,22 @@
+## Admin review-snapshot integrity - 2026-09-15
+
+- Single and bulk review now serialize with cycle-first writer locks and verify a before/after fingerprint around fully materialized review details. A changed snapshot is rebuilt, never signed using newer state against older displayed settings; repeated changes block confirmation. Cycle instructions use the same verified review snapshot. GET remains free of persistent writes and locks end before user confirmation; signed scope/expiry and locked opening revalidation remain intact.
+- Focused deterministic interleaving and retained confirmation regressions passed 10/10 in 63.862s on disposable in-memory SQLite. Django, migration-drift and diff checks passed; exact run history and separate browser/MariaDB acceptance gates are in HANDOFF.md. Viewer navigation, Manual presentation and standalone-question rich-text deferral remain unchanged. No model or migration change.
+
+## Admin setup review corrections - 2026-09-15
+
+- Automatic single-course Open now reuses expiring signed selection confirmation, bound to the actor, tenant, cycle and exact authoritative examination unit. Full effective configuration/defaults, blueprint/sections, membership and opening evidence are checked under existing locks before mutation. The review shows the effective values and ordered section quotas; missing, stale, expired or tampered tokens reject without opening.
+- Current generated-exam navigation is restored for independently authorized viewers even without cycle-wide summary access. Manual rows retain their inclusion, configuration and lifecycle presentation instead of Automatic history badges.
+- Five focused regressions have passing results across corrected runs: four combined passes plus the corrected viewer rerun (1/1). Django, migration-drift and diff checks pass. No model, migration, RBAC or assignment-policy change. Standalone-question rich text remains deferred. Exact run history and outstanding browser acceptance are recorded in HANDOFF.md.
+
+## 2026-09-15 - Admin setup navigation and DEPTAL No Sections default
+
+- Automatic course rows now use lifecycle-aware actions and accessible text-and-color readiness states: Ready, Blocked, Already open, Preserved history and Exempt. DEPTAL remains a separate classification. The cycle-level Prepare Faculty Contributions action opens the signed, selected, all-or-nothing workflow; the retained legacy preparation route and behavior are unchanged.
+- Unified setup selects only visible Ready examination units, clears hidden selections when filters change, announces the selected count and reviews the exact examination-unit/course-record counts. Existing signed confirmations, expiry, permission checks, fingerprints, locks, server revalidation and batch rollback remain authoritative.
+- With Structured Case/Scenario Exam Lifecycle enabled, a consistently classified, entirely never-opened Draft Automatic Included DEPTAL unit with no blueprint or incompatible activity can use the read-only effective label `No Sections — default (created on Open)`. Authorized single or bulk Open revalidates under the existing locks, materializes effective configuration, creates exactly one primary-owned No Sections blueprint, audits its default origin and effective final-item count, and freezes it through the existing authoritative opening process. Explicit, conflicting, alias-owned, invalid, frozen, generated, released, contributed, rostered or historical units are never replaced or defaulted. Cases remain valid in the implicit section.
+- Admin responsibility/inclusion guidance now states that assigning an Exam Department neither assigns its Area Chair nor grants permission, and distinguishes Automatic's optional department/no reviewer from Manual's required department/eligible reviewer. RBAC, assignment policy, Manual behavior, feature-off behavior, models and migrations are unchanged.
+- Standalone-question rich text remains a separate deferred task and is not implemented by this change.
+
 ## 2026-09-15 - Automatic roster, sufficient-pool and deadline correction
 
 - Question Bank follow-up: superseded or structurally incomplete Answer Key releases are identified before their dates are evaluated, so Answer Key and Checking Master cards cannot promise later access to an obsolete revision. Revoked releases keep precedence. Exact `print_until` and `available_until` instants remain inclusive and now have card/direct-access regressions.

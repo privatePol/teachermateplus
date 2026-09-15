@@ -1962,7 +1962,10 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         automatic_response = self.client.get(assigned_url)
         self.assertEqual(automatic_response.status_code, 200)
         self.assertContains(automatic_response, "Automatic workflow")
-        self.assertContains(automatic_response, "Configure Override")
+        self.assertContains(automatic_response, "Preserved history")
+        self.assertContains(automatic_response, "View preserved configuration")
+        self.assertContains(automatic_response, "Generation status")
+        self.assertNotContains(automatic_response, "Configure Override")
         for manual_action in (
             "Exam Blueprint",
             "Confidential Inputs",
@@ -3239,6 +3242,23 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertNotContains(summary, "Regenerate Set A &amp; Set B", html=True)
         self.assertNotContains(summary, "Reopen Contributions")
 
+        # A denied, unrelated course removes cycle-wide summary access, while
+        # the authorized current revision must remain reachable from its row.
+        from apps.tenants.models import Campus
+        from .models import CycleCourseOffering
+        extra_campus = Campus.objects.create(tenant=self.tenant, code="LIMIT", name="Limited")
+        unrelated = self.make_course(cycle=parent.cycle, code="UNRELATED")
+        CycleCourseOffering.objects.filter(cycle_course=unrelated).update(campus=extra_campus)
+        UserPermission.objects.create(
+            user=viewer, permission=Permission.objects.get(code="departmental_exams.view_generated_exams"),
+            grant_type="DENY", tenant=self.tenant, campus=extra_campus,
+        )
+        partial_assigned = client.get(reverse("departmental_exams:assigned_course_examinations"))
+        self.assertContains(partial_assigned, current_url)
+        self.assertNotContains(partial_assigned, reverse("departmental_exams:automatic_generation_summary", args=[parent.cycle_id]))
+        self.assertEqual(client.get(current_url).status_code, 200)
+        self.assertEqual(client.get(reverse("departmental_exams:automatic_generation_summary", args=[parent.cycle_id])).status_code, 403)
+
         client.force_login(self.generation_manager)
         manager_history = client.get(historical_url)
         self.assertEqual(manager_history.status_code, 200)
@@ -3259,6 +3279,9 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
         client.force_login(viewer)
         self.assertEqual(client.get(current_url).status_code, 403)
+        denied_list = client.get(reverse("departmental_exams:assigned_course_examinations"))
+        self.assertEqual(denied_list.status_code, 403)
+        self.assertNotContains(denied_list, current_url, status_code=403)
 
         partial_viewer = self.make_user(
             "partial-automatic-viewer",
