@@ -680,6 +680,10 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
 
     def test_grouped_reopen_updates_every_member_atomically(self):
         fixture = self._ready_group()
+        # Early closure may reopen only while its pre-existing window is live.
+        CourseExamConfiguration.objects.filter(cycle_course_id__in=(
+            fixture["primary"].id, fixture["secondary"].id,
+        )).update(reopened_contribution_deadline=timezone.now() + timezone.timedelta(hours=1))
         new_deadline = timezone.now() + timezone.timedelta(days=1)
         with patch(
             "apps.departmental_exams.automatic_workflow."
@@ -718,6 +722,30 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             resolve_examination_unit(fixture["secondary"]).primary,
             fixture["primary"],
         )
+
+    def test_expired_group_reopen_and_open_leave_every_member_unchanged(self):
+        from django.db import transaction
+        from .setup_services import CourseSetupService
+        fixture = self._ready_group()
+        before = list(CourseExamConfiguration.objects.order_by("id").values())
+        audit_before = list(AuditLog.objects.order_by("id").values())
+        with patch("apps.departmental_exams.automatic_workflow.DepartmentalExamAuthorizationService.require_generation_management"):
+            with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
+                AutomaticContributionReopenService.reopen(
+                    cycle_course_id=fixture["secondary"].id, tenant_id=self.tenant.id,
+                    actor=self.admin, expected_revision=fixture["configurations"][0].revision,
+                    new_deadline=timezone.now() + timezone.timedelta(days=1),
+                )
+        with transaction.atomic(), patch.object(CourseSetupService, "prepare_structure") as prepare:
+            with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
+                CourseSetupService.open_group_locked(
+                    resolve_examination_unit(fixture["secondary"], for_update=True),
+                    requested=fixture["secondary"], actor=self.admin,
+                    expected_revision=fixture["configurations"][1].revision,
+                )
+            prepare.assert_not_called()
+        self.assertEqual(before, list(CourseExamConfiguration.objects.order_by("id").values()))
+        self.assertEqual(audit_before, list(AuditLog.objects.order_by("id").values()))
 
     def test_unit_authority_across_every_member_campus_allows_group_creation(self):
         cycle, primary, secondary, _configurations = self._pair()

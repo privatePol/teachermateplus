@@ -704,6 +704,13 @@ def assigned_course_examinations_view(request):
             ),
             None,
         )
+        configuration = getattr(course, "configuration", None)
+        course.can_reopen_contributions = bool(
+            course.can_manage_generation
+            and course.cycle.status == ExaminationCycle.Status.OPEN
+            and configuration and configuration.workflow_status == "CLOSED"
+            and CourseExamConfigurationService.reopen_deadline_available(configuration)
+        )
         course.locked_revision = next(
             (
                 revision
@@ -1008,6 +1015,7 @@ def _course_action_flags(*, parent, configuration, readiness):
         "can_reopen": bool(
             mutable
             and configuration
+            and CourseExamConfigurationService.reopen_deadline_available(configuration)
             and parent.cycle.status == ExaminationCycle.Status.OPEN
             and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED
             and not has_activity

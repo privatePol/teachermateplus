@@ -494,7 +494,9 @@ class BlueprintMutationService:
             ).exists()
         ):
             raise Stage6Conflict(
-                "Reopen contributions before changing inputs for a current automatic generation."
+                "Current generated inputs are protected. Reopening is allowed only before the "
+                "existing effective deadline; after it, preserve this record and use a new cycle "
+                "if additional contributions are needed."
             )
         if (
             configuration is None

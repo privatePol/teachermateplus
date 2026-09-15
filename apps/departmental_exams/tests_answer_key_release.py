@@ -383,16 +383,21 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
             end=now + timezone.timedelta(hours=2),
         )
         client = self._faculty_client()
-        self.assertNotContains(
-            client.get(reverse("departmental_exams:contribution_list")),
-            "View Set A Answer Key",
+        scheduled_page = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(scheduled_page, "View Set A Answer Key")
+        self.assertEqual(
+            scheduled_page.context["contributions"][0].answer_key_releases[0]["status"],
+            "NOT_YET_AVAILABLE",
         )
+        self.assertContains(scheduled_page, "Not yet available", count=2)
         self.assertEqual(client.get(self._url(scheduled)).status_code, 403)
 
         active = self._release()
-        self.assertContains(
-            client.get(reverse("departmental_exams:contribution_list")),
-            "View Set A Answer Key",
+        active_page = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertContains(active_page, "View Set A Answer Key")
+        self.assertEqual(
+            active_page.context["contributions"][0].answer_key_releases[0]["status"],
+            "AVAILABLE",
         )
         self.assertEqual(client.get(self._url(active)).status_code, 200)
 
@@ -400,13 +405,159 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
             start=now - timezone.timedelta(hours=2),
             end=now - timezone.timedelta(hours=1),
         )
+        expired_page = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(expired_page, "View Set A Answer Key")
+        self.assertEqual(
+            expired_page.context["contributions"][0].answer_key_releases[0]["status"],
+            "EXPIRED",
+        )
+        self.assertContains(expired_page, "Expired", count=2)
         self.assertEqual(client.get(self._url(expired)).status_code, 403)
         AnswerKeyReleaseService.revoke(
             release_id=expired.id,
             tenant_id=self.tenant.id,
             actor=self.release_manager,
         )
+        revoked_page = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(revoked_page, "View Set A Answer Key")
+        self.assertEqual(
+            revoked_page.context["contributions"][0].answer_key_releases[0]["status"],
+            "REVOKED",
+        )
+        self.assertContains(revoked_page, "Revoked", count=2)
         self.assertEqual(client.get(self._url(expired)).status_code, 403)
+
+    def test_available_until_boundary_is_inclusive_for_card_and_direct_access(self):
+        boundary = timezone.now()
+        release = self._release(
+            start=boundary - timezone.timedelta(hours=1),
+            end=boundary,
+        )
+        client = self._faculty_client()
+
+        with patch("django.utils.timezone.now", return_value=boundary):
+            page = client.get(reverse("departmental_exams:contribution_list"))
+            self.assertEqual(
+                page.context["contributions"][0].answer_key_releases[0]["status"],
+                "AVAILABLE",
+            )
+            self.assertContains(page, "View Set A Answer Key")
+            self.assertContains(page, "Print Set A Master")
+            self.assertEqual(client.get(self._url(release)).status_code, 200)
+            self.assertEqual(client.get(self._master_url(release.id)).status_code, 200)
+
+    def test_superseded_scheduled_and_expired_cards_never_promise_access(self):
+        now = timezone.now()
+        release = self._release(
+            start=now + timezone.timedelta(hours=1),
+            end=now + timezone.timedelta(hours=2),
+        )
+        self.r4.status = ExamGenerationRevision.Status.SUPERSEDED
+        self.r4.current_marker = None
+        self.r4.save(update_fields=["status", "current_marker", "updated_at"])
+        self._make_revision(5, supersedes=self.r4)
+        client = self._faculty_client()
+
+        for start, end in (
+            (
+                now + timezone.timedelta(hours=1),
+                now + timezone.timedelta(hours=2),
+            ),
+            (
+                now - timezone.timedelta(hours=2),
+                now - timezone.timedelta(hours=1),
+            ),
+        ):
+            with self.subTest(available_from=start, available_until=end):
+                AnswerKeyRelease.objects.filter(pk=release.pk).update(
+                    available_from=start,
+                    available_until=end,
+                )
+                page = client.get(reverse("departmental_exams:contribution_list"))
+                material = page.context["contributions"][0].answer_key_releases[0]
+                self.assertEqual(material["status"], "UNAVAILABLE")
+                self.assertEqual(
+                    material["status_label"],
+                    "Superseded / No Longer Faculty Accessible",
+                )
+                self.assertContains(
+                    page, "Superseded / No Longer Faculty Accessible", count=2
+                )
+                self.assertNotContains(page, "Not yet available")
+                self.assertNotContains(page, "View Set A Answer Key")
+                self.assertNotContains(page, "Print Set A Master")
+                self.assertNotContains(page, "Print Set B Master")
+
+    def test_course_card_uses_distinct_release_expiries_and_deadline_labels(self):
+        client = self._faculty_client()
+        unreleased = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertContains(unreleased, "Contribution deadline")
+        self.assertContains(unreleased, "Times shown in Asia/Manila")
+        self.assertContains(
+            unreleased,
+            "Open until:</strong> Not configured because no release is available.",
+            count=3,
+            html=False,
+        )
+        self.assertNotContains(unreleased, "View Set A Answer Key")
+
+        now = timezone.now()
+        questionnaire_until = now + timezone.timedelta(hours=3)
+        answer_key_until = now + timezone.timedelta(hours=7)
+        QuestionnairePrintRelease.objects.create(
+            cycle_course=self.parent,
+            generation_revision=self.r4,
+            print_from=now - timezone.timedelta(minutes=5),
+            print_until=questionnaire_until,
+            released_by=self.generation_manager,
+        )
+        answer_key = self._release(start=now - timezone.timedelta(minutes=5), end=answer_key_until)
+
+        released = client.get(reverse("departmental_exams:contribution_list"))
+        contribution = released.context["contributions"][0]
+        self.assertEqual(contribution.questionnaire_print["expires_at"], questionnaire_until)
+        self.assertEqual(contribution.answer_key_releases[0]["expires_at"], answer_key_until)
+        self.assertNotEqual(
+            contribution.questionnaire_print["expires_at"],
+            contribution.answer_key_releases[0]["expires_at"],
+        )
+        self.assertEqual(contribution.answer_key_releases[0]["release_id"], answer_key.id)
+        self.assertContains(released, '<h1 class="h3 mb-1">Question Bank</h1>', html=True)
+        self.assertContains(released, "Questionnaire actions")
+        self.assertContains(released, "Answer Key actions")
+        self.assertContains(released, "Checking Master actions")
+        self.assertContains(released, "Open until:", count=3)
+        template_source = (
+            Path(__file__).resolve().parents[2]
+            / "templates"
+            / "departmental_exams"
+            / "faculty"
+            / "contribution_list.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("@media (max-width: 575.98px)", template_source)
+        self.assertIn(".qb-action-row .btn:focus-visible", template_source)
+        self.assertIn('aria-labelledby="qb-course-', template_source)
+
+    def test_course_card_contribution_states_use_effective_deadline(self):
+        client = self._faculty_client()
+        submitted = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertContains(submitted, "Submitted")
+
+        FacultyContribution.objects.filter(pk=self.contribution.pk).update(
+            status=FacultyContribution.Status.DRAFT,
+            submitted_at=None,
+        )
+        CourseExamConfiguration.objects.filter(pk=self.configuration.pk).update(
+            contribution_deadline=timezone.now() + timezone.timedelta(hours=1)
+        )
+        draft = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertContains(draft, "Active Draft")
+
+        CourseExamConfiguration.objects.filter(pk=self.configuration.pk).update(
+            contribution_deadline=timezone.now() - timezone.timedelta(hours=1)
+        )
+        expired = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertContains(expired, "Active Draft / Deadline passed")
 
     def test_replace_and_revoke_preserve_history_and_safe_admin_audits(self):
         first = self._release()
@@ -486,9 +637,21 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         self.assignment.is_active = False
         self.assignment.save(update_fields=["is_active", "updated_at"])
         client = self._faculty_client()
-        self.assertNotContains(
-            client.get(reverse("departmental_exams:contribution_list")),
-            "View Set A Answer Key",
+        listing = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(listing, "View Set A Answer Key")
+        self.assertEqual(
+            listing.context["contributions"][0].answer_key_releases[0],
+            {
+                "status": "NOT_RELEASED",
+                "status_label": "Not released",
+                "release_id": None,
+                "revision_number": None,
+                "campus_id": None,
+                "campus_name": "",
+                "opens_at": None,
+                "expires_at": None,
+                "actions": None,
+            },
         )
         self.assertEqual(client.get(self._url(release)).status_code, 403)
 

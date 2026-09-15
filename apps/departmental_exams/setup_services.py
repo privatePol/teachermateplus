@@ -270,6 +270,11 @@ class CourseSetupService:
         from .blueprint_services import StructuredExamLifecyclePolicy
         from .exam_units import validate_examination_unit
         service = CourseExamConfigurationService
+        # Check the original windows before prepare_structure can write anything.
+        for config in CourseExamConfiguration.objects.select_for_update().filter(
+            cycle_course_id__in=unit.member_ids
+        ).order_by("cycle_course_id"):
+            service.require_existing_intake_deadline(config)
         cls.prepare_structure(unit.primary, actor=actor, request=request)
         validate_examination_unit(unit)
         configurations = {c.cycle_course_id: c for c in CourseExamConfiguration.objects.select_for_update().filter(cycle_course_id__in=unit.member_ids).order_by("cycle_course_id")}

@@ -90,9 +90,150 @@ from .tests_stage6_generation import (
 
 
 class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
+    def test_reopen_uses_locked_configuration_for_live_source_discovery(self):
+        parent, configuration, _ = self._ready_automatic_course(due=False)
+        FacultyContribution.objects.filter(cycle_course=parent).update(status="DRAFT", submitted_at=None)
+        before = list(FacultyContributionEligibilitySource.objects.filter(
+            contribution__cycle_course=parent).order_by("id").values("id", "is_current", "invalidated_at"))
+        self.assertTrue(before and all(row["is_current"] for row in before))
+        client = Client()
+        client.force_login(self.generation_manager)
+        response = client.get(reverse("departmental_exams:automatic_contribution_reopen", args=[parent.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'type="submit"')
+        AutomaticContributionReopenService.reopen(
+            cycle_course_id=parent.id, tenant_id=self.tenant.id,
+            actor=self.generation_manager, expected_revision=configuration.revision,
+            new_deadline=configuration.active_contribution_deadline + timezone.timedelta(hours=1),
+        )
+        self.assertEqual(before, list(FacultyContributionEligibilitySource.objects.filter(
+            contribution__cycle_course=parent).order_by("id").values("id", "is_current", "invalidated_at")))
+        self.assertFalse(FacultyContribution.objects.filter(
+            cycle_course=parent, roster_status="BLOCKED").exists())
+
+    def test_synchronization_ignores_stale_closed_reverse_relation(self):
+        from django.db import transaction
+        from .contribution_services import ContributionRosterService, Stage5LockService
+        parent, _, _ = self._ready_automatic_course(due=False)
+        FacultyContribution.objects.filter(cycle_course=parent).update(status="DRAFT", submitted_at=None)
+        before = list(FacultyContributionEligibilitySource.objects.order_by("id").values())
+        with transaction.atomic():
+            _, course, cached = Stage5LockService.lock_cycle_course(cycle_course_id=parent.id, tenant_id=self.tenant.id)
+            authoritative = CourseExamConfiguration.objects.select_for_update().get(cycle_course_id=course.id)
+            authoritative.workflow_status = "OPEN"
+            authoritative.save(update_fields=["workflow_status"])
+            self.assertEqual(course.configuration.workflow_status, "CLOSED")
+            self.assertIsNot(course.configuration, authoritative)
+            ContributionRosterService._synchronize_locked(cycle_course=course, configuration=authoritative,
+                actor=self.generation_manager, request=None, initializing=False)
+            self.assertEqual(before, list(FacultyContributionEligibilitySource.objects.order_by("id").values()))
+
     def setUp(self):
         super().setUp()
         self.generation_manager = self._make_generation_manager()
+
+    @staticmethod
+    def _correction_state():
+        # Include sources, audit and generated output, not just workflow status.
+        return {model.__name__: list(model.objects.order_by("pk").values()) for model in (
+            CourseExamConfiguration, FacultyContribution, FacultyContributionEligibilitySource,
+            Question, ExamGenerationRevision, GeneratedExamSet, GeneratedExamItem, AuditLog,
+        )}
+
+    def test_reopen_keeps_genuine_assignment_loss_blocked(self):
+        parent, configuration, _ = self._ready_automatic_course(due=False)
+        FacultyContribution.objects.filter(cycle_course=parent).update(status="DRAFT", submitted_at=None)
+        source = FacultyContributionEligibilitySource.objects.filter(contribution__cycle_course=parent).first()
+        source.assignment.is_active = False
+        source.assignment.save(update_fields=["is_active"])
+        AutomaticContributionReopenService.reopen(
+            cycle_course_id=parent.id, tenant_id=self.tenant.id, actor=self.generation_manager,
+            expected_revision=configuration.revision, new_deadline=self.future_deadline(),
+        )
+        source.refresh_from_db()
+        self.assertFalse(source.is_current)
+        self.assertEqual(source.contribution.roster_status, "BLOCKED")
+        self.assertEqual(FacultyContribution.objects.filter(cycle_course=parent, roster_status="ACTIVE").count(), 2)
+
+    def test_reopen_deadline_boundary_and_direct_open_preserve_all_state(self):
+        from .services import CourseExamConfigurationService
+        parent, configuration, _ = self._ready_automatic_course(due=False, clear_manual_assignment=False)
+        deadline = configuration.active_contribution_deadline
+        before = self._correction_state()
+        for now in (deadline, deadline + timezone.timedelta(microseconds=1)):
+            with self.subTest(now=now), patch("django.utils.timezone.now", return_value=now):
+                with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
+                    AutomaticContributionReopenService.reopen(
+                        cycle_course_id=parent.id, tenant_id=self.tenant.id, actor=self.generation_manager,
+                        expected_revision=configuration.revision, new_deadline=deadline + timezone.timedelta(days=2),
+                    )
+                for service in (CourseExamConfigurationService.open_for_contribution,
+                                CourseExamConfigurationService.reopen_contribution):
+                    with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
+                        service(cycle_course_id=parent.id, tenant_id=self.tenant.id,
+                                user=self.generation_manager, expected_revision=configuration.revision)
+                self.assertEqual(before, self._correction_state())
+
+    def test_expired_reopen_get_post_and_summary_have_no_action(self):
+        parent, configuration, _ = self._ready_automatic_course()
+        client = Client()
+        client.force_login(self.generation_manager)
+        url = reverse("departmental_exams:automatic_contribution_reopen", args=[parent.id])
+        before = self._correction_state()
+        for response in (client.get(url), client.post(url, {
+            "expected_revision": configuration.revision,
+            "new_deadline": self.future_deadline().strftime("%Y-%m-%dT%H:%M"),
+        })):
+            self.assertEqual(response.status_code, 400)
+            self.assertContains(response, "cannot be reopened", status_code=400)
+            self.assertNotContains(response, 'type="submit"', status_code=400)
+        self.assertEqual(before, self._correction_state())
+        response = client.get(reverse("departmental_exams:automatic_generation_summary", args=[parent.cycle_id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, url)
+        response = client.get(reverse("departmental_exams:assigned_course_examinations"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, url)
+        for route in ("course_contribution_open", "course_contribution_reopen"):
+            ordinary_url = reverse("departmental_exams:" + route, args=[parent.id])
+            self.assertEqual(client.get(ordinary_url).status_code, 404)
+            self.assertEqual(client.post(ordinary_url, {"expected_revision": configuration.revision}).status_code, 404)
+        self.assertEqual(before, self._correction_state())
+
+    def test_sufficient_pool_excludes_blocked_drafts_without_mutating_them(self):
+        parent, configuration, _ = self._ready_automatic_course()
+        _submitted, draft_campus = self._two_campus_one_submitted_shape(parent=parent)
+        draft = FacultyContribution.objects.get(cycle_course=parent, source_campus_id=draft_campus.campus_id)
+        FacultyContribution.objects.filter(pk=draft.pk).update(roster_status="BLOCKED", roster_blocked_at=timezone.now())
+        draft.eligibility_sources.update(is_current=False, invalidated_at=timezone.now())
+        for nonempty in (False, True):
+            if nonempty:
+                self.add_questions(draft)
+            before = self._correction_state()
+            problem, report = Stage6ReadinessService.build_problem(cycle_course=parent)
+            self.assertTrue(report["ready"], report["blockers"])
+            self.assertIn("BLOCKED_DRAFTS_UNRESOLVED", [w["code"] for w in report["warnings"]])
+            self.assertEqual(before, self._correction_state())
+        # Strict Automatic and Manual retain their existing blockers.
+        self._set_automatic_policies(parent, contributor_policy="REQUIRE_ALL")
+        _, report = Stage6ReadinessService.build_problem(cycle_course=parent)
+        self.assertIn("BLOCKED_DRAFTS_UNRESOLVED", [b["code"] for b in report["blockers"]])
+        parent.cycle.processing_mode = "MANUAL_REVIEW"
+        parent.cycle.save(update_fields=["processing_mode"])
+        _, report = Stage6ReadinessService.build_problem(cycle_course=parent)
+        self.assertIn("BLOCKED_DRAFTS_UNRESOLVED", [b["code"] for b in report["blockers"]])
+        parent.cycle.processing_mode = "AUTOMATIC_GENERATION"
+        parent.cycle.save(update_fields=["processing_mode"])
+        self._set_automatic_policies(parent, contributor_policy="SUFFICIENT_POOL")
+        draft_before = list(FacultyContribution.objects.filter(pk=draft.pk).values())
+        questions_before = list(Question.objects.filter(contribution=draft).order_by("id").values())
+        problem, _ = Stage6ReadinessService.build_problem(cycle_course=parent)
+        self._process_with_proved_selection(parent=parent, problem=problem)
+        self.assertFalse(GeneratedExamItem.objects.filter(source_question__contribution=draft).exists())
+        self.assertEqual(draft_before, list(FacultyContribution.objects.filter(pk=draft.pk).values()))
+        self.assertEqual(questions_before, list(Question.objects.filter(contribution=draft).order_by("id").values()))
+        summary = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
+        self.assertIn("BLOCKED_DRAFTS_UNRESOLVED", [w["code"] for w in summary["generated"][0]["warnings"]])
 
     def _make_generation_manager(self):
         user = get_user_model().objects.create_user(
@@ -2354,62 +2495,19 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertEqual(controls["reason"]["tag"], "textarea")
         self.assertNotIn("disabled", controls["reason"]["attributes"])
 
-    def test_reopen_supersedes_current_preserves_submissions_and_allows_fresh_r2(self):
+    def test_expired_reopen_preserves_current_generation_and_submissions(self):
         parent, configuration, problem = self._ready_automatic_course()
         self._process_with_proved_selection(parent=parent, problem=problem)
-        submitted_ids = set(
-            FacultyContribution.objects.filter(
-                cycle_course=parent,
-                status=FacultyContribution.Status.SUBMITTED,
-            ).values_list("id", flat=True)
-        )
-        reopened = AutomaticContributionReopenService.reopen(
-            cycle_course_id=parent.id,
-            tenant_id=self.tenant.id,
-            actor=self.generation_manager,
-            expected_revision=configuration.revision,
-            new_deadline=timezone.now() + timezone.timedelta(days=1),
-        )
-        r1 = ExamGenerationRevision.objects.get(revision_number=1)
-        self.assertEqual((r1.status, r1.current_marker), ("SUPERSEDED", None))
-        self.assertEqual(reopened.workflow_status, "OPEN")
-        self.assertEqual(reopened.automatic_processing_status, "")
-        self.assertEqual(reopened.automatic_processing_code, "")
-        self.assertIsNone(reopened.automatic_processed_at)
-        self.assertEqual(
-            set(
-                FacultyContribution.objects.filter(
-                    id__in=submitted_ids,
-                    status=FacultyContribution.Status.SUBMITTED,
-                ).values_list("id", flat=True)
-            ),
-            submitted_ids,
-        )
-        CourseExamConfiguration.objects.filter(pk=reopened.pk).update(
-            reopened_contribution_deadline=timezone.now()
-            - timezone.timedelta(minutes=1)
-        )
-        fresh_problem, _readiness = Stage6ReadinessService.build_problem(
-            cycle_course=parent
-        )
-        self.assertIsNone(fresh_problem)
-        # The processor closes first, so obtain the post-close problem inside
-        # generation by returning a structurally valid selection for the same pool.
-        with patch(
-            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
-            side_effect=lambda **kwargs: self._proved_selection_for(
-                parent=parent,
-                problem=Stage6ReadinessService.build_problem(cycle_course=parent)[0],
-            ),
-        ):
-            result = AutomaticExamDeadlineService.process_course(
-                cycle_course_id=parent.id,
-                tenant_id=self.tenant.id,
+        before = self._correction_state()
+        with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
+            AutomaticContributionReopenService.reopen(
+                cycle_course_id=parent.id, tenant_id=self.tenant.id,
+                actor=self.generation_manager, expected_revision=configuration.revision,
+                new_deadline=timezone.now() + timezone.timedelta(days=1),
             )
-        r2 = ExamGenerationRevision.objects.get(revision_number=2)
-        self.assertEqual(result.status, "GENERATED")
-        self.assertEqual(r2.current_marker, 1)
-        self.assertEqual(r2.supersedes, r1)
+        self.assertEqual(before, self._correction_state())
+        summary = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
+        self.assertFalse(summary["generated"][0]["can_reopen"])
 
     def test_summary_is_generated_first_content_safe_and_scope_denies_win(self):
         parent, _configuration, problem = self._ready_automatic_course(
@@ -2666,7 +2764,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
         self.assertEqual(
             row["recommended_action"],
-            "Administrator review is required before reopening contributions for retry.",
+            "Ask an administrator to review the processing failure. Reopening is unavailable after the effective deadline; preserve the existing record.",
         )
 
     def test_unprocessed_closed_summary_uses_aggregate_non_exact_assessment(self):
@@ -2968,53 +3066,19 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             scenario_ids,
         )
 
-    def test_reopen_supersedes_r1_and_generates_r2_with_flat_structure(self):
+    def test_expired_reopen_post_preserves_flat_generation(self):
         parent, configuration, problem = self._ready_automatic_course()
         self._process_with_proved_selection(parent=parent, problem=problem)
-        reopened = AutomaticContributionReopenService.reopen(
-            cycle_course_id=parent.id,
-            tenant_id=self.tenant.id,
-            actor=self.generation_manager,
-            expected_revision=configuration.revision,
-            new_deadline=timezone.now() + timezone.timedelta(days=1),
-        )
-        CourseExamConfiguration.objects.filter(pk=reopened.pk).update(
-            reopened_contribution_deadline=timezone.now()
-            - timezone.timedelta(minutes=1)
-        )
-        self.assertIsNone(
-            AutomaticExamDeadlineService._close_due_intake(
-                cycle_course_id=parent.id,
-                tenant_id=self.tenant.id,
-                now=timezone.now(),
-            )
-        )
-        blueprint = ExamBlueprint.objects.get(cycle_course=parent)
-        # Reopen's revised deadline/configuration is the changed input. Phase 1
-        # must not silently generate a flat exam from newly sectioned inputs.
-        self.assertEqual(blueprint.mode, ExamBlueprint.Mode.NO_SECTIONS)
-        self.assertFalse(blueprint.sections.exists())
-        fresh_problem, readiness = Stage6ReadinessService.build_problem(
-            cycle_course=parent
-        )
-        self.assertTrue(readiness["ready"], readiness["blockers"])
-        with patch(
-            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
-            return_value=self._proved_selection_for(
-                parent=parent,
-                problem=fresh_problem,
-            ),
-        ):
-            result = AutomaticExamDeadlineService.process_course(
-                cycle_course_id=parent.id,
-                tenant_id=self.tenant.id,
-            )
-        r1, r2 = ExamGenerationRevision.objects.order_by("revision_number")
-        self.assertEqual(result.generation_revision, 2)
-        self.assertEqual((r1.status, r1.current_marker), ("SUPERSEDED", None))
-        self.assertEqual((r2.status, r2.current_marker), ("GENERATED", 1))
-        self.assertEqual(r2.supersedes, r1)
-        self.assertNotEqual(r1.source_input_fingerprint, r2.source_input_fingerprint)
+        client = Client()
+        client.force_login(self.generation_manager)
+        before = self._correction_state()
+        response = client.post(reverse("departmental_exams:automatic_contribution_reopen", args=[parent.id]), {
+            "expected_revision": configuration.revision,
+            "new_deadline": self.future_deadline().strftime("%Y-%m-%dT%H:%M"),
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(before, self._correction_state())
+        self.assertEqual(ExamBlueprint.objects.get(cycle_course=parent).mode, "NO_SECTIONS")
 
     def test_null_department_blueprint_placement_and_scenario_audits_are_safe(self):
         parent, _configuration, _problem, blueprint, _sections, _scenario = (

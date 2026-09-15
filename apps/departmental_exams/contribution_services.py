@@ -212,6 +212,12 @@ class ContributionRosterService:
         if not initializing and configuration.contributor_roster_initialized_at is None:
             raise ValidationError("Initialize the contributor roster before synchronizing it.")
 
+        # The caller holds the authoritative configuration lock. A reverse
+        # relation cached before OPEN may still contain a different CLOSED
+        # instance; do not let that lifecycle cache invalidate live sources.
+        if configuration.cycle_course_id != cycle_course.pk:
+            raise ValidationError("The contributor configuration belongs to another course.")
+        cycle_course.configuration = configuration
         inventory = ContributorEligibilityService.source_inventory(
             cycle_course=cycle_course
         )

@@ -1,6 +1,58 @@
 {% extends "faculty_portal/base.html" %}
+{% load tz %}
 {% block title %}Question Bank | TeacherMate+{% endblock %}
 {% block faculty_content %}
+<style>
+  .qb-grid { --bs-gutter-y: 1.25rem; }
+  .qb-card {
+    border: 1px solid #d7e2d6;
+    border-radius: 0.95rem;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 5px 16px rgba(26, 59, 38, 0.08);
+    height: 100%;
+  }
+  .qb-card-header {
+    min-height: 132px;
+    padding: 1rem 1.1rem;
+    color: #fff;
+    background: linear-gradient(130deg, #184f30 0%, #21683d 50%, #a4b53f 88%, #d8c260 100%);
+  }
+  .qb-course-code { font-size: 1.58rem; font-weight: 750; line-height: 1.15; }
+  .qb-course-title { font-size: 1.02rem; line-height: 1.3; margin-top: 0.2rem; }
+  .qb-course-meta { font-size: 0.84rem; margin-top: 0.5rem; opacity: 0.96; }
+  .qb-card-header .badge { border: 1px solid rgba(255,255,255,.55); }
+  .qb-classification .badge { background: rgba(255,255,255,.92) !important; color: #19492e !important; }
+  .qb-card-body { padding: 1rem 1.1rem 1.1rem; }
+  .qb-section + .qb-section { border-top: 1px solid #e2ebe1; margin-top: 1rem; padding-top: 1rem; }
+  .qb-section-title { color: #234c33; font-size: 0.78rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+  .qb-detail-row { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.86rem; padding: .18rem 0; }
+  .qb-detail-label { color: #6b8175; flex: 0 0 auto; }
+  .qb-detail-value { color: #294a36; font-weight: 650; text-align: right; }
+  .qb-progress { height: .55rem; background: #e4ece3; }
+  .qb-progress .progress-bar { background: linear-gradient(90deg, #17613a, #9aad3d); }
+  .qb-resource { border: 1px solid #dde7dc; border-radius: .8rem; padding: .85rem; background: #fbfdfb; }
+  .qb-resource + .qb-resource { margin-top: .75rem; }
+  .qb-resource-title { color: #234c33; font-weight: 750; }
+  .qb-resource-meta { color: #667b6d; font-size: .79rem; }
+  .qb-status { border-radius: 999px; font-size: .7rem; font-weight: 800; padding: .28rem .58rem; }
+  .qb-status-available { background: #d1e7dd; color: #0f5132; }
+  .qb-status-expired, .qb-status-revoked { background: #f8d7da; color: #842029; }
+  .qb-status-notyetavailable { background: #cff4fc; color: #055160; }
+  .qb-status-notreleased, .qb-status-unavailable { background: #e9ecef; color: #495057; }
+  .qb-action-row { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .7rem; }
+  .qb-action-row .btn { border-radius: 999px; font-size: .76rem; font-weight: 700; padding: .34rem .72rem; white-space: normal; }
+  .qb-action-row .btn:focus-visible { outline: 3px solid #fdcf4a; outline-offset: 2px; }
+  .qb-timezone { color: #687c6e; font-size: .78rem; }
+  @media (max-width: 575.98px) {
+    .qb-card-header { min-height: 0; padding: .9rem; }
+    .qb-card-body { padding: .9rem; }
+    .qb-detail-row { display: block; }
+    .qb-detail-value { display: block; text-align: left; margin-top: .05rem; }
+    .qb-action-row .btn { flex: 1 1 11rem; min-height: 42px; display: inline-flex; align-items: center; justify-content: center; }
+  }
+</style>
+
 {% include "departmental_exams/_cycle_filter.html" with faculty_only=True %}
 <div class="d-flex justify-content-between align-items-start mb-3">
   <div>
@@ -9,70 +61,116 @@
   </div>
 </div>
 {% if contributions %}
-  <div class="row g-3">
+  <div class="row g-3 qb-grid">
     {% for contribution in contributions %}
       <div class="col-12 col-xl-6">
-        <div class="card h-100 shadow-sm">
-          <div class="card-body">
-            <div class="d-flex justify-content-between gap-3">
+        <article class="qb-card" aria-labelledby="qb-course-{{ contribution.id }}">
+          <header class="qb-card-header">
+            <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
               <div>
-                <h2 class="h5 mb-1">{{ contribution.cycle_course.course.code }} — {{ contribution.cycle_course.course.title }} {% include "departmental_exams/_classification_badge.html" with course=contribution.cycle_course %}</h2>
-                <p class="text-muted small mb-2">{{ contribution.cycle_course.cycle.get_exam_period_display }} · {{ contribution.cycle_course.cycle.academic_year }} · {{ contribution.cycle_course.cycle.term }}</p>
+                <h2 class="qb-course-code mb-0" id="qb-course-{{ contribution.id }}">{{ contribution.cycle_course.course.code }}</h2>
+                <div class="qb-course-title">{{ contribution.cycle_course.course.title }}</div>
+                <div class="qb-classification mt-2">{% include "departmental_exams/_classification_badge.html" with course=contribution.cycle_course %}</div>
               </div>
-              <div class="text-end">
-                <span class="badge {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}text-bg-secondary{% elif contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.is_reopened_draft %}text-bg-info{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
-                  {% if contribution.cycle_course.cycle.status == 'CLOSED' %}Closed cycle / {{ contribution.get_status_display }} / Read-only{% elif contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% elif contribution.is_reopened_draft %}Reopened Draft{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
-                </span>
+              <span class="badge rounded-pill bg-white text-dark">
+                {% if contribution.cycle_course.cycle.status == 'CLOSED' %}Closed cycle / {{ contribution.get_status_display }} / Read-only{% elif contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% elif contribution.contribution_deadline_expired %}{{ contribution.get_roster_status_display }} Draft / Deadline passed{% elif contribution.is_reopened_draft %}Reopened Draft{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
+              </span>
+            </div>
+            <div class="qb-course-meta">{{ contribution.cycle_course.cycle.academic_year }} &middot; {{ contribution.cycle_course.cycle.term }} &middot; {{ contribution.cycle_course.cycle.get_exam_period_display }}</div>
+          </header>
+
+          <div class="qb-card-body">
+            <section class="qb-section" aria-labelledby="qb-contribution-{{ contribution.id }}">
+              <h3 class="qb-section-title mb-2" id="qb-contribution-{{ contribution.id }}">Contribution</h3>
+              <div class="qb-detail-row"><span class="qb-detail-label">Status</span><span class="qb-detail-value">{% if contribution.cycle_course.cycle.status == 'CLOSED' %}Closed cycle / {{ contribution.get_status_display }} / Read-only{% elif contribution.cycle_course.inclusion_status == 'EXEMPT' %}Exempt / Read-only{% elif contribution.status == 'SUBMITTED' %}Submitted{% elif contribution.contribution_deadline_expired %}{{ contribution.get_roster_status_display }} Draft / Deadline passed{% elif contribution.is_reopened_draft %}Reopened Draft{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}</span></div>
+              <div class="qb-detail-row"><span class="qb-detail-label">Questions</span><span class="qb-detail-value">{{ contribution.saved_question_count }} saved / {{ contribution.quota_snapshot }} configured</span></div>
+              <div class="progress qb-progress my-2" role="progressbar" aria-label="Contribution progress: {{ contribution.progress_percent }} percent" aria-valuenow="{{ contribution.progress_percent }}" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar" style="width: {{ contribution.progress_percent }}%"></div>
               </div>
-            </div>
-            <p class="mb-1"><strong>{{ contribution.saved_question_count }} / {{ contribution.quota_snapshot }}</strong> questions saved</p>
-            <div class="progress mb-3" role="progressbar" aria-label="Contribution progress" aria-valuenow="{{ contribution.progress_percent }}" aria-valuemin="0" aria-valuemax="100">
-              <div class="progress-bar" style="width: {{ contribution.progress_percent }}%">{{ contribution.progress_percent }}%</div>
-            </div>
-            <div class="d-grid gap-3">
-              <div><a class="btn {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}btn-outline-secondary{% else %}btn-primary{% endif %}" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">{% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Review read-only history{% else %}Open workspace{% endif %}</a></div>
-              {% if contribution.questionnaire_print or contribution.answer_key_releases %}
-                <section class="border rounded-3 bg-light p-3" aria-label="Exam outputs">
-                  <h3 class="h6 text-uppercase text-muted mb-3">Exam Outputs</h3>
-                  <div class="d-grid gap-3">
-                    {% if contribution.questionnaire_print %}
-                      <div>
-                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                          <strong>Questionnaire</strong>
-                          <span class="small text-muted">Released R{{ contribution.questionnaire_print.revision_number }}</span>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2">
-                          <a class="btn btn-sm btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id contribution.questionnaire_print.release_id 'A' %}">Print Set A</a>
-                          <a class="btn btn-sm btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id contribution.questionnaire_print.release_id 'B' %}">Print Set B</a>
-                          <a class="btn btn-sm btn-success" href="{% url 'departmental_exams:personalized_answer_sheet_overview' contribution.id contribution.questionnaire_print.release_id %}">Personalized Answer Sheets</a>
-                        </div>
-                      </div>
-                    {% endif %}
-                    {% for answer_key_release in contribution.answer_key_releases %}
-                      <div>
-                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                          <span><span class="badge text-bg-danger me-1">CONFIDENTIAL</span><strong>{{ answer_key_release.campus_name }} Answer Key</strong></span>
-                          <span class="small text-muted">Released R{{ answer_key_release.revision_number }}</span>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2">
-                          <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id answer_key_release.release_id 'A' %}">View Set A Answer Key</a>
-                          <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id answer_key_release.release_id 'B' %}">View Set B Answer Key</a>
-                        </div>
-                      </div>
-                      <div>
-                        <div class="small fw-semibold text-uppercase mb-2">CHECKING MASTER</div>
-                        <div class="d-flex flex-wrap gap-2">
-                          <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id answer_key_release.release_id 'A' %}">Print Set A Master</a>
-                          <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id answer_key_release.release_id 'B' %}">Print Set B Master</a>
-                        </div>
-                      </div>
-                    {% endfor %}
+              <div class="qb-detail-row">
+                <span class="qb-detail-label">Contribution deadline</span>
+                <span class="qb-detail-value">{% if contribution.effective_contribution_deadline %}{{ contribution.effective_contribution_deadline|localtime|date:"M j, Y g:i A" }}{% else %}Not configured{% endif %}</span>
+              </div>
+              <div class="qb-action-row">
+                <a class="btn {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}btn-outline-secondary{% else %}btn-outline-success{% endif %}" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">{% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}Review read-only history{% else %}Open Workspace{% endif %}</a>
+              </div>
+            </section>
+
+            <section class="qb-section" aria-labelledby="qb-materials-{{ contribution.id }}" aria-label="Exam Outputs — Released materials">
+              <div class="d-flex justify-content-between align-items-baseline gap-2 flex-wrap mb-2">
+                <h3 class="qb-section-title mb-0" id="qb-materials-{{ contribution.id }}">Released materials</h3>
+                <span class="qb-timezone">Times shown in {{ display_timezone }}</span>
+              </div>
+
+              {% with material=contribution.questionnaire_print %}
+                <article class="qb-resource" aria-labelledby="qb-questionnaire-{{ contribution.id }}">
+                  <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                    <div>
+                      <div class="qb-resource-title" id="qb-questionnaire-{{ contribution.id }}">Questionnaire</div>
+                      {% if material.revision_number %}<div class="qb-resource-meta">Released R{{ material.revision_number }}</div>{% endif %}
+                    </div>
+                    <span class="qb-status qb-status-{{ material.status|lower|cut:'_' }}">{{ material.status_label }}</span>
                   </div>
-                </section>
-              {% endif %}
-            </div>
+                  <div class="qb-resource-meta mt-2">
+                    {% if material.expires_at %}<strong>Open until:</strong> {{ material.expires_at|localtime|date:"M j, Y g:i A" }}{% else %}<strong>Open until:</strong> Not configured because no release is available.{% endif %}
+                  </div>
+                  {% if material.status == 'NOT_YET_AVAILABLE' and material.opens_at %}<div class="qb-resource-meta"><strong>Available from:</strong> {{ material.opens_at|localtime|date:"M j, Y g:i A" }}</div>{% endif %}
+                  {% if material.actions %}
+                    <div class="qb-action-row" aria-label="Questionnaire actions">
+                      <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id material.release_id 'A' %}">Print Set A</a>
+                      <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id material.release_id 'B' %}">Print Set B</a>
+                      <a class="btn btn-success" href="{% url 'departmental_exams:personalized_answer_sheet_overview' contribution.id material.release_id %}">Personalized Answer Sheets</a>
+                    </div>
+                  {% endif %}
+                </article>
+              {% endwith %}
+
+              {% for material in contribution.answer_key_releases %}
+                <article class="qb-resource" aria-labelledby="qb-answer-key-{{ contribution.id }}-{{ forloop.counter }}">
+                  <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                    <div>
+                      <span class="badge text-bg-danger me-1">CONFIDENTIAL</span>
+                      <span class="qb-resource-title" id="qb-answer-key-{{ contribution.id }}-{{ forloop.counter }}">{% if material.campus_name %}{{ material.campus_name }} {% endif %}Answer Key</span>
+                      {% if material.revision_number %}<div class="qb-resource-meta mt-1">Released R{{ material.revision_number }}</div>{% endif %}
+                    </div>
+                    <span class="qb-status qb-status-{{ material.status|lower|cut:'_' }}">{{ material.status_label }}</span>
+                  </div>
+                  <div class="qb-resource-meta mt-2">
+                    {% if material.expires_at %}<strong>Open until:</strong> {{ material.expires_at|localtime|date:"M j, Y g:i A" }}{% else %}<strong>Open until:</strong> Not configured because no release is available.{% endif %}
+                  </div>
+                  {% if material.status == 'NOT_YET_AVAILABLE' and material.opens_at %}<div class="qb-resource-meta"><strong>Available from:</strong> {{ material.opens_at|localtime|date:"M j, Y g:i A" }}</div>{% endif %}
+                  {% if material.actions %}
+                    <div class="qb-action-row" aria-label="Answer Key actions">
+                      <a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id material.release_id 'A' %}">View Set A Answer Key</a>
+                      <a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id material.release_id 'B' %}">View Set B Answer Key</a>
+                    </div>
+                  {% endif %}
+                </article>
+
+                <article class="qb-resource" aria-labelledby="qb-checking-master-{{ contribution.id }}-{{ forloop.counter }}">
+                  <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                    <div>
+                      <span class="badge text-bg-danger me-1">CONFIDENTIAL</span>
+                      <span class="qb-resource-title" id="qb-checking-master-{{ contribution.id }}-{{ forloop.counter }}">{% if material.campus_name %}{{ material.campus_name }} {% endif %}CHECKING MASTER</span>
+                      {% if material.revision_number %}<div class="qb-resource-meta mt-1">Uses Answer Key release R{{ material.revision_number }}</div>{% endif %}
+                    </div>
+                    <span class="qb-status qb-status-{{ material.status|lower|cut:'_' }}">{{ material.status_label }}</span>
+                  </div>
+                  <div class="qb-resource-meta mt-2">
+                    {% if material.expires_at %}<strong>Open until:</strong> {{ material.expires_at|localtime|date:"M j, Y g:i A" }}{% else %}<strong>Open until:</strong> Not configured because no release is available.{% endif %}
+                  </div>
+                  {% if material.status == 'NOT_YET_AVAILABLE' and material.opens_at %}<div class="qb-resource-meta"><strong>Available from:</strong> {{ material.opens_at|localtime|date:"M j, Y g:i A" }}</div>{% endif %}
+                  {% if material.actions %}
+                    <div class="qb-action-row" aria-label="Checking Master actions">
+                      <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id material.release_id 'A' %}">Print Set A Master</a>
+                      <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id material.release_id 'B' %}">Print Set B Master</a>
+                    </div>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </section>
           </div>
-        </div>
+        </article>
       </div>
     {% endfor %}
   </div>

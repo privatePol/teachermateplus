@@ -510,6 +510,24 @@ class AutomaticGenerationReadinessReport:
             return "WAITING FOR DEADLINE", ("Wait for the contribution deadline.",)
         return None, ()
 
+    def _stale_roster_guidance(self, configuration):
+        detail = "Contributor roster requires review because its source evidence is inconsistent."
+        deadline = configuration.active_contribution_deadline
+        if deadline is None or self.now >= deadline:
+            return detail, (
+                "The effective contribution deadline has been reached or is unavailable. "
+                "Existing contributions remain preserved. Prepare a fresh cycle for revised preparation."
+            )
+        if configuration.workflow_status != configuration.WorkflowStatus.OPEN:
+            return detail, (
+                "Roster synchronization is unavailable while contribution intake is Closed. "
+                "Ask an authorized administrator to review the intake lifecycle."
+            )
+        return (
+            "Contributor roster needs synchronization because the eligible faculty list has changed.",
+            "Synchronize the contributor roster.",
+        )
+
     def _execution_status(self, *, course, configuration, roster, pool, current):
         preliminary_status, preliminary_actions = self._pre_roster_status(
             course=course,
@@ -519,8 +537,10 @@ class AutomaticGenerationReadinessReport:
         if preliminary_status not in (None, "WAITING FOR DEADLINE"):
             return preliminary_status, preliminary_actions
         if roster is None or not roster.current:
-            return "BLOCKED", ("Synchronize the contributor roster.",)
-        if roster.unresolved_blocked_count:
+            return "BLOCKED", (self._stale_roster_guidance(configuration)[1],)
+        if (roster.unresolved_blocked_count
+                and course.cycle.automatic_contributor_completion_policy
+                != ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL):
             count = roster.unresolved_blocked_count
             return "BLOCKED", (
                 f"Resolve {count} Blocked Draft contributor record{'s' if count != 1 else ''}.",
@@ -657,10 +677,7 @@ class AutomaticGenerationReadinessReport:
         )
         if roster_status not in (None, "WAITING FOR DEADLINE"):
             if roster is None or not roster.current:
-                status_detail = (
-                    "Contributor roster needs synchronization because the eligible faculty "
-                    "list has changed."
-                )
+                status_detail = self._stale_roster_guidance(configuration)[0]
             else:
                 status_detail = ""
             return {
@@ -682,6 +699,13 @@ class AutomaticGenerationReadinessReport:
         )
         pool_actions = self._pool_actions(pool)
         pool_warnings = self._pool_warnings(pool)
+        if (roster.unresolved_blocked_count
+                and course.cycle.automatic_contributor_completion_policy
+                == ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL):
+            pool_warnings += (
+                f"{roster.unresolved_blocked_count} unresolved Blocked Draft(s) excluded; "
+                "only the eligible Submitted pool is used.",
+            )
         status, action_items = self._execution_status(
             course=course,
             configuration=configuration,
@@ -709,10 +733,7 @@ class AutomaticGenerationReadinessReport:
         elif configuration.contributor_roster_initialized_at is None:
             status_detail = "Contributor roster has not been initialized."
         elif roster is None or not roster.current:
-            status_detail = (
-                "Contributor roster needs synchronization because the eligible faculty "
-                "list has changed."
-            )
+            status_detail = self._stale_roster_guidance(configuration)[0]
         else:
             status_detail = ""
         return {

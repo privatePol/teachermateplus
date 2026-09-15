@@ -883,7 +883,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             ("1 current faculty has not completed their required contribution.",),
         )
 
-    def test_stale_roster_and_unresolved_blocked_draft_remain_blockers(self):
+    def test_stale_roster_blocks_and_blocked_draft_follows_contributor_policy(self):
         parent, _configuration, campuses, offerings = self._automatic_course()
         _faculty, assignment = self.add_faculty_source(
             parent=parent,
@@ -911,11 +911,76 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
             tenant_id=self.tenant.id,
             actor=self.generation_manager,
         )
+        before = list(FacultyContribution.objects.order_by("id").values())
+        warning_row = self._screen(parent).context["rows"][0]
+        self.assertEqual(warning_row["generation_status"], "WAITING FOR DEADLINE")
+        self.assertIn("1 unresolved Blocked Draft(s) excluded; only the eligible Submitted pool is used.",
+                      warning_row["pool_warnings"])
+        self.assertEqual(before, list(FacultyContribution.objects.order_by("id").values()))
+        ExaminationCycle.objects.filter(pk=parent.cycle_id).update(automatic_contributor_completion_policy="REQUIRE_ALL")
         blocked_row = self._screen(parent).context["rows"][0]
         self.assertEqual(blocked_row["generation_status"], "BLOCKED")
         self.assertIn(
             "Resolve 1 Blocked Draft contributor record.", blocked_row["action_items"]
         )
+
+    def test_stale_roster_screen_and_print_respect_intake_window(self):
+        from .models import FacultyContributionEligibilitySource
+
+        parent, configuration, _campuses, _offerings = self._automatic_course(
+            submitted_codes=("FAIRVIEW", "TAYTAY"),
+        )
+        # Closed readiness freezes staffing. An Active Draft without current
+        # source evidence is a genuine stale frozen roster, even after Close.
+        draft = FacultyContribution.objects.get(cycle_course=parent, status="DRAFT")
+        draft.eligibility_sources.update(is_current=False, invalidated_at=timezone.now())
+        deadline = timezone.now() + timezone.timedelta(hours=1)
+        CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
+            reopened_contribution_deadline=deadline,
+        )
+        preserved = (
+            "The effective contribution deadline has been reached or is unavailable. "
+            "Existing contributions remain preserved. Prepare a fresh cycle for revised preparation."
+        )
+        closed = (
+            "Roster synchronization is unavailable while contribution intake is Closed. "
+            "Ask an authorized administrator to review the intake lifecycle."
+        )
+
+        def state():
+            return {model.__name__: list(model.objects.order_by("pk").values()) for model in (
+                CourseExamConfiguration, FacultyContribution, FacultyContributionEligibilitySource,
+                Question, ExamGenerationRevision, AuditLog,
+            )}
+
+        for workflow, now, guidance in (
+            ("CLOSED", deadline - timezone.timedelta(minutes=1), closed),
+            ("CLOSED", deadline, preserved),
+            ("CLOSED", deadline + timezone.timedelta(seconds=1), preserved),
+            ("OPEN", deadline + timezone.timedelta(seconds=1), preserved),
+        ):
+            with self.subTest(workflow=workflow, now=now):
+                CourseExamConfiguration.objects.filter(pk=configuration.pk).update(workflow_status=workflow)
+                before = state()
+                # Advance report time without expiring the authenticated session.
+                with patch(
+                    "apps.departmental_exams.automatic_generation_readiness.timezone",
+                    SimpleNamespace(now=lambda: now, localtime=timezone.localtime),
+                ):
+                    for route in ("automatic_generation_readiness", "automatic_generation_readiness_print"):
+                        response = self.client.get(
+                            reverse("departmental_exams:" + route), {"cycle": parent.cycle_id},
+                        )
+                        self.assertEqual(response.context["rows"][0]["action_items"], (guidance,))
+                        self.assertContains(response, guidance)
+                        self.assertEqual(response.context["rows"][0]["generation_status"], "BLOCKED")
+                        self.assertFalse(response.context["rows"][0]["faculty"]["roster_current"])
+                        self.assertNotContains(response, "Synchronize the contributor roster.")
+                        self.assertNotContains(response, "Contributor roster needs synchronization")
+                        self.assertNotContains(response, "Reopen Contributions")
+                        self.assertNotContains(response, "Readiness confidential question")
+                        self.assertNotContains(response, "Private A")
+                self.assertEqual(before, state())
 
     def test_initialized_legacy_null_draft_roster_does_not_render_stale(self):
         parent, _configuration, _campuses, _offerings = self._automatic_course(
@@ -1156,7 +1221,7 @@ class AutomaticGenerationReadinessReportTests(Stage6FixtureMixin, Stage4TestCase
 
         ExaminationCycle.objects.filter(pk=parent.cycle_id).update(
             automatic_contributor_completion_policy=(
-                ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL
+                ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL
             )
         )
         assignment.is_active = False

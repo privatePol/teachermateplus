@@ -66,6 +66,7 @@ from .forms import (
 from .exam_units import resolve_examination_unit
 from .questionnaire_printing import QuestionnairePrintReleaseService
 from .services import (
+    CourseExamConfigurationService,
     CourseExamConfigurationConflict,
     DepartmentalExamAuthorizationService,
 )
@@ -1744,7 +1745,15 @@ def automatic_contribution_reopen_view(request, cycle_course_id):
         initial={"expected_revision": configuration.revision},
     )
     status = 200
-    if request.method == "POST" and form.is_valid():
+    can_reopen = True
+    reopen_error = ""
+    try:
+        CourseExamConfigurationService.require_existing_intake_deadline(configuration)
+    except ValidationError as exc:
+        reopen_error = " ".join(exc.messages)
+        status = 400
+        can_reopen = False
+    if can_reopen and request.method == "POST" and form.is_valid():
         try:
             AutomaticContributionReopenService.reopen(
                 cycle_course_id=course.id,
@@ -1772,6 +1781,7 @@ def automatic_contribution_reopen_view(request, cycle_course_id):
     return render(
         request,
         "departmental_exams/admin/automatic_contribution_reopen.html",
-        {"cycle_course": course, "configuration": configuration, "form": form},
+        {"cycle_course": course, "configuration": configuration, "form": form,
+         "can_reopen": can_reopen, "reopen_error": reopen_error},
         status=status,
     )

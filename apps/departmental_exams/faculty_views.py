@@ -3,12 +3,14 @@ from __future__ import annotations
 import csv
 from functools import wraps
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from django.views.decorators.cache import never_cache
 
@@ -423,18 +425,27 @@ def contribution_list_view(request):
     )
     from .cycle_visibility import filter_cycle_rows
     contributions = filter_cycle_rows(contributions, request.GET, cycle_of=lambda row: row.cycle_course.cycle, allow_draft=False)
-    print_options = FacultyQuestionnairePrintService.available_options(
-        contributions=contributions,
+    now = timezone.now()
+    questionnaire_statuses = FacultyQuestionnairePrintService.card_statuses(
+        contributions=contributions, now=now,
     )
-    answer_key_options = FacultyAnswerKeyReleaseService.available_options(
-        contributions=contributions,
+    answer_key_statuses = FacultyAnswerKeyReleaseService.card_statuses(
+        contributions=contributions, now=now,
     )
     for contribution in contributions:
         contribution.progress_percent = round(
             (contribution.saved_question_count / contribution.quota_snapshot) * 100
         )
-        contribution.questionnaire_print = print_options.get(contribution.id)
-        contribution.answer_key_releases = answer_key_options.get(contribution.id, ())
+        contribution.questionnaire_print = questionnaire_statuses[contribution.id]
+        contribution.answer_key_releases = answer_key_statuses[contribution.id]
+        configuration = contribution.cycle_course.configuration
+        contribution.effective_contribution_deadline = (
+            configuration.active_contribution_deadline
+        )
+        contribution.contribution_deadline_expired = bool(
+            contribution.effective_contribution_deadline
+            and now >= contribution.effective_contribution_deadline
+        )
         contribution.is_reopened_draft = (
             ContributionAuthorizationService.has_authorized_reopened_existing_draft_authority(
                 user=request.user,
@@ -447,7 +458,10 @@ def contribution_list_view(request):
     return render(
         request,
         "departmental_exams/faculty/contribution_list.html",
-        {"contributions": contributions},
+        {
+            "contributions": contributions,
+            "display_timezone": settings.TIME_ZONE,
+        },
     )
 
 

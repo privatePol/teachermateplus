@@ -312,6 +312,56 @@ class CaseGenerationTests(FacultyCaseFixtureMixin, Stage4TestCase):
         with self.assertRaises((PermissionDenied, ValidationError)):
             self.save_case(title="Too late")
 
+    def test_blocked_nonempty_draft_is_excluded_from_whole_case_generation(self):
+        from .models import FacultyContribution
+        cases = self.fill_and_submit()
+        self.faculty, self.contribution = self.other_faculty, self.other_contribution
+        draft_case = self.save_case(title="Excluded unfinished Draft")
+        self.add_question(scenario=draft_case, text="Draft-only question")
+        FacultyContribution.objects.filter(pk=self.contribution.id).update(
+            roster_status="BLOCKED", roster_blocked_at=timezone.now())
+        self.contribution.eligibility_sources.update(is_current=False, invalidated_at=timezone.now())
+        before = self._question_mutation_snapshot()[:5]
+        revision = self.generate()
+        self.assertEqual(before, self._question_mutation_snapshot()[:5])
+        self.assertFalse(GeneratedExamItem.objects.filter(scenario_id_snapshot=draft_case.id).exists())
+        for case in cases:
+            expected = list(case.members.order_by("position").values_list("question_id", flat=True))
+            for generated_set in revision.generated_sets.all():
+                self.assertEqual(expected, list(generated_set.items.filter(scenario_id_snapshot=case.id)
+                    .order_by("position").values_list("source_question_id", flat=True)))
+
+    def test_section_surplus_does_not_cover_shortage_with_blocked_draft_warning(self):
+        from .models import ExamSection, FacultyContribution, _exam_structure_lifecycle_service_scope
+        # Construct the reported historical shape only in this disposable fixture.
+        with _exam_structure_lifecycle_service_scope():
+            ExamSection.objects.filter(pk=self.section_a.id).update(item_quota=10)
+            ExamSection.objects.filter(pk=self.section_b.id).update(item_quota=40)
+        scenario = self.save_case(title="Eleven linked items")
+        for i in range(11):
+            self.add_question(scenario=scenario, text=f"Case member {i}")
+        for i in range(39):
+            self.add_question(section=self.section_b, text=f"Standalone {i}")
+        self.contribution.refresh_from_db()
+        QuestionMutationService.submit(contribution_id=self.contribution.id, user=self.faculty,
+            tenant_id=self.tenant.id, campus_id=self.campus.id,
+            expected_contribution_revision=self.contribution.revision)
+        FacultyContribution.objects.filter(pk=self.other_contribution.id).update(
+            roster_status="BLOCKED", roster_blocked_at=timezone.now())
+        self.other_contribution.eligibility_sources.update(is_current=False, invalidated_at=timezone.now())
+        CourseExamConfiguration.objects.filter(pk=self.configuration.id).update(workflow_status="CLOSED")
+        before = self._question_mutation_snapshot()
+        with patch("apps.departmental_exams.whole_unit_selection.solve_whole_unit_two_sets") as solver:
+            problem, report = Stage6ReadinessService.build_problem(cycle_course=self.parent)
+            solver.assert_not_called()
+        self.assertIsNone(problem)
+        self.assertIn("QUESTION_SHORTAGES", [b["code"] for b in report["blockers"]])
+        self.assertIn("BLOCKED_DRAFTS_UNRESOLVED", [w["code"] for w in report["warnings"]])
+        self.assertTrue(any(s["dimension"] == "section" and s["available"] == 39 and s["required"] == 40
+                            for s in report["shortages"]))
+        self.assertEqual([(s["available"], s["required"]) for s in report["section_quotas"]], [(11, 10), (39, 40)])
+        self.assertEqual(before, self._question_mutation_snapshot())
+
     def test_admin_preview_and_print_use_immutable_rich_blocks(self):
         cases = self.fill_and_submit()
         revision = self.generate()

@@ -587,10 +587,16 @@ class Stage6ReadinessService:
                         **details,
                     )
             if roster.unresolved_blocked_count:
-                cls._block(
-                    blockers,
+                sufficient_pool = (
+                    automatic_flat_mode
+                    and cycle_course.cycle.automatic_contributor_completion_policy
+                    == ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL
+                )
+                (cls._warn if sufficient_pool else cls._block)(
+                    warnings if sufficient_pool else blockers,
                     "BLOCKED_DRAFTS_UNRESOLVED",
-                    "Every current Blocked Draft requires explicit resolution.",
+                    ("Unresolved Blocked Drafts are excluded; generation uses only the eligible Submitted pool."
+                     if sufficient_pool else "Every current Blocked Draft requires explicit resolution."),
                     unresolved=roster.unresolved_blocked_count,
                 )
 
@@ -1546,6 +1552,7 @@ class Stage6ReadinessService:
                     automatic_selection if automatic_flat_mode else None
                 ),
                 pool_warnings=tuple(w for w in warnings if w["code"] in {
-                    "UNUSABLE_CASE_EXCLUDED", "UNPLACED_SINGLETONS_EXCLUDED", "INVALID_QUESTIONS_EXCLUDED"}),
+                    "UNUSABLE_CASE_EXCLUDED", "UNPLACED_SINGLETONS_EXCLUDED", "INVALID_QUESTIONS_EXCLUDED",
+                    "BLOCKED_DRAFTS_UNRESOLVED"}),
             )
         return problem, report

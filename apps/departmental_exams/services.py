@@ -2731,6 +2731,7 @@ class CourseExamConfigurationService:
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
         cls._require_active_responsible_department(parent)
         cls._require_cycle_open_for_workflow(parent)
+        cls.require_existing_intake_deadline(configuration)
         from .setup_services import CourseSetupService
 
         if parent.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
@@ -2949,6 +2950,26 @@ class CourseExamConfigurationService:
             },
         )
         return configuration, True
+
+    @classmethod
+    def reopen_deadline_available(cls, configuration, *, now=None):
+        return bool(configuration and configuration.active_contribution_deadline
+                    and (now or timezone.now()) < configuration.active_contribution_deadline)
+
+    @classmethod
+    def require_existing_intake_deadline(cls, configuration, *, now=None):
+        """Never extend expired intake by first changing its effective deadline.
+
+        Call under the configuration lock, before any transition writes. New,
+        never-opened setup still uses its existing opening-readiness checks.
+        """
+        if configuration and (configuration.opened_at or configuration.workflow_status in ("OPEN", "CLOSED")):
+            if not cls.reopen_deadline_available(configuration, now=now):
+                raise ValidationError(
+                    "The effective contribution deadline has been reached or is unavailable. "
+                    "This intake cannot be reopened. Preserve this record and prepare a new cycle "
+                    "with a future deadline if further contributions are needed."
+                )
 
     @classmethod
     def reopen_contribution(cls, **kwargs):

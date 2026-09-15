@@ -537,6 +537,124 @@ class FacultyAnswerKeyReleaseService:
                     })
         return options
 
+    @classmethod
+    def card_statuses(cls, *, contributions, now=None):
+        """Return scoped, content-safe release metadata for Question Bank cards."""
+        contributions = tuple(contributions)
+        now = now or timezone.now()
+        available = cls.available_options(contributions=contributions, now=now)
+        primary_ids = {
+            row.id: resolve_examination_unit(row.cycle_course).primary.id
+            for row in contributions
+        }
+        retained_assignments = {
+            row.id: ContributionAuthorizationService.retained_current_print_assignments(
+                contribution=row
+            )
+            for row in contributions
+        }
+        eligible_campus_ids = {
+            assignment.offering.campus_id
+            for assignments in retained_assignments.values()
+            for assignment in assignments
+        }
+        releases = list(
+            AnswerKeyRelease.objects.filter(
+                recipient_course_id__in=[row.cycle_course_id for row in contributions],
+                target_campus_id__in=eligible_campus_ids,
+                scope_kind=AnswerKeyRelease.ScopeKind.SCOPED,
+                generation_revision__cycle_course_id=F("cycle_course_id"),
+            )
+            .select_related("target_campus", "generation_revision__cycle_course__cycle")
+            .order_by("-released_at", "-id")
+        )
+        active_by_scope = {}
+        latest_by_scope = {}
+        for release in releases:
+            key = (release.recipient_course_id, release.target_campus_id)
+            latest_by_scope.setdefault(key, release)
+            if release.status == AnswerKeyRelease.Status.ACTIVE and release.active_marker == 1:
+                active_by_scope.setdefault(key, release)
+
+        statuses = {}
+        for contribution in contributions:
+            campus_rows = {}
+            for assignment in retained_assignments[contribution.id]:
+                campus_rows.setdefault(
+                    assignment.offering.campus_id,
+                    assignment.offering.campus,
+                )
+            available_by_release = {
+                row["release_id"]: row for row in available.get(contribution.id, ())
+            }
+            summaries = []
+            for campus_id, campus in sorted(
+                campus_rows.items(), key=lambda item: (item[1].name, item[0])
+            ):
+                summary = {
+                    "status": "NOT_RELEASED",
+                    "status_label": "Not released",
+                    "release_id": None,
+                    "revision_number": None,
+                    "campus_id": campus_id,
+                    "campus_name": campus.name,
+                    "opens_at": None,
+                    "expires_at": None,
+                    "actions": None,
+                }
+                key = (contribution.cycle_course_id, campus_id)
+                release = active_by_scope.get(key) or latest_by_scope.get(key)
+                if release is None or release.cycle_course_id != primary_ids[contribution.id]:
+                    summaries.append(summary)
+                    continue
+                summary.update(
+                    release_id=release.id,
+                    revision_number=release.generation_revision.revision_number,
+                    opens_at=release.available_from,
+                    expires_at=release.available_until,
+                )
+                option = available_by_release.get(release.id)
+                if release.status == AnswerKeyRelease.Status.REVOKED:
+                    summary.update(status="REVOKED", status_label="Revoked")
+                elif not AnswerKeyReleaseService.revision_is_eligible(
+                    release.generation_revision
+                ):
+                    summary.update(
+                        status="UNAVAILABLE",
+                        status_label="Superseded / No Longer Faculty Accessible",
+                    )
+                elif release.available_from is None or release.available_until is None:
+                    summary.update(status="UNAVAILABLE", status_label="Unavailable")
+                elif now < release.available_from:
+                    summary.update(status="NOT_YET_AVAILABLE", status_label="Not yet available")
+                elif now > release.available_until:
+                    summary.update(status="EXPIRED", status_label="Expired")
+                elif option:
+                    summary.update(
+                        status="AVAILABLE",
+                        status_label="Available",
+                        actions=option,
+                    )
+                else:
+                    summary.update(status="UNAVAILABLE", status_label="Unavailable")
+                summaries.append(summary)
+            if not summaries:
+                summaries.append(
+                    {
+                        "status": "NOT_RELEASED",
+                        "status_label": "Not released",
+                        "release_id": None,
+                        "revision_number": None,
+                        "campus_id": None,
+                        "campus_name": "",
+                        "opens_at": None,
+                        "expires_at": None,
+                        "actions": None,
+                    }
+                )
+            statuses[contribution.id] = tuple(summaries)
+        return statuses
+
     @staticmethod
     def _authorized_release(*, contribution, release_id, set_code, actor, now=None):
         if (

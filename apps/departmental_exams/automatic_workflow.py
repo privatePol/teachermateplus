@@ -221,7 +221,7 @@ class FacultyContributionPreparationService:
                         course,
                         status="Preserved",
                         reason="Course contributions are already closed",
-                        recommended_action="Use the governed per-course reopen action only if additional faculty work is required.",
+                        recommended_action="Reopening is available only before the existing effective deadline. After it, preserve this record and prepare a new cycle if more contributions are needed.",
                     )
                 )
                 continue
@@ -402,17 +402,17 @@ def readiness_recommendation(report):
         "CONTRIBUTION_NOT_CLOSED": "Wait for automatic deadline processing.",
         "WAITING_FOR_DEADLINE": "Monitor faculty contributions until the deadline.",
         "AUTOMATIC_PROCESSING_PENDING": "No admin action is needed; automatic processing is pending.",
-        "ROSTER_STALE": "Synchronize the contributor roster.",
-        "ACTIVE_CONTRIBUTORS_INCOMPLETE": "Reopen contributions with a new deadline if more time is needed.",
+        "ROSTER_STALE": "Review source eligibility and roster evidence. After the effective deadline, preserve this record and prepare a new cycle if more contributions are needed.",
+        "ACTIVE_CONTRIBUTORS_INCOMPLETE": "Complete required contributions before the effective deadline. After it, preserve this record and prepare a new cycle if more contributions are needed.",
         "BLOCKED_DRAFTS_UNRESOLVED": "Resolve current Blocked Draft contributions.",
-        "QUESTION_SHORTAGES": "Obtain enough eligible Submitted questions.",
-        "UNIQUE_QUESTION_SHORTAGES": "Obtain enough unique usable Submitted questions.",
+        "QUESTION_SHORTAGES": "Each section must meet its exact quota using whole Cases and standalone questions; surplus in another section cannot fill a shortage. After the deadline, use a new cycle for additional contributions.",
+        "UNIQUE_QUESTION_SHORTAGES": "Each section needs enough unique usable Submitted questions. After the deadline, use a new cycle for additional contributions.",
         "HARD_CONSTRAINTS_INFEASIBLE": "Review the eligible pool and required allocation constraints.",
         "FEASIBILITY_LIMIT": "Contact an administrator to review the solver limit.",
         AUTOMATIC_PROCESSING_TIMEOUT_CODE: (
-            "Administrator review is required before reopening contributions for retry."
+            "Ask an administrator to review the processing failure. Reopening is unavailable after the effective deadline; preserve the existing record."
         ),
-        "PROCESSING_ERROR": "Review the secured processor log, correct the failure, and rerun deadline processing.",
+        "PROCESSING_ERROR": "Ask an administrator to review the secured processor log and arrange authorized technical recovery. Do not reopen expired intake.",
     }.get(code, "Review the readiness details and correct the blocking input.")
 
 
@@ -972,8 +972,13 @@ class AutomaticContributionReopenService:
             raise CourseExamConfigurationConflict(
                 "The course configuration changed after this page was loaded."
             )
+        now = timezone.now()
+        for member in unit.members:
+            CourseExamConfigurationService.require_existing_intake_deadline(
+                configurations[member.id], now=now,
+            )
         normalized_deadline = normalize_contribution_deadline_to_minute(new_deadline)
-        if normalized_deadline is None or normalized_deadline <= timezone.now():
+        if normalized_deadline is None or normalized_deadline <= now:
             raise ValidationError("The new contribution deadline must be in the future.")
 
         revisions = list(
@@ -1165,7 +1170,8 @@ class AutomaticGenerationSummaryService:
     ):
         warnings = [row for row in optimization_evidence.get("case_pool_warnings", ())
                     if isinstance(row, dict) and row.get("code") in {
-                        "UNUSABLE_CASE_EXCLUDED", "UNPLACED_SINGLETONS_EXCLUDED", "INVALID_QUESTIONS_EXCLUDED"}
+                        "UNUSABLE_CASE_EXCLUDED", "UNPLACED_SINGLETONS_EXCLUDED", "INVALID_QUESTIONS_EXCLUDED",
+                        "BLOCKED_DRAFTS_UNRESOLVED"}
                     and isinstance(row.get("message"), str)]
         if audit_snapshot is not None and audit_snapshot.redundant_copy_count:
             warnings.append(
@@ -1397,6 +1403,16 @@ class AutomaticGenerationSummaryService:
             current = current_rows[0] if current_rows else None
             common = {
                 "course": course,
+                "can_reopen": (
+                    cycle.status == ExaminationCycle.Status.OPEN
+                    and (not current or current.status != ExamGenerationRevision.Status.LOCKED)
+                    and all(
+                        getattr(member, "configuration", None)
+                        and member.configuration.workflow_status == "CLOSED"
+                        and CourseExamConfigurationService.reopen_deadline_available(member.configuration, now=now)
+                        for member in unit.members
+                    )
+                ),
                 "campuses": campuses,
                 "target_count": (
                     configuration.final_item_count if configuration else None

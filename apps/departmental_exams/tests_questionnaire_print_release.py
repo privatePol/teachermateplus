@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
@@ -1371,21 +1372,57 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             print_until=now + timezone.timedelta(hours=2),
         )
         client = self._faculty_client()
-        self.assertNotContains(
-            client.get(reverse("departmental_exams:contribution_list")),
-            "Print Set A",
+        scheduled_page = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(scheduled_page, "Print Set A")
+        self.assertEqual(
+            scheduled_page.context["contributions"][0].questionnaire_print["status"],
+            "NOT_YET_AVAILABLE",
         )
+        self.assertContains(scheduled_page, "Not yet available")
         self.assertEqual(client.get(self._print_url(scheduled)).status_code, 403)
 
         expired = self._release(
             print_from=now - timezone.timedelta(hours=2),
             print_until=now - timezone.timedelta(hours=1),
         )
-        self.assertNotContains(
-            client.get(reverse("departmental_exams:contribution_list")),
-            "Print Set A",
+        expired_page = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(expired_page, "Print Set A")
+        self.assertEqual(
+            expired_page.context["contributions"][0].questionnaire_print["status"],
+            "EXPIRED",
         )
+        self.assertContains(expired_page, "Expired")
         self.assertEqual(client.get(self._print_url(expired)).status_code, 403)
+
+        QuestionnairePrintReleaseService.revoke(
+            release_id=expired.id,
+            tenant_id=self.tenant.id,
+            actor=self.manager_user,
+        )
+        revoked_page = client.get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(revoked_page, "Print Set A")
+        self.assertEqual(
+            revoked_page.context["contributions"][0].questionnaire_print["status"],
+            "REVOKED",
+        )
+        self.assertContains(revoked_page, "Revoked")
+
+    def test_print_until_boundary_is_inclusive_for_card_and_direct_access(self):
+        boundary = timezone.now()
+        release = self._release(
+            print_from=boundary - timezone.timedelta(hours=1),
+            print_until=boundary,
+        )
+        client = self._faculty_client()
+
+        with patch("django.utils.timezone.now", return_value=boundary):
+            page = client.get(reverse("departmental_exams:contribution_list"))
+            self.assertEqual(
+                page.context["contributions"][0].questionnaire_print["status"],
+                "AVAILABLE",
+            )
+            self.assertContains(page, "Print Set A")
+            self.assertEqual(client.get(self._print_url(release)).status_code, 200)
 
     def test_set_a_and_b_are_sanitized_no_store_and_audited(self):
         release = self._release()

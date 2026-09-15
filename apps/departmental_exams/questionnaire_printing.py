@@ -487,6 +487,81 @@ class FacultyQuestionnairePrintService:
             }
         return options
 
+    @classmethod
+    def card_statuses(cls, *, contributions, now=None):
+        """Return content-safe release metadata for owned Question Bank cards."""
+        contributions = tuple(contributions)
+        now = now or timezone.now()
+        available = cls.available_options(contributions=contributions, now=now)
+        primary_ids = {
+            row.id: resolve_examination_unit(row.cycle_course).primary.id
+            for row in contributions
+        }
+        releases = list(
+            QuestionnairePrintRelease.objects.filter(
+                cycle_course_id__in=set(primary_ids.values()),
+                generation_revision__cycle_course_id=F("cycle_course_id"),
+            )
+            .select_related("generation_revision")
+            .order_by("-released_at", "-id")
+        )
+        active_by_course = {}
+        latest_by_course = {}
+        for release in releases:
+            latest_by_course.setdefault(release.cycle_course_id, release)
+            if (
+                release.status == QuestionnairePrintRelease.Status.ACTIVE
+                and release.active_marker == 1
+            ):
+                active_by_course.setdefault(release.cycle_course_id, release)
+
+        statuses = {}
+        for contribution in contributions:
+            summary = {
+                "status": "NOT_RELEASED",
+                "status_label": "Not released",
+                "release_id": None,
+                "revision_number": None,
+                "opens_at": None,
+                "expires_at": None,
+                "actions": None,
+            }
+            if not ContributionAuthorizationService.has_retained_current_print_eligibility(
+                contribution=contribution
+            ):
+                statuses[contribution.id] = summary
+                continue
+            primary_id = primary_ids[contribution.id]
+            release = active_by_course.get(primary_id) or latest_by_course.get(primary_id)
+            if release is None:
+                statuses[contribution.id] = summary
+                continue
+            summary.update(
+                release_id=release.id,
+                revision_number=release.generation_revision.revision_number,
+                opens_at=release.print_from,
+                expires_at=release.print_until,
+            )
+            option = available.get(contribution.id)
+            if release.status == QuestionnairePrintRelease.Status.REVOKED:
+                summary.update(status="REVOKED", status_label="Revoked")
+            elif release.print_from is None or release.print_until is None:
+                summary.update(status="UNAVAILABLE", status_label="Unavailable")
+            elif now < release.print_from:
+                summary.update(status="NOT_YET_AVAILABLE", status_label="Not yet available")
+            elif now > release.print_until:
+                summary.update(status="EXPIRED", status_label="Expired")
+            elif option and option["release_id"] == release.id:
+                summary.update(
+                    status="AVAILABLE",
+                    status_label="Available",
+                    actions=option,
+                )
+            else:
+                summary.update(status="UNAVAILABLE", status_label="Unavailable")
+            statuses[contribution.id] = summary
+        return statuses
+
     @staticmethod
     def _printable_release(*, contribution, release_id, set_code, now=None):
         normalized_set = (set_code or "").upper()
