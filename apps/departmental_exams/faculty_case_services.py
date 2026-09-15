@@ -242,9 +242,10 @@ class FacultyCasePolicy:
                 ordered = [member for member in members if member.scenario_id == scenario.id]
                 if [member.position for member in ordered] != list(range(1, len(ordered) + 1)):
                     raise ValidationError("Reorder this Case's Linked Questions to restore a complete sequence before Final Submission.")
-                fingerprints = [QuestionPayloadService.question_fingerprint(member.question.question_text) for member in ordered]
+                from .duplicate_contract import question_identity
+                fingerprints = [question_identity(member.question) for member in ordered]
                 if len(fingerprints) != len(set(fingerprints)):
-                    raise ValidationError("A Case contains duplicate logical MCQs. Give each Linked Question a distinct stem before Final Submission.")
+                    raise ValidationError("A Case contains duplicate logical MCQs. Revise its Linked Questions before Final Submission.")
             canonical = canonicalize_scenario_content(scenario.stimulus).html
             if (
                 scenario.content_format != ExamScenario.ContentFormat.RICH_HTML_V1

@@ -24,8 +24,10 @@ from .contribution_services import (
     QuestionPayloadService,
     Stage5LockService,
 )
-from .models import Question, QuestionBlueprintPlacement, QuestionImportBatch, QuestionImportRow
+from .models import FacultyContribution, Question, QuestionBlueprintPlacement, QuestionImportBatch, QuestionImportRow
 from .import_sections import ImportSectionError, resolve_import_section, validate_import_placements
+from .duplicate_contract import (LegacyPoolConflict, LEGACY_POOL_MESSAGE,
+    IncompatibleImportPlan, IMPORT_PLAN_VERSION_MESSAGE, validate_import_plan_version)
 
 
 CSV_HEADERS = (
@@ -249,6 +251,8 @@ class QuestionCSVParser:
 
 class QuestionCSVImportService:
     SAFE_FAILURE_MESSAGES = {
+        "IMPORT_PLAN_VERSION": IMPORT_PLAN_VERSION_MESSAGE,
+        "LEGACY_POOL_CONFLICT": LEGACY_POOL_MESSAGE,
         "IMPORT_SECTION_CHANGED": "Import stopped because its target section is missing or no longer valid. Unpublished partial rows were discarded. Upload the file again and select 'Add these questions to section'. Completed imports and existing questions are unchanged.",
         "AUTHORIZATION_CHANGED": "Import stopped because current access or assignment eligibility changed. Partial imported rows were discarded; start a fresh CSV preview when access is restored.",
         "STALE_CONTRIBUTION": "Import stopped because the contribution changed after preview. Partial imported rows were discarded; start a fresh CSV preview.",
@@ -330,19 +334,17 @@ class QuestionCSVImportService:
         existing_questions = list(
             Question.objects.filter(contribution=contribution).order_by("pk")
         )
-        ContributionAuthorizationService.require_add_capacity(
-            contribution=contribution,
-            question_count=len(existing_questions),
-        )
         remaining = contribution.quota_snapshot - len(existing_questions)
         data_rows = parsed.data_rows
-        if len(data_rows) > remaining:
+        from .duplicate_contract import accepted_count, plan_import
+        candidate_plan = plan_import(contribution, [row for row in data_rows if not row.errors])
+        if accepted_count(candidate_plan) > remaining:
             parsed.rows.insert(
                 0,
                 QuestionCSVParser._error(
                     1,
                     "quota",
-                    f"The CSV has {len(data_rows)} rows but only {remaining} quota slots remain.",
+                    f"The CSV has {accepted_count(candidate_plan)} new questions but only {remaining} quota slots remain. Reduce the upload; no questions were imported.",
                 ),
             )
         existing_fingerprints = {
@@ -395,7 +397,7 @@ class QuestionCSVImportService:
             valid_rows=valid_rows,
             error_count=error_count,
             warning_count=warning_count,
-            resulting_question_count=len(existing_questions) + valid_rows,
+            resulting_question_count=len(existing_questions) + accepted_count(candidate_plan),
             expires_at=timezone.now() + PREVIEW_LIFETIME,
         )
         QuestionImportRow.objects.bulk_create(
@@ -467,6 +469,8 @@ class QuestionCSVImportService:
         return {
             "status": batch.status,
             "committed_rows": batch.committed_rows,
+            "accepted_rows": batch.accepted_rows,
+            "skipped_rows": batch.skipped_rows,
             "total_rows": batch.total_rows,
             "percentage": percentage,
             "can_resume": batch.status in QuestionImportBatch.resumable_statuses(),
@@ -541,6 +545,7 @@ class QuestionCSVImportService:
             section_id=batch.target_section_id, for_update=True,
         )
         batch.target_section = target_section
+        validate_import_plan_version(batch)
         if batch.status == QuestionImportBatch.Status.READY and QuestionImportBatch.objects.filter(
             contribution=contribution,
             status__in=QuestionImportBatch.active_statuses(),
@@ -555,6 +560,8 @@ class QuestionCSVImportService:
         )
         if len(rows) != batch.total_rows or any(row.errors for row in rows):
             raise ValidationError("The persisted preview rows are not valid for import.")
+        for row in rows:
+            QuestionPayloadService.validate(row.payload)
         imported_questions = list(
             Question.objects.select_for_update()
             .filter(contribution=contribution, import_batch=batch)
@@ -568,18 +575,32 @@ class QuestionCSVImportService:
         )
         imported_row_numbers = [item.import_row_number for item in imported_questions]
         staged_row_numbers = [row.row_number for row in rows]
+        processed = rows[:batch.committed_rows]
+        expected_imported = {row.row_number for row in processed
+                             if not batch.duplicate_plan or batch.duplicate_plan.get(str(row.row_number), {}).get("disposition") == "ACCEPTED"}
         if (
-            len(imported_questions) != batch.committed_rows
+            set(imported_row_numbers) != expected_imported
             or any(row_number is None for row_number in imported_row_numbers)
             or len(imported_row_numbers) != len(set(imported_row_numbers))
             or not set(imported_row_numbers).issubset(staged_row_numbers)
         ):
             raise ValidationError("The persisted committed-row progress is inconsistent.")
-        ContributionAuthorizationService.require_add_capacity(
-            contribution=contribution,
-            question_count=len(other_questions),
-        )
-        if len(other_questions) + batch.total_rows > contribution.quota_snapshot:
+        from .duplicate_contract import accepted_count, plan_import
+        initialize_claims = not batch.duplicate_plan
+        if not batch.duplicate_plan:
+            if batch.committed_rows:
+                raise ValidationError("A legacy partial import requires a fresh preview before continuing.")
+            from .duplicate_contract import reconcile
+            reconcile(contribution.cycle_course, legacy=True)
+            batch.duplicate_plan = plan_import(contribution, rows)
+        if set(batch.duplicate_plan) != {str(row.row_number) for row in rows}:
+            raise ValidationError("The persisted import decisions are inconsistent.")
+        from .duplicate_contract import standalone_identity
+        if any(batch.duplicate_plan[str(row.row_number)].get("identity") != standalone_identity(row.payload)
+               or batch.duplicate_plan[str(row.row_number)].get("disposition") not in {"ACCEPTED", "SKIPPED_DUPLICATE"}
+               for row in rows):
+            raise ValidationError("The persisted import decisions are inconsistent.")
+        if len(other_questions) + accepted_count(batch.duplicate_plan) > contribution.quota_snapshot:
             raise ContributionConflict(
                 "The available question quota changed after this preview was created."
             )
@@ -590,6 +611,9 @@ class QuestionCSVImportService:
         validate_import_placements(
             questions=imported_questions, section=target_section, actor_id=user.id,
         )
+        if initialize_claims:
+            from .duplicate_contract import acquire_import
+            acquire_import(batch)
         return configuration, contribution, batch, rows, imported_questions, other_questions
 
     @classmethod
@@ -621,17 +645,17 @@ class QuestionCSVImportService:
         )
         if batch.status == QuestionImportBatch.Status.CONFIRMED:
             return batch, 0
-        imported_row_numbers = {item.import_row_number for item in imported_questions}
-        pending_rows = [row for row in rows if row.row_number not in imported_row_numbers]
+        pending_rows = rows[batch.committed_rows:]
         if not pending_rows:
             raise ValidationError("The persisted import has no remaining rows but is not complete.")
         chunk_rows = pending_rows[: max(1, min(int(chunk_size), CSV_MAX_ROWS))]
+        accepted_rows = [row for row in rows if batch.duplicate_plan[str(row.row_number)]["disposition"] == "ACCEPTED"]
         row_positions = {
             row.row_number: len(other_questions) + index
-            for index, row in enumerate(rows, start=1)
+            for index, row in enumerate(accepted_rows, start=1)
         }
         cleaned_rows = [
-            (row, QuestionPayloadService.validate(row.payload)) for row in chunk_rows
+            (row, QuestionPayloadService.validate(row.payload)) for row in chunk_rows if row in accepted_rows
         ]
         Question.objects.bulk_create(
             [
@@ -658,7 +682,7 @@ class QuestionCSVImportService:
             contribution=contribution, import_batch=batch,
             import_row_number__in=[row.row_number for row in chunk_rows],
         ).order_by("import_row_number", "pk"))
-        if len(created_questions) != len(chunk_rows):
+        if len(created_questions) != len(cleaned_rows):
             raise ValidationError("The imported question count is inconsistent.")
         if batch.target_section_id:
             QuestionBlueprintPlacement.objects.bulk_create([
@@ -671,7 +695,9 @@ class QuestionCSVImportService:
         validate_import_placements(
             questions=created_questions, section=batch.target_section, actor_id=user.id,
         )
-        committed_rows = len(imported_questions) + len(chunk_rows)
+        from .duplicate_contract import transfer_import
+        transfer_import(batch, created_questions)
+        committed_rows = batch.committed_rows + len(chunk_rows)
         now = timezone.now()
         batch.started_at = batch.started_at or now
         batch.progress_updated_at = now
@@ -684,6 +710,7 @@ class QuestionCSVImportService:
             batch.active_contribution = contribution
             batch.next_row_number = remaining_rows[0].row_number
             batch.save(update_fields=[
+                "duplicate_plan",
                 "status",
                 "active_contribution",
                 "committed_rows",
@@ -694,7 +721,7 @@ class QuestionCSVImportService:
                 "failure_message",
                 "updated_at",
             ])
-            return batch, len(chunk_rows)
+            return batch, len(cleaned_rows)
 
         revision_before = contribution.revision
         contribution.revision += 1
@@ -706,6 +733,7 @@ class QuestionCSVImportService:
         batch.confirmed_at = now
         batch.payload_purged_at = now
         batch.save(update_fields=[
+            "duplicate_plan",
             "status",
             "active_contribution",
             "committed_rows",
@@ -751,14 +779,16 @@ class QuestionCSVImportService:
                 "row_count": batch.total_rows,
                 "warning_count": batch.warning_count,
                 "quota": contribution.quota_snapshot,
-                "resulting_count": len(other_questions) + batch.total_rows,
+                "resulting_count": len(other_questions) + batch.accepted_rows,
+                "accepted_rows": batch.accepted_rows,
+                "skipped_rows": batch.skipped_rows,
                 "revision_before": revision_before,
                 "revision_after": contribution.revision,
                 "difficulty_counts": difficulty_counts,
             },
             request=request,
         )
-        return batch, len(chunk_rows)
+        return batch, len(cleaned_rows)
 
     @classmethod
     @transaction.atomic
@@ -794,24 +824,14 @@ class QuestionCSVImportService:
             status__in=QuestionImportBatch.active_statuses(),
         ).exclude(pk=batch.pk).exists():
             return
-        committed_row_numbers = set(
-            Question.objects.filter(import_batch=batch).values_list(
-                "import_row_number", flat=True
-            )
-        )
-        next_row_number = (
-            QuestionImportRow.objects.filter(batch=batch)
-            .exclude(row_number__in=committed_row_numbers)
-            .order_by("row_number")
-            .values_list("row_number", flat=True)
-            .first()
-        )
+        next_row_number = next(iter(QuestionImportRow.objects.filter(batch=batch)
+            .order_by("row_number").values_list("row_number", flat=True)[batch.committed_rows:batch.committed_rows + 1]), None)
         if next_row_number is None:
             return
         now = timezone.now()
         batch.status = QuestionImportBatch.Status.PAUSED
         batch.active_contribution = contribution
-        batch.committed_rows = len(committed_row_numbers)
+        # Persisted processed-row count includes deliberately skipped duplicates.
         batch.next_row_number = next_row_number
         batch.started_at = batch.started_at or now
         batch.progress_updated_at = now
@@ -838,6 +858,7 @@ class QuestionCSVImportService:
         user,
         tenant_id,
         failure_code,
+        inactive_before=None,
     ):
         identity = cls._owner_batch_identity(token=token, user=user, tenant_id=tenant_id)
         _cycle, _course, _configuration, contribution = Stage5LockService.lock_contribution(
@@ -851,6 +872,12 @@ class QuestionCSVImportService:
             uploading_user=user,
             tenant_id=tenant_id,
         ).first()
+        if (contribution.status == FacultyContribution.Status.SUBMITTED
+                and batch is not None and Question.objects.filter(import_batch=batch).exists()):
+            return
+        if (inactive_before is not None and batch is not None
+                and (batch.progress_updated_at is None or batch.progress_updated_at > inactive_before)):
+            return
         if batch is None or batch.status in {
             QuestionImportBatch.Status.CONFIRMED,
             QuestionImportBatch.Status.EXPIRED,
@@ -897,6 +924,11 @@ class QuestionCSVImportService:
             "failure_message",
             "updated_at",
         ])
+        # Question-owned unpublished claims were cascaded above. Release only
+        # this batch's pending claims, regardless of unrelated legacy content.
+        from .models import QuestionIdentityReservation
+        QuestionIdentityReservation.objects.filter(import_batch=batch, question__isnull=True).delete()
+        return True
 
     @classmethod
     def process_next_chunk(cls, **kwargs):
@@ -905,6 +937,10 @@ class QuestionCSVImportService:
         except Http404:
             raise
         except ContributionExpired:
+            cls._record_terminal_failure(
+                token=kwargs["token"], user=kwargs["user"], tenant_id=kwargs["tenant_id"],
+                failure_code="AUTHORIZATION_CHANGED",
+            )
             raise
         except ImportSectionError:
             cls._record_terminal_failure(
@@ -933,6 +969,20 @@ class QuestionCSVImportService:
                     tenant_id=kwargs["tenant_id"],
                     failure_code=code,
                 )
+            raise
+        except IncompatibleImportPlan as exc:
+            identity = cls._owner_batch_identity(token=kwargs["token"], user=kwargs["user"], tenant_id=kwargs["tenant_id"])
+            if exc.batch_id == identity["id"]:
+                cls._record_terminal_failure(
+                    token=kwargs["token"], user=kwargs["user"], tenant_id=kwargs["tenant_id"],
+                    failure_code="IMPORT_PLAN_VERSION",
+                )
+            raise
+        except LegacyPoolConflict:
+            cls._record_terminal_failure(
+                token=kwargs["token"], user=kwargs["user"], tenant_id=kwargs["tenant_id"],
+                failure_code="LEGACY_POOL_CONFLICT",
+            )
             raise
         except ValidationError:
             cls._record_terminal_failure(
@@ -985,6 +1035,21 @@ class QuestionImportCleanupService:
     @classmethod
     def purge(cls, *, batch_size=200, now=None):
         now = now or timezone.now()
+        # Active jobs never expire merely because their preview window elapsed.
+        # After 24 hours without progress, discard only unpublished batch rows.
+        abandoned = list(QuestionImportBatch.objects.filter(
+            status__in=QuestionImportBatch.active_statuses(),
+            contribution__status=FacultyContribution.Status.DRAFT,
+            progress_updated_at__lte=now - timedelta(hours=24),
+        ).select_related("uploading_user").order_by("id")[:batch_size])
+        abandoned_count = 0
+        for batch in abandoned:
+            changed = QuestionCSVImportService._record_terminal_failure(
+                token=batch.token, user=batch.uploading_user, tenant_id=batch.tenant_id,
+                failure_code="AUTHORIZATION_CHANGED",
+                inactive_before=now - timedelta(hours=24),
+            )
+            abandoned_count += bool(changed)
         expired = 0
         rows_purged = 0
         shells_purged = 0
@@ -1041,6 +1106,7 @@ class QuestionImportCleanupService:
                     batch.delete()
                     shells_purged += 1
         return {
+            "abandoned_batches": abandoned_count,
             "expired_batches": expired,
             "rows_purged": rows_purged,
             "shells_purged": shells_purged,

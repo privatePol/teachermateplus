@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.core.services.audit import AuditService
 
-from .generation_readiness import AUTOMATIC_LOGICAL_IDENTITY_VERSION
+from .generation_readiness import SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS
 from .models import (
     ExamGenerationRevision,
     ExaminationCycle,
@@ -281,7 +281,7 @@ class GenerationSelectionAuditReportService:
         eligible_rows = [row for row in source_rows if row.eligible_for_generation]
         automatic_identity = (
             audit_snapshot.logical_identity_version
-            == AUTOMATIC_LOGICAL_IDENTITY_VERSION
+            in SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS
         )
         logical_keys = (
             {row.normalized_fingerprint for row in eligible_rows}

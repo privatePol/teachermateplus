@@ -671,8 +671,12 @@ def contribution_workspace_view(request, contribution_id):
 
 
 def _bind_question_validation_errors(form, exc):
+    from .duplicate_contract import DUPLICATE_MESSAGE, LEGACY_POOL_MESSAGE, IMPORT_PLAN_VERSION_MESSAGE
     # Only publish known author-facing messages, never arbitrary model diagnostics.
     public_messages = {
+        DUPLICATE_MESSAGE,
+        LEGACY_POOL_MESSAGE,
+        IMPORT_PLAN_VERSION_MESSAGE,
         "Control and bidirectional formatting characters are not allowed.",
         "Question text is required.",
         "Question text may not exceed 5,000 characters.",
@@ -770,7 +774,7 @@ def question_create_view(request, contribution_id, scenario_id=None):
             _bind_question_validation_errors(form, exc)
         else:
             if getattr(question, "duplicate_warning", False):
-                messages.warning(request, "This question resembles another question you have saved. It was saved because duplicates are warning-only.")
+                messages.warning(request, "This question resembles another question you have saved. It was saved; this is a similarity warning.")
             messages.success(request, "Linked Question added." if scenario else "Question added.")
             if scenario:
                 return redirect(
@@ -837,7 +841,7 @@ def question_edit_view(request, contribution_id, question_id):
             _bind_question_validation_errors(form, exc)
         else:
             if getattr(updated_question, "duplicate_warning", False):
-                messages.warning(request, "This question resembles another question you have saved. It remains allowed as a warning-only duplicate.")
+                messages.warning(request, "This question resembles another question you have saved. It remains saved; this is a similarity warning.")
             messages.success(request, "Question updated." if changed else "No question changes were needed.")
             return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
     return render(
@@ -1226,7 +1230,6 @@ def csv_template_view(request, contribution_id):
 def csv_upload_view(request, contribution_id):
     contribution = _owner_contribution(request, contribution_id)
     _require_currently_mutable(request, contribution)
-    _require_add_capacity(contribution)
     saved_count = contribution.questions.filter(
         Q(import_batch__isnull=True)
         | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
@@ -1287,15 +1290,6 @@ def csv_preview_view(request, token):
         Q(import_batch__isnull=True)
         | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
     ).count()
-    if (
-        batch.status == batch.Status.READY
-        and not batch.error_count
-        and existing_count >= batch.contribution.quota_snapshot
-    ):
-        return _error_response(
-            request,
-            ContributionQuotaReached(batch.contribution.quota_snapshot),
-        )
     can_confirm = (
         batch.status in QuestionImportBatch.resumable_statuses() and not batch.error_count
     )
@@ -1381,6 +1375,8 @@ def csv_confirm_view(request, token):
                 request=request,
             )
             payload = QuestionCSVImportService.status_payload(batch)
+            if batch.status == batch.Status.CONFIRMED:
+                messages.success(request, f"{batch.accepted_rows} questions accepted; {batch.skipped_rows} duplicates skipped.")
             payload.update({
                 "status_url": reverse("departmental_exams:csv_status", args=[batch.token]),
                 "resume_url": reverse("departmental_exams:csv_confirm", args=[batch.token]),
@@ -1430,7 +1426,7 @@ def csv_confirm_view(request, token):
             payload["error"] = payload.get("failure_message") or "The import could not continue safely."
             return JsonResponse(payload, status=status)
         return _error_response(request, exc)
-    messages.success(request, "CSV questions imported." if changed else "This CSV was already imported.")
+    messages.success(request, f"{batch.accepted_rows} questions accepted; {batch.skipped_rows} duplicates skipped." if changed else "This CSV was already imported.")
     return redirect(
         "departmental_exams:contribution_workspace",
         contribution_id=batch.contribution_id,
@@ -1476,7 +1472,6 @@ def csv_status_view(request, token):
 def docx_upload_view(request, contribution_id):
     contribution = _owner_contribution(request, contribution_id)
     _require_currently_mutable(request, contribution)
-    _require_add_capacity(contribution)
     tenant_id, campus_id = _scope(request)
     QuestionDOCXImportService.require_feature(tenant_id=tenant_id)
     saved_count = contribution.questions.filter(
@@ -1620,6 +1615,8 @@ def docx_confirm_view(request, token):
             raise Http404
         if is_async:
             payload = QuestionDOCXImportService.status_payload(batch)
+            if batch.status == batch.Status.CONFIRMED:
+                messages.success(request, f"{batch.accepted_rows} questions accepted; {batch.skipped_rows} duplicates skipped.")
             payload.update({
                 "status_url": reverse("departmental_exams:docx_status", args=[batch.token]),
                 "resume_url": reverse("departmental_exams:docx_confirm", args=[batch.token]),
@@ -1631,7 +1628,7 @@ def docx_confirm_view(request, token):
             return _error_response(request, exc)
         status = 403 if isinstance(exc, PermissionDenied) else 410 if isinstance(exc, ContributionExpired) else 409 if isinstance(exc, ContributionConflict) else 400
         return JsonResponse({"error": str(exc), "failure_message": str(exc), "completed": False, "can_resume": False, "committed_rows": 0, "total_rows": 0, "percentage": 0}, status=status)
-    messages.success(request, "Word questions imported." if changed else "This Word preview was already imported.")
+    messages.success(request, f"{batch.accepted_rows} questions accepted; {batch.skipped_rows} duplicates skipped." if changed else "This Word preview was already imported.")
     return redirect("departmental_exams:contribution_workspace", contribution_id=batch.contribution_id)
 
 

@@ -969,15 +969,14 @@ class QuestionDOCXImportService(QuestionCSVImportService):
             section_id=target_section_id, for_update=True,
         )
         existing_questions = list(Question.objects.filter(contribution=contribution).order_by("pk"))
-        ContributionAuthorizationService.require_add_capacity(
-            contribution=contribution, question_count=len(existing_questions)
-        )
         parsed = QuestionDOCXParser.parse(uploaded_file)
         data_rows = parsed.data_rows
         remaining = contribution.quota_snapshot - len(existing_questions)
-        if len(data_rows) > remaining:
+        from .duplicate_contract import accepted_count, plan_import
+        candidate_plan = plan_import(contribution, [row for row in data_rows if not row.errors])
+        if accepted_count(candidate_plan) > remaining:
             parsed.rows.insert(0, QuestionDOCXParser._error(
-                f"The Word file has {len(data_rows)} questions but only {remaining} quota slots remain.",
+                f"The Word file has {accepted_count(candidate_plan)} new questions but only {remaining} quota slots remain. Reduce the upload; no questions were imported.",
                 field="quota",
             ))
         existing_fingerprints = {
@@ -1010,7 +1009,7 @@ class QuestionDOCXImportService(QuestionCSVImportService):
             valid_rows=valid_rows,
             error_count=error_count,
             warning_count=warning_count,
-            resulting_question_count=len(existing_questions) + valid_rows,
+            resulting_question_count=len(existing_questions) + accepted_count(candidate_plan),
             expires_at=timezone.now() + PREVIEW_LIFETIME,
         )
         QuestionImportRow.objects.bulk_create([
@@ -1103,7 +1102,9 @@ class QuestionDOCXImportService(QuestionCSVImportService):
         batch.error_count = sum(len(item.errors) for item in rows)
         batch.warning_count = sum(len(item.warnings) for item in rows)
         batch.valid_rows = sum(1 for item in rows if not item.errors)
-        batch.resulting_question_count = contribution.questions.count() + batch.valid_rows
+        from .duplicate_contract import accepted_count, plan_import
+        candidate_plan = plan_import(contribution, [item for item in rows if not item.errors])
+        batch.resulting_question_count = contribution.questions.count() + accepted_count(candidate_plan)
         batch.status = batch.Status.READY if batch.error_count == 0 and batch.valid_rows else batch.Status.INVALID
         batch.save(update_fields=["error_count", "warning_count", "valid_rows", "resulting_question_count", "status", "updated_at"])
         return batch, row

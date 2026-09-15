@@ -371,6 +371,10 @@ class ContributionRosterService:
                     changed_fields.append("source_campus")
                     material_evidence_changed = True
             if contribution.roster_status != desired_status:
+                if (desired_status == FacultyContribution.RosterStatus.ACTIVE
+                        and (configuration.active_contribution_deadline is None
+                             or now >= configuration.active_contribution_deadline)):
+                    raise ValidationError("Draft reactivation requires an unexpired contribution deadline.")
                 contribution.roster_status = desired_status
                 contribution.roster_blocked_at = None if eligible_assignments else now
                 changed_fields.extend(["roster_status", "roster_blocked_at"])
@@ -427,6 +431,9 @@ class ContributionRosterService:
                 batch_size=cls.BATCH_SIZE,
             )
 
+        if contribution_updates:
+            from .duplicate_contract import reconcile
+            reconcile(cycle_course)
         changed = bool(creates or source_creates or source_updates or contribution_updates)
         if initializing:
             configuration.contributor_roster_initialized_at = now
@@ -685,10 +692,14 @@ class QuestionMutationService:
             .filter(contribution=contribution)
             .order_by("pk")
         )
+        from .duplicate_contract import require_clean_pool
+        require_clean_pool(contribution.cycle_course)
         return configuration, contribution, questions
 
     @staticmethod
     def _increment_contribution(contribution):
+        from .duplicate_contract import reconcile
+        reconcile(contribution.cycle_course)
         contribution.revision += 1
         contribution.save(update_fields=["revision", "updated_at"])
 
@@ -1044,6 +1055,8 @@ class QuestionMutationService:
             questions=questions,
             tenant_id=tenant_id,
         )
+        from .duplicate_contract import reconcile
+        reconcile(contribution.cycle_course, legacy=True)
         difficulty_distribution = ContributionDifficultyDistributionService.evaluate(
             questions=questions,
             quota=contribution.quota_snapshot,
@@ -1054,6 +1067,7 @@ class QuestionMutationService:
         contribution.submitted_at = timezone.now()
         contribution.revision += 1
         contribution.save(update_fields=["status", "submitted_at", "revision", "updated_at"])
+        reconcile(contribution.cycle_course)
         difficulty_counts = Counter(item.difficulty for item in questions)
         cls._audit(
             action="DE_EXAM_CONTRIBUTION_SUBMITTED",

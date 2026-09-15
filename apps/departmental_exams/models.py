@@ -1186,6 +1186,25 @@ class Question(TimeStampedModel):
         indexes = [models.Index(fields=["contribution", "difficulty"], name="idx_de_q_contrib_difficulty")]
 
 
+class QuestionIdentityReservation(models.Model):
+    primary_cycle_course = models.ForeignKey(CycleCourse, on_delete=models.CASCADE)
+    version = models.CharField(max_length=32)
+    fingerprint = models.CharField(max_length=64)
+    bundle_fingerprint = models.CharField(max_length=64, blank=True, default="")
+    question = models.OneToOneField(Question, null=True, blank=True, on_delete=models.CASCADE)
+    import_batch = models.ForeignKey("QuestionImportBatch", null=True, blank=True, on_delete=models.CASCADE)
+    import_row_number = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["primary_cycle_course", "version", "fingerprint"], name="uq_de_logical_reservation"),
+            models.CheckConstraint(condition=(
+                models.Q(question__isnull=False, import_batch__isnull=True, import_row_number__isnull=True)
+                | models.Q(question__isnull=True, import_batch__isnull=False, import_row_number__isnull=False)
+            ), name="ck_de_logical_owner"),
+        ]
+
+
 class QuestionImportBatch(TimeStampedModel):
     class SourceFormat(models.TextChoices):
         CSV = "CSV", "CSV"
@@ -1242,6 +1261,7 @@ class QuestionImportBatch(TimeStampedModel):
         null=True,
         blank=True,
     )
+    duplicate_plan = models.JSONField(default=dict, blank=True)
     file_sha256 = models.CharField(max_length=64)
     filename_sha256 = models.CharField(max_length=64)
     total_rows = models.PositiveSmallIntegerField(default=0)
@@ -1262,6 +1282,15 @@ class QuestionImportBatch(TimeStampedModel):
     @classmethod
     def active_statuses(cls):
         return (cls.Status.IMPORTING, cls.Status.PAUSED)
+
+    @property
+    def accepted_rows(self):
+        from .duplicate_contract import accepted_count
+        return accepted_count(self.duplicate_plan) if self.duplicate_plan else self.total_rows
+
+    @property
+    def skipped_rows(self):
+        return self.total_rows - self.accepted_rows
 
     @classmethod
     def resumable_statuses(cls):

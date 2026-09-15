@@ -15,7 +15,7 @@ from apps.core.services.audit import AuditService
 
 from .approval_services import GeneratedExamIntegrityService
 from .generation_algorithms import allocate_difficulties
-from .generation_readiness import AUTOMATIC_LOGICAL_IDENTITY_VERSION
+from .generation_readiness import SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS
 from .models import (
     AutomaticGenerationAuditRun,
     ExamGenerationRevision,
@@ -509,7 +509,7 @@ class AutomaticGenerationAuditService:
             )
             counts_ok = bool(
                 source_audit.logical_identity_version
-                == AUTOMATIC_LOGICAL_IDENTITY_VERSION
+                in SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS
                 and source_audit.submitted_count == len(source_rows)
                 and source_audit.eligible_count == len(eligible_rows)
                 and source_audit.unique_logical_count == logical_count

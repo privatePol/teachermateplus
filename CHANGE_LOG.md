@@ -1265,3 +1265,10 @@ For every merged change:
 - Grading Analytics, Grade Distribution Monitor, grade submissions, correction requests, reopen requests, and overdue monitoring now follow supervised faculty and their active accepted teaching assignments. Master-data setup pages keep their existing ownership scope.
 - Multi-campus analytics now defaults to the campus selected in the Admin Portal top bar and provides an explicit `All Campuses` option where supported.
 - Monitoring and governance queue empty states now explain that results depend on supervised faculty, accepted assignments, and selected filters.
+# Course examination duplicate contract - 2026-09-15
+
+- Remaining-review follow-up: v3 conservatively preserves numeric-ordinal choice order; pending JSON row decisions persist a uniform identity version validated before initialization and resume. Missing/mixed/old versions fail closed without digest relabeling; owner-only terminal cleanup is idempotent and preserves published questions/claims. No additional schema migration.
+- Independent-review remediation: v2 preserves mathematical characters/case and ordered label-dependent choices; Admin Scenario mutations reconcile atomically; malformed Cases are safely excluded whole; terminal cleanup is batch-scoped despite unrelated collisions; chunk claims transfer incrementally with assessment-local narrative caching. No additional schema change or historical record rewrite.
+- Add shared versioned course/cycle duplicate identities, semantic whole-Case reservations, manual input retention, accepted-only CSV/Word quota accounting and durable skipped-row replay decisions.
+- Align generation logical identities and invalidate new-input fingerprints while retaining historical audits. Add schema-only migration 0030 and bounded read-only collision preflight; no automatic legacy collision winner or Submitted/history edits.
+- Document Faculty/Admin procedures in `docs/COURSE_QUESTION_DUPLICATES.md`. Focused validation and remaining gates are recorded in HANDOFF.md.

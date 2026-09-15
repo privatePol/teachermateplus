@@ -6,6 +6,7 @@
 {% if batch.target_section_id %}<p><strong>Add these questions to section:</strong> {{ batch.target_section.title }}</p>{% endif %}
   <p class="text-muted">This owner-only staged preview expires {{ batch.expires_at|date:"M j, Y g:i A" }}. Edits and final import use server-stored rows; browser-submitted rows are never trusted at confirmation.</p>
   <div class="row g-2 mb-3"><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.total_rows }}</strong><br>Detected</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.valid_rows }}</strong><br>Valid</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ batch.error_count }}</strong><br>Errors</div></div></div><div class="col"><div class="card"><div class="card-body"><strong>{{ remaining }}</strong><br>Quota remaining</div></div></div></div>
+  {% if batch.status == "CONFIRMED" %}<div class="alert alert-success">{{ batch.accepted_rows }} questions accepted; {{ batch.skipped_rows }} duplicates skipped.</div>{% endif %}
   {% if batch.error_count %}<div class="alert alert-danger">Fix every staged row error before import. Unsupported document structures require a corrected Word file and a new upload.</div>{% endif %}
   <div class="alert alert-danger" data-import-error role="alert" hidden></div>
   {% for row in rows %}

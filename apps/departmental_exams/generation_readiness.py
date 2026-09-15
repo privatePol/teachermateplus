@@ -16,6 +16,7 @@ from .blueprint_services import (
     ContributorRosterReadinessService,
     stage6_cycle_is_open,
 )
+from .duplicate_contract import VERSION as DUPLICATE_IDENTITY_VERSION, question_identity
 from .exam_units import resolve_examination_unit
 from .contribution_services import QuestionPayloadService
 from .generation_algorithms import (
@@ -54,7 +55,8 @@ from .stage6_campus_codes import (
 GENERATION_ALGORITHM_VERSION = "stage6b-v1"
 AUTOMATIC_GENERATION_DEFAULT_MAX_STATES = 1_000_000
 SOURCE_AUDIT_SCHEMA_VERSION = "generation-source-audit-v1"
-AUTOMATIC_LOGICAL_IDENTITY_VERSION = "normalized-text-v3"
+AUTOMATIC_LOGICAL_IDENTITY_VERSION = DUPLICATE_IDENTITY_VERSION
+SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS = {AUTOMATIC_LOGICAL_IDENTITY_VERSION, "course-question-v2", "course-question-v1", "normalized-text-v3"}
 MANUAL_LOGICAL_IDENTITY_VERSION = "source-question-id-v1"
 # Existing immutable revision rows require a positive structure snapshot.
 # This marks the non-persistent Automatic flat contract; it is not a Blueprint PK.
@@ -213,7 +215,9 @@ def _assessed_submitted_question_pool(
     participating_codes=None,
     participating_campus_ids=None,
     include_source_audit=True,
+    narrative_cache=None,
 ):
+    narrative_cache = narrative_cache if narrative_cache is not None else {}
     if (cycle_course is None) == (cycle_courses is None):
         raise ValueError("Provide exactly one course or examination-unit member list.")
     member_courses = (cycle_course,) if cycle_course is not None else tuple(cycle_courses)
@@ -230,6 +234,7 @@ def _assessed_submitted_question_pool(
             "contribution__source_campus",
             "contribution__faculty_user",
             "import_batch",
+            "exam_scenario_membership__scenario",
         )
         .prefetch_related(
             Prefetch(
@@ -292,6 +297,15 @@ def _assessed_submitted_question_pool(
         ):
             exclusion_code = "UNCONFIRMED_IMPORT_BATCH"
         eligible = not exclusion_code
+        try:
+            logical_identity = question_identity(question, narrative_cache=narrative_cache)
+        except ValidationError:
+            # Malformed Cases are excluded whole by structured pool assessment.
+            # Their audit placeholder cannot collide with an accepted identity.
+            from .duplicate_contract import digest
+            logical_identity = digest([DUPLICATE_IDENTITY_VERSION, "unusable-case", question.id])
+            eligible = False
+            exclusion_code = "INVALID_CASE_IDENTITY"
         if eligible:
             question.stage6_campus_code = campus_code
             eligible_questions.append(question)
@@ -321,9 +335,7 @@ def _assessed_submitted_question_pool(
                     ),
                     difficulty=question.difficulty,
                     correct_answer=question.correct_answer,
-                    normalized_fingerprint=QuestionPayloadService.question_fingerprint(
-                        question.question_text
-                    ),
+                    normalized_fingerprint=logical_identity,
                     eligible_for_generation=eligible,
                     exclusion_code=exclusion_code,
                 )
@@ -355,12 +367,13 @@ def automatic_campus_allocate(*, total, campus_ids):
     }
 
 
-def automatic_logical_question_groups(questions):
+def automatic_logical_question_groups(questions, *, narrative_cache=None):
+    narrative_cache = narrative_cache if narrative_cache is not None else {}
     """Return every eligible row grouped by its Automatic logical identity."""
     by_fingerprint = defaultdict(list)
     for question in questions:
         by_fingerprint[
-            QuestionPayloadService.question_fingerprint(question.question_text)
+            question_identity(question, narrative_cache=narrative_cache)
         ].append(question)
     return {
         fingerprint: tuple(sorted(rows, key=lambda question: question.id))
@@ -669,6 +682,7 @@ class Stage6ReadinessService:
             if automatic_flat_mode
             else {"participating_codes": participating_codes}
         )
+        narrative_cache = {}
         (
             eligible_questions,
             invalid_question_count,
@@ -676,6 +690,7 @@ class Stage6ReadinessService:
         ) = _assessed_submitted_question_pool(
             cycle_courses=unit_members,
             include_source_audit=not question_pool_only,
+            narrative_cache=narrative_cache,
             **pool_kwargs,
         )
         structured_members = []
@@ -698,7 +713,7 @@ class Stage6ReadinessService:
             }
             eligible_questions, source_audit_questions, structured_placements, structured_members, unit_warnings, excluded_count = assess_whole_units(
                 blueprint=blueprint, unit=unit, questions=eligible_questions,
-                audit_questions=source_audit_questions, sections=section_rows)
+                audit_questions=source_audit_questions, sections=section_rows, narrative_cache=narrative_cache)
             warnings.extend(unit_warnings)
             if invalid_question_count:
                 cls._warn(warnings, "INVALID_QUESTIONS_EXCLUDED",
@@ -707,6 +722,9 @@ class Stage6ReadinessService:
         submitted_question_count = len(eligible_questions)
         duplicate_question_count = 0
         automatic_question_groups = {}
+        if not automatic_flat_mode and any(len(group) > 1 for group in automatic_logical_question_groups(eligible_questions, narrative_cache=narrative_cache).values()):
+            cls._block(blockers, "LOGICAL_QUESTION_COLLISIONS",
+                       "Legacy duplicate questions require administrative reconciliation before generation.")
         if invalid_question_count and not question_pool_only and not structured_automatic:
             cls._block(
                 blockers,
@@ -767,7 +785,7 @@ class Stage6ReadinessService:
                 )
                 difficulty_quotas = allocate_difficulties(final_count)
             automatic_question_groups = automatic_logical_question_groups(
-                eligible_questions
+                eligible_questions, narrative_cache=narrative_cache
             )
             duplicate_question_count = (
                 submitted_question_count - len(automatic_question_groups)
@@ -1083,9 +1101,7 @@ class Stage6ReadinessService:
                             ),
                         ),
                         logical_group_id=(
-                            QuestionPayloadService.question_fingerprint(
-                                question.question_text
-                            )
+                            question_identity(question, narrative_cache=narrative_cache)
                         ),
                     )
                     for question in eligible_questions
@@ -1367,9 +1383,7 @@ class Stage6ReadinessService:
                     section_id=section_id,
                     section_title=section_labels[section_id],
                     section_instructions=section_instructions[section_id],
-                    normalized_fingerprint=QuestionPayloadService.question_fingerprint(
-                        question.question_text
-                    ),
+                    normalized_fingerprint=question_identity(question, narrative_cache=narrative_cache),
                     question_text=question.question_text,
                     choices=(
                         question.choice_a,
@@ -1459,6 +1473,7 @@ class Stage6ReadinessService:
                 else blueprint.revision
             )
             fingerprint_payload = {
+                "logical_identity_version": DUPLICATE_IDENTITY_VERSION,
                 "algorithm_version": GENERATION_ALGORITHM_VERSION,
                 "tenant_id": cycle_course.cycle.tenant_id,
                 "cycle_id": cycle_course.cycle_id,
@@ -1515,7 +1530,7 @@ class Stage6ReadinessService:
                 fingerprint_payload["structured_input"] = structured_input
             if automatic_flat_mode:
                 fingerprint_payload["structure_mode"] = "AUTOMATIC_CASE_V1" if structured_automatic else "AUTOMATIC_FLAT"
-                fingerprint_payload["automatic_dedupe_policy"] = "normalized-text-v3"
+                fingerprint_payload["automatic_dedupe_policy"] = DUPLICATE_IDENTITY_VERSION
                 fingerprint_payload["automatic_policies"] = {
                     "campus_contribution": (
                         cycle_course.cycle.automatic_campus_contribution_policy

@@ -16,11 +16,11 @@
   <div class="col-6 col-md-3 col-xl"><div class="card h-100"><div class="card-body"><strong>{{ batch.resulting_question_count }}</strong><br>Result</div></div></div>
 </div>
 {% if batch.status == 'CONFIRMED' %}
-  <div class="alert alert-success" role="status">This CSV import completed successfully. All {{ batch.total_rows }} rows were committed.</div>
+  <div class="alert alert-success" role="status">This CSV import completed successfully. {{ batch.accepted_rows }} questions accepted; {{ batch.skipped_rows }} duplicates skipped.</div>
 {% elif batch.status == 'IMPORTING' or batch.status == 'PAUSED' or batch.status == 'FAILED' %}
   <div class="alert alert-info" role="status">
     <strong>Persisted import progress:</strong>
-    <span data-import-progress-text>{{ batch.committed_rows }} / {{ batch.total_rows }} rows committed ({{ import_progress.percentage }}%).</span>
+    <span data-import-progress-text>{{ batch.committed_rows }} / {{ batch.total_rows }} rows processed ({{ import_progress.percentage }}%).</span>
     {% if batch.failure_message %}<div class="mt-2" data-import-server-message>{{ batch.failure_message }}</div>{% else %}<div class="mt-2" data-import-server-message hidden></div>{% endif %}
     <div class="progress mt-2" role="progressbar" aria-label="Persisted question import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ import_progress.percentage }}">
       <div class="progress-bar" data-import-progress-bar style="width: {{ import_progress.percentage }}%"></div>

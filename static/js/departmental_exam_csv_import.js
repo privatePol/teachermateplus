@@ -59,7 +59,7 @@
 
   const setProgress = payload => {
     document.querySelectorAll("[data-import-progress-text]").forEach(node => {
-      node.textContent = `${payload.committed_rows} / ${payload.total_rows} rows committed (${payload.percentage}%).`;
+      node.textContent = `${payload.committed_rows} / ${payload.total_rows} rows processed (${payload.percentage}%). Accepted: ${payload.accepted_rows ?? 0}; duplicates skipped: ${payload.skipped_rows ?? 0}.`;
     });
     document.querySelectorAll("[data-import-progress-bar]").forEach(bar => {
       bar.style.width = `${payload.percentage}%`;
@@ -67,7 +67,7 @@
       if (progress) progress.setAttribute("aria-valuenow", String(payload.percentage));
     });
     document.querySelectorAll("[data-import-overlay-progress]").forEach(node => {
-      node.textContent = `${payload.committed_rows} / ${payload.total_rows} rows committed (${payload.percentage}%).`;
+      node.textContent = `${payload.committed_rows} / ${payload.total_rows} rows processed (${payload.percentage}%). Accepted: ${payload.accepted_rows ?? 0}; duplicates skipped: ${payload.skipped_rows ?? 0}.`;
     });
     const message = document.querySelector("[data-import-server-message]");
     if (message) {

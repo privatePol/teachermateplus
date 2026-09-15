@@ -187,6 +187,16 @@ def resolve_examination_unit(cycle_course, *, for_update=False, validate=True):
 
 class ExamCourseEquivalencyService:
     @staticmethod
+    def _refresh_duplicate_units(member_ids):
+        from .duplicate_contract import reconcile
+        seen = set()
+        for member in CycleCourse.objects.filter(pk__in=member_ids).select_related("cycle").order_by("pk"):
+            unit = resolve_examination_unit(member)
+            if unit.primary.id not in seen:
+                reconcile(member)
+                seen.add(unit.primary.id)
+
+    @staticmethod
     def _require_authority(*, cycle, members, actor):
         from .services import DepartmentalExamAuthorizationService
 
@@ -330,6 +340,7 @@ class ExamCourseEquivalencyService:
                 membership.full_clean()
                 membership.save()
         unit = resolve_examination_unit(group.primary_cycle_course, for_update=True)
+        cls._refresh_duplicate_units(unit.member_ids)
         AuditService.log_event(
             action="DE_EXAM_COURSE_EQUIVALENCY_CREATED",
             portal="SYSTEM",
@@ -461,6 +472,7 @@ class ExamCourseEquivalencyService:
                 "member_cycle_course_ids": list(unit.member_ids),
             },
         )
+        cls._refresh_duplicate_units(set(current_member_ids) | set(unit.member_ids))
         return unit.group
 
     @classmethod
@@ -551,6 +563,7 @@ class ExamCourseEquivalencyService:
                 "reason": normalized_reason,
             },
         )
+        cls._refresh_duplicate_units(member_ids)
         return group
 
 def contribution_matches_structure(*, contribution, blueprint):

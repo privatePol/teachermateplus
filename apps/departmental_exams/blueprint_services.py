@@ -1197,6 +1197,8 @@ class ScenarioMutationService:
         ):
             raise ValidationError("A question may belong to at most one scenario.")
 
+        from .duplicate_contract import require_clean_pool, reconcile
+        require_clean_pool(course)
         creating = scenario is None
         if creating:
             scenario = ExamScenario(
@@ -1225,6 +1227,7 @@ class ScenarioMutationService:
                 for position, question_id in enumerate(ordered_ids, start=1)
             ]
         )
+        reconcile(course)
         AuditService.log_event(
             action="DE_EXAM_SCENARIO_CREATED" if creating else "DE_EXAM_SCENARIO_UPDATED",
             portal="ADMIN",
@@ -1287,6 +1290,8 @@ class ScenarioMutationService:
             .order_by("id")
         )
         member_count = len(locked_members)
+        from .duplicate_contract import require_clean_pool, reconcile
+        require_clean_pool(course)
         AuditService.log_event(
             action="DE_EXAM_SCENARIO_DELETED",
             portal="ADMIN",
@@ -1308,4 +1313,5 @@ class ScenarioMutationService:
             request=request,
         )
         scenario.delete()
+        reconcile(course)
         return course.id

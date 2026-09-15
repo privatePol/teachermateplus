@@ -7,9 +7,11 @@ from django.db.models import Q
 from .contribution_services import QuestionPayloadService
 from .models import ExamScenario, ExamScenarioMember, FacultyContribution, QuestionBlueprintPlacement
 from .scenario_content import canonicalize_scenario_content
+from .duplicate_contract import question_identity
 
 
-def assess_whole_units(*, blueprint, unit, questions, audit_questions, sections):
+def assess_whole_units(*, blueprint, unit, questions, audit_questions, sections, narrative_cache=None):
+    narrative_cache = narrative_cache if narrative_cache is not None else {}
     by_id = {q.id: q for q in questions}
     placements = {p.question_id: p for p in QuestionBlueprintPlacement.objects.filter(
         question_id__in=by_id).select_related("section")}
@@ -23,11 +25,12 @@ def assess_whole_units(*, blueprint, unit, questions, audit_questions, sections)
         return (placement is not None and placement.blueprint_id == blueprint.id
                 and placement.section_id in section_ids)
 
-    scenarios = list(ExamScenario.objects.filter(blueprint=blueprint)
-                     .select_related("contribution").order_by("id"))
+    scenarios = list(ExamScenario.objects.filter(blueprint=blueprint).filter(
+        Q(members__question_id__in=by_id) | Q(contribution__status="SUBMITTED")
+    ).distinct().select_related("contribution").order_by("id"))
     members = list(ExamScenarioMember.objects.filter(
-        Q(scenario__blueprint=blueprint) | Q(question_id__in=by_id)
-    ).select_related("question__contribution", "scenario").order_by("scenario_id", "position", "id"))
+        Q(scenario_id__in=[scenario.id for scenario in scenarios]) | Q(question_id__in=by_id)
+    ).select_related("question__contribution", "question__exam_scenario_membership__scenario", "scenario").order_by("scenario_id", "position", "id"))
     by_scenario = {}
     for member in members:
         # Cross-unit links are an authorization/integrity failure, not a pool
@@ -67,9 +70,12 @@ def assess_whole_units(*, blueprint, unit, questions, audit_questions, sections)
                 for qid in ids))
         ) or (not explicit and scenario.section_id is not None):
             reasons.append("missing or mismatched section placement")
-        fingerprints = [QuestionPayloadService.question_fingerprint(row.question.question_text) for row in rows]
-        if len(fingerprints) != len(set(fingerprints)):
-            reasons.append("duplicate logical MCQs within the Case")
+        try:
+            fingerprints = [question_identity(row.question, narrative_cache=narrative_cache) for row in rows]
+            if len(fingerprints) != len(set(fingerprints)):
+                reasons.append("duplicate logical MCQs within the Case")
+        except ValidationError:
+            reasons.append("invalid Case identity")
         if scenario.content_format == "RICH_HTML_V1":
             try:
                 if canonicalize_scenario_content(scenario.stimulus).html != scenario.stimulus:
