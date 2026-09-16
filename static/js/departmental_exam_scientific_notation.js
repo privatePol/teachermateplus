@@ -83,18 +83,35 @@
     return { start, end };
   }
 
+  function richAdapter(input) {
+    return input && input.TMPScientificEditor &&
+      typeof input.TMPScientificEditor.insertText === "function"
+      ? input.TMPScientificEditor
+      : null;
+  }
+
   function notifyInputChanged(input) {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
   }
 
   function insertText(input, text) {
+    const adapter = richAdapter(input);
+    if (adapter) {
+      adapter.insertText(text);
+      return;
+    }
     const bounds = selectionBounds(input);
     input.setRangeText(text, bounds.start, bounds.end, "end");
     notifyInputChanged(input);
   }
 
   function insertTemplate(input, before, after, placeholder) {
+    const adapter = richAdapter(input);
+    if (adapter && typeof adapter.insertTemplate === "function") {
+      adapter.insertTemplate(before, after, placeholder);
+      return;
+    }
     const bounds = selectionBounds(input);
     const selected = input.value.slice(bounds.start, bounds.end);
     const body = selected || placeholder;
@@ -168,6 +185,7 @@
   }
 
   function updatePreview(input, preview) {
+    if (!preview) return;
     const value = input.value;
     preview.classList.toggle("is-empty", !value);
     preview.textContent = value || "Preview will appear here.";
@@ -176,12 +194,16 @@
 
   function initialiseEditors() {
     document.querySelectorAll("[data-scientific-field]").forEach(function (wrapper) {
-      const input = wrapper.querySelector("textarea, input[type='text']");
+      if (wrapper.dataset.scientificInitialised === "true") return;
+      const input = wrapper.querySelector("textarea, input[type='text'], [data-scientific-rich-editor]");
       const toolbar = wrapper.querySelector("[data-scientific-toolbar]");
       const preview = wrapper.querySelector("[data-scientific-preview]");
-      if (!input || !toolbar || !preview || !SCIENTIFIC_FIELD_NAMES.has(input.name)) return;
-      const label = wrapper.dataset.scientificLabel || input.name;
+      const name = input && (input.name || input.dataset.scientificName);
+      if (!input || !toolbar || !SCIENTIFIC_FIELD_NAMES.has(name)) return;
+      if (input.hasAttribute("data-scientific-rich-editor") && !richAdapter(input)) return;
+      const label = wrapper.dataset.scientificLabel || name;
       buildToolbar(input, toolbar, label);
+      wrapper.dataset.scientificInitialised = "true";
       input.addEventListener("input", function () { updatePreview(input, preview); });
       updatePreview(input, preview);
     });
@@ -208,6 +230,7 @@
   function initialise() {
     renderAll(document);
     initialiseEditors();
+    document.addEventListener("tmp:scientific-rich-editor-ready", initialiseEditors);
     const initialReady = fontsReady();
     initialisePrintActions(initialReady);
     initialReady.then(function () {

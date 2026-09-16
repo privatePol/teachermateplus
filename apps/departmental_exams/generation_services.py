@@ -464,7 +464,7 @@ class ExamGenerationService:
             set_a_members = ordered_members_by_set.get(GeneratedExamSet.SetCode.A)
             if (
                 automatic_mode
-                and problem.algorithm_version != "automatic-case-v1"
+                and problem.algorithm_version not in {"automatic-case-v1", "automatic-case-v2"}
                 and set_code == GeneratedExamSet.SetCode.B
                 and set_a_selected_ids is not None
                 and set_a_members is not None
@@ -500,9 +500,15 @@ class ExamGenerationService:
             snapshots = [cls._item_snapshot(generated_set=generated_set, position=position,
                                             data=problem.questions[member.source_id])
                          for position, member in enumerate(ordered_members, start=1)]
-            if problem.algorithm_version == "automatic-case-v1":
+            if problem.algorithm_version in {"automatic-case-v1", "automatic-case-v2"}:
                 from .structured_snapshots import content_digest, verify_structured_set
-                generated_set.structured_content_digest = content_digest(generated_set, snapshots)
+                generated_set.structured_content_digest_version = (
+                    "automatic-case-content-v2"
+                    if problem.algorithm_version == "automatic-case-v2" else ""
+                )
+                generated_set.structured_content_digest = content_digest(
+                    generated_set, snapshots, algorithm_version=problem.algorithm_version,
+                )
                 verify_structured_set(generated_set, snapshots, algorithm_version=problem.algorithm_version)
             generated_set.save()
             # Assign the now-persisted parent explicitly before bulk insertion.
@@ -593,6 +599,7 @@ class ExamGenerationService:
                     campus_name_snapshot=row.campus_name,
                     assignment_context_snapshot=list(row.assignment_context),
                     question_text_snapshot=row.question_text,
+                    question_content_format_snapshot=row.question_content_format,
                     choices_snapshot=list(row.choices),
                     difficulty_snapshot=row.difficulty,
                     correct_answer_snapshot=row.correct_answer,
@@ -693,6 +700,7 @@ class ExamGenerationService:
             section_title_snapshot=data.section_title,
             section_instructions_snapshot=data.section_instructions,
             question_text_snapshot=data.question_text,
+            question_content_format_snapshot=data.question_content_format,
             choices_snapshot=list(data.choices),
             correct_answer_snapshot=data.correct_answer,
             source_scenario_id=data.scenario_id,

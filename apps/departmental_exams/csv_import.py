@@ -349,11 +349,11 @@ class QuestionCSVImportService:
             )
         existing_fingerprints = {
             QuestionPayloadService.question_fingerprint(
-                sanitize_csv_question_text(value)
+                value, content_format
             )
-            for value in Question.objects.filter(
+            for value, content_format in Question.objects.filter(
                 contribution__faculty_user=user
-            ).values_list("question_text", flat=True)
+            ).values_list("question_text", "content_format")
         }
         seen_fingerprints = set()
         for row in data_rows:

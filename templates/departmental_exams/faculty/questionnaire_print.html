@@ -45,6 +45,7 @@
     .questionnaire-case tr { break-inside: avoid-page; }
     .question-line { display: grid; grid-template-columns: 28px 1fr; gap: 5px; font-weight: 600; break-after: avoid-page; page-break-after: avoid; }
     .choices { margin: 5px 0 0 33px; padding-left: 22px; columns: 2; column-gap: 42px; break-inside: avoid-page; page-break-inside: avoid; }
+    .choices-rich { columns: 1; }
     .choices li { margin: 2px 0; padding-left: 3px; break-inside: avoid-page; page-break-inside: avoid; }
     .confidential-footer { position: static; margin-top: 0.25in; padding-top: 5px; border-top: 1px solid #555; font-size: 8pt; font-weight: 700; text-align: center; letter-spacing: .02em; break-inside: avoid-page; page-break-inside: avoid; }
     @media print {
@@ -102,8 +103,8 @@
         {% if item.case_start %}<aside class="questionnaire-case"><h3>{{ item.case_title|default:"Case / Scenario" }}</h3><div class="tmp-case-content" data-scientific-content>{{ item.case_content|scenario_content:item.case_format }}</div></aside>{% endif %}
         {% if forloop.last %}<div class="questionnaire-ending">{% endif %}
         <article class="question" data-scientific-group>
-          <div class="question-line"><span>{{ item.position }}.</span><span data-scientific-content>{{ item.question_text }}</span></div>
-          <ol class="choices" type="A">{% for choice in item.choices %}<li><span data-scientific-content>{{ choice }}</span></li>{% endfor %}</ol>
+          <div class="question-line"><span>{{ item.position }}.</span>{% if item.question_format == 'RICH_HTML_V1' %}<div class="tmp-case-content" data-scientific-content>{{ item.question_text|question_content:item.question_format }}</div>{% else %}<span data-scientific-content>{{ item.question_text|question_content:item.question_format }}</span>{% endif %}</div>
+          <ol class="choices{% if item.question_format == 'RICH_HTML_V1' %} choices-rich{% endif %}" type="A">{% for choice in item.choices %}<li>{% if item.question_format == 'RICH_HTML_V1' %}<div class="tmp-case-content" data-scientific-content>{{ choice|question_choice_content:item.question_format }}</div>{% else %}<span data-scientific-content>{{ choice|question_choice_content:item.question_format }}</span>{% endif %}</li>{% endfor %}</ol>
         </article>
         {% if forloop.last %}
           <footer class="confidential-footer">CONFIDENTIAL &bull; {{ course_code }} &bull; SET {{ set_code }} &bull; Revision R{{ revision_number }} &bull; Printed {{ printed_at|date:"M j, Y g:i A" }}</footer>

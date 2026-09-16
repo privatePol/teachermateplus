@@ -15,6 +15,7 @@ from django.utils import timezone
 from .duplicate_contract import (VERSION, bundle_identity, narrative_identity, standalone_identity,
                                  question_identity, reconcile, pool_claims)
 from .contribution_services import QuestionMutationService, ContributionRosterService
+from .question_content import RICH_HTML_V1, plain_text_to_rich_html
 from .csv_import import CSV_HEADERS, QuestionCSVImportService, QuestionImportCleanupService
 from .models import (FacultyContribution, Question, QuestionIdentityReservation, QuestionImportBatch,
                      ExaminationCycle, ExamCourseEquivalencyGroup, ExamCourseEquivalencyMembership)
@@ -128,6 +129,54 @@ class DuplicateWorkflowTests(Stage5FixtureMixin, Stage4TestCase):
         self.delete(first)
         self.create()
         self.assertEqual(QuestionIdentityReservation.objects.count(), 1)
+
+    def test_editor_projection_noop_preserves_plain_storage_and_revisions(self):
+        question = self.create(text="plain\nquestion")
+        before_contribution = question.contribution.revision
+        rich_payload = self.payload("plain\nquestion")
+        rich_payload["content_format"] = RICH_HTML_V1
+        for field in ("question_text", "choice_a", "choice_b", "choice_c", "choice_d"):
+            rich_payload[field] = plain_text_to_rich_html(rich_payload[field])
+        unchanged, changed = QuestionMutationService.update(
+            contribution_id=self.contribution.id, question_id=question.id,
+            user=self.faculty, tenant_id=self.tenant.id, campus_id=self.campus.id,
+            expected_contribution_revision=before_contribution,
+            expected_question_revision=question.revision, payload=rich_payload,
+        )
+        question.refresh_from_db()
+        self.contribution.refresh_from_db()
+        self.assertFalse(changed)
+        self.assertEqual(unchanged.id, question.id)
+        self.assertEqual(question.content_format, "PLAIN_TEXT")
+        self.assertEqual(question.question_text, "plain\nquestion")
+        self.assertEqual(question.revision, 1)
+        self.assertEqual(self.contribution.revision, before_contribution)
+
+    def test_v3_reservations_transition_atomically_to_v4(self):
+        first = self.create(text="first")
+        QuestionIdentityReservation.objects.filter(question=first).update(version="course-question-v3")
+        self.create(text="second")
+        reservations = list(QuestionIdentityReservation.objects.order_by("question_id"))
+        self.assertEqual([row.version for row in reservations], [VERSION, VERSION])
+        self.assertEqual([row.question_id for row in reservations], [first.id, reservations[1].question_id])
+
+    def test_v3_import_plan_is_owner_cleaned_not_relabelled(self):
+        batch = self.preview(["pending"])
+        from .duplicate_contract import plan_import
+        plan = plan_import(self.contribution, list(batch.rows.order_by("row_number")))
+        row_number = next(iter(plan))
+        decision = dict(plan[row_number])
+        decision["identity_version"] = "course-question-v3"
+        plan[row_number] = decision
+        batch.duplicate_plan = plan
+        batch.save(update_fields=["duplicate_plan", "updated_at"])
+        with self.assertRaises(ValidationError):
+            self.process(batch)
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, QuestionImportBatch.Status.FAILED)
+        self.assertEqual(batch.failure_code, "IMPORT_PLAN_VERSION")
+        self.assertFalse(Question.objects.filter(import_batch=batch).exists())
+        self.assertFalse(QuestionIdentityReservation.objects.filter(import_batch=batch).exists())
 
     def test_manual_bound_input_and_confidentiality(self):
         self.create(self.other_contribution)
@@ -742,7 +791,7 @@ class DuplicateMigrationTests(Stage5FixtureMixin, Stage4TransactionTestCase):
         before_questions = list(Question.objects.order_by("pk").values())
         before_contributions = list(FacultyContribution.objects.order_by("pk").values())
         previous = [("departmental_exams", "0029_question_import_target_section")]
-        current = [("departmental_exams", "0030_course_question_identity")]
+        current = [("departmental_exams", "0031_question_rich_content")]
         try:
             MigrationExecutor(connection).migrate(previous)
             MigrationExecutor(connection).migrate(current)

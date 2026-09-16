@@ -18,7 +18,13 @@ from apps.rbac.models import (
 from .automatic_generation_audit import AutomaticGenerationAuditService
 from .automatic_workflow import AutomaticExamDeadlineService
 from .generation_algorithms import solve_automatic_identity_aware_two_sets
-from .generation_readiness import Stage6ReadinessService
+from .generation_readiness import (
+    LEGACY_QUESTION_CONTENT_DIGEST_VERSION,
+    LEGACY_SOURCE_AUDIT_SCHEMA_VERSION,
+    QUESTION_CONTENT_DIGEST_VERSION,
+    Stage6ReadinessService,
+    generation_question_source_digest,
+)
 from .generation_services import ExamGenerationService
 from .models import (
     AutomaticGenerationAuditRun,
@@ -227,6 +233,50 @@ class AutomaticGenerationAuditTests(Stage6BGenerationFixtureMixin, Stage4TestCas
             self.assertNotIn("fingerprint", metadata)
             self.assertNotIn("hmac", metadata)
 
+    def test_legacy_flat_revision_digests_remain_verifiable(self):
+        source_rows = list(
+            GenerationSourceQuestionSnapshot.objects.filter(
+                audit_snapshot__generation_revision=self.revision
+            )
+        )
+        legacy_digests = {}
+        for source in source_rows:
+            digest = generation_question_source_digest(
+                source_id=source.source_question_id_snapshot,
+                revision=source.source_question_revision,
+                question_text=source.question_text_snapshot,
+                choices=source.choices_snapshot,
+                correct_answer=source.correct_answer_snapshot,
+                difficulty=source.difficulty_snapshot,
+                content_format=source.question_content_format_snapshot,
+                digest_version=LEGACY_QUESTION_CONTENT_DIGEST_VERSION,
+            )
+            legacy_digests[source.source_question_id_snapshot] = digest
+            GenerationSourceQuestionSnapshot.objects.filter(pk=source.pk).update(
+                source_question_digest=digest
+            )
+        for item in GeneratedExamItem.objects.filter(
+            generated_set__generation_revision=self.revision
+        ):
+            GeneratedExamItem.objects.filter(pk=item.pk).update(
+                source_question_digest=legacy_digests[item.source_question_id]
+            )
+        GenerationSourceAuditSnapshot.objects.filter(
+            generation_revision=self.revision
+        ).update(schema_version=LEGACY_SOURCE_AUDIT_SCHEMA_VERSION)
+        ExamGenerationRevision.objects.filter(pk=self.revision.pk).update(
+            algorithm_version="stage6b-v1"
+        )
+        self.revision.refresh_from_db()
+
+        findings, _counts = AutomaticGenerationAuditService._build_findings(
+            revision=self.revision
+        )
+        finding_by_code = {finding["code"]: finding for finding in findings}
+        self.assertEqual(finding_by_code["REVISION_SNAPSHOT_INTEGRITY"]["status"], "PASS")
+        self.assertEqual(finding_by_code["SOURCE_AUDIT_DIGESTS"]["status"], "PASS")
+        self.assertEqual(finding_by_code["SOURCE_MEMBERSHIP_CONSISTENCY"]["status"], "PASS")
+
     def test_budget_exhausted_difficulty_warning_reports_best_found_not_closest(self):
         generated_set = GeneratedExamSet.objects.get(
             generation_revision=self.revision,
@@ -240,15 +290,15 @@ class AutomaticGenerationAuditTests(Stage6BGenerationFixtureMixin, Stage4TestCas
             audit_snapshot__generation_revision=self.revision,
             source_question_id_snapshot=easy_item.source_question_id,
         )
-        adjusted_digest = AutomaticGenerationAuditService._digest(
-            {
-                "source_id": easy_item.source_question_id,
-                "revision": easy_item.source_question_revision,
-                "question_text": easy_item.question_text_snapshot,
-                "choices": easy_item.choices_snapshot,
-                "correct_answer": easy_item.correct_answer_snapshot,
-                "difficulty": Question.Difficulty.MODERATE,
-            }
+        adjusted_digest = generation_question_source_digest(
+            source_id=easy_item.source_question_id,
+            revision=easy_item.source_question_revision,
+            question_text=easy_item.question_text_snapshot,
+            choices=easy_item.choices_snapshot,
+            correct_answer=easy_item.correct_answer_snapshot,
+            difficulty=Question.Difficulty.MODERATE,
+            content_format=easy_item.question_content_format_snapshot,
+            digest_version=QUESTION_CONTENT_DIGEST_VERSION,
         )
         GeneratedExamItem.objects.filter(pk=easy_item.pk).update(
             difficulty_snapshot=Question.Difficulty.MODERATE,

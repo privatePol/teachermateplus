@@ -88,7 +88,7 @@ def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None
         raise PermissionDenied("The generated questionnaire set is unavailable.")
     from .structured_snapshots import ALGORITHM_VERSION, verify_structured_set
     snapshot_fields = (
-        "position", "question_text_snapshot", "choices_snapshot",
+        "position", "question_text_snapshot", "question_content_format_snapshot", "choices_snapshot",
         "section_id_snapshot", "section_title_snapshot", "section_instructions_snapshot",
         "scenario_id_snapshot", "scenario_title_snapshot", "scenario_stimulus_snapshot",
         "scenario_content_format_snapshot", "scenario_member_position_snapshot",
@@ -133,6 +133,7 @@ def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None
             {
                 "position": row["position"],
                 "question_text": row["question_text_snapshot"],
+                "question_format": row["question_content_format_snapshot"],
                 "choices": tuple(row["choices_snapshot"] or ()),
                 "section_id": row["section_id_snapshot"],
                 "section_title": row["section_title_snapshot"],

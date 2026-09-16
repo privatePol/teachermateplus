@@ -1218,10 +1218,15 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             question_get.content.decode().count("data-scientific-field"),
             5,
         )
-        self.assertEqual(
-            question_get.content.decode().count("data-scientific-preview"),
-            5,
-        )
+        # Rich MCQ fields deliberately have no client-side text preview: each
+        # visible result comes from the protected server-authoritative preview
+        # endpoint after canonicalization.  All five fields remain scientific
+        # rendering targets once that response is received.
+        body = question_get.content.decode()
+        self.assertNotIn("data-scientific-preview", body)
+        self.assertEqual(body.count("data-question-preview-field"), 5)
+        self.assertEqual(body.count("data-scientific-content"), 5)
+        self.assertEqual(body.count("Server-authoritative preview"), 5)
         self.assertContains(question_get, "vendor/katex/0.18.4/katex.min.css")
         self.assertContains(question_get, "vendor/katex/0.18.4/katex.min.js")
         self.assertContains(question_get, "vendor/katex/0.18.4/contrib/mhchem.min.js")
@@ -1233,9 +1238,12 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         )
         self.assertEqual(question_invalid.status_code, 400)
         invalid_form = question_invalid.context["form"]
-        self.assertIn("is-invalid", invalid_form.fields["question_text"].widget.attrs["class"])
+        # The hidden source is not the accessible authoring control.  Its
+        # matching rich editor has the visible, field-local error surface.
+        self.assertTrue(invalid_form.fields["question_text"].widget.is_hidden)
         self.assertEqual(
-            invalid_form.fields["question_text"].widget.attrs["aria-invalid"], "true"
+            invalid_form.fields["question_text"].widget.attrs["data-question-source"],
+            "question_text",
         )
         self.assertContains(question_invalid, "invalid-feedback d-block", status_code=400)
 

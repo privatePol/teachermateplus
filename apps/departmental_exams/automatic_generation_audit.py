@@ -15,7 +15,14 @@ from apps.core.services.audit import AuditService
 
 from .approval_services import GeneratedExamIntegrityService
 from .generation_algorithms import allocate_difficulties
-from .generation_readiness import SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS
+from .generation_readiness import (
+    LEGACY_QUESTION_CONTENT_DIGEST_VERSION,
+    LEGACY_SOURCE_AUDIT_SCHEMA_VERSION,
+    QUESTION_CONTENT_DIGEST_VERSION,
+    SOURCE_AUDIT_SCHEMA_VERSION,
+    SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS,
+    generation_question_source_digest,
+)
 from .models import (
     AutomaticGenerationAuditRun,
     ExamGenerationRevision,
@@ -91,7 +98,7 @@ class AutomaticGenerationAuditService:
         return "/".join(str(value.get(key, 0)) for key in keys)
 
     @classmethod
-    def _item_digest_valid(cls, item):
+    def _item_digest_valid(cls, item, *, digest_version):
         choices = item.choices_snapshot
         if (
             item.source_question_revision < 1
@@ -99,26 +106,24 @@ class AutomaticGenerationAuditService:
                 item.source_question_digest or ""
             )
             or not (item.question_text_snapshot or "").strip()
+            or item.question_content_format_snapshot not in {"PLAIN_TEXT", "RICH_HTML_V1"}
             or not isinstance(choices, list)
             or len(choices) != 4
             or any(not str(choice).strip() for choice in choices)
             or item.correct_answer_snapshot not in {"A", "B", "C", "D"}
         ):
             return False
-        expected = cls._digest(
-            {
-                "source_id": item.source_question_id,
-                "revision": item.source_question_revision,
-                "question_text": item.question_text_snapshot,
-                "choices": choices,
-                "correct_answer": item.correct_answer_snapshot,
-                "difficulty": item.difficulty_snapshot,
-            }
+        expected = generation_question_source_digest(
+            source_id=item.source_question_id, revision=item.source_question_revision,
+            question_text=item.question_text_snapshot, choices=choices,
+            correct_answer=item.correct_answer_snapshot, difficulty=item.difficulty_snapshot,
+            content_format=item.question_content_format_snapshot,
+            digest_version=digest_version,
         )
         return expected == item.source_question_digest
 
     @classmethod
-    def _source_digest_valid(cls, source, *, allow_excluded_invalid=False):
+    def _source_digest_valid(cls, source, *, digest_version, allow_excluded_invalid=False):
         choices = source.choices_snapshot
         if (
             source.source_question_revision < 1
@@ -127,6 +132,7 @@ class AutomaticGenerationAuditService:
             )
             or (not (source.question_text_snapshot or "").strip()
                 and not (allow_excluded_invalid and not source.eligible_for_generation))
+            or source.question_content_format_snapshot not in {"PLAIN_TEXT", "RICH_HTML_V1"}
             or not isinstance(choices, list)
             or len(choices) != 4
             or (any(not str(choice).strip() for choice in choices)
@@ -134,15 +140,12 @@ class AutomaticGenerationAuditService:
             or source.correct_answer_snapshot not in {"A", "B", "C", "D"}
         ):
             return False
-        expected = cls._digest(
-            {
-                "source_id": source.source_question_id_snapshot,
-                "revision": source.source_question_revision,
-                "question_text": source.question_text_snapshot,
-                "choices": choices,
-                "correct_answer": source.correct_answer_snapshot,
-                "difficulty": source.difficulty_snapshot,
-            }
+        expected = generation_question_source_digest(
+            source_id=source.source_question_id_snapshot, revision=source.source_question_revision,
+            question_text=source.question_text_snapshot, choices=choices,
+            correct_answer=source.correct_answer_snapshot, difficulty=source.difficulty_snapshot,
+            content_format=source.question_content_format_snapshot,
+            digest_version=digest_version,
         )
         return expected == source.source_question_digest
 
@@ -165,8 +168,8 @@ class AutomaticGenerationAuditService:
         }
         all_items = items_by_code["A"] + items_by_code["B"]
         findings = []
-        from .structured_snapshots import ALGORITHM_VERSION, verify_structured_set
-        if revision.algorithm_version == ALGORITHM_VERSION:
+        from .structured_snapshots import ALGORITHM_VERSION, LEGACY_ALGORITHM_VERSION, verify_structured_set
+        if revision.algorithm_version in {ALGORITHM_VERSION, LEGACY_ALGORITHM_VERSION}:
             for generated_set in generated_sets:
                 verify_structured_set(generated_set, items_by_code[generated_set.set_code],
                                       algorithm_version=revision.algorithm_version)
@@ -429,7 +432,14 @@ class AutomaticGenerationAuditService:
             )
         )
 
-        item_digest_count = sum(cls._item_digest_valid(item) for item in all_items)
+        item_digest_version = (
+            QUESTION_CONTENT_DIGEST_VERSION
+            if revision.algorithm_version in {"stage6b-v2", "automatic-case-v2"}
+            else LEGACY_QUESTION_CONTENT_DIGEST_VERSION
+        )
+        item_digest_count = sum(
+            cls._item_digest_valid(item, digest_version=item_digest_version) for item in all_items
+        )
         revision_header_ok = bool(
             revision.final_item_count_snapshot >= 1
             and (revision.algorithm_version or "").strip()
@@ -508,6 +518,11 @@ class AutomaticGenerationAuditService:
                 {row.normalized_fingerprint for row in eligible_rows}
             )
             counts_ok = bool(
+                source_audit.schema_version in {
+                    LEGACY_SOURCE_AUDIT_SCHEMA_VERSION,
+                    SOURCE_AUDIT_SCHEMA_VERSION,
+                }
+                and
                 source_audit.logical_identity_version
                 in SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS
                 and source_audit.submitted_count == len(source_rows)
@@ -559,8 +574,16 @@ class AutomaticGenerationAuditService:
                     total=len(all_items),
                 )
             )
+            source_digest_version = (
+                QUESTION_CONTENT_DIGEST_VERSION
+                if source_audit.schema_version == SOURCE_AUDIT_SCHEMA_VERSION
+                else LEGACY_QUESTION_CONTENT_DIGEST_VERSION
+            )
             valid_source_digests = sum(
-                cls._source_digest_valid(source, allow_excluded_invalid=revision.algorithm_version == "automatic-case-v1")
+                cls._source_digest_valid(
+                    source, digest_version=source_digest_version,
+                    allow_excluded_invalid=revision.algorithm_version in {"automatic-case-v1", "automatic-case-v2"},
+                )
                 for source in source_rows
             )
             source_digests_ok = valid_source_digests == len(source_rows)

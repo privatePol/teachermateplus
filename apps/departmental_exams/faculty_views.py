@@ -60,6 +60,11 @@ from .scenario_content import (
     canonicalize_scenario_content,
     render_scenario_content_for_editor,
 )
+from .question_content import (
+    RICH_HTML_V1,
+    TEXT_FIELDS as QUESTION_CONTENT_FIELDS,
+    render_question_content_for_editor,
+)
 from .questionnaire_printing import (
     FacultyQuestionnairePrintService,
     _questionnaire_paper_context,
@@ -695,11 +700,28 @@ def _bind_question_validation_errors(form, exc):
         "Select a valid frozen Exam Section.",
         "Linked Questions must use the Case Exam Section.",
         "A question may belong to at most one Case.",
+        "Unsupported question content format.",
+        "Rich question content cannot be downgraded automatically.",
     }
     errors = exc.message_dict if hasattr(exc, "error_dict") else {None: exc.messages}
     needs_fallback = False
     for field, messages_for_field in errors.items():
         for message in messages_for_field:
+            # Rich-content diagnostics must never repeat submitted markup.  The
+            # server records no content in an error response and the page keeps
+            # the rejected field source locally for correction.
+            if field in QUESTION_CONTENT_FIELDS and message not in public_messages:
+                form.add_error(
+                    field,
+                    "This rich-text field contains unsupported content or exceeds a supported limit.",
+                )
+                continue
+            if field == "__all__" and message not in public_messages:
+                form.add_error(
+                    None,
+                    "The combined rich-text content exceeds a supported limit.",
+                )
+                continue
             if message not in public_messages:
                 needs_fallback = True
                 continue
@@ -726,13 +748,110 @@ def _question_initial(question, contribution):
                     "choice_d",
                     "correct_answer",
                     "difficulty",
+                    "content_format",
                 )
             }
         )
     return initial
 
 
+def _render_question_form(request, *, contribution, form, mode, scenario=None, question=None, status=200):
+    content_format = (form["content_format"].value() or Question.ContentFormat.PLAIN_TEXT).strip().upper()
+    editor_fields = []
+    labels = {
+        "question_text": "Question stem",
+        "choice_a": "Choice A",
+        "choice_b": "Choice B",
+        "choice_c": "Choice C",
+        "choice_d": "Choice D",
+    }
+    for name in QUESTION_CONTENT_FIELDS:
+        source = form[name].value() or ""
+        unavailable = False
+        try:
+            display_html = render_question_content_for_editor(
+                source,
+                content_format=content_format,
+                field=name,
+            )
+        except ValidationError:
+            display_html = ""
+            unavailable = bool(source)
+        editor_fields.append(
+            {
+                "name": name,
+                "label": labels[name],
+                "bound": form[name],
+                "display_html": display_html,
+                "source": source if unavailable else "",
+                "unavailable": unavailable,
+            }
+        )
+    return render(
+        request,
+        "departmental_exams/faculty/question_form.html",
+        {
+            "form": form,
+            "contribution": contribution,
+            "mode": mode,
+            "scenario": scenario,
+            "question": question,
+            "editor_fields": editor_fields,
+            "preview_url": reverse("departmental_exams:question_preview", args=[contribution.id]),
+        },
+        status=status,
+    )
+
+
+def _question_preview_error_payload(exc):
+    errors = exc.message_dict if hasattr(exc, "error_dict") else {"__all__": exc.messages}
+    public = {}
+    for field, messages in errors.items():
+        target = field if field in QUESTION_CONTENT_FIELDS else "__all__"
+        if target in QUESTION_CONTENT_FIELDS:
+            public[target] = [
+                "This rich-text field contains unsupported content or exceeds a supported limit."
+            ]
+        else:
+            public[target] = ["The question could not be previewed. Review the indicated fields."]
+    return public
+
+
+def _no_store_json(payload, *, status=200):
+    response = JsonResponse(payload, status=status)
+    response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
+
+
 @_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_POST
+def question_preview_view(request, contribution_id):
+    """Permission-scoped, non-persistent rich-question preview."""
+    contribution = _owner_contribution(request, contribution_id)
+    _require_currently_mutable(request, contribution)
+    payload = {field: request.POST.get(field, "") for field in QUESTION_CONTENT_FIELDS}
+    payload.update(
+        {
+            "correct_answer": request.POST.get("correct_answer", ""),
+            "difficulty": request.POST.get("difficulty", ""),
+            "content_format": RICH_HTML_V1,
+        }
+    )
+    try:
+        cleaned = QuestionMutationService.validate_payload_for_preview(payload)
+    except ValidationError as exc:
+        return _no_store_json({"errors": _question_preview_error_payload(exc)}, status=400)
+    return _no_store_json(
+        {"fields": {field: cleaned[field] for field in QUESTION_CONTENT_FIELDS}}
+    )
+
+
+@_faculty_error_page
+@never_cache
 @portal_required("FACULTY")
 @require_http_methods(["GET", "POST"])
 def question_create_view(request, contribution_id, scenario_id=None):
@@ -760,6 +879,7 @@ def question_create_view(request, contribution_id, scenario_id=None):
         require_section=structure["require_section"],
         fixed_section=structure.get("fixed_section"),
         scenario_id=structure["scenario_id"],
+        rich_editor=True,
     )
     if request.method == "POST" and form.is_valid():
         tenant_id, campus_id = _scope(request)
@@ -790,15 +910,18 @@ def question_create_view(request, contribution_id, scenario_id=None):
                     scenario_id=scenario.id,
                 )
             return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
-    return render(
+    return _render_question_form(
         request,
-        "departmental_exams/faculty/question_form.html",
-        {"form": form, "contribution": contribution, "mode": "create", "scenario": scenario},
+        contribution=contribution,
+        form=form,
+        mode="create",
+        scenario=scenario,
         status=400 if request.method == "POST" else 200,
     )
 
 
 @_faculty_error_page
+@never_cache
 @portal_required("FACULTY")
 @require_http_methods(["GET", "POST"])
 def question_edit_view(request, contribution_id, question_id):
@@ -825,6 +948,7 @@ def question_edit_view(request, contribution_id, question_id):
         require_section=structure["require_section"],
         fixed_section=structure.get("fixed_section"),
         scenario_id=structure["scenario_id"],
+        rich_editor=True,
     )
     if request.method == "POST" and form.is_valid():
         tenant_id, campus_id = _scope(request)
@@ -851,10 +975,13 @@ def question_edit_view(request, contribution_id, question_id):
                 messages.warning(request, "This question resembles another question you have saved. It remains saved; this is a similarity warning.")
             messages.success(request, "Question updated." if changed else "No question changes were needed.")
             return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
-    return render(
+    return _render_question_form(
         request,
-        "departmental_exams/faculty/question_form.html",
-        {"form": form, "contribution": contribution, "question": question, "mode": "edit", "scenario": scenario},
+        contribution=contribution,
+        form=form,
+        mode="edit",
+        scenario=scenario,
+        question=question,
         status=400 if request.method == "POST" else 200,
     )
 

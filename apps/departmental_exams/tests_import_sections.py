@@ -444,38 +444,74 @@ class ImportSectionMigrationTests(FacultyCaseFixtureMixin, stage4_test_support.S
         from django.db import connection
         from django.db.migrations.executor import MigrationExecutor
 
-        case = self.save_case()
-        self.add_question(scenario=case)
-        batches = []
-        for complete in (True, False):
-            self.contribution.refresh_from_db()
-            batch = QuestionCSVImportService.create_preview(
-                contribution_id=self.contribution.pk,
-                uploaded_file=tests_stage5_csv_resume.Stage5ResumableCSVImportTests.upload(1),
-                user=self.faculty, tenant_id=self.tenant.pk, campus_id=self.campus.pk,
-                expected_contribution_revision=self.contribution.revision, target_section_id=self.section_b.pk,
-            )
-            if complete:
-                QuestionCSVImportService.confirm(token=batch.token, expected_file_sha256=batch.file_sha256,
-                                                 user=self.faculty, tenant_id=self.tenant.pk, campus_id=self.campus.pk)
-            batches.append(batch.pk)
-        questions = list(Question.objects.order_by("pk").values())
-        placements = list(QuestionBlueprintPlacement.objects.order_by("pk").values())
-        members = list(ExamScenarioMember.objects.order_by("pk").values())
         current = [("departmental_exams", "0029_question_import_target_section")]
         previous = [("departmental_exams", "0028_case_generation_snapshots")]
+        leaves = MigrationExecutor(connection).loader.graph.leaf_nodes()
         try:
             MigrationExecutor(connection).migrate(previous)
             executor = MigrationExecutor(connection)
-            old_batch = executor.loader.project_state(previous).apps.get_model("departmental_exams", "QuestionImportBatch")
-            before = list(old_batch.objects.filter(pk__in=batches).order_by("pk").values())
+            historical = executor.loader.project_state(previous).apps
+            old = lambda name: historical.get_model("departmental_exams", name)
+            # Create actual 0028 rows, before target_section or v4 import plans
+            # existed.  Current services would create irreversible v4 evidence.
+            case = old("ExamScenario").objects.create(
+                blueprint_id=self.blueprint.pk, contribution_id=self.contribution.pk,
+                section_id=self.section_a.pk, title="Historical Case",
+                stimulus="<p>Historical narrative</p>", content_format="RICH_HTML_V1",
+                created_by_id=self.faculty.pk, updated_by_id=self.faculty.pk,
+            )
+            linked = old("Question").objects.create(
+                contribution_id=self.contribution.pk, position=1,
+                question_text="Historical linked question", choice_a="A", choice_b="B",
+                choice_c="C", choice_d="D", correct_answer="A", difficulty="EASY",
+            )
+            old("ExamScenarioMember").objects.create(scenario_id=case.pk, question_id=linked.pk, position=1)
+            old("QuestionBlueprintPlacement").objects.create(
+                blueprint_id=self.blueprint.pk, section_id=self.section_a.pk,
+                question_id=linked.pk, placed_by_id=self.faculty.pk,
+            )
+            now = timezone.now()
+            batch_fields = dict(
+                tenant_id=self.tenant.pk, contribution_id=self.contribution.pk,
+                uploading_user_id=self.faculty.pk,
+                contribution_revision_snapshot=self.contribution.revision,
+                file_sha256="a" * 64, filename_sha256="b" * 64,
+                total_rows=1, valid_rows=1, resulting_question_count=2,
+                expires_at=now + timedelta(hours=1),
+            )
+            complete = old("QuestionImportBatch").objects.create(
+                **batch_fields, status="CONFIRMED", committed_rows=1,
+                confirmed_at=now, payload_purged_at=now,
+            )
+            imported = old("Question").objects.create(
+                contribution_id=self.contribution.pk, position=2,
+                import_batch_id=complete.pk, import_row_number=2, entry_method="CSV",
+                question_text="Historical imported question", choice_a="A", choice_b="B",
+                choice_c="C", choice_d="D", correct_answer="A", difficulty="EASY",
+            )
+            old("QuestionBlueprintPlacement").objects.create(
+                blueprint_id=self.blueprint.pk, section_id=self.section_b.pk,
+                question_id=imported.pk, placed_by_id=self.faculty.pk,
+            )
+            pending = old("QuestionImportBatch").objects.create(**batch_fields, status="READY")
+            old("QuestionImportRow").objects.create(
+                batch_id=pending.pk, row_number=2,
+                payload={"question_text": "Historical pending row"}, fingerprint="c" * 64,
+            )
+            batches = [complete.pk, pending.pk]
+            before = list(old("QuestionImportBatch").objects.filter(pk__in=batches).order_by("pk").values())
+            questions = list(old("Question").objects.order_by("pk").values())
+            placements = list(old("QuestionBlueprintPlacement").objects.order_by("pk").values())
+            members = list(old("ExamScenarioMember").objects.order_by("pk").values())
             executor.migrate(current)
-            after = list(QuestionImportBatch.objects.filter(pk__in=batches).order_by("pk").values())
+            upgraded = MigrationExecutor(connection).loader.project_state(current).apps
+            new = lambda name: upgraded.get_model("departmental_exams", name)
+            after = list(new("QuestionImportBatch").objects.filter(pk__in=batches).order_by("pk").values())
             self.assertEqual([row.pop("target_section_id") for row in after], [None, None])
             self.assertEqual(after, before)
-            self.assertEqual(list(Question.objects.order_by("pk").values()), questions)
-            self.assertEqual(list(QuestionBlueprintPlacement.objects.order_by("pk").values()), placements)
-            self.assertEqual(list(ExamScenarioMember.objects.order_by("pk").values()), members)
+            self.assertEqual(list(new("Question").objects.order_by("pk").values()), questions)
+            self.assertEqual(list(new("QuestionBlueprintPlacement").objects.order_by("pk").values()), placements)
+            self.assertEqual(list(new("ExamScenarioMember").objects.order_by("pk").values()), members)
             with connection.cursor() as cursor:
                 constraints = connection.introspection.get_constraints(cursor, QuestionImportBatch._meta.db_table)
                 columns = connection.introspection.get_table_description(cursor, QuestionImportBatch._meta.db_table)
@@ -483,4 +519,4 @@ class ImportSectionMigrationTests(FacultyCaseFixtureMixin, stage4_test_support.S
             self.assertTrue(any(item["foreign_key"] == (ExamSection._meta.db_table, "id") for item in constraints.values()))
             self.assertTrue(next(column for column in columns if column.name == "target_section_id").null_ok)
         finally:
-            MigrationExecutor(connection).migrate(current)
+            MigrationExecutor(connection).migrate(leaves)

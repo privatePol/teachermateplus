@@ -1093,6 +1093,7 @@ def require_eligible_stage6_question(*, question, cycle_course):
             "choice_d": question.choice_d,
             "correct_answer": question.correct_answer,
             "difficulty": question.difficulty,
+            "content_format": question.content_format,
         }
     )
     if (

@@ -268,5 +268,159 @@ export function mountCaseEditor(form) {
   });
   return {editor,currentContent};
 }
-const form = document.querySelector('[data-case-editor-form]');
-if (form) mountCaseEditor(form);
+function questionPublicPasteMessage(error) {
+  const supported = new Set([
+    'Images and embedded objects are not supported.',
+    'Native Word equations are not supported. Use TMP LaTeX or Unicode.',
+    'This Word list uses unsupported numbering. Paste the affected list as text, then apply Bullets or Numbered list in TMP. No content was inserted.',
+    'This pasted border cannot be represented safely. Keep accounting lines as a single or double bottom border on an amount cell or its final paragraph, then paste again. No content was inserted.',
+    'This border cannot be preserved as an accounting rule. Use explicit single/double bottom rules on amount cells; paragraph, stylesheet and conflicting rules are not supported.',
+    'Stylesheet-defined accounting borders are not supported. Apply explicit bottom rules to amount cells in Word or TMP.',
+    'This table would require a geometry change to edit safely. The original source is preserved.'
+  ]);
+  return supported.has(error?.message)
+    ? error.message
+    : 'Paste could not be inserted safely. Existing content is unchanged.';
+}
+
+function createQuestionToolbar({editor, toolbar, errorBox, status, controls, getAnchor, setAnchor}) {
+  let groupControls;
+  const compact = {Bold:'B',Italic:'I',Underline:'U',Superscript:'x²',Subscript:'x₂',
+    'Bulleted list':'• List','Numbered list':'1. List','Decrease indent':'− Indent','Increase indent':'+ Indent'};
+  const group = label => {
+    const section=document.createElement('div'); section.className='tmp-case-tool-group';
+    section.setAttribute('role','group'); section.setAttribute('aria-label',label);
+    const heading=document.createElement('span'); heading.className='tmp-case-tool-label'; heading.textContent=label;
+    groupControls=document.createElement('div'); groupControls.className='tmp-case-tool-controls';
+    section.append(heading,groupControls); toolbar.append(section);
+  };
+  const cellPosition = () => {
+    const position=editor.state.selection.$from;
+    for (let depth=position.depth;depth>0;depth--) if (['tableCell','tableHeader'].includes(position.node(depth).type.name)) return position.before(depth);
+    return editor.state.selection.$anchorCell?.pos ?? null;
+  };
+  const button = (label, command, active=null, enabled=null) => {
+    const control=document.createElement('button'); control.type='button'; control.className='btn btn-sm btn-outline-secondary';
+    control.textContent=compact[label] || label; control.title=label; control.setAttribute('aria-label',label);
+    control.addEventListener('click', () => {
+      try { command(); editor.commands.focus(); refresh(); }
+      catch (error) { errorBox.textContent=error.accountingConflict ? error.message : 'The formatting action could not be completed safely.'; errorBox.hidden=false; status.textContent='Existing content is unchanged.'; }
+    });
+    groupControls.append(control); controls.push({control,active,enabled}); return control;
+  };
+  const refresh = () => controls.forEach(item => {
+    item.control.disabled=Boolean(item.enabled && !item.enabled());
+    if (item.active) item.control.setAttribute('aria-pressed',String(item.active()));
+  });
+  toolbar.addEventListener('keydown', event => {
+    if (event.target.tagName!=='BUTTON' || !['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+    const buttons=[...event.target.closest('[role=group]').querySelectorAll('button:not(:disabled)')], index=buttons.indexOf(event.target);
+    const next=event.key==='Home' ? 0 : event.key==='End' ? buttons.length-1 : (index+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;
+    event.preventDefault(); buttons[next]?.focus();
+  });
+  const toggle=(label,name,command)=>button(label,()=>editor.chain().focus()[command]().run(),()=>editor.isActive(name));
+  group('Text formatting');
+  toggle('Bold','bold','toggleBold'); toggle('Italic','italic','toggleItalic'); toggle('Underline','underline','toggleUnderline');
+  toggle('Superscript','superscript','toggleSuperscript'); toggle('Subscript','subscript','toggleSubscript');
+  group('Lists and indentation');
+  toggle('Bulleted list','bulletList','toggleBulletList'); toggle('Numbered list','orderedList','toggleOrderedList');
+  for (const [label,delta] of [['Decrease indent',-1],['Increase indent',1]]) button(label,()=>editor.chain().focus().indentParagraph(delta).run(),null,()=>editor.can().indentParagraph(delta));
+  group('Paragraph alignment');
+  for (const value of ['left','center','right','justify']) button('Paragraph '+value,()=>editor.chain().focus().setTextAlign(value).run(),()=>editor.isActive({textAlign:value}));
+  group('Table structure');
+  const numberInput=(label,max)=>{ const wrapper=document.createElement('label'); wrapper.className='tmp-case-table-size'; wrapper.textContent=label+' '; const input=document.createElement('input'); input.type='number'; input.min='1'; input.max=String(max); input.value='2'; wrapper.append(input); groupControls.append(wrapper); return input; };
+  const rows=numberInput('Rows',40), columns=numberInput('Columns',12);
+  button('Insert table',()=>{ if (!rows.checkValidity() || !columns.checkValidity()) { errorBox.textContent='Choose 1–40 rows and 1–12 columns.'; errorBox.hidden=false; return; } editor.chain().focus().insertTable({rows:Number(rows.value),cols:Number(columns.value),withHeaderRow:true}).run(); });
+  for (const [label,command] of [['Add row above','addRowBefore'],['Add row below','addRowAfter'],['Delete row','deleteRow'],['Add column before','addColumnBefore'],['Add column after','addColumnAfter'],['Delete column','deleteColumn'],['Delete table','deleteTable'],['Merge cells','mergeCells'],['Split cell','splitCell']]) button(label,()=>editor.chain().focus()[command]().run(),null,()=>editor.can()[command]());
+  button('Start cell selection',()=>{ setAnchor(cellPosition()); status.textContent='Selection start recorded. Move to another cell, then extend the selection.'; },null,()=>cellPosition()!==null);
+  button('Extend cell selection',()=>editor.commands.setCellSelection({anchorCell:getAnchor(),headCell:cellPosition()}),null,()=>cellsShareTable(editor,getAnchor(),cellPosition()));
+  group('Cell alignment');
+  for (const value of ['left','center','right','justify']) button('Cell '+value,()=>editor.chain().focus().setCellAttribute('cellAlign',value).run(),()=>editor.isActive('tableCell',{cellAlign:value})||editor.isActive('tableHeader',{cellAlign:value}),()=>cellPosition()!==null);
+  for (const value of ['top','middle','bottom']) button('Cell vertical '+value,()=>editor.chain().focus().setCellAttribute('verticalAlign',value).run(),()=>editor.isActive('tableCell',{verticalAlign:value})||editor.isActive('tableHeader',{verticalAlign:value}),()=>cellPosition()!==null);
+  group('Accounting rules');
+  for (const [label,value] of [['Single Rule','single'],['Double Rule','double'],['Remove Rule',null]]) button(label,()=>editor.chain().focus().setAccountingRule(value).run(),null,()=>cellPosition()!==null);
+  group('Undo, redo and clear');
+  button('Undo',()=>editor.chain().focus().undo().run(),null,()=>editor.can().undo()); button('Redo',()=>editor.chain().focus().redo().run(),null,()=>editor.can().redo()); button('Clear text formatting',()=>editor.chain().focus().clearTextFormatting().run());
+  return refresh;
+}
+
+function mountQuestionEditors(form) {
+  const saveButton=form.querySelector('[data-question-save]'), previewButton=form.querySelector('[data-question-preview-button]');
+  const globalErrors=form.querySelector('[data-question-editor-errors]'), status=form.querySelector('[data-question-editor-status]');
+  const format=form.querySelector('[name=content_format]'), csrf=form.querySelector('[name=csrfmiddlewaretoken]');
+  const fieldErrors={}; const states=[];
+  let previewSequence=0, previewPending=false, previewInvalid=false, failed=false;
+  const show=(box,messages)=>{ box.textContent=(messages||[]).join(' '); box.hidden=!(messages||[]).length; };
+  const setBusy=busy=>{ previewPending=busy; previewButton.disabled=busy||failed; saveButton.disabled=busy||failed; form.setAttribute('aria-busy',String(busy)); };
+  const clearFieldErrors=()=>{ Object.values(fieldErrors).forEach(box=>show(box,[])); show(globalErrors,[]); };
+  const invalidatePreview=()=>{ previewSequence++; previewInvalid=false; clearFieldErrors(); };
+  for (const field of form.querySelectorAll('[data-question-rich-field]')) {
+    const name=field.dataset.questionRichField, source=form.querySelector(`[name="${name}"]`), host=field.querySelector('[data-question-rich-editor]');
+    const toolbar=field.querySelector('[data-question-toolbar]'), errorBox=field.querySelector('[data-question-field-errors]'), recovery=field.querySelector('[data-question-paste-recovery]');
+    fieldErrors[name]=errorBox;
+    const safeHtml=host.innerHTML, original=source.value; let editor, dirty=false, anchorCell=null, rejectedPaste=null;
+    let refresh=()=>{};
+    const state={name,source,host,get editor(){ return editor; },get dirty(){ return dirty; },sync(){
+      if (!editor || editor.isDestroyed) throw new Error('Editor unavailable.');
+      source.value=serializeEditor(editor); return source.value;
+    }};
+    function showRecovery(html,text,message) {
+      const htmlTarget=recovery.querySelector('[data-question-clipboard-html]'), textTarget=recovery.querySelector('[data-question-clipboard-text]');
+      const retained=html.length<=100000 && text.length<=100000 && new TextEncoder().encode(html).length+new TextEncoder().encode(text).length<=200000;
+      rejectedPaste={html:retained?html:'',text:retained?text:'',retained}; htmlTarget.value=rejectedPaste.html; textTarget.value=rejectedPaste.text;
+      recovery.hidden=false; recovery.querySelector('[data-question-paste-note]').textContent=retained ? 'Clipboard copies are retained only in this page. Existing field content is unchanged.' : 'The clipboard was too large to retain. Existing field content is unchanged.';
+      show(errorBox,['Paste was not inserted.',message]);
+    }
+    function insertPaste(html,text,files=false) {
+      const before=editor.state, prior=source.value, priorDirty=dirty, priorAnchor=anchorCell;
+      try {
+        if (files) throw new Error('Images and embedded objects are not supported.');
+        const normalized=normalizeClipboard(html,text); if (!normalized.trim()) throw new Error('No supported rich content was found.');
+        const probe=createCaseEditor(document.createElement('div'),normalized); probe.destroy();
+        if (!editor.commands.insertContent(prepareLegacy(normalized),{parseOptions:{preserveWhitespace:'full'}})) throw new Error('Paste could not be inserted at this position.');
+        rejectedPaste=null; recovery.hidden=true; show(errorBox,[]); status.textContent=`${field.dataset.questionFieldLabel} paste inserted. Use Preview to validate.`;
+      } catch (error) {
+        if (editor.state!==before) editor.view.updateState(before); dirty=priorDirty; source.value=prior; anchorCell=priorAnchor;
+        showRecovery(html,text,questionPublicPasteMessage(error)); status.textContent='Paste rejected. Existing content remains available.';
+      }
+    }
+    try {
+      if (host.dataset.questionEditorDisplayUnavailable==='true') throw new Error('Unsafe editor source.');
+      host.replaceChildren();
+      editor=createCaseEditor(host,safeHtml,{onUpdate:()=>{dirty=true; invalidatePreview(); status.textContent='Content changed. Use Preview to validate the current question.';},onTransaction:({transaction})=>{if(anchorCell!==null&&transaction.docChanged){const mapped=transaction.mapping.mapResult(anchorCell);anchorCell=mapped.deleted?null:mapped.pos;} refresh();},editorProps:{attributes:{role:'textbox','aria-label':field.dataset.questionFieldLabel,'aria-multiline':'true','aria-describedby':field.dataset.questionEditorHelp},handlePaste:(_view,event)=>{event.preventDefault(); insertPaste(event.clipboardData?.getData('text/html')||'',event.clipboardData?.getData('text/plain')||'',Boolean(event.clipboardData?.files?.length)); return true;}}});
+      const controls=[]; refresh=createQuestionToolbar({editor,toolbar,errorBox,status,controls,getAnchor:()=>anchorCell,setAnchor:value=>{anchorCell=value;}}); refresh();
+      host.TMPScientificEditor={insertText(text){editor.chain().focus().insertContent(text).run();},insertTemplate(before,after,placeholder){const {from,to}=editor.state.selection,selected=editor.state.doc.textBetween(from,to,'\n');editor.chain().focus().insertContent(before+(selected||placeholder)+after).run();}};
+      recovery.querySelector('[data-question-paste-dismiss]').addEventListener('click',()=>{rejectedPaste=null; recovery.hidden=true; show(errorBox,[]); editor.commands.focus();});
+      recovery.querySelector('[data-question-paste-retry]').addEventListener('click',()=>{if(rejectedPaste?.retained) insertPaste(rejectedPaste.html,rejectedPaste.text);});
+    } catch (_error) {
+      failed=true; host.innerHTML=safeHtml; field.querySelector('[data-question-original-source]').hidden=false; field.querySelector('[data-question-original-source] textarea').value=original;
+      show(errorBox,['This editor could not load without changing saved content. The original source is preserved and Save is disabled.']);
+    }
+    states.push(state);
+  }
+  if (failed) { setBusy(false); saveButton.disabled=true; previewButton.disabled=true; return; }
+  saveButton.disabled=false; previewButton.disabled=false; status.textContent='Five editors ready. Preview validates the complete question before Save.';
+  form.addEventListener('submit',event=>{
+    if (previewPending || previewInvalid || failed) { event.preventDefault(); show(globalErrors,[previewPending ? 'Preview processing is still in progress.' : 'Resolve the rich-text validation errors or change the affected field before saving.']); return; }
+    try { for (const state of states) state.sync(); if (states.some(state=>state.dirty)) format.value='RICH_HTML_V1'; }
+    catch (_error) { event.preventDefault(); show(globalErrors,['The question editor could not preserve content safely.']); }
+  });
+  previewButton.addEventListener('click',async()=>{
+    let request; try { for (const state of states) state.sync(); format.value='RICH_HTML_V1'; request=++previewSequence; clearFieldErrors(); setBusy(true); }
+    catch (_error) { show(globalErrors,['The question editor could not preserve content safely.']); return; }
+    try {
+      const body=new FormData(form); body.set('content_format','RICH_HTML_V1');
+      const response=await fetch(form.dataset.previewUrl,{method:'POST',body,credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const payload=await response.json(); if(request!==previewSequence||failed)return;
+      setBusy(false);
+      if(!response.ok){ previewInvalid=true; Object.entries(payload.errors||{}).forEach(([name,messages])=>show(fieldErrors[name]||globalErrors,messages)); if(!Object.keys(payload.errors||{}).length)show(globalErrors,['Preview could not be generated.']); status.textContent='Preview rejected. Correct the field errors before saving.'; return; }
+      previewInvalid=false; Object.entries(payload.fields||{}).forEach(([name,html])=>{ const state=states.find(item=>item.name===name); if(!state)return; state.source.value=html; const preview= form.querySelector(`[data-question-preview-field="${name}"]`); if(preview){preview.innerHTML=html;if(typeof window.renderMathInElement==='function')window.renderMathInElement(preview,{delimiters:[{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],trust:false,throwOnError:false,strict:'error',maxSize:10,maxExpand:1000});} });
+      status.textContent='Server-authoritative Preview updated. Save will validate again.';
+    } catch (_error) { if(request!==previewSequence||failed)return; setBusy(false); previewInvalid=true; show(globalErrors,['Preview could not be generated. Current content has not passed server validation.']); status.textContent='Preview failed. Save remains blocked until content changes or Preview succeeds.'; }
+  });
+  document.dispatchEvent(new CustomEvent('tmp:scientific-rich-editor-ready'));
+}
+
+const caseForm = document.querySelector('[data-case-editor-form]');
+if (caseForm) mountCaseEditor(caseForm);
+document.querySelectorAll('[data-question-editor-form]').forEach(mountQuestionEditors);

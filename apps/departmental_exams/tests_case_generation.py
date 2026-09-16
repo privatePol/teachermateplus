@@ -14,17 +14,28 @@ from django.utils import timezone
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 
+from .automatic_generation_audit import AutomaticGenerationAuditService
 from .automatic_workflow import AutomaticExamDeadlineService
 from .contribution_services import QuestionMutationService
 from .generation_algorithms import IdentityBlock, IdentityMember, order_selected_blocks
-from .generation_readiness import Stage6ReadinessService
+from .generation_readiness import (
+    LEGACY_QUESTION_CONTENT_DIGEST_VERSION,
+    LEGACY_SOURCE_AUDIT_SCHEMA_VERSION,
+    Stage6ReadinessService,
+    generation_question_source_digest,
+)
 from .generation_services import ExamGenerationService, GenerationConflict
 from .models import (CourseExamConfiguration, ExamGenerationRevision, ExamScenario,
-                     ExamScenarioMember, GeneratedExamItem, Question)
+                     ExamScenarioMember, GeneratedExamItem, GeneratedExamSet, Question)
 from .questionnaire_printing import _sanitized_questionnaire_context
 from .setup_services import CourseSetupService
 from .stage4_test_support import Stage4TestCase
-from .structured_snapshots import ALGORITHM_VERSION, verify_structured_set
+from .structured_snapshots import (
+    ALGORITHM_VERSION,
+    LEGACY_ALGORITHM_VERSION,
+    content_digest,
+    verify_structured_set,
+)
 from .tests_faculty_cases import FacultyCaseFixtureMixin
 from . import tests_faculty_cases as case_fixtures
 from .whole_unit_selection import solve_whole_unit_two_sets
@@ -204,6 +215,57 @@ class CaseGenerationTests(FacultyCaseFixtureMixin, Stage4TestCase):
             self.assertNotIn('correct_answer', context)
         retry = AutomaticExamDeadlineService.process_course(cycle_course_id=self.parent.id, tenant_id=self.tenant.id)
         self.assertEqual(retry.code, 'CURRENT_GENERATION_EXISTS')
+
+    def test_legacy_case_snapshot_digests_remain_verifiable(self):
+        self.fill_and_submit()
+        revision = self.generate()
+        source_audit = revision.source_audit_snapshot
+        legacy_digests = {}
+        for source in source_audit.question_snapshots.all():
+            digest = generation_question_source_digest(
+                source_id=source.source_question_id_snapshot,
+                revision=source.source_question_revision,
+                question_text=source.question_text_snapshot,
+                choices=source.choices_snapshot,
+                correct_answer=source.correct_answer_snapshot,
+                difficulty=source.difficulty_snapshot,
+                content_format=source.question_content_format_snapshot,
+                digest_version=LEGACY_QUESTION_CONTENT_DIGEST_VERSION,
+            )
+            legacy_digests[source.source_question_id_snapshot] = digest
+            source_audit.question_snapshots.filter(pk=source.pk).update(
+                source_question_digest=digest
+            )
+        for item in GeneratedExamItem.objects.filter(generated_set__generation_revision=revision):
+            GeneratedExamItem.objects.filter(pk=item.pk).update(
+                source_question_digest=legacy_digests[item.source_question_id]
+            )
+        source_audit.__class__.objects.filter(pk=source_audit.pk).update(
+            schema_version=LEGACY_SOURCE_AUDIT_SCHEMA_VERSION
+        )
+        ExamGenerationRevision.objects.filter(pk=revision.pk).update(
+            algorithm_version=LEGACY_ALGORITHM_VERSION
+        )
+        revision.refresh_from_db()
+        for generated_set in revision.generated_sets.order_by("set_code"):
+            items = list(generated_set.items.order_by("position"))
+            legacy_digest = content_digest(
+                generated_set, items, algorithm_version=LEGACY_ALGORITHM_VERSION,
+            )
+            GeneratedExamSet.objects.filter(pk=generated_set.pk).update(
+                structured_content_digest=legacy_digest,
+                structured_content_digest_version="",
+            )
+            generated_set.refresh_from_db()
+            verify_structured_set(
+                generated_set, items, algorithm_version=LEGACY_ALGORITHM_VERSION,
+            )
+
+        findings, _counts = AutomaticGenerationAuditService._build_findings(revision=revision)
+        finding_by_code = {finding["code"]: finding for finding in findings}
+        self.assertEqual(finding_by_code["REVISION_SNAPSHOT_INTEGRITY"]["status"], "PASS")
+        self.assertEqual(finding_by_code["SOURCE_AUDIT_DIGESTS"]["status"], "PASS")
+        self.assertEqual(finding_by_code["SOURCE_MEMBERSHIP_CONSISTENCY"]["status"], "PASS")
 
     def test_unusable_case_is_excluded_whole_with_warning(self):
         self.fill_and_submit()

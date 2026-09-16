@@ -1,3 +1,15 @@
+## Rich-text MCQ Step A foundation - 2026-09-16
+
+- Added the non-UI storage and integrity foundation for rich standalone and Case-linked MCQ stems/choices: explicit `PLAIN_TEXT`/`RICH_HTML_V1` format evidence, bounded server-side canonical HTML validation, safe accounting-table semantics, and versioned immutable source/generated snapshots. Existing Case narrative normalization/profile remains unchanged.
+- Course duplicate identity now uses `course-question-v4`, allowing neutral plain/rich equivalence while retaining table, alignment, indentation, superscript/subscript, accounting-rule, choice-order, multiplicity and Case-bundle distinctions. Existing v3 reservations transition atomically only after collision preflight; unfinished v3 imports are owner-cleaned and re-uploaded, never relabeled.
+- This is an intermediate backend step only. The five-field rich editor, rich rendering and single-column rich print layout remain Step B and must ship with this foundation as one coordinated feature. CSV and DOCX import remain plain text.
+
+## Rich-text MCQ Step B — 2026-09-16
+
+- Standalone and Case-linked MCQs now use five separate rich editors for the stem and fixed Choices A-D. They share the established Case editor’s Word clipboard adaptation, tables, alignment, indentation, accounting rules, preservation checks and TMP scientific/LaTeX tooling, while Step A’s smaller MCQ sanitizer remains the saving authority.
+- Preview is owner-scoped, non-persistent and no-store. It validates all five fields through the same payload boundary as Save; rejected paste retains only a bounded page-local recovery copy, stale preview replies are ignored, and a pending or rejected preview prevents Save. Existing plain storage is preserved for a true no-op, including literal HTML-looking text.
+- Content-bearing workspace, generated-revision and questionnaire paths render only verified canonical rich snapshots. Rich questionnaire choices use one column; plain and historical output keep the existing two-column behavior. CSV and DOCX imports remain explicitly plain text. No aggregate administration page now includes question content.
+
 ## Faculty section targets and saved counts - 2026-09-16
 
 - Each real frozen Exam Section in the Faculty contribution workspace now shows its final-exam item quota beside that faculty member's visible saved-question count. Linked MCQs and assigned standalone MCQs count once, Case narratives count zero, empty sections show zero, unfinished imports remain hidden, and unassigned legacy questions remain separate without a final-exam target. No Sections keeps the existing overall contribution count. This display adds no section-level submission, completion, generation, model or migration behavior.

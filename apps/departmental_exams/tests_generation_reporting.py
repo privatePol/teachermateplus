@@ -163,9 +163,14 @@ class GenerationReportingTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                             if printable
                             else f'<td class="text-center">{number}</td>'
                         )
+                        question_cell = (
+                            f'<td data-scientific-content>{row["question"]}</td>'
+                            if printable else
+                            f'<td class="tmp-case-content" data-scientific-content>{row["question"]}</td>'
+                        )
                         self.assertContains(
                             response,
-                            f'{number_cell}<td data-scientific-content>{row["question"]}</td>',
+                            f"{number_cell}{question_cell}",
                             html=True,
                         )
 

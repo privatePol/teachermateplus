@@ -1,8 +1,9 @@
 {% extends "faculty_portal/base.html" %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
+{% load static departmental_exam_content %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">{% endblock %}
 {% block faculty_content %}
 <h1 class="h3">Delete question</h1>
 <div class="alert alert-warning">This removes the selected question from your Draft and closes the position gap. Other contributors cannot see it.</div>
-<div class="card mb-3" data-scientific-group><div class="card-body" data-scientific-content>{{ question.question_text }}</div></div>
+<div class="card mb-3" data-scientific-group><div class="card-body tmp-case-content" data-scientific-content>{{ question.question_text|question_content:question.content_format }}</div></div>
 <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-danger" type="submit">Delete question</button> <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Cancel</a></form>
 {% endblock %}

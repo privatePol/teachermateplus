@@ -172,6 +172,17 @@ class FacultyHelpGuideTests(TestCase):
         ):
             self.assertContains(response, wording)
 
+    def test_rich_mcq_guide_explains_five_fields_import_boundary_and_print_layout(self):
+        response = self.client.get(reverse("faculty_portal:guide"))
+        for wording in (
+            "five independent rich-text editors", "Question stem and Choices A-D",
+            "Paste formatted Microsoft Word clipboard content", "fixed A-D selection",
+            "CSV and Word (.docx) imports remain plain-text routes",
+            "Rich questions print choices in one column", "Rich Linked MCQs",
+            "same five rich-text editors as standalone MCQs",
+        ):
+            self.assertContains(response, wording)
+
     def test_grouped_help_link_opens_faculty_quick_guide(self):
         response = self.client.get(reverse("faculty_portal:my_courses"))
 

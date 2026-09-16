@@ -691,23 +691,45 @@ class Stage5ResumableCSVReverseMigrationTests(
         ]
 
     def test_reverse_discards_partial_progress_and_restores_old_constraints(self):
-        batch = QuestionCSVImportService.create_preview(
-            contribution_id=self.contribution.id,
-            uploaded_file=Stage5ResumableCSVImportTests.upload(11),
-            user=self.faculty,
-            tenant_id=self.tenant.id,
-            campus_id=self.campus.id,
-            expected_contribution_revision=self.contribution.revision,
+        executor = MigrationExecutor(connection)
+        source = self._target_state(
+            executor,
+            ("departmental_exams", "0018_resumable_question_csv_import"),
         )
-        QuestionCSVImportService.process_next_chunk(
-            token=batch.token,
-            expected_file_sha256=batch.file_sha256,
-            user=self.faculty,
-            tenant_id=self.tenant.id,
-            campus_id=self.campus.id,
+        executor.migrate(source)
+        historical = executor.loader.project_state(source).apps
+        HistoricalBatch = historical.get_model("departmental_exams", "QuestionImportBatch")
+        HistoricalQuestion = historical.get_model("departmental_exams", "Question")
+        HistoricalRow = historical.get_model("departmental_exams", "QuestionImportRow")
+        now = timezone.now()
+        # The rollback fixture must really be pre-v4.  A current CSV preview
+        # writes v4 reservations/plans, which 0031 correctly refuses to erase.
+        batch = HistoricalBatch.objects.create(
+            tenant_id=self.tenant.id, contribution_id=self.contribution.id,
+            active_contribution_id=self.contribution.id, uploading_user_id=self.faculty.id,
+            status="IMPORTING", contribution_revision_snapshot=self.contribution.revision,
+            file_sha256="a" * 64, filename_sha256="b" * 64,
+            total_rows=11, valid_rows=11, resulting_question_count=11,
+            committed_rows=10, next_row_number=12,
+            expires_at=now + timezone.timedelta(hours=1),
+            started_at=now, progress_updated_at=now,
         )
-        self.assertEqual(Question.objects.filter(import_batch=batch).count(), 10)
+        for position in range(1, 11):
+            HistoricalQuestion.objects.create(
+                contribution_id=self.contribution.id, import_batch_id=batch.pk,
+                import_row_number=position + 1, position=position, entry_method="CSV",
+                question_text=f"Historical partial question {position}",
+                choice_a="A", choice_b="B", choice_c="C", choice_d="D",
+                correct_answer="A", difficulty="EASY",
+            )
+        HistoricalRow.objects.create(
+            batch_id=batch.pk, row_number=12, payload={"question_text": "Pending historical row"},
+            fingerprint="c" * 64,
+        )
+        self.assertEqual(HistoricalQuestion.objects.filter(import_batch_id=batch.pk).count(), 10)
 
+        # Refresh applied migration state; the executor above was constructed
+        # while the database was still at the latest schema.
         executor = MigrationExecutor(connection)
         target = self._target_state(
             executor,

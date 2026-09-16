@@ -6,11 +6,22 @@ from collections import Counter
 from django.core.exceptions import PermissionDenied, ValidationError
 
 from .scenario_content import canonicalize_scenario_content
+from .question_content import canonicalize_question_content
 
-ALGORITHM_VERSION = "automatic-case-v1"
-CONTENT_FIELDS = (
+ALGORITHM_VERSION = "automatic-case-v2"
+LEGACY_ALGORITHM_VERSION = "automatic-case-v1"
+CONTENT_DIGEST_VERSION = "automatic-case-content-v2"
+LEGACY_CONTENT_DIGEST_VERSION = "automatic-case-content-v1"
+LEGACY_CONTENT_FIELDS = (
     "position", "source_question_id", "source_question_revision", "source_question_digest",
     "question_text_snapshot", "choices_snapshot", "correct_answer_snapshot", "difficulty_snapshot",
+    "source_campus_id", "section_id_snapshot", "section_title_snapshot", "section_instructions_snapshot",
+    "scenario_id_snapshot", "scenario_revision_snapshot", "scenario_title_snapshot",
+    "scenario_stimulus_snapshot", "scenario_content_format_snapshot", "scenario_member_position_snapshot",
+)
+CONTENT_FIELDS = (
+    "position", "source_question_id", "source_question_revision", "source_question_digest",
+    "question_text_snapshot", "question_content_format_snapshot", "choices_snapshot", "correct_answer_snapshot", "difficulty_snapshot",
     "source_campus_id", "section_id_snapshot", "section_title_snapshot", "section_instructions_snapshot",
     "scenario_id_snapshot", "scenario_revision_snapshot", "scenario_title_snapshot",
     "scenario_stimulus_snapshot", "scenario_content_format_snapshot", "scenario_member_position_snapshot",
@@ -18,7 +29,7 @@ CONTENT_FIELDS = (
 
 
 def verify_revision_structure(revision):
-    if revision.algorithm_version != ALGORITHM_VERSION:
+    if revision.algorithm_version not in {ALGORITHM_VERSION, LEGACY_ALGORITHM_VERSION}:
         return
     from .models import GeneratedExamSet
     generated_sets = list(GeneratedExamSet.objects.filter(generation_revision=revision)
@@ -32,21 +43,29 @@ def verify_revision_structure(revision):
                               algorithm_version=revision.algorithm_version)
 
 
-def content_digest(generated_set, items):
-    payload = {"schema": ALGORITHM_VERSION, "set": generated_set.set_code,
+def content_digest(generated_set, items, *, algorithm_version=ALGORITHM_VERSION):
+    if algorithm_version == LEGACY_ALGORITHM_VERSION:
+        schema, fields = LEGACY_ALGORITHM_VERSION, LEGACY_CONTENT_FIELDS
+    elif algorithm_version == ALGORITHM_VERSION:
+        schema, fields = CONTENT_DIGEST_VERSION, CONTENT_FIELDS
+    else:
+        raise PermissionDenied("Generated Case snapshot format is unsupported.")
+    payload = {"schema": schema, "set": generated_set.set_code,
                "count": generated_set.item_count, "sections": generated_set.section_quotas_snapshot,
                "campuses": generated_set.campus_quotas_snapshot,
                "difficulties": generated_set.difficulty_quotas_snapshot,
-               "items": [{field: getattr(item, field) for field in CONTENT_FIELDS} for item in items]}
+               "items": [{field: getattr(item, field) for field in fields} for item in items]}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def verify_structured_set(generated_set, items, *, algorithm_version):
-    if algorithm_version != ALGORITHM_VERSION:
+    if algorithm_version not in {ALGORITHM_VERSION, LEGACY_ALGORITHM_VERSION}:
         return
     items = tuple(items)
+    expected_version = LEGACY_CONTENT_DIGEST_VERSION if algorithm_version == LEGACY_ALGORITHM_VERSION else CONTENT_DIGEST_VERSION
     if (not generated_set.structured_content_digest
-            or content_digest(generated_set, items) != generated_set.structured_content_digest
+            or generated_set.structured_content_digest_version != ("" if algorithm_version == LEGACY_ALGORITHM_VERSION else expected_version)
+            or content_digest(generated_set, items, algorithm_version=algorithm_version) != generated_set.structured_content_digest
             or len(items) != generated_set.item_count
             or [item.position for item in items] != list(range(1, len(items) + 1))):
         raise PermissionDenied("Generated Case snapshot integrity failed. Do not use this revision.")
@@ -58,6 +77,17 @@ def verify_structured_set(generated_set, items, *, algorithm_version):
     case_position = 0
     case_payload = None
     for item in items:
+        if item.question_content_format_snapshot not in {"PLAIN_TEXT", "RICH_HTML_V1"}:
+            raise PermissionDenied("Generated question content format is unsupported.")
+        if item.question_content_format_snapshot == "RICH_HTML_V1":
+            values = (item.question_text_snapshot, *item.choices_snapshot)
+            fields = ("question_text", "choice_a", "choice_b", "choice_c", "choice_d")
+            try:
+                if any(canonicalize_question_content(value, field=field).html != value
+                       for field, value in zip(fields, values)):
+                    raise PermissionDenied("Generated rich question content is not canonical.")
+            except ValidationError as exc:
+                raise PermissionDenied("Generated rich question content is invalid.") from exc
         section = item.section_id_snapshot
         if section != current_section:
             if section in seen_sections:

@@ -25,6 +25,13 @@ from .models import (
     FacultyContributionEligibilitySource,
     Question,
 )
+from .question_content import (
+    PLAIN_TEXT,
+    RICH_HTML_V1,
+    canonicalize_question_content,
+    canonicalize_question_fields,
+    plain_text_to_rich_html,
+)
 from .services import DepartmentalExamAuthorizationService
 
 
@@ -593,33 +600,72 @@ class QuestionPayloadService:
         return " ".join(normalized.split()).casefold()
 
     @classmethod
-    def question_fingerprint(cls, value):
+    def question_fingerprint(cls, value, content_format=PLAIN_TEXT):
+        if content_format == RICH_HTML_V1:
+            value = canonicalize_question_content(value or "", field="question_text").visible_text
         return hashlib.sha256(cls.comparison_value(value).encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _plain_projection_matches_rich(question, values):
+        """Opening an editor must not promote a plain question by itself."""
+        for field in QuestionPayloadService.TEXT_FIELDS:
+            projected = canonicalize_question_content(
+                plain_text_to_rich_html(getattr(question, field)), field=field
+            ).html
+            if values[field] != projected:
+                return False
+        return True
+
     @classmethod
-    def validate(cls, payload):
+    def validate(cls, payload, *, current_question=None):
+        requested_format = (payload.get("content_format") or PLAIN_TEXT).strip().upper()
+        if requested_format not in {PLAIN_TEXT, RICH_HTML_V1}:
+            raise ValidationError({"content_format": ["Unsupported question content format."]})
+        if current_question is not None and (
+            current_question.content_format == RICH_HTML_V1 and requested_format == PLAIN_TEXT
+        ):
+            raise ValidationError({"content_format": ["Rich question content cannot be downgraded automatically."]})
         source_text = {
             field: payload.get(field) or ""
-            for field in cls.TEXT_FIELDS
-        }
-        cleaned = {
-            field: cls.normalize_text(source_text[field])
             for field in cls.TEXT_FIELDS
         }
         errors = defaultdict(list)
         for field, value in source_text.items():
             if cls.has_unsupported_characters(value):
                 errors[field].append(cls.UNSUPPORTED_CHARACTER_MESSAGE)
+        if errors:
+            raise ValidationError(dict(errors))
+        plain_source = {
+            field: cls.normalize_text(source_text[field])
+            for field in cls.TEXT_FIELDS
+        }
+        try:
+            cleaned, visible = canonicalize_question_fields(
+                plain_source if requested_format == PLAIN_TEXT else source_text,
+                content_format=requested_format,
+            )
+        except ValidationError as exc:
+            raise exc
+        if (
+            current_question is not None
+            and current_question.content_format == PLAIN_TEXT
+            and requested_format == RICH_HTML_V1
+            and cls._plain_projection_matches_rich(current_question, cleaned)
+        ):
+            # Preserve exact stored plain text and format for a genuine no-op.
+            cleaned = {field: getattr(current_question, field) for field in cls.TEXT_FIELDS}
+            visible = dict(cleaned)
+            requested_format = PLAIN_TEXT
         if not cleaned["question_text"]:
             errors["question_text"].append("Question text is required.")
-        elif len(cleaned["question_text"]) > 5000:
+        elif len(visible["question_text"]) > 5000:
             errors["question_text"].append("Question text may not exceed 5,000 characters.")
         for field in cls.CHOICE_FIELDS:
             if not cleaned[field]:
                 errors[field].append("This choice is required.")
-            elif len(cleaned[field]) > 1000:
+            elif len(visible[field]) > 1000:
                 errors[field].append("Each choice may not exceed 1,000 characters.")
-        comparisons = [cls.comparison_value(cleaned[field]) for field in cls.CHOICE_FIELDS]
+        comparisons = [cls.comparison_value(visible[field]) for field in cls.CHOICE_FIELDS]
         nonblank = [value for value in comparisons if value]
         if len(nonblank) != len(set(nonblank)):
             errors["choices"].append("Choices must be distinct after text normalization.")
@@ -635,10 +681,16 @@ class QuestionPayloadService:
             raise ValidationError(dict(errors))
         cleaned["correct_answer"] = answer
         cleaned["difficulty"] = difficulty
+        cleaned["content_format"] = requested_format
         return cleaned
 
 
 class QuestionMutationService:
+    @staticmethod
+    def validate_payload_for_preview(payload):
+        """Use the Save boundary for non-persistent preview validation."""
+        return QuestionPayloadService.validate(payload)
+
     @staticmethod
     def _audit(*, action, contribution, actor, question_id=None, metadata=None, request=None):
         AuditService.log_event(
@@ -732,12 +784,12 @@ class QuestionMutationService:
         cleaned = QuestionPayloadService.validate(payload)
         duplicate_warning = Question.objects.filter(
             contribution__faculty_user=user
-        ).values_list("question_text", flat=True)
+        ).values_list("question_text", "content_format")
         duplicate_warning = QuestionPayloadService.question_fingerprint(
-            cleaned["question_text"]
+            cleaned["question_text"], cleaned["content_format"]
         ) in {
-            QuestionPayloadService.question_fingerprint(value)
-            for value in duplicate_warning
+            QuestionPayloadService.question_fingerprint(value, content_format)
+            for value, content_format in duplicate_warning
         }
         before_revision = contribution.revision
         question = Question.objects.create(
@@ -805,14 +857,14 @@ class QuestionMutationService:
             raise Http404
         if question.revision != expected_question_revision:
             raise ContributionConflict("This question changed after the page was loaded.")
-        cleaned = QuestionPayloadService.validate(payload)
+        cleaned = QuestionPayloadService.validate(payload, current_question=question)
         duplicate_warning = QuestionPayloadService.question_fingerprint(
-            cleaned["question_text"]
+            cleaned["question_text"], cleaned["content_format"]
         ) in {
-            QuestionPayloadService.question_fingerprint(value)
-            for value in Question.objects.filter(
+            QuestionPayloadService.question_fingerprint(value, content_format)
+            for value, content_format in Question.objects.filter(
                 contribution__faculty_user=user
-            ).exclude(pk=question.pk).values_list("question_text", flat=True)
+            ).exclude(pk=question.pk).values_list("question_text", "content_format")
         }
         changed_fields = [
             field for field, value in cleaned.items() if getattr(question, field) != value
@@ -1045,7 +1097,7 @@ class QuestionMutationService:
             QuestionPayloadService.validate(
                 {
                     field: getattr(question, field)
-                    for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty")
+                    for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty", "content_format")
                 }
             )
         from .faculty_case_services import FacultyCasePolicy

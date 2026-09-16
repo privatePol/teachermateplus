@@ -107,6 +107,9 @@ class ClassificationForwardMigrationTests(TransactionTestCase):
                 if name == "CycleCourse":
                     for row in after_rows:
                         self.assertEqual(row.pop("exam_classification"), "UNCLASSIFIED_LEGACY")
+                if name == "Question":
+                    for row in after_rows:
+                        self.assertEqual(row.pop("content_format"), "PLAIN_TEXT")
                 self.assertEqual(after_rows, before_rows, name)
             for parent_id, cycle_id, mode, status, blueprint_id, scenario_id in saved:
                 self.assertEqual(current.get_model("departmental_exams", "CycleCourse").objects.get(pk=parent_id).exam_classification, "UNCLASSIFIED_LEGACY")

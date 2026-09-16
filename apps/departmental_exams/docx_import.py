@@ -980,8 +980,8 @@ class QuestionDOCXImportService(QuestionCSVImportService):
                 field="quota",
             ))
         existing_fingerprints = {
-            QuestionPayloadService.question_fingerprint(sanitize_csv_question_text(value))
-            for value in Question.objects.filter(contribution__faculty_user=user).values_list("question_text", flat=True)
+            QuestionPayloadService.question_fingerprint(value, content_format)
+            for value, content_format in Question.objects.filter(contribution__faculty_user=user).values_list("question_text", "content_format")
         }
         seen = set()
         for row in data_rows:
@@ -1084,8 +1084,8 @@ class QuestionDOCXImportService(QuestionCSVImportService):
 
         rows = list(QuestionImportRow.objects.select_for_update().filter(batch=batch).order_by("row_number"))
         existing = {
-            QuestionPayloadService.question_fingerprint(sanitize_csv_question_text(value))
-            for value in Question.objects.filter(contribution__faculty_user=user).values_list("question_text", flat=True)
+            QuestionPayloadService.question_fingerprint(value, content_format)
+            for value, content_format in Question.objects.filter(contribution__faculty_user=user).values_list("question_text", "content_format")
         }
         seen = set()
         for staged in rows:

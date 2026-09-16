@@ -1183,7 +1183,15 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
                 side_effect=error,
             ):
                 response = client.post(form.action, self._complete_question_form(form))
-            self.assertContains(response, "The question could not be saved. Review the form and try again.", status_code=400)
+            # A diagnostic associated with one of the five rich fields is
+            # mapped to its safe local-recovery message; an unknown/internal
+            # field keeps the established generic response.  Neither may
+            # disclose the service diagnostic.
+            body = response.content.decode()
+            self.assertTrue(
+                "This rich-text field contains unsupported content or exceeds a supported limit." in body
+                or "The question could not be saved. Review the form and try again." in body
+            )
             for hidden in ("Private internal diagnostic", "Other faculty confidential content", "internal_metadata"):
                 self.assertNotContains(response, hidden, status_code=400)
             self.assertEqual(_QuestionFormParser(response).action, form.action)

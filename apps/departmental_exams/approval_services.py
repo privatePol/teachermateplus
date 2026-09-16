@@ -14,7 +14,13 @@ from django.utils import timezone
 from apps.core.services.audit import AuditService
 
 from .blueprint_services import Stage6Conflict, require_stage6_open_cycle
-from .generation_readiness import GENERATION_ALGORITHM_VERSION, Stage6ReadinessService
+from .generation_readiness import (
+    GENERATION_ALGORITHM_VERSION,
+    LEGACY_QUESTION_CONTENT_DIGEST_VERSION,
+    QUESTION_CONTENT_DIGEST_VERSION,
+    Stage6ReadinessService,
+    generation_question_source_digest,
+)
 from .generation_services import ExamGenerationService
 from .models import (
     ExamGenerationRevision,
@@ -63,12 +69,13 @@ class GeneratedExamIntegrityService:
         return normalized
 
     @classmethod
-    def _verify_item_snapshot(cls, item, *, authoritative):
+    def _verify_item_snapshot(cls, item, *, authoritative, digest_version):
         choices = item.choices_snapshot
         if (
             item.source_question_revision < 1
             or not cls.SHA256_RE.fullmatch(item.source_question_digest or "")
             or not (item.question_text_snapshot or "").strip()
+            or item.question_content_format_snapshot not in {"PLAIN_TEXT", "RICH_HTML_V1"}
             or not isinstance(choices, list)
             or len(choices) != 4
             or any(not str(choice).strip() for choice in choices)
@@ -81,15 +88,15 @@ class GeneratedExamIntegrityService:
             or not (item.section_title_snapshot or "").strip()
         ):
             raise ApprovalConflict("Generated question snapshot evidence is incomplete.")
-        expected_digest = _sha256_json(
-            {
-                "source_id": item.source_question_id,
-                "revision": item.source_question_revision,
-                "question_text": item.question_text_snapshot,
-                "choices": choices,
-                "correct_answer": item.correct_answer_snapshot,
-                "difficulty": item.difficulty_snapshot,
-            }
+        expected_digest = generation_question_source_digest(
+            source_id=item.source_question_id,
+            revision=item.source_question_revision,
+            question_text=item.question_text_snapshot,
+            choices=choices,
+            correct_answer=item.correct_answer_snapshot,
+            difficulty=item.difficulty_snapshot,
+            content_format=item.question_content_format_snapshot,
+            digest_version=digest_version,
         )
         if expected_digest != item.source_question_digest:
             raise ApprovalConflict("Generated question snapshot evidence is corrupt.")
@@ -137,6 +144,7 @@ class GeneratedExamIntegrityService:
             "section_title_snapshot": authoritative.section_title,
             "section_instructions_snapshot": authoritative.section_instructions,
             "question_text_snapshot": authoritative.question_text,
+            "question_content_format_snapshot": authoritative.question_content_format,
             "choices_snapshot": list(authoritative.choices),
             "correct_answer_snapshot": authoritative.correct_answer,
             "source_scenario_id": authoritative.scenario_id,
@@ -182,6 +190,11 @@ class GeneratedExamIntegrityService:
             revision.cycle_course.cycle.processing_mode
             == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         )
+        item_digest_version = (
+            QUESTION_CONTENT_DIGEST_VERSION
+            if revision.algorithm_version in {GENERATION_ALGORITHM_VERSION, "automatic-case-v2"}
+            else LEGACY_QUESTION_CONTENT_DIGEST_VERSION
+        )
         source_sets = []
         aggregate = None
         difficulty_by_set = {}
@@ -224,6 +237,7 @@ class GeneratedExamIntegrityService:
                 cls._verify_item_snapshot(
                     item,
                     authoritative=problem.questions.get(item.source_question_id),
+                    digest_version=item_digest_version,
                 )
                 campus_actual[str(item.campus_code_snapshot)] += 1
                 difficulty_actual[str(item.difficulty_snapshot)] += 1
@@ -427,7 +441,7 @@ class ExamApprovalLockService:
             or target.blueprint_revision_snapshot != problem.blueprint_revision
             or target.roster_boundary_snapshot != problem.roster_boundary
             or target.final_item_count_snapshot != problem.final_count
-            or target.algorithm_version != GENERATION_ALGORITHM_VERSION
+            or target.algorithm_version != problem.algorithm_version
         ):
             raise ApprovalConflict("Generation snapshots drifted. Regenerate before approval.")
 

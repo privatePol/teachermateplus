@@ -52,9 +52,15 @@ from .stage6_campus_codes import (
 )
 
 
-GENERATION_ALGORITHM_VERSION = "stage6b-v1"
+GENERATION_ALGORITHM_VERSION = "stage6b-v2"
+LEGACY_GENERATION_ALGORITHM_VERSION = "stage6b-v1"
+AUTOMATIC_CASE_ALGORITHM_VERSION = "automatic-case-v2"
+LEGACY_AUTOMATIC_CASE_ALGORITHM_VERSION = "automatic-case-v1"
 AUTOMATIC_GENERATION_DEFAULT_MAX_STATES = 1_000_000
-SOURCE_AUDIT_SCHEMA_VERSION = "generation-source-audit-v1"
+SOURCE_AUDIT_SCHEMA_VERSION = "generation-source-audit-v2"
+LEGACY_SOURCE_AUDIT_SCHEMA_VERSION = "generation-source-audit-v1"
+QUESTION_CONTENT_DIGEST_VERSION = "source-question-content-v2"
+LEGACY_QUESTION_CONTENT_DIGEST_VERSION = "source-question-content-v1"
 AUTOMATIC_LOGICAL_IDENTITY_VERSION = DUPLICATE_IDENTITY_VERSION
 SUPPORTED_AUTOMATIC_IDENTITY_VERSIONS = {AUTOMATIC_LOGICAL_IDENTITY_VERSION, "course-question-v2", "course-question-v1", "normalized-text-v3"}
 MANUAL_LOGICAL_IDENTITY_VERSION = "source-question-id-v1"
@@ -100,6 +106,7 @@ class GenerationQuestion:
     question_text: str
     choices: tuple[str, str, str, str]
     correct_answer: str
+    question_content_format: str = "PLAIN_TEXT"
     scenario_id: int | None = None
     scenario_revision: int | None = None
     scenario_title: str = ""
@@ -129,6 +136,7 @@ class GenerationSourceQuestion:
     normalized_fingerprint: str
     eligible_for_generation: bool
     exclusion_code: str
+    question_content_format: str = "PLAIN_TEXT"
 
 
 @dataclass(frozen=True)
@@ -156,21 +164,30 @@ class GenerationProblem:
     pool_warnings: tuple[dict, ...] = ()
 
 
+def generation_question_source_digest(*, source_id, revision, question_text, choices, correct_answer, difficulty,
+                                      content_format="PLAIN_TEXT", digest_version=QUESTION_CONTENT_DIGEST_VERSION):
+    payload = {
+        "source_id": source_id,
+        "revision": revision,
+        "question_text": question_text,
+        "choices": list(choices),
+        "correct_answer": correct_answer,
+        "difficulty": difficulty,
+    }
+    if digest_version == QUESTION_CONTENT_DIGEST_VERSION:
+        payload.update({"content_schema": digest_version, "content_format": content_format})
+    elif digest_version != LEGACY_QUESTION_CONTENT_DIGEST_VERSION:
+        raise ValidationError("Unsupported immutable question content digest version.")
+    return _sha256_json(payload)
+
+
 def _generation_question_source_digest(question):
-    return _sha256_json(
-        {
-            "source_id": question.id,
-            "revision": question.revision,
-            "question_text": question.question_text,
-            "choices": [
-                question.choice_a,
-                question.choice_b,
-                question.choice_c,
-                question.choice_d,
-            ],
-            "correct_answer": question.correct_answer,
-            "difficulty": question.difficulty,
-        }
+    return generation_question_source_digest(
+        source_id=question.id, revision=question.revision,
+        question_text=question.question_text,
+        choices=(question.choice_a, question.choice_b, question.choice_c, question.choice_d),
+        correct_answer=question.correct_answer, difficulty=question.difficulty,
+        content_format=question.content_format,
     )
 
 
@@ -284,6 +301,7 @@ def _assessed_submitted_question_pool(
                     "choice_d": question.choice_d,
                     "correct_answer": question.correct_answer,
                     "difficulty": question.difficulty,
+                    "content_format": question.content_format,
                 }
             )
         except ValidationError:
@@ -327,6 +345,7 @@ def _assessed_submitted_question_pool(
                     campus_name=contribution.source_campus.name,
                     assignment_context=_assignment_context_snapshot(contribution),
                     question_text=question.question_text,
+                    question_content_format=question.content_format,
                     choices=(
                         question.choice_a,
                         question.choice_b,
@@ -1385,6 +1404,7 @@ class Stage6ReadinessService:
                     section_instructions=section_instructions[section_id],
                     normalized_fingerprint=question_identity(question, narrative_cache=narrative_cache),
                     question_text=question.question_text,
+                    question_content_format=question.content_format,
                     choices=(
                         question.choice_a,
                         question.choice_b,
@@ -1526,7 +1546,7 @@ class Stage6ReadinessService:
                     ],
                 }
             if structured_automatic:
-                fingerprint_payload["whole_unit_schema"] = "automatic-case-v1"
+                fingerprint_payload["whole_unit_schema"] = AUTOMATIC_CASE_ALGORITHM_VERSION
                 fingerprint_payload["structured_input"] = structured_input
             if automatic_flat_mode:
                 fingerprint_payload["structure_mode"] = "AUTOMATIC_CASE_V1" if structured_automatic else "AUTOMATIC_FLAT"
@@ -1542,7 +1562,7 @@ class Stage6ReadinessService:
             problem = GenerationProblem(
                 cycle_course=cycle_course,
                 configuration=configuration,
-                algorithm_version=("automatic-case-v1" if structured_automatic else GENERATION_ALGORITHM_VERSION),
+                algorithm_version=(AUTOMATIC_CASE_ALGORITHM_VERSION if structured_automatic else GENERATION_ALGORITHM_VERSION),
                 blueprint=blueprint,
                 final_count=final_count,
                 margins=margins,

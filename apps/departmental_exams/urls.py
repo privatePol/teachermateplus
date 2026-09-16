@@ -77,6 +77,11 @@ urlpatterns = [
         name="question_create",
     ),
     path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/questions/preview/",
+        faculty_views.question_preview_view,
+        name="question_preview",
+    ),
+    path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/cases/<int:scenario_id>/questions/add/",
         faculty_views.question_create_view,
         name="faculty_case_question_create",

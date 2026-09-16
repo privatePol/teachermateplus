@@ -136,6 +136,7 @@ class GenerationSelectionAuditReportService:
                 "campus_name_snapshot",
                 "difficulty_snapshot",
                 "question_text_snapshot",
+                "question_content_format_snapshot",
                 "correct_answer_snapshot",
                 "generated_set__set_code",
                 "position",
@@ -197,6 +198,7 @@ class GenerationSelectionAuditReportService:
         for source_id, item in sorted(by_source.items()):
             row = {
                 "question": item["question_text_snapshot"],
+                "question_format": item["question_content_format_snapshot"],
                 "contributor": item["source_contributor_name_snapshot"],
                 "campus": (
                     f"{item['campus_code_snapshot']} - "
@@ -344,6 +346,7 @@ class GenerationSelectionAuditReportService:
                 equivalence_status = f"Unselected equivalent group ({group_label})"
             row = {
                 "question": source.question_text_snapshot,
+                "question_format": source.question_content_format_snapshot,
                 "contributor": source.contributor_name_snapshot,
                 "campus": (
                     f"{source.campus_code_snapshot} - {source.campus_name_snapshot}"

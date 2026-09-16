@@ -1,6 +1,5 @@
-import hashlib
-import json
 import re
+from dataclasses import replace
 from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -23,7 +22,12 @@ from .blueprint_services import (
     ScenarioMutationService,
     Stage6Conflict,
 )
-from .generation_readiness import Stage6ReadinessService
+from .generation_readiness import (
+    LEGACY_QUESTION_CONTENT_DIGEST_VERSION,
+    QUESTION_CONTENT_DIGEST_VERSION,
+    Stage6ReadinessService,
+    generation_question_source_digest,
+)
 from .generation_services import ExamGenerationService, GenerationConflict
 from .models import (
     ExamBlueprint,
@@ -97,21 +101,17 @@ class Stage6CFixtureMixin(Stage6BGenerationFixtureMixin):
         }
 
     @staticmethod
-    def snapshot_digest(item):
-        payload = json.dumps(
-            {
-                "source_id": item.source_question_id,
-                "revision": item.source_question_revision,
-                "question_text": item.question_text_snapshot,
-                "choices": item.choices_snapshot,
-                "correct_answer": item.correct_answer_snapshot,
-                "difficulty": item.difficulty_snapshot,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
+    def snapshot_digest(item, *, digest_version=QUESTION_CONTENT_DIGEST_VERSION):
+        return generation_question_source_digest(
+            source_id=item.source_question_id,
+            revision=item.source_question_revision,
+            question_text=item.question_text_snapshot,
+            choices=item.choices_snapshot,
+            correct_answer=item.correct_answer_snapshot,
+            difficulty=item.difficulty_snapshot,
+            content_format=item.question_content_format_snapshot,
+            digest_version=digest_version,
         )
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def assert_revision_remains_unlocked(self, revision):
         revision.refresh_from_db()
@@ -124,6 +124,48 @@ class Stage6CFixtureMixin(Stage6BGenerationFixtureMixin):
 
 
 class Stage6CApprovalServiceTests(Stage6CFixtureMixin, Stage4TestCase):
+    def test_legacy_standard_revision_item_digests_remain_verifiable(self):
+        _parent, problem, revision = self.generated_course()
+        legacy_questions = {}
+        for source_id, question in problem.questions.items():
+            legacy_questions[source_id] = replace(
+                question,
+                source_digest=generation_question_source_digest(
+                    source_id=question.source_id,
+                    revision=question.source_revision,
+                    question_text=question.question_text,
+                    choices=question.choices,
+                    correct_answer=question.correct_answer,
+                    difficulty=question.difficulty,
+                    content_format=question.question_content_format,
+                    digest_version=LEGACY_QUESTION_CONTENT_DIGEST_VERSION,
+                ),
+            )
+        legacy_problem = replace(problem, questions=legacy_questions)
+        items = list(
+            GeneratedExamItem.objects.filter(generated_set__generation_revision=revision)
+            .order_by("generated_set__set_code", "position")
+        )
+        for item in items:
+            GeneratedExamItem.objects.filter(pk=item.pk).update(
+                source_question_digest=legacy_questions[item.source_question_id].source_digest
+            )
+        ExamGenerationRevision.objects.filter(pk=revision.pk).update(
+            algorithm_version="stage6b-v1"
+        )
+        revision.refresh_from_db()
+        items = list(
+            GeneratedExamItem.objects.filter(generated_set__generation_revision=revision)
+            .order_by("generated_set__set_code", "position")
+        )
+        integrity = GeneratedExamIntegrityService.verify(
+            revision=revision,
+            generated_sets=list(revision.generated_sets.order_by("set_code")),
+            generated_items=items,
+            problem=legacy_problem,
+        )
+        self.assertEqual(integrity["overlap_count"], revision.minimum_overlap)
+
     def test_generated_transitions_atomically_to_locked_with_one_safe_audit(self):
         _parent, _problem, revision = self.generated_course()
         before = self.output_snapshot(revision)

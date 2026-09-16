@@ -1134,6 +1134,10 @@ class FacultyContributionEligibilitySource(TimeStampedModel):
 
 
 class Question(TimeStampedModel):
+    class ContentFormat(models.TextChoices):
+        PLAIN_TEXT = "PLAIN_TEXT", "Plain text"
+        RICH_HTML_V1 = "RICH_HTML_V1", "Rich HTML V1"
+
     class Difficulty(models.TextChoices):
         EASY = "EASY", "Easy"
         MODERATE = "MODERATE", "Moderate"
@@ -1145,11 +1149,18 @@ class Question(TimeStampedModel):
         DOCX = "DOCX", "Word (.docx)"
 
     contribution = models.ForeignKey(FacultyContribution, on_delete=models.PROTECT, related_name="questions")
-    question_text = models.TextField(max_length=5000)
-    choice_a = models.CharField(max_length=1000)
-    choice_b = models.CharField(max_length=1000)
-    choice_c = models.CharField(max_length=1000)
-    choice_d = models.CharField(max_length=1000)
+    # Stored rich HTML is canonical; visible-text limits remain enforced by the
+    # payload service so historical plain text keeps its existing capacity.
+    content_format = models.CharField(
+        max_length=20,
+        choices=ContentFormat.choices,
+        default=ContentFormat.PLAIN_TEXT,
+    )
+    question_text = models.TextField(max_length=25000)
+    choice_a = models.TextField(max_length=12000)
+    choice_b = models.TextField(max_length=12000)
+    choice_c = models.TextField(max_length=12000)
+    choice_d = models.TextField(max_length=12000)
     correct_answer = models.CharField(max_length=1, choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")])
     difficulty = models.CharField(max_length=10, choices=Difficulty.choices)
     position = models.PositiveIntegerField()
@@ -2944,6 +2955,8 @@ class GeneratedExamSet(TimeStampedModel):
     difficulty_quotas_snapshot = models.JSONField(default=dict)
     section_quotas_snapshot = models.JSONField(default=dict)
     structured_content_digest = models.CharField(max_length=64, blank=True, default="")
+    # Blank denotes the immutable automatic-case-v1 historical payload.
+    structured_content_digest_version = models.CharField(max_length=40, blank=True, default="")
     item_count = models.PositiveSmallIntegerField()
 
     class Meta:
@@ -3013,7 +3026,12 @@ class GeneratedExamItem(TimeStampedModel):
     section_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
     section_title_snapshot = models.CharField(max_length=200)
     section_instructions_snapshot = models.TextField(max_length=2000, blank=True)
-    question_text_snapshot = models.TextField(max_length=5000)
+    question_text_snapshot = models.TextField(max_length=25000)
+    question_content_format_snapshot = models.CharField(
+        max_length=20,
+        choices=Question.ContentFormat.choices,
+        default=Question.ContentFormat.PLAIN_TEXT,
+    )
     choices_snapshot = models.JSONField(default=list)
     correct_answer_snapshot = models.CharField(
         max_length=1,
@@ -3165,7 +3183,12 @@ class GenerationSourceQuestionSnapshot(TimeStampedModel):
     campus_code_snapshot = models.CharField(max_length=30)
     campus_name_snapshot = models.CharField(max_length=120)
     assignment_context_snapshot = models.JSONField(default=list)
-    question_text_snapshot = models.TextField(max_length=5000)
+    question_text_snapshot = models.TextField(max_length=25000)
+    question_content_format_snapshot = models.CharField(
+        max_length=20,
+        choices=Question.ContentFormat.choices,
+        default=Question.ContentFormat.PLAIN_TEXT,
+    )
     choices_snapshot = models.JSONField(default=list)
     difficulty_snapshot = models.CharField(
         max_length=10,

@@ -36,8 +36,8 @@
       {% if item.scenario_id_snapshot and item.scenario_member_position_snapshot == 1 %}<aside class="de-generation-scenario mb-2"><div class="small text-uppercase fw-bold text-warning-emphasis">Scenario{% if item.scenario_title_snapshot %}: {{ item.scenario_title_snapshot }}{% endif %}</div><div class="tmp-case-content mt-2" data-scientific-content>{{ item.scenario_stimulus_snapshot|scenario_content:item.scenario_content_format_snapshot }}</div></aside>{% endif %}
       <article class="de-generation-question mb-3{% if item.scenario_id_snapshot %} ms-md-3{% endif %}" data-scientific-group>
         <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><span class="badge text-bg-light border text-dark">Item {{ item.position }}</span><span class="small text-muted">{{ item.campus_code_snapshot }} &middot; {{ item.get_difficulty_snapshot_display }}{% if item.scenario_id_snapshot %} &middot; Scenario member {{ item.scenario_member_position_snapshot }}{% endif %}</span></div>
-        <p class="fw-semibold mb-2" data-scientific-content>{{ item.question_text_snapshot }}</p>
-        <ol type="A" class="mb-2">{% for choice in item.choices_snapshot %}<li><span data-scientific-content>{{ choice }}</span></li>{% endfor %}</ol>
+        <div class="tmp-case-content fw-semibold mb-2" data-scientific-content>{{ item.question_text_snapshot|question_content:item.question_content_format_snapshot }}</div>
+        <ol type="A" class="mb-2">{% for choice in item.choices_snapshot %}<li><div class="tmp-case-content" data-scientific-content>{{ choice|question_choice_content:item.question_content_format_snapshot }}</div></li>{% endfor %}</ol>
         <div class="small"><strong>Correct answer:</strong> {{ item.correct_answer_snapshot }} <span class="text-muted ms-2">Source snapshot Q{{ item.source_question_id }} r{{ item.source_question_revision }}</span></div>
       </article>
     {% empty %}<div class="de-empty"><h3 class="h5">No generated items</h3><p class="text-muted mb-0">This revision is incomplete and must not be used.</p></div>{% endfor %}

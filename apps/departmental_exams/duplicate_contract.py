@@ -10,7 +10,10 @@ from django.core.exceptions import ValidationError
 from django.db import connection
 from django.db.models import Q
 
-VERSION = "course-question-v3"
+VERSION = "course-question-v4"
+# Case narrative identity is deliberately frozen at its v3 representation.
+# v4 changes only MCQ rich-content compatibility.
+NARRATIVE_IDENTITY_VERSION = "course-question-v3"
 DUPLICATE_MESSAGE = "This question is already represented in this course examination. Your input is retained; please revise it or add a different question."
 LEGACY_POOL_MESSAGE = "Existing course-pool identities need administrative review before new questions can be saved. Your input is retained. Contact the exam coordinator; do not change Submitted questions."
 IMPORT_PLAN_VERSION_MESSAGE = "An unfinished upload has missing or incompatible duplicate-rule versions. Its owner must retry it to discard unpublished work, then upload the file again. Completed questions remain protected. Contact the exam coordinator if this is not your upload."
@@ -55,13 +58,17 @@ def digest(value):
 
 
 def standalone_identity(payload):
-    from .contribution_services import QuestionPayloadService
+    from .question_content import PLAIN_TEXT, identity_tokens, visible_text
     get = payload.get if isinstance(payload, dict) else lambda key: getattr(payload, key)
-    stem = normalize_exact(get("question_text"))
-    choices = [normalize_exact(get(field)) for field in QuestionPayloadService.CHOICE_FIELDS]
-    ordered = positional_choices(stem, choices)
+    content_format = get("content_format") or PLAIN_TEXT
+    stem = identity_tokens(get("question_text"), content_format)
+    choices = [identity_tokens(get(field), content_format) for field in ("choice_a", "choice_b", "choice_c", "choice_d")]
+    ordered = positional_choices(
+        visible_text(get("question_text"), content_format),
+        [visible_text(get(field), content_format) for field in ("choice_a", "choice_b", "choice_c", "choice_d")],
+    )
     return digest([VERSION, stem, "ordered" if ordered else "multiset",
-                   choices if ordered else sorted(choices)])
+                   choices if ordered else sorted(choices, key=lambda value: json.dumps(value, ensure_ascii=False, separators=(",", ":")))])
 
 
 class _Narrative(HTMLParser):
@@ -111,7 +118,7 @@ def narrative_identity(stimulus, content_format="RICH_HTML_V1"):
     else:
         raise ValidationError("Unsupported Case content format.")
     parser.flush()
-    return digest([VERSION, "narrative", parser.tokens])
+    return digest([NARRATIVE_IDENTITY_VERSION, "narrative", parser.tokens])
 
 
 def cached_narrative(scenario, cache):
@@ -223,7 +230,7 @@ def reconcile(course, *, legacy=False):
         members = sorted(scenario.members.all(), key=lambda row: row.position)
         key = bundle_identity(scenario, members, narrative_cache=cache)
         bundles.update({member.question_id: key for member in members})
-    existing = list(QuestionIdentityReservation.objects.filter(
+    existing = list(QuestionIdentityReservation.objects.select_for_update().filter(
         Q(primary_cycle_course=unit.primary)
         | Q(question__contribution__cycle_course_id__in=unit.member_ids)
         | Q(import_batch__contribution__cycle_course_id__in=unit.member_ids)

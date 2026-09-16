@@ -1,6 +1,7 @@
 from django import forms
 
 from .models import Question
+from .question_content import MAX_RAW_BY_FIELD
 
 
 class BootstrapFormMixin:
@@ -43,14 +44,21 @@ class QuestionForm(ContributionRevisionForm):
         min_value=1, required=False, widget=forms.HiddenInput
     )
     question_text = forms.CharField(
-        max_length=5000,
+        max_length=MAX_RAW_BY_FIELD["question_text"],
         widget=forms.Textarea(attrs={"rows": 5}),
-        help_text="Plain text only; meaningful line breaks are preserved.",
+        label="Question stem",
+        help_text="Plain text and meaningful line breaks are preserved.",
     )
-    choice_a = forms.CharField(max_length=1000)
-    choice_b = forms.CharField(max_length=1000)
-    choice_c = forms.CharField(max_length=1000)
-    choice_d = forms.CharField(max_length=1000)
+    choice_a = forms.CharField(max_length=MAX_RAW_BY_FIELD["choice_a"], label="Choice A")
+    choice_b = forms.CharField(max_length=MAX_RAW_BY_FIELD["choice_b"], label="Choice B")
+    choice_c = forms.CharField(max_length=MAX_RAW_BY_FIELD["choice_c"], label="Choice C")
+    choice_d = forms.CharField(max_length=MAX_RAW_BY_FIELD["choice_d"], label="Choice D")
+    content_format = forms.ChoiceField(
+        choices=Question.ContentFormat.choices,
+        initial=Question.ContentFormat.PLAIN_TEXT,
+        required=False,
+        widget=forms.HiddenInput,
+    )
     correct_answer = forms.ChoiceField(choices=((value, value) for value in "ABCD"))
     difficulty = forms.ChoiceField(choices=Question.Difficulty.choices)
 
@@ -61,12 +69,14 @@ class QuestionForm(ContributionRevisionForm):
         require_section=False,
         fixed_section=None,
         scenario_id=None,
+        rich_editor=False,
         **kwargs,
     ):
         self._case_sections = sections
         self._case_require_section = require_section
         self._case_fixed_section = fixed_section
         self._case_scenario_id = scenario_id
+        self._rich_editor = rich_editor
         super().__init__(*args, **kwargs)
 
     def configure_dynamic_fields(self):
@@ -92,12 +102,26 @@ class QuestionForm(ContributionRevisionForm):
                 widget=forms.HiddenInput,
                 initial=self._case_scenario_id,
             )
+        if self._rich_editor:
+            for name in ("question_text", "choice_a", "choice_b", "choice_c", "choice_d"):
+                # Preserve the form's established Bootstrap contract even
+                # though the visible rich editor owns the authoring surface.
+                self.fields[name].widget = forms.HiddenInput(attrs={
+                    "class": "form-control",
+                    "data-question-source": name,
+                })
 
     def clean_scenario_id(self):
         scenario_id = self.cleaned_data["scenario_id"]
         if scenario_id != self._case_scenario_id:
             raise forms.ValidationError("The submitted Case does not match this question form.")
         return scenario_id
+
+    def clean_content_format(self):
+        # Old plain-text page submissions and the CSV/DOCX correction forms
+        # predate this hidden field.  Absence remains an explicit plain route;
+        # an unknown submitted value is still rejected by ChoiceField.
+        return self.cleaned_data.get("content_format") or Question.ContentFormat.PLAIN_TEXT
 
     def clean_section_id(self):
         section_id = self.cleaned_data["section_id"]
