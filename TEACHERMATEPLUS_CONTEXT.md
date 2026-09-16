@@ -1,3 +1,7 @@
+## Faculty contribution section targets - 2026-09-16
+
+For a frozen `USE_SECTIONS` blueprint, each real section heading in the Faculty contribution workspace displays `Final exam: N items | Your saved questions: M`. `N` is the authoritative frozen `ExamSection.item_quota`; it is distinct from the contribution's overall faculty quota. `M` is computed from the workspace's existing owner-scoped, confirmed-import-aware question set: every visible linked MCQ and assigned standalone MCQ counts once, while the Case narrative counts zero. Empty sections remain visible with zero. Historical questions awaiting placement remain in the separate Section assignment required group without a final-exam target. `NO_SECTIONS` retains its existing overall saved/contribution count. The display reuses the existing ordered presentation groups and adds no per-section query, submission rule, completion state, generation rule, model or migration.
+
 ## Admin review-snapshot integrity - 2026-09-15
 
 - Shared single/bulk review is a short, read-only cycle-first locked transaction. It keeps the fingerprint captured before displayed details, verifies stability after materialization, and rebuilds changed snapshots (three-attempt bound; then Blocked). Effective defaults/configuration, blueprint/sections, membership and opening evidence are covered. Cycle instructions render from the verified row's cycle. No transaction waits for confirmation; actor/tenant/cycle signatures, expiry and locked POST revalidation are preserved.

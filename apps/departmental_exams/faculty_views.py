@@ -183,6 +183,7 @@ def _case_presentation(contribution, questions, case_context):
     )
     groups, numbers = [], {}
     for section in sections or (None,):
+        first_group_number = len(numbers)
         section_id = section.id if section else None
         cases = [case for case in scenarios if case.section_id == section_id]
         standalone = [question for question in questions if question.id not in linked_ids
@@ -194,7 +195,12 @@ def _case_presentation(contribution, questions, case_context):
         for question in standalone:
             numbers[question.id] = len(numbers) + 1
             question.presentation_number = numbers[question.id]
-        groups.append({"section": section, "cases": cases, "questions": standalone})
+        groups.append({
+            "section": section,
+            "cases": cases,
+            "questions": standalone,
+            "saved_question_count": len(numbers) - first_group_number,
+        })
     # CSV/legacy Draft questions may legitimately await an explicit placement.
     # Recover only absent placements, never reinterpret a foreign/invalid one.
     unplaced = [question for question in questions if sections
@@ -210,7 +216,8 @@ def _case_presentation(contribution, questions, case_context):
             question.presentation_number = numbers[question.id]
             question.section_assignment_required = True
         groups.append({"section": None, "cases": [], "questions": unplaced,
-                       "assignment_required": True})
+                       "assignment_required": True,
+                       "saved_question_count": len(unplaced)})
     # Invalid structure must not silently hide saved questions or Cases.
     if set(numbers) != set(by_id) or sum(len(g["cases"]) for g in groups) != len(scenarios):
         raise ValidationError("Saved Case/question section context is invalid. Ask an administrator to inspect it.")

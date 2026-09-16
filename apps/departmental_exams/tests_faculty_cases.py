@@ -7,8 +7,10 @@ from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.http import Http404
 from django.test import Client, SimpleTestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -20,6 +22,7 @@ from apps.rbac.models import Permission, UserPermission
 from .blueprint_services import BlueprintMutationService, ScenarioMutationService
 from .contribution_services import QuestionMutationService
 from .faculty_case_services import FacultyCaseMutationService, FacultyCasePolicy
+from .faculty_views import _case_presentation
 from .generation_readiness import Stage6ReadinessService
 from .models import (
     ExamBlueprint,
@@ -738,6 +741,14 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertEqual(self._displayed_question_pairs(page),
                          [(linked.id, 1), (standalone.id, 2), (imported[0].id, 3), (imported[1].id, 4)])
         self.assertContains(page, 'Section assignment required')
+        self.assertContains(page, 'Final exam: 30 items | Your saved questions: 1')
+        self.assertContains(page, 'Final exam: 20 items | Your saved questions: 1')
+        self.assertContains(page, 'Final exam:', count=2)
+        unassigned_group = next(
+            group for group in page.context['presentation_sections']
+            if group.get('assignment_required')
+        )
+        self.assertEqual(unassigned_group['saved_question_count'], 2)
         detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[self.contribution.id, scenario.id]))
         self.assertEqual(self._displayed_question_pairs(detail), [(linked.id, 1)])
         self.assertEqual(self._question_mutation_snapshot(), before)
@@ -762,6 +773,51 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
             r'class="card shadow-sm mb-3 question-card" data-question-id="(\d+)"[\s\S]*?class="question-position">(\d+)',
             response.content.decode(),
         )]
+
+    def test_section_targets_count_owner_visible_linked_and_standalone_without_query_growth(self):
+        scenario = self.save_case(title="Counted Case", section=self.section_a)
+        first = self.add_question(scenario=scenario, text="First linked")
+        second = self.add_question(scenario=scenario, text="Second linked")
+        standalone = self.add_question(section=self.section_a, text="Assigned standalone")
+
+        self.other_contribution.refresh_from_db()
+        other_question = QuestionMutationService.create(
+            contribution_id=self.other_contribution.id,
+            user=self.other_faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.other_contribution.source_campus_id,
+            expected_contribution_revision=self.other_contribution.revision,
+            payload=self.payload("Other faculty confidential question"),
+            section_id=self.section_a.id,
+        )
+
+        questions = list(self.contribution.questions.order_by("position", "id"))
+        case_context = FacultyCasePolicy.context(
+            contribution=self.contribution,
+            tenant_id=self.tenant.id,
+        )
+        with CaptureQueriesContext(connection) as captured:
+            groups, _scenarios, _numbers = _case_presentation(
+                self.contribution, questions, case_context
+            )
+        # Cases, memberships, member questions, and placements are loaded once
+        # for the workspace; the section loop issues no additional queries.
+        self.assertEqual(len(captured), 4)
+        self.assertEqual(
+            [(group["section"].id, group["saved_question_count"]) for group in groups],
+            [(self.section_a.id, 3), (self.section_b.id, 0)],
+        )
+
+        response = self.client.get(reverse(
+            "departmental_exams:contribution_workspace", args=[self.contribution.id],
+        ))
+        self.assertEqual(
+            self._displayed_question_pairs(response),
+            [(first.id, 1), (second.id, 2), (standalone.id, 3)],
+        )
+        self.assertContains(response, "Final exam: 30 items | Your saved questions: 3")
+        self.assertContains(response, "Final exam: 20 items | Your saved questions: 0")
+        self.assertNotContains(response, other_question.question_text)
 
     def test_interleaved_cases_display_contiguously_without_persistent_renumbering(self):
         first_case = self.save_case(title="Problem 1")
@@ -1743,5 +1799,7 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.client.force_login(faculty)
         workspace = self.client.get(reverse('departmental_exams:contribution_workspace', args=[contribution.id]))
         self.assertEqual(self._displayed_question_pairs(workspace), [(question.id, 1)])
+        self.assertContains(workspace, '<strong>1 / 50</strong> questions', html=True)
+        self.assertNotContains(workspace, 'Final exam:')
         detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[contribution.id, scenario.id]))
         self.assertEqual(self._displayed_question_pairs(detail), [(question.id, 1)])

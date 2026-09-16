@@ -88,7 +88,7 @@
   <p class="small text-muted">Question numbers follow section and Case order, not the order you added questions. These are workspace numbers, not final exam item numbers.</p>
   {% for group in presentation_sections %}
   <section class="mb-4" aria-label="{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}">
-    <h2 class="h4">{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}</h2>
+    <h2 class="h4">{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}{% if group.section %} <span class="fs-6 fw-normal text-muted">Final exam: {{ group.section.item_quota }} items | Your saved questions: {{ group.saved_question_count }}</span>{% endif %}</h2>
     {% if group.assignment_required %}<p class="alert alert-warning">These saved questions still need an Exam Section before Final Submission.{% if is_mutable %} Use Edit to select a frozen Exam Section.{% else %} Section assignment is unavailable while this contribution is read-only.{% endif %}</p>{% endif %}
     {% for scenario in group.cases %}
       <article class="card shadow-sm mb-3">

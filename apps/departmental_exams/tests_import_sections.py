@@ -133,13 +133,28 @@ class SectionTargetedImportTests(FacultyCaseFixtureMixin, Stage4TestCase):
     def test_resume_retry_has_exact_placements_and_unpublished_rows_stay_hidden(self):
         for source in ("csv", "docx"):
             with self.subTest(source=source):
+                workspace_url = reverse(
+                    "departmental_exams:contribution_workspace",
+                    args=[self.contribution.id],
+                )
+                visible_before = self.client.get(workspace_url).context["saved_count"]
                 batch = self.preview(source)
                 self.process(batch)
                 self.assert_placements(batch, 1)
-                workspace = self.client.get(reverse("departmental_exams:contribution_workspace", args=[self.contribution.id]))
+                workspace = self.client.get(workspace_url)
                 self.assertContains(workspace, "Add these questions to section:</strong> Section B")
                 partial = Question.objects.get(import_batch=batch)
                 self.assertNotIn(partial, workspace.context["questions"])
+                self.assertEqual(workspace.context["saved_count"], visible_before)
+                section_b_group = next(
+                    group for group in workspace.context["presentation_sections"]
+                    if group["section"] == self.section_b
+                )
+                self.assertEqual(section_b_group["saved_question_count"], visible_before)
+                self.assertContains(
+                    workspace,
+                    f"Final exam: 20 items | Your saved questions: {visible_before}",
+                )
                 with patch("apps.departmental_exams.csv_import.QuestionBlueprintPlacement.objects.bulk_create",
                            side_effect=RuntimeError("placement write interrupted")):
                     with self.assertRaises(RuntimeError):
@@ -150,6 +165,13 @@ class SectionTargetedImportTests(FacultyCaseFixtureMixin, Stage4TestCase):
                 self.assertEqual(self.process(batch).status, "CONFIRMED")
                 self.process(batch)
                 self.assert_placements(batch, 2)
+                published = self.client.get(workspace_url)
+                self.assertEqual(published.context["saved_count"], visible_before + 2)
+                section_b_group = next(
+                    group for group in published.context["presentation_sections"]
+                    if group["section"] == self.section_b
+                )
+                self.assertEqual(section_b_group["saved_question_count"], visible_before + 2)
 
     def test_final_audit_failure_rolls_back_questions_and_placements_together(self):
         batch = self.preview()

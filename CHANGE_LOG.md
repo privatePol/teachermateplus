@@ -1,3 +1,7 @@
+## Faculty section targets and saved counts - 2026-09-16
+
+- Each real frozen Exam Section in the Faculty contribution workspace now shows its final-exam item quota beside that faculty member's visible saved-question count. Linked MCQs and assigned standalone MCQs count once, Case narratives count zero, empty sections show zero, unfinished imports remain hidden, and unassigned legacy questions remain separate without a final-exam target. No Sections keeps the existing overall contribution count. This display adds no section-level submission, completion, generation, model or migration behavior.
+
 ## Admin review-snapshot integrity - 2026-09-15
 
 - Single and bulk review now serialize with cycle-first writer locks and verify a before/after fingerprint around fully materialized review details. A changed snapshot is rebuilt, never signed using newer state against older displayed settings; repeated changes block confirmation. Cycle instructions use the same verified review snapshot. GET remains free of persistent writes and locks end before user confirmation; signed scope/expiry and locked opening revalidation remain intact.
