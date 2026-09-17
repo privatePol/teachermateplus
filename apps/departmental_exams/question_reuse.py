@@ -205,7 +205,7 @@ def catalogue(*, request, destination, filters):
             continue
         visible.append(entry)
     page = Paginator(visible, 12).get_page(filters.get("page") or 1)
-    return {"page": page, "years": years, "terms": terms,
+    return {"page": page, "eligible_items": visible, "years": years, "terms": terms,
             "periods": ExaminationCycle.ExamPeriod.choices,
             "difficulties": Question.Difficulty.choices,
             "excluded_context_count": excluded, "filters": filters}
@@ -252,7 +252,7 @@ def _validated_payload(question):
 def copy_selected(*, request, destination_id, expected_revision, filters, selected_tokens,
                   target_section_id=None):
     if not selected_tokens or len(selected_tokens) != len(set(selected_tokens)) or len(selected_tokens) > 75:
-        raise ValidationError("Select valid visible questions or whole Cases from this page.")
+        raise ValidationError("Select valid visible questions or whole Cases.")
     tenant_id = (getattr(request, "scope", {}) or {}).get("tenant_id") or getattr(request.user, "default_tenant_id", None)
     initial = FacultyContribution.objects.select_related("cycle_course__cycle").filter(
         pk=destination_id, faculty_user=request.user, active_marker=1,
@@ -262,7 +262,7 @@ def copy_selected(*, request, destination_id, expected_revision, filters, select
         raise Http404
     # Acquire cycle locks in one global order, including the historical source.
     initial_catalog = catalogue(request=request, destination=initial, filters=filters)
-    available = {entry["token"]: entry for entry in initial_catalog["page"].object_list}
+    available = {entry["token"]: entry for entry in initial_catalog["eligible_items"]}
     if any(token not in available for token in selected_tokens):
         raise ContributionConflict("The visible selection changed. Reload the reuse page and select again.")
     source_cycle_ids = {available[token]["source"].cycle_course.cycle_id for token in selected_tokens}
@@ -283,11 +283,11 @@ def copy_selected(*, request, destination_id, expected_revision, filters, select
             contribution=destination, expected_revision=expected_revision)
         ContributionAuthorizationService.require_no_active_import(contribution=destination)
         current_catalog = catalogue(request=request, destination=destination, filters=filters)
-        current = {entry["token"]: entry for entry in current_catalog["page"].object_list}
+        current = {entry["token"]: entry for entry in current_catalog["eligible_items"]}
         if any(token not in current for token in selected_tokens):
             raise ContributionConflict("A source changed after this page was loaded. Reload and select again.")
         requested = set(selected_tokens)
-        entries = [entry for entry in current_catalog["page"].object_list
+        entries = [entry for entry in current_catalog["eligible_items"]
                    if entry["token"] in requested]
         source_ids = {entry["source"].id for entry in entries}
         list(FacultyContribution.objects.select_for_update().filter(pk__in=source_ids).order_by("pk"))

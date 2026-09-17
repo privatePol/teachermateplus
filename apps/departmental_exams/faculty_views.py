@@ -9,6 +9,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
@@ -723,8 +724,25 @@ def question_reuse_view(request, contribution_id):
             destination=destination, tenant_id=tenant_id)
     except ValidationError as exc:
         return _error_response(request, exc)
+    if request.method == "GET" and request.GET.get("batch") == "1":
+        # get_page() clamps out-of-range numbers to the last page; a lazy
+        # request past the end must instead return no cards.
+        try:
+            requested_page = int(filters["page"])
+        except (TypeError, ValueError):
+            requested_page = 0
+        page = listing["page"]
+        if requested_page < 1 or requested_page > page.paginator.num_pages:
+            return JsonResponse({"html": "", "next_page": None})
+        html = render_to_string(
+            "departmental_exams/faculty/_reuse_items.html",
+            {"entries": page.object_list}, request=request)
+        return JsonResponse({
+            "html": html,
+            "next_page": page.next_page_number() if page.has_next() else None,
+        })
     item_choices = [(entry["token"], entry["token"])
-                    for entry in listing["page"].object_list]
+                    for entry in listing["eligible_items"]]
     section_choices = [(str(section.id), section.title) for section in sections]
     form = QuestionReuseForm(
         request.POST if request.method == "POST" else None,

@@ -1,3 +1,9 @@
+## Reuse My Previous Questions continuous selection (2026-09-18)
+
+The Faculty reuse catalogue renders a deterministic 12-card first batch and fetches more cards as the contributor scrolls. Selection stays in the loaded DOM across batches, while changing filters clears it. Select all affects only loaded visible eligible cards; selected-only view retains checked cards and pauses loading. A Case counts all its Linked Questions toward the selected question total. Both Copy controls submit one form, one revision and one explicit destination section. The server validates selected tokens against all currently filtered authorized entries before and after locking, so selections across batches are supported without trusting client ownership or eligibility. Existing source-version fingerprints, Case integrity, destination authority, quota-before-duplicate, pending-import, and audit rules continue to govern copying. No model or migration change is needed.
+
+The user reported staging browser acceptance for the earlier page-based version (enablement, access, filters/selection, copying, editable copies, Case order/source preservation, duplicate skipping). Browser acceptance of the continuous-list changes and MariaDB/InnoDB contention validation remain pending.
+
 ## One-member Faculty Case reuse (2026-09-17)
 
 Manual Review allows a Faculty Case with at least one Linked Question at Final Submission. Historical reuse now uses that same nonempty minimum when selecting an otherwise valid owned Case. A one-member Case remains one selectable unit and consumes one Draft question slot; its linked question is never offered separately. Empty Cases remain unavailable. The source submission and Case graph stay unchanged during copying; see HANDOFF.md for the focused regression and pending acceptance.

@@ -1,3 +1,8 @@
+## Reuse My Previous Questions usability - 2026-09-18
+
+- Replaced page navigation with 12-card lazy batches and selection across loaded batches. Added selected-only view, visible-only select-all, selected question totals, coordinated Copy buttons, a back-to-filters control, and loading/end/retry feedback. Standalone stems and Case titles now lead gradient cards; question stems render at 14pt and selected cards show pale green. Locked POST validation now accepts filtered selections across batches while retaining source, revision, quota, duplicate, section, and authority checks. No schema change.
+- The user reported that the prior staging version passed enablement, access, filters/selection, copying, editable copies, Case order/source preservation, and duplicate skipping. Browser acceptance of these new usability changes and MariaDB/InnoDB concurrency acceptance remain pending; see HANDOFF.md.
+
 ## One-member Faculty Case reuse - 2026-09-17
 
 - Corrected historical reuse selection to offer an owned Faculty Case with one Linked Question as a whole Case. Empty, shared, malformed, or cross-source Cases remain excluded; existing destination, duplicate, and quota checks are unchanged. An authenticated Manual Review submission and reuse regression reproduced the hidden Case before the fix and passed after it.

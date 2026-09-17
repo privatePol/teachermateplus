@@ -1,7 +1,7 @@
 {% extends "faculty_portal/base.html" %}
-{% load static departmental_exam_content %}
+{% load static %}
 {% block title %}Reuse My Previous Questions | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_question_reuse.css' %}">{% endblock %}
 {% block faculty_content %}
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_workspace' destination.id %}">Current Draft</a></li><li class="breadcrumb-item active">Reuse My Previous Questions</li></ol></nav>
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
@@ -22,19 +22,18 @@
   </div>
 </form>
 {% if selection_error %}<div class="alert alert-danger" role="alert">{{ selection_error }}</div>{% endif %}
-<form method="post" data-reuse-form data-remaining="{{ remaining }}" data-revision="{{ destination.revision }}">
+<form method="post" data-reuse-form data-remaining="{{ remaining }}" data-next-page="{% if page.has_next %}{{ page.next_page_number }}{% endif %}">
   {% csrf_token %}{{ form.expected_contribution_revision }}
-  {% for key, value in filters.items %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+  {% for key, value in filters.items %}{% if key != 'page' %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
   {% if sections %}<div class="card card-body mb-3"><label class="form-label" for="id_target_section_id">Add these questions to section</label>{% if sole_section %}<p class="mb-1"><strong>{{ sole_section.title }}</strong> (the only frozen section)</p>{% endif %}{{ form.target_section_id }}{% if not sole_section %}<div class="form-text">Choose one destination section for every selected question and whole Case. Historical section names are not mapped automatically.</div>{% endif %}</div>{% else %}{{ form.target_section_id }}{% endif %}
-  <div class="card card-body mb-3" role="status"><div class="d-flex flex-wrap gap-3 align-items-center"><label><input type="checkbox" data-reuse-select-all> Select all visible eligible items</label><strong>Selected questions: <span data-reuse-selected-count>0</span></strong><span>Remaining Draft slots: {{ remaining }}</span><span>Whole Cases selected: <span data-reuse-case-count>0</span></span></div><p class="text-danger mt-2 mb-0" data-reuse-overflow hidden></p></div>
-  {% for entry in page.object_list %}
-  <article class="card shadow-sm mb-3" data-reuse-item data-size="{{ entry.size }}" data-kind="{{ entry.kind }}">
-    <div class="card-header"><label class="d-flex gap-2 align-items-start"><input class="form-check-input" type="checkbox" name="selected_items" value="{{ entry.token }}" data-reuse-checkbox{% if entry.selected %} checked{% endif %}><span><strong>{% if entry.kind == 'case' %}Whole Case: {{ entry.object.title|default:"Case / Scenario" }}{% else %}Standalone question{% endif %}</strong> · {{ entry.size }} question{{ entry.size|pluralize }}<br><span class="small text-muted">{{ entry.source.cycle_course.cycle.academic_year }} · {{ entry.source.cycle_course.cycle.term.name }} · {{ entry.source.cycle_course.cycle.get_exam_period_display }}</span></span></label></div>
-    <div class="card-body">{% if entry.kind == 'case' %}<div class="tmp-case-content mb-3" data-scientific-content>{{ entry.object.stimulus|scenario_content:entry.object.content_format }}</div>{% for member in entry.members %}{% include "departmental_exams/faculty/_reuse_question_preview.html" with question=member.question number=member.position %}{% endfor %}{% else %}{% include "departmental_exams/faculty/_reuse_question_preview.html" with question=entry.object number=entry.object.position %}{% endif %}</div>
-  </article>
-  {% empty %}<div class="alert alert-secondary">No eligible previous questions match these filters.</div>{% endfor %}
-  {% if page.object_list %}<button class="btn btn-primary mb-3" data-reuse-copy type="submit" disabled>Copy into Current Draft</button>{% endif %}
+  <div class="card card-body mb-3" aria-label="Reuse selection controls"><div class="d-flex flex-wrap gap-3 align-items-center"><label><input type="checkbox" data-reuse-select-all> Select all visible eligible items</label><button class="btn btn-outline-primary btn-sm" type="button" data-reuse-selected-only aria-pressed="false">Show all selected</button><strong aria-live="polite">Selected questions: <span data-reuse-selected-count>0</span></strong><span>Remaining Draft slots: {{ remaining }}</span><span>Whole Cases selected: <span data-reuse-case-count>0</span></span><button class="btn btn-primary ms-auto" data-reuse-copy type="submit" disabled>Copy into Current Draft</button></div><p class="text-danger mt-2 mb-0" data-reuse-overflow hidden></p></div>
+  <div data-reuse-cards aria-live="off">{% include "departmental_exams/faculty/_reuse_items.html" with entries=page.object_list %}</div>
+  <p class="alert alert-secondary" data-reuse-no-results{% if page.object_list %} hidden{% endif %}>No eligible previous questions match these filters.</p>
+  <p class="alert alert-secondary" data-reuse-selected-empty hidden>No selected questions are currently shown. Return to all questions to select items.</p>
+  <div data-reuse-sentinel aria-hidden="true"></div>
+  <div class="d-flex flex-wrap gap-2 align-items-center mb-3"><p class="small text-muted mb-0" data-reuse-load-status role="status" aria-live="polite"></p><button type="button" class="btn btn-outline-primary btn-sm" data-reuse-retry hidden>Retry loading questions</button></div>
+  <button class="btn btn-primary mb-3" data-reuse-copy type="submit" disabled>Copy into Current Draft</button>
 </form>
-{% if page.has_other_pages %}<nav aria-label="Previous question pages"><ul class="pagination"><li class="page-item {% if not page.has_previous %}disabled{% endif %}">{% if page.has_previous %}<a class="page-link" href="?academic_year={{ filters.academic_year|urlencode }}&semester={{ filters.semester|urlencode }}&exam_period={{ filters.exam_period|urlencode }}&difficulty={{ filters.difficulty|urlencode }}&content_type={{ filters.content_type|urlencode }}&search={{ filters.search|urlencode }}&page={{ page.previous_page_number }}">Previous</a>{% else %}<span class="page-link">Previous</span>{% endif %}</li><li class="page-item disabled"><span class="page-link">Page {{ page.number }} of {{ page.paginator.num_pages }}</span></li><li class="page-item {% if not page.has_next %}disabled{% endif %}">{% if page.has_next %}<a class="page-link" href="?academic_year={{ filters.academic_year|urlencode }}&semester={{ filters.semester|urlencode }}&exam_period={{ filters.exam_period|urlencode }}&difficulty={{ filters.difficulty|urlencode }}&content_type={{ filters.content_type|urlencode }}&search={{ filters.search|urlencode }}&page={{ page.next_page_number }}">Next</a>{% else %}<span class="page-link">Next</span>{% endif %}</li></ul></nav>{% endif %}
+<button type="button" class="btn btn-success reuse-back-top" data-reuse-back-top aria-label="Back to filters and selection controls" hidden>↑</button>
 <script src="{% static 'js/departmental_exam_question_reuse.js' %}"></script>
 {% endblock %}

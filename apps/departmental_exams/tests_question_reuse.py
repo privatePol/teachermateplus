@@ -103,6 +103,8 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
         page = self.client.get(self.url)
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, "Previous unique stem")
+        self.assertEqual(page.content.decode().count("Previous unique stem"), 1)
+        self.assertContains(page, "reuse-item-header")
         token = page.context["page"].object_list[0]["token"]
         response = self._copy(page, token)
         self.assertRedirects(response, self.workspace_url, fetch_redirect_response=False)
@@ -179,7 +181,7 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertEqual(len(page.context["page"].object_list), 0)
 
-    def test_draft_only_history_is_excluded_and_selection_is_page_bound(self):
+    def test_draft_history_excluded_and_authenticated_cross_batch_copy(self):
         self._enable()
         self._source_question("Unsubmitted old question")
         self.previous.status = FacultyContribution.Status.DRAFT
@@ -192,11 +194,37 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
         for index in range(12):
             self._source_question(f"Other historical item {index}")
         first_page = self.client.get(self.url)
-        second_page = self.client.get(self.url, {"page": "2"})
+        second_page = self.client.get(self.url, {"batch": "1", "page": "2"})
         self.assertEqual(len(first_page.context["page"].object_list), 12)
-        self.assertEqual(len(second_page.context["page"].object_list), 1)
-        hidden_token = second_page.context["page"].object_list[0]["token"]
-        self.assertEqual(self._copy(first_page, hidden_token).status_code, 409)
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(second_page.json()["next_page"], None)
+        self.assertIn("Other historical item 11", second_page.json()["html"])
+        self.assertNotIn("Unsubmitted old question", second_page.json()["html"])
+        self.assertEqual(self.client.get(self.url, {"batch": "1", "page": "99"}).json()["html"], "")
+        self.assertNotContains(first_page, "Page 1 of")
+        source_ids_before = list(self.previous.questions.order_by("position").values_list("id", flat=True))
+        first_token = first_page.context["page"].object_list[0]["token"]
+        last_token = self.client.get(self.url, {"page": "2"}).context["page"].object_list[0]["token"]
+        result = self._copy(first_page, first_token, last_token)
+        self.assertEqual(result.status_code, 302)
+        self.assertEqual(list(self.destination.questions.order_by("position").values_list(
+            "question_text", flat=True)), ["Unsubmitted old question", "Other historical item 11"])
+        self.assertEqual(list(self.previous.questions.order_by("position").values_list("id", flat=True)),
+                         source_ids_before)
+
+    def test_cross_batch_selection_rechecks_filters_and_source_versions(self):
+        self._enable()
+        for index in range(13):
+            self._source_question(f"Historical item {index}")
+        first = self.client.get(self.url).context["page"].object_list[0]
+        last = self.client.get(self.url, {"page": "2"}).context["page"].object_list[0]
+        self.assertEqual(self._copy(None, first["token"], last["token"],
+                                    search="Historical item 0").status_code, 409)
+        self.assertFalse(self.destination.questions.exists())
+        last["object"].question_text = "Edited historical item"
+        last["object"].revision += 1
+        last["object"].save(update_fields=["question_text", "revision"])
+        self.assertEqual(self._copy(None, first["token"], last["token"]).status_code, 409)
         self.assertFalse(self.destination.questions.exists())
 
     def test_other_campus_source_requires_current_exact_permission_and_obeys_deny(self):
@@ -516,6 +544,7 @@ class QuestionReuseCaseHTTPTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertContains(page, 'data-size="1"')
         self.assertContains(page, "One linked question case")
         self.assertContains(page, "Single linked question")
+        self.assertContains(page, "reuse-question-stem")
         self.assertContains(page, f"Correct answer:</strong> {linked.correct_answer}")
         token = items[0]["token"]
         copied_response = self._post(
