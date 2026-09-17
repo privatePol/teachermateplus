@@ -3469,6 +3469,11 @@ class ConfigurableFeatureSettingForm(forms.Form):
             "server-staged questions, and import them into the existing Draft Question Workspace."
         ),
     )
+    departmental_exam_question_reuse_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Reuse My Previous Questions",
+        help_text="Lets eligible faculty copy their own previous submitted questions and whole owned Cases into an editable Draft for the same course.",
+    )
     student_academic_intervention_tracking_enabled = forms.BooleanField(
         required=False,
         label="Enable Student Academic Intervention Tracking",

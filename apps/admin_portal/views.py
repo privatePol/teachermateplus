@@ -4788,6 +4788,11 @@ def configurable_features_settings_view(request):
             tenant_id=tenant_id, default=False
         )
     )
+    current_departmental_exam_question_reuse_enabled = (
+        FeatureSettingsService.is_departmental_exam_question_reuse_enabled(
+            tenant_id=tenant_id, default=False
+        )
+    )
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
@@ -4797,6 +4802,7 @@ def configurable_features_settings_view(request):
                 current_departmental_exam_structured_lifecycle_enabled
             ),
             "departmental_exam_docx_import_enabled": current_departmental_exam_docx_import_enabled,
+            "departmental_exam_question_reuse_enabled": current_departmental_exam_question_reuse_enabled,
             "student_academic_intervention_tracking_enabled": current_student_academic_intervention_tracking_enabled,
             "academic_performance_insights_enabled": current_academic_performance_insights_enabled,
             "role_based_help_guide_enabled": current_role_based_help_guide_enabled,
@@ -4967,6 +4973,11 @@ def configurable_features_settings_view(request):
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.DEPARTMENTAL_EXAM_QUESTION_REUSE_ENABLED_KEY,
+            bool(form.cleaned_data["departmental_exam_question_reuse_enabled"]),
+            tenant_id=tenant_id, value_type="BOOL", is_active=True,
         )
         SystemSettingService.set(
             FeatureSettingsService.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY,
@@ -5470,6 +5481,7 @@ def configurable_features_settings_view(request):
                     current_departmental_exam_structured_lifecycle_enabled
                 ),
                 "departmental_exam_docx_import_enabled": current_departmental_exam_docx_import_enabled,
+                "departmental_exam_question_reuse_enabled": current_departmental_exam_question_reuse_enabled,
                 "student_academic_intervention_tracking_enabled": current_student_academic_intervention_tracking_enabled,
                 "academic_performance_insights_enabled": current_academic_performance_insights_enabled,
                 "role_based_help_guide_enabled": current_role_based_help_guide_enabled,
@@ -5545,6 +5557,9 @@ def configurable_features_settings_view(request):
                 ),
                 "departmental_exam_docx_import_enabled": bool(
                     form.cleaned_data["departmental_exam_docx_import_enabled"]
+                ),
+                "departmental_exam_question_reuse_enabled": bool(
+                    form.cleaned_data["departmental_exam_question_reuse_enabled"]
                 ),
                 "student_academic_intervention_tracking_enabled": bool(
                     form.cleaned_data["student_academic_intervention_tracking_enabled"]

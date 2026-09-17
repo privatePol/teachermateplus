@@ -1,3 +1,11 @@
+## One-member Faculty Case reuse (2026-09-17)
+
+Manual Review allows a Faculty Case with at least one Linked Question at Final Submission. Historical reuse now uses that same nonempty minimum when selecting an otherwise valid owned Case. A one-member Case remains one selectable unit and consumes one Draft question slot; its linked question is never offered separately. Empty Cases remain unavailable. The source submission and Case graph stay unchanged during copying; see HANDOFF.md for the focused regression and pending acceptance.
+
+## Reuse My Previous Questions (2026-09-17)
+
+The Faculty Question Bank has a default-off tenant setting for owner-only reuse into an editable Draft. Sources are the latest Submitted version of each earlier exact-Course contribution; a pending correction Draft leaves its last Submitted predecessor selectable. Current source-campus RBAC and direct DENY apply while old assignment liveness is not required. Shared/Admin Case members are excluded. Owned Cases copy only as whole ordered groups into one validated frozen destination section. The POST rechecks the source graph, destination revision, quota, current grouped-course duplicate claims and pending imports under cycle locks; a duplicate member skips its whole Case. The original contribution, Case, and generated/released history are unchanged. See HANDOFF.md for validation and remaining acceptance gates.
+
 ## Reviewer Case campus reassignment - 2026-09-17
 
 Roster synchronization may change an active Automatic correction Draft's primary assignment and source campus while leaving its immediately superseded Submitted contribution and generated source snapshots historical. Reviewer Case lineage authority uses that direct predecessor's stable contributor and examination-course identity plus archived Case membership; historical and current source campuses need not match. When they differ, the current Draft must retain its new primary assignment as a current eligibility source, and that assignment must remain eligible under live tenant, campus, Faculty Portal permission and direct-DENY rules. Faculty Case edit GET, edit/add POST, workspace discovery, submission and member validation use the shared Case predicate in addition to ordinary owner, Draft, deadline, revision and scope gates. No field or migration change is required.

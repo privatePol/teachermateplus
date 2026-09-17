@@ -136,11 +136,17 @@ def cached_narrative(scenario, cache):
 
 def question_identity(question, *, narrative_cache=None):
     membership = getattr(question, "exam_scenario_membership", None)
-    base = standalone_identity(question)
     if membership is None:
-        return base
+        return standalone_identity(question)
     scenario = membership.scenario
-    return digest([VERSION, "member", cached_narrative(scenario, narrative_cache if narrative_cache is not None else {}), base])
+    return case_member_identity(question, scenario, narrative_cache=narrative_cache)
+
+
+def case_member_identity(question, scenario, *, narrative_cache=None):
+    """Compute a Case member identity even when its historical link is archived."""
+    return digest([VERSION, "member",
+                   cached_narrative(scenario, narrative_cache if narrative_cache is not None else {}),
+                   standalone_identity(question)])
 
 
 def bundle_identity(scenario, members, *, narrative_cache=None):

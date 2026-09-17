@@ -103,6 +103,22 @@ class DepartmentalExamFeatureFlagTests(TestCase):
             )
         )
 
+    def test_question_reuse_defaults_off_and_configurable_features_scopes_it_to_tenant(self):
+        self.assertFalse(FeatureSettingsService.is_departmental_exam_question_reuse_enabled(
+            tenant_id=self.tenant_a.id))
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("admin_portal:configurable_features_settings"))
+        self.assertContains(page, 'name="departmental_exam_question_reuse_enabled"')
+        payload = self._feature_settings_payload(enabled=True)
+        payload["departmental_exam_question_reuse_enabled"] = "on"
+        response = self.client.post(
+            reverse("admin_portal:configurable_features_settings"), payload, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(FeatureSettingsService.is_departmental_exam_question_reuse_enabled(
+            tenant_id=self.tenant_a.id))
+        self.assertFalse(FeatureSettingsService.is_departmental_exam_question_reuse_enabled(
+            tenant_id=self.tenant_b.id))
+
     def test_configurable_features_can_enable_structured_exam_lifecycle(self):
         self.client.force_login(self.user)
 

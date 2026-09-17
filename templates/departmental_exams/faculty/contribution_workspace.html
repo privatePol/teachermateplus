@@ -82,6 +82,7 @@
       <a class="btn btn-outline-primary" href="{% url 'departmental_exams:csv_upload' contribution.id %}">Upload CSV</a>
       {% if docx_import_enabled %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:docx_upload' contribution.id %}">Import from Word (.docx)</a>{% endif %}
     {% endif %}
+    {% if question_reuse_enabled %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:question_reuse' contribution.id %}">Reuse My Previous Questions</a>{% endif %}
     <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:csv_template' contribution.id %}">Download CSV template</a>
     {% if saved_count == quota %}<a class="btn btn-success" href="{% url 'departmental_exams:contribution_submit' contribution.id %}">Final submission</a>{% endif %}
   </div>

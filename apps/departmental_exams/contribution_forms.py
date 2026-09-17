@@ -39,6 +39,33 @@ class ContributionRevisionForm(BootstrapFormMixin, forms.Form):
     )
 
 
+class QuestionReuseForm(ContributionRevisionForm):
+    selected_items = forms.MultipleChoiceField(required=True)
+    target_section_id = forms.ChoiceField(required=False)
+
+    def __init__(self, *args, item_choices=(), section_choices=(), sole_section=None, **kwargs):
+        self.item_choices = tuple(item_choices)
+        self.section_choices = tuple(section_choices)
+        self.sole_section = sole_section
+        super().__init__(*args, **kwargs)
+
+    def configure_dynamic_fields(self):
+        self.fields["selected_items"].choices = self.item_choices
+        self.fields["target_section_id"].choices = [("", "Select an Exam Section"), *self.section_choices]
+        if not self.section_choices or self.sole_section is not None:
+            self.fields["target_section_id"].widget = forms.HiddenInput()
+
+    def clean_target_section_id(self):
+        value = self.cleaned_data["target_section_id"]
+        if self.sole_section is not None:
+            if value not in ("", str(self.sole_section.id)):
+                raise forms.ValidationError("The destination section changed. Reload and try again.")
+            return str(self.sole_section.id)
+        if self.section_choices and not value:
+            raise forms.ValidationError("Select a destination Exam Section.")
+        return value
+
+
 class QuestionForm(ContributionRevisionForm):
     expected_question_revision = forms.IntegerField(
         min_value=1, required=False, widget=forms.HiddenInput

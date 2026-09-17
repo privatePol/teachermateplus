@@ -1,0 +1,12 @@
+{% load departmental_exam_content %}
+<div class="card card-body mb-2" data-scientific-group>
+  <div class="d-flex justify-content-between gap-2"><strong>Question {{ number }}</strong><span class="badge text-bg-light">{{ question.get_difficulty_display }}</span></div>
+  <div class="tmp-case-content my-2" data-scientific-content>{{ question.question_text|question_content:question.content_format }}</div>
+  <ol type="A" class="mb-2">
+    <li><div class="tmp-case-content" data-scientific-content>{{ question.choice_a|question_choice_content:question.content_format }}</div></li>
+    <li><div class="tmp-case-content" data-scientific-content>{{ question.choice_b|question_choice_content:question.content_format }}</div></li>
+    <li><div class="tmp-case-content" data-scientific-content>{{ question.choice_c|question_choice_content:question.content_format }}</div></li>
+    <li><div class="tmp-case-content" data-scientific-content>{{ question.choice_d|question_choice_content:question.content_format }}</div></li>
+  </ol>
+  <div class="small"><strong>Correct answer:</strong> {{ question.correct_answer }}</div>
+</div>

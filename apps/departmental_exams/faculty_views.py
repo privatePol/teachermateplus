@@ -37,6 +37,7 @@ from .contribution_forms import (
     QuestionDeleteForm,
     QuestionForm,
     QuestionReorderForm,
+    QuestionReuseForm,
 )
 from .contribution_selectors import ContributionSelector
 from .contribution_services import (
@@ -65,6 +66,10 @@ from .question_content import (
     TEXT_FIELDS as QUESTION_CONTENT_FIELDS,
     render_question_content_for_editor,
 )
+from .question_reuse import (ReuseCapacityError, catalogue as reuse_catalogue,
+                             copy_selected as copy_previous_questions,
+                             destination_sections as reuse_destination_sections,
+                             require_destination as require_reuse_destination)
 from .questionnaire_printing import (
     FacultyQuestionnairePrintService,
     _questionnaire_paper_context,
@@ -334,6 +339,8 @@ def _workspace_context(request, contribution):
         ),
         "case_authoring_enabled": case_context is not None,
         "case_mutation_enabled": case_context is not None and is_mutable,
+        "question_reuse_enabled": is_mutable and FeatureSettingsService.is_departmental_exam_question_reuse_enabled(
+            tenant_id=cycle.tenant_id, default=False),
     }
 
 
@@ -696,6 +703,79 @@ def contribution_workspace_view(request, contribution_id):
         "departmental_exams/faculty/contribution_workspace.html",
         _workspace_context(request, contribution),
     )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def question_reuse_view(request, contribution_id):
+    destination = _owner_contribution(request, contribution_id)
+    require_reuse_destination(request=request, destination=destination)
+    tenant_id, _campus_id = _scope(request)
+    values = request.POST if request.method == "POST" else request.GET
+    filters = {key: values.get(key, "") for key in (
+        "academic_year", "semester", "exam_period", "difficulty",
+        "content_type", "search", "page")}
+    try:
+        listing = reuse_catalogue(request=request, destination=destination, filters=filters)
+        sections, sole_section = reuse_destination_sections(
+            destination=destination, tenant_id=tenant_id)
+    except ValidationError as exc:
+        return _error_response(request, exc)
+    item_choices = [(entry["token"], entry["token"])
+                    for entry in listing["page"].object_list]
+    section_choices = [(str(section.id), section.title) for section in sections]
+    form = QuestionReuseForm(
+        request.POST if request.method == "POST" else None,
+        item_choices=item_choices, section_choices=section_choices,
+        sole_section=sole_section,
+        initial={"expected_contribution_revision": destination.revision,
+                 "target_section_id": str(sole_section.id) if sole_section else ""},
+    )
+    selection_error = ""
+    status = 200
+    if request.method == "POST":
+        if form.is_valid():
+            try:
+                result = copy_previous_questions(
+                    request=request, destination_id=destination.id,
+                    expected_revision=form.cleaned_data["expected_contribution_revision"],
+                    filters=filters,
+                    selected_tokens=form.cleaned_data["selected_items"],
+                    target_section_id=form.cleaned_data["target_section_id"],
+                )
+            except ReuseCapacityError as exc:
+                selection_error, status = str(exc), 409
+            except ContributionConflict:
+                selection_error, status = "This page or its source changed. Reload and select again.", 409
+            except ValidationError:
+                selection_error, status = "The selected source cannot be copied safely. Review it and try again.", 400
+            else:
+                copied, skipped = result["copied_questions"], result["skipped_questions"]
+                copied_cases, skipped_cases = result["copied_cases"], result["skipped_cases"]
+                summary = (
+                    f"{copied} {'question' if copied == 1 else 'questions'} copied "
+                    f"({copied_cases} whole {'Case' if copied_cases == 1 else 'Cases'}); "
+                    f"{skipped} duplicate {'question' if skipped == 1 else 'questions'} skipped "
+                    f"({skipped_cases} whole {'Case' if skipped_cases == 1 else 'Cases'})."
+                )
+                if result["copied_questions"]:
+                    messages.success(request, summary + " Review the copies before Final Submission.")
+                else:
+                    messages.info(request, summary)
+                return redirect("departmental_exams:contribution_workspace", contribution_id=destination.id)
+        else:
+            selection_error, status = "The selection or destination section changed. Reload and select again.", 409
+    selected = set(request.POST.getlist("selected_items")) if request.method == "POST" else set()
+    for entry in listing["page"].object_list:
+        entry["selected"] = entry["token"] in selected
+    return render(request, "departmental_exams/faculty/question_reuse.html", {
+        **listing, "destination": destination, "form": form,
+        "sections": sections, "sole_section": sole_section,
+        "remaining": max(0, destination.quota_snapshot - destination.saved_question_count),
+        "selection_error": selection_error,
+    }, status=status)
 
 
 def _bind_question_validation_errors(form, exc):

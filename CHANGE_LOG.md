@@ -1,3 +1,11 @@
+## One-member Faculty Case reuse - 2026-09-17
+
+- Corrected historical reuse selection to offer an owned Faculty Case with one Linked Question as a whole Case. Empty, shared, malformed, or cross-source Cases remain excluded; existing destination, duplicate, and quota checks are unchanged. An authenticated Manual Review submission and reuse regression reproduced the hidden Case before the fix and passed after it.
+
+## Reuse My Previous Questions - 2026-09-17
+
+- Added a default-off tenant feature in Configurable Features and an owner-only Faculty page for copying previous Submitted standalone questions and whole owned Cases from the exact same course into a current editable Draft. Filters, server pagination, safe rich previews, explicit destination section, capacity warnings, duplicate skips, stale-page checks, and content-free batch audit preserve original submissions and historical Cases. No schema change; validation and acceptance status are in HANDOFF.md.
+
 ## Reviewer Case campus reassignment - 2026-09-17
 
 - An Open Automatic correction Draft may keep reviewer Case edit and replacement access when roster synchronization moves its eligible primary assignment to another campus in the same examination course. The immediately superseded Submitted contribution still supplies historical Case membership; its original campus remains preserved. The current Draft's reassigned primary source must be retained and currently eligible, including current-campus permission and direct-DENY checks. Faculty edit GET now checks the same Case authority as POST, workspace discovery, submission and member validation. No schema or migration change.

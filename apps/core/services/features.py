@@ -9,6 +9,7 @@ class FeatureSettingsService:
         "FEATURE_DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED"
     )
     DEPARTMENTAL_EXAM_DOCX_IMPORT_ENABLED_KEY = "FEATURE_DEPARTMENTAL_EXAM_DOCX_IMPORT_ENABLED"
+    DEPARTMENTAL_EXAM_QUESTION_REUSE_ENABLED_KEY = "FEATURE_DEPARTMENTAL_EXAM_QUESTION_REUSE_ENABLED"
     CORRECTION_OFFICIAL_REPORT_ENABLED_KEY = "FEATURE_CORRECTION_OFFICIAL_REPORT_ENABLED"
     CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY = "FEATURE_CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED"
     CORRECTION_SUBMISSION_APPROVAL_EMAIL_ROLE_CODES_KEY = "FEATURE_CORRECTION_SUBMISSION_APPROVAL_EMAIL_ROLE_CODES"
@@ -890,6 +891,15 @@ class FeatureSettingsService:
                 default=default,
             )
         )
+
+    @classmethod
+    def is_departmental_exam_question_reuse_enabled(
+        cls, *, tenant_id: int | None, default: bool = False
+    ) -> bool:
+        return bool(SystemSettingService.get(
+            cls.DEPARTMENTAL_EXAM_QUESTION_REUSE_ENABLED_KEY,
+            tenant_id=tenant_id, default=default,
+        ))
 
     @classmethod
     def can_user_access_grade_prediction(cls, *, user, tenant_id: int | None) -> bool:
