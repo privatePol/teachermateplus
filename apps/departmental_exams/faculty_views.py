@@ -170,9 +170,25 @@ def _case_presentation(contribution, questions, case_context):
         return [], [], {}
     _blueprint, sections = case_context
     scenarios = list(
-        contribution.faculty_scenarios.select_related("section")
+        contribution.faculty_scenarios.filter(active_marker=1).select_related("section")
         .prefetch_related("members__question").order_by("created_at", "id")
     )
+    if contribution.supersedes_id:
+        blueprint, _sections = case_context
+        for candidate in ExamScenario.objects.filter(
+            blueprint=blueprint, contribution__isnull=True,
+            active_marker=1, supersedes__isnull=False,
+        ).select_related("section").order_by("created_at", "id"):
+            try:
+                FacultyCasePolicy.correction_admin_case(
+                    contribution=contribution, scenario_id=candidate.id,
+                    tenant_id=contribution.cycle_course.cycle.tenant_id,
+                )
+            except Http404:
+                continue
+            candidate.is_correction_admin = True
+            candidate.case_member_count = candidate.members.filter(active_marker=1).count()
+            scenarios.append(candidate)
     by_id = {question.id: question for question in questions}
     linked_ids = set()
     for scenario in scenarios:
@@ -860,18 +876,25 @@ def question_create_view(request, contribution_id, scenario_id=None):
     _require_add_capacity(contribution)
     scenario = None
     if scenario_id is not None:
-        scenario = get_object_or_404(
-            ExamScenario,
-            pk=scenario_id,
-            contribution=contribution,
-            contribution__faculty_user=request.user,
-        )
+        scenario = ExamScenario.objects.filter(
+            pk=scenario_id, contribution=contribution, active_marker=1,
+        ).select_related("section").first()
+        if scenario is None:
+            tenant_id, _campus_id = _scope(request)
+            scenario = FacultyCasePolicy.correction_admin_case(
+                contribution=contribution, scenario_id=scenario_id,
+                tenant_id=tenant_id,
+            )
+            scenario.is_correction_admin = True
     structure = _question_structure_options(
         request, contribution, scenario=scenario
     )
     initial = _question_initial(None, contribution)
     if structure["section_id"]:
         initial["section_id"] = structure["section_id"]
+    if scenario and scenario.contribution_id is None:
+        initial["expected_scenario_revision"] = scenario.revision
+        initial["insert_position"] = scenario.members.filter(active_marker=1).count() + 1
     form = QuestionForm(
         request.POST or None,
         initial=initial,
@@ -879,6 +902,8 @@ def question_create_view(request, contribution_id, scenario_id=None):
         require_section=structure["require_section"],
         fixed_section=structure.get("fixed_section"),
         scenario_id=structure["scenario_id"],
+        scenario_positions=(scenario.members.filter(active_marker=1).count() + 1
+                            if scenario and scenario.contribution_id is None else None),
         rich_editor=True,
     )
     if request.method == "POST" and form.is_valid():
@@ -893,6 +918,8 @@ def question_create_view(request, contribution_id, scenario_id=None):
                 payload=form.cleaned_data,
                 section_id=form.cleaned_data.get("section_id"),
                 scenario_id=scenario.id if scenario else None,
+                expected_scenario_revision=form.cleaned_data.get("expected_scenario_revision"),
+                insert_position=form.cleaned_data.get("insert_position"),
                 request=request,
             )
         except ContributionConflict as exc:
@@ -904,6 +931,8 @@ def question_create_view(request, contribution_id, scenario_id=None):
                 messages.warning(request, "This question resembles another question you have saved. It was saved; this is a similarity warning.")
             messages.success(request, "Linked Question added." if scenario else "Question added.")
             if scenario:
+                if scenario.contribution_id is None:
+                    return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
                 return redirect(
                     "departmental_exams:faculty_case_detail",
                     contribution_id=contribution.id,
@@ -935,12 +964,20 @@ def question_edit_view(request, contribution_id, question_id):
     _require_currently_mutable(request, contribution)
     membership = getattr(question, "exam_scenario_membership", None)
     scenario = membership.scenario if membership else None
+    if scenario is not None and scenario.contribution_id is None:
+        tenant_id, _campus_id = _scope(request)
+        FacultyCasePolicy.correction_admin_case(
+            contribution=contribution, scenario_id=scenario.id,
+            tenant_id=tenant_id,
+        )
     structure = _question_structure_options(
         request, contribution, question=question, scenario=scenario
     )
     initial = _question_initial(question, contribution)
     if structure["section_id"]:
         initial["section_id"] = structure["section_id"]
+    if scenario and scenario.contribution_id is None:
+        initial["expected_scenario_revision"] = scenario.revision
     form = QuestionForm(
         request.POST or None,
         initial=initial,
@@ -964,6 +1001,7 @@ def question_edit_view(request, contribution_id, question_id):
                 payload=form.cleaned_data,
                 section_id=form.cleaned_data.get("section_id"),
                 scenario_id=scenario.id if scenario else None,
+                expected_scenario_revision=form.cleaned_data.get("expected_scenario_revision"),
                 request=request,
             )
         except ContributionConflict as exc:
@@ -1033,6 +1071,34 @@ def question_delete_view(request, contribution_id, question_id):
 @_faculty_error_page
 @portal_required("FACULTY")
 @require_POST
+def question_bulk_delete_view(request, contribution_id):
+    contribution = _owner_contribution(request, contribution_id)
+    _require_currently_mutable(request, contribution)
+    try:
+        expected_revision = int(request.POST.get("expected_contribution_revision", ""))
+        raw = request.POST.getlist("selected_questions")
+        if not raw:
+            raise ContributionConflict("Select at least one visible question and retry.")
+        selected = []
+        for value in raw:
+            question_id, question_revision = value.split(":", 1)
+            selected.append((int(question_id), int(question_revision)))
+        tenant_id, campus_id = _scope(request)
+        count = QuestionMutationService.delete_many(
+            contribution_id=contribution.id, selected_questions=selected,
+            user=request.user, tenant_id=tenant_id, campus_id=campus_id,
+            expected_contribution_revision=expected_revision, request=request,
+        )
+    except (ValueError, ContributionConflict, ValidationError) as exc:
+        return _error_response(request, exc if isinstance(exc, ValidationError) else
+                               ContributionConflict("Selection changed. Refresh and retry."))
+    messages.success(request, f"Deleted {count} selected question(s). Linked Cases remain in place. If a reviewer Case is incomplete, add replacements within it before submission.")
+    return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_POST
 def question_reorder_view(request, contribution_id):
     contribution = _owner_contribution(request, contribution_id)
     form = QuestionReorderForm(request.POST)
@@ -1057,7 +1123,7 @@ def question_reorder_view(request, contribution_id):
 
 def _owner_case(request, contribution, scenario_id):
     scenario = get_object_or_404(
-        ExamScenario.objects.select_related("section", "blueprint"),
+        ExamScenario.objects.filter(active_marker=1).select_related("section", "blueprint"),
         pk=scenario_id,
         contribution=contribution,
         contribution__faculty_user=request.user,

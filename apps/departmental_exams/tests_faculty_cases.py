@@ -20,6 +20,8 @@ from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, UserPermission
 
 from .blueprint_services import BlueprintMutationService, ScenarioMutationService
+from .automatic_workflow import AutomaticContributionReopenService
+from .contribution_authorization import ContributionConflict
 from .contribution_services import QuestionMutationService
 from .faculty_case_services import FacultyCaseMutationService, FacultyCasePolicy
 from .faculty_views import _case_presentation
@@ -1561,6 +1563,114 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertEqual(list(scenario.members.values_list("position", flat=True)), [1])
         detail = self.client.get(reverse('departmental_exams:faculty_case_detail', args=[self.contribution.id, scenario.id]))
         self.assertEqual(self._displayed_question_pairs(detail), [(first.id, 1)])
+
+    def test_bulk_delete_linked_questions_preserves_empty_case(self):
+        scenario = self.save_case()
+        first = self.add_question(scenario=scenario, text="First linked")
+        second = self.add_question(scenario=scenario, text="Second linked")
+        standalone = self.add_question(section=self.section_b, text="Standalone")
+        self.contribution.refresh_from_db()
+        scenario.refresh_from_db()
+        before_revision = self.contribution.revision
+        before_case_revision = scenario.revision
+
+        QuestionMutationService.delete_many(
+            contribution_id=self.contribution.id,
+            selected_questions=[(first.id, first.revision), (second.id, second.revision)],
+            user=self.faculty, tenant_id=self.tenant.id, campus_id=self.campus.id,
+            expected_contribution_revision=before_revision,
+        )
+
+        self.contribution.refresh_from_db()
+        scenario.refresh_from_db()
+        self.assertEqual(self.contribution.revision, before_revision + 1)
+        self.assertEqual(scenario.revision, before_case_revision + 1)
+        self.assertEqual(scenario.members.count(), 0)
+        self.assertTrue(ExamScenario.objects.filter(pk=scenario.id).exists())
+        self.assertEqual(list(self.contribution.questions.order_by("position").values_list("id", "position")), [(standalone.id, 1)])
+        self.assertFalse(QuestionBlueprintPlacement.objects.filter(question_id__in=[first.id, second.id]).exists())
+
+    def test_return_to_draft_copies_case_graph_and_keeps_original_submitted(self):
+        scenario = self.save_case()
+        linked = self.add_question(scenario=scenario, text="Linked original")
+        standalone = self.add_question(section=self.section_b, text="Standalone original")
+        Question.objects.filter(pk=linked.pk).update(
+            content_format=Question.ContentFormat.RICH_HTML_V1,
+            question_text="<p>Linked original</p>",
+            choice_a="<p>Choice A</p>", choice_b="<p>Choice B</p>",
+            choice_c="<p>Choice C</p>", choice_d="<p>Choice D</p>",
+        )
+        linked.refresh_from_db()
+        now = timezone.now()
+        import_batch = QuestionImportBatch.objects.create(
+            tenant=self.tenant, contribution=self.contribution,
+            uploading_user=self.faculty, confirming_user=self.faculty,
+            status=QuestionImportBatch.Status.CONFIRMED,
+            contribution_revision_snapshot=self.contribution.revision,
+            file_sha256="a" * 64, filename_sha256="b" * 64,
+            total_rows=1, valid_rows=1, committed_rows=1,
+            resulting_question_count=1, expires_at=now + timezone.timedelta(minutes=30),
+            confirmed_at=now, payload_purged_at=now,
+        )
+        Question.objects.filter(pk=standalone.pk).update(
+            entry_method=Question.EntryMethod.CSV,
+            import_batch=import_batch, import_row_number=2,
+        )
+        standalone.refresh_from_db()
+        self.contribution.refresh_from_db()
+        self.contribution.status = FacultyContribution.Status.SUBMITTED
+        self.contribution.submitted_at = timezone.now()
+        self.contribution.save(update_fields=["status", "submitted_at", "updated_at"])
+
+        successor = AutomaticContributionReopenService._draft_successor(
+            self.contribution, actor=self.configurer, configuration=self.configuration,
+            reason="Correct submitted Case questions.", now=timezone.now(),
+        )
+
+        self.contribution.refresh_from_db()
+        self.assertIsNone(self.contribution.active_marker)
+        self.assertEqual(self.contribution.status, FacultyContribution.Status.SUBMITTED)
+        self.assertEqual(successor.supersedes_id, self.contribution.id)
+        self.assertEqual(successor.status, FacultyContribution.Status.DRAFT)
+        copies = {row.position: row for row in successor.questions.all()}
+        self.assertEqual(set(copies), {linked.position, standalone.position})
+        self.assertNotIn(linked.id, {row.id for row in copies.values()})
+        self.assertEqual(copies[linked.position].content_format, Question.ContentFormat.RICH_HTML_V1)
+        self.assertEqual(copies[linked.position].question_text, linked.question_text)
+        self.assertEqual(copies[linked.position].choice_a, linked.choice_a)
+        self.assertEqual(standalone.import_batch_id, import_batch.id)
+        self.assertIsNone(copies[standalone.position].import_batch_id)
+        self.assertIsNone(copies[standalone.position].import_row_number)
+        copied_case = ExamScenario.objects.get(contribution=successor)
+        self.assertNotEqual(copied_case.id, scenario.id)
+        self.assertEqual(list(copied_case.members.values_list("question_id", "position")), [(copies[linked.position].id, 1)])
+        self.assertEqual(copies[linked.position].blueprint_placement.section_id, self.section_a.id)
+        self.assertEqual(copies[standalone.position].blueprint_placement.section_id, self.section_b.id)
+        self.assertTrue(ExamScenario.objects.filter(pk=scenario.id, contribution=self.contribution).exists())
+        self.assertTrue(Question.objects.filter(pk__in=[linked.id, standalone.id]).count() == 2)
+
+    def test_bulk_delete_rejects_any_generated_source_without_partial_removal(self):
+        from .tests_questionnaire_print_release import QuestionnairePrintReleaseTests
+        scenario = self.save_case()
+        referenced = self.add_question(scenario=scenario, text="Referenced linked")
+        other = self.add_question(scenario=scenario, text="Other linked")
+        self.questions = [referenced]
+        QuestionnairePrintReleaseTests._make_revision(self, self.parent, revision_number=1)
+        self.contribution.refresh_from_db()
+        before_revision = self.contribution.revision
+
+        with self.assertRaises(ContributionConflict):
+            QuestionMutationService.delete_many(
+                contribution_id=self.contribution.id,
+                selected_questions=[(referenced.id, referenced.revision), (other.id, other.revision)],
+                user=self.faculty, tenant_id=self.tenant.id, campus_id=self.campus.id,
+                expected_contribution_revision=before_revision,
+            )
+
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.revision, before_revision)
+        self.assertTrue(Question.objects.filter(pk__in=[referenced.id, other.id]).count() == 2)
+        self.assertEqual(scenario.members.count(), 2)
 
     def test_submission_rejects_empty_case_unplaced_and_section_mismatch(self):
         scenario = self.save_case()

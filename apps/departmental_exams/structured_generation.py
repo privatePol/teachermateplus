@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 
 from .contribution_services import QuestionPayloadService
 from .models import ExamScenario, ExamScenarioMember, FacultyContribution, QuestionBlueprintPlacement
@@ -25,12 +25,18 @@ def assess_whole_units(*, blueprint, unit, questions, audit_questions, sections,
         return (placement is not None and placement.blueprint_id == blueprint.id
                 and placement.section_id in section_ids)
 
-    scenarios = list(ExamScenario.objects.filter(blueprint=blueprint).filter(
-        Q(members__question_id__in=by_id) | Q(contribution__status="SUBMITTED")
+    scenarios = list(ExamScenario.objects.filter(blueprint=blueprint, active_marker=1).filter(
+        Q(members__question_id__in=by_id, members__active_marker=1)
+        | Q(contribution__status="SUBMITTED", contribution__active_marker=1)
+        | Q(contribution__isnull=True, supersedes__isnull=False)
     ).distinct().select_related("contribution").order_by("id"))
-    members = list(ExamScenarioMember.objects.filter(
+    members = list(ExamScenarioMember.objects.filter(active_marker=1).filter(
         Q(scenario_id__in=[scenario.id for scenario in scenarios]) | Q(question_id__in=by_id)
-    ).select_related("question__contribution", "question__exam_scenario_membership__scenario", "scenario").order_by("scenario_id", "position", "id"))
+    ).select_related("question__contribution", "scenario").prefetch_related(Prefetch(
+        "question__exam_scenario_memberships",
+        queryset=ExamScenarioMember.objects.filter(active_marker=1).select_related("scenario"),
+        to_attr="_current_case_memberships",
+    )).order_by("scenario_id", "position", "id"))
     by_scenario = {}
     for member in members:
         # Cross-unit links are an authorization/integrity failure, not a pool
@@ -49,11 +55,13 @@ def assess_whole_units(*, blueprint, unit, questions, audit_questions, sections,
         ids = [row.question_id for row in rows]
         # Unsubmitted Cases cannot supply questions. Do not expose irrelevant
         # Draft details in readiness; Submitted/partially eligible units warn.
-        relevant = bool(set(ids) & set(by_id)) or (
+        relevant = bool(set(ids) & set(by_id)) or scenario.supersedes_id is not None or (
             scenario.contribution_id and scenario.contribution.status == "SUBMITTED")
         reasons = []
         if not ids:
             reasons.append("no linked MCQs")
+        elif scenario.contribution_id is None and scenario.supersedes_id and len(ids) < 2:
+            reasons.append("fewer than two linked MCQs in a corrected reviewer Case")
         if any(qid not in by_id for qid in ids):
             reasons.append("one or more linked MCQs are unusable or not Final Submitted")
         if scenario.contribution_id and (

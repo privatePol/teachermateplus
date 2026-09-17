@@ -757,7 +757,7 @@ class MalformedCaseAssessmentTests(FacultyCaseFixtureMixin, Stage4TestCase):
         ExamScenarioMember.objects.create(scenario=irrelevant, question=draft_question, position=1)
         ExamScenario.objects.filter(pk=cases[0].pk).update(stimulus="<script>private invalid narrative</script>")
         valid_ids = list(Question.objects.filter(contribution__cycle_course=self.parent,
-            contribution__status="SUBMITTED").exclude(exam_scenario_membership__scenario=cases[0])
+            contribution__status="SUBMITTED").exclude(exam_scenario_memberships__scenario=cases[0])
             .order_by("pk").values_list("pk", flat=True))
         # Complete the disposable pool's configured 15/25/10 difficulty margins.
         Question.objects.filter(pk__in=valid_ids[15:40]).update(difficulty="MODERATE")

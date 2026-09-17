@@ -268,6 +268,8 @@ class QuestionnairePrintReleaseService:
             user=actor,
             cycle_course=course,
         )
+        if course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+            require_current_generated = True
         if (
             require_current_generated
             and resolve_examination_unit(course).primary.id != course.id
@@ -465,13 +467,22 @@ class FacultyQuestionnairePrintService:
                 print_from__lte=now,
                 print_until__gte=now,
                 generation_revision__cycle_course_id=F("cycle_course_id"),
-            ).select_related("generation_revision")
+            ).select_related("generation_revision", "cycle_course__cycle")
         }
         options = {}
         for contribution in contributions:
             release = releases.get(primary_by_contribution[contribution.id])
             if not release or not ContributionAuthorizationService.has_retained_current_print_eligibility(
                 contribution=contribution
+            ):
+                continue
+            if (
+                release.cycle_course.cycle.processing_mode
+                == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                and (
+                    release.generation_revision.current_marker != 1
+                    or release.generation_revision.status != ExamGenerationRevision.Status.GENERATED
+                )
             ):
                 continue
             set_rows = GeneratedExamSet.objects.filter(
@@ -588,6 +599,15 @@ class FacultyQuestionnairePrintService:
         if (
             release.status != QuestionnairePrintRelease.Status.ACTIVE
             or release.active_marker != 1
+            or (
+                contribution.cycle_course.cycle.processing_mode
+                == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                and (
+                    release.generation_revision.current_marker != 1
+                    or release.generation_revision.status != ExamGenerationRevision.Status.GENERATED
+                )
+            )
+            or contribution.active_marker != 1
             or now < release.print_from
             or now > release.print_until
         ):

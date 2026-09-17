@@ -213,6 +213,7 @@ class ReopenedDraftAccessTests(Stage5FixtureMixin, Stage4TestCase):
             actor=self.generation_manager,
             expected_revision=self.configuration.revision,
             new_deadline=deadline or timezone.now() + timezone.timedelta(days=1),
+            reason="Restore faculty contribution access.",
         )
         self._refresh()
         if expect_blocked:
@@ -669,6 +670,7 @@ class ReopenedDraftAccessTests(Stage5FixtureMixin, Stage4TestCase):
             actor=self.generation_manager,
             expected_revision=self.configuration.revision,
             new_deadline=timezone.now() + timezone.timedelta(days=1),
+            reason="Restore faculty contribution access.",
         )
         self._refresh()
         secondary_configuration.refresh_from_db()

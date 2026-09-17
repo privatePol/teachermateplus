@@ -7,6 +7,7 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Prefetch
 from django.utils import timezone
 
+from .blueprint_services import automatic_correction_cycle_allowed
 from .exam_units import ExaminationUnit, resolve_examination_unit
 from .generation_readiness import Stage6ReadinessService
 from .models import (
@@ -126,7 +127,7 @@ class AutomaticGenerationReadinessReport:
                 ).values_list("cycle_course_id", flat=True)
             )
         contribution_queryset = (
-            FacultyContribution.objects.select_related("faculty_user", "source_campus")
+            FacultyContribution.objects.filter(active_marker=1).select_related("faculty_user", "source_campus")
             .annotate(saved_question_count=Count("questions"))
             .order_by("faculty_user__last_name", "faculty_user__first_name", "id")
         )
@@ -363,7 +364,7 @@ class AutomaticGenerationReadinessReport:
             contribution
             for member in unit.members
             for contribution in member.faculty_contributions.all()
-            if contribution.status == FacultyContribution.Status.SUBMITTED
+            if contribution.active_marker == 1 and contribution.status == FacultyContribution.Status.SUBMITTED
         ]
         submitted_question_volume = sum(
             contribution.saved_question_count
@@ -475,7 +476,7 @@ class AutomaticGenerationReadinessReport:
             return "EXEMPT", ("No generation required.",)
         if current:
             return "GENERATED", ("No action needed.",)
-        if course.cycle.status != ExaminationCycle.Status.OPEN:
+        if not automatic_correction_cycle_allowed(course, configuration):
             return "BLOCKED", ("Open the examination cycle.",)
         if configuration is None:
             return "BLOCKED", ("Configure the course examination.",)

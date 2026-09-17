@@ -174,6 +174,7 @@ class Stage5LockService:
     def lock_contribution(cls, *, contribution_id, user, tenant_id):
         identity = FacultyContribution.objects.filter(
             pk=contribution_id,
+            active_marker=1,
             faculty_user=user,
             cycle_course__cycle__tenant_id=tenant_id,
         ).values("cycle_course_id").first()
@@ -186,7 +187,7 @@ class Stage5LockService:
         contribution = (
             FacultyContribution.objects.select_for_update()
             .select_related("faculty_user", "source_campus")
-            .get(pk=contribution_id, faculty_user=user, cycle_course=cycle_course)
+            .get(pk=contribution_id, active_marker=1, faculty_user=user, cycle_course=cycle_course)
         )
         contribution.cycle_course = cycle_course
         return cycle, cycle_course, configuration, contribution
@@ -237,7 +238,7 @@ class ContributionRosterService:
 
         contributions = list(
             FacultyContribution.objects.select_for_update()
-            .filter(cycle_course=cycle_course)
+            .filter(cycle_course=cycle_course, active_marker=1)
             .order_by("id")
         )
         preexisting_contribution_ids = {item.id for item in contributions}
@@ -272,14 +273,14 @@ class ContributionRosterService:
             FacultyContribution.objects.bulk_create(creates, batch_size=cls.BATCH_SIZE)
             contributions = list(
                 FacultyContribution.objects.select_for_update()
-                .filter(cycle_course=cycle_course)
+                .filter(cycle_course=cycle_course, active_marker=1)
                 .order_by("id")
             )
             contributions_by_user = {item.faculty_user_id: item for item in contributions}
 
         existing_sources = list(
             FacultyContributionEligibilitySource.objects.select_for_update()
-            .filter(contribution__cycle_course=cycle_course)
+            .filter(contribution__cycle_course=cycle_course, contribution__active_marker=1)
             .order_by("contribution_id", "assignment_id_snapshot")
         )
         source_map = {
@@ -768,6 +769,8 @@ class QuestionMutationService:
         payload,
         section_id=None,
         scenario_id=None,
+        expected_scenario_revision=None,
+        insert_position=None,
         request=None,
     ):
         _configuration, contribution, questions = cls._lock_mutable(
@@ -783,7 +786,8 @@ class QuestionMutationService:
         )
         cleaned = QuestionPayloadService.validate(payload)
         duplicate_warning = Question.objects.filter(
-            contribution__faculty_user=user
+            contribution__faculty_user=user,
+            contribution__active_marker=1,
         ).values_list("question_text", "content_format")
         duplicate_warning = QuestionPayloadService.question_fingerprint(
             cleaned["question_text"], cleaned["content_format"]
@@ -808,6 +812,8 @@ class QuestionMutationService:
             tenant_id=tenant_id,
             section_id=section_id,
             scenario_id=scenario_id,
+            expected_scenario_revision=expected_scenario_revision,
+            insert_position=insert_position,
         )
         cls._increment_contribution(contribution)
         cls._audit(
@@ -843,6 +849,7 @@ class QuestionMutationService:
         payload,
         section_id=None,
         scenario_id=None,
+        expected_scenario_revision=None,
         request=None,
     ):
         _configuration, contribution, questions = cls._lock_mutable(
@@ -863,6 +870,7 @@ class QuestionMutationService:
         ) in {
             QuestionPayloadService.question_fingerprint(value, content_format)
             for value, content_format in Question.objects.filter(
+                contribution__active_marker=1,
                 contribution__faculty_user=user
             ).exclude(pk=question.pk).values_list("question_text", "content_format")
         }
@@ -878,6 +886,7 @@ class QuestionMutationService:
             tenant_id=tenant_id,
             section_id=section_id,
             scenario_id=scenario_id,
+            expected_scenario_revision=expected_scenario_revision,
         )
         if not changed_fields and not structure_changed:
             question.duplicate_warning = duplicate_warning
@@ -932,6 +941,20 @@ class QuestionMutationService:
         expected_question_revision,
         request=None,
     ):
+        return cls.delete_many(
+            contribution_id=contribution_id,
+            selected_questions=[(question_id, expected_question_revision)],
+            user=user, tenant_id=tenant_id, campus_id=campus_id,
+            expected_contribution_revision=expected_contribution_revision,
+            request=request, missing_as_404=True,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def delete_many(
+        cls, *, contribution_id, selected_questions, user, tenant_id, campus_id,
+        expected_contribution_revision, request=None, missing_as_404=False,
+    ):
         _configuration, contribution, questions = cls._lock_mutable(
             contribution_id=contribution_id,
             user=user,
@@ -939,35 +962,52 @@ class QuestionMutationService:
             campus_id=campus_id,
             expected_contribution_revision=expected_contribution_revision,
         )
-        question = next((item for item in questions if item.id == question_id), None)
-        if question is None:
-            raise Http404
-        if question.revision != expected_question_revision:
-            raise ContributionConflict("This question changed after the page was loaded.")
-        deleted_id = question.id
-        deleted_position = question.position
+        try:
+            requested = {int(question_id): int(revision) for question_id, revision in selected_questions}
+        except (TypeError, ValueError) as exc:
+            raise ContributionConflict("Question selection is invalid. Refresh and retry.") from exc
+        if not requested or len(requested) != len(selected_questions):
+            raise ContributionConflict("Question selection changed. Refresh and retry.")
+        selected = [item for item in questions if item.id in requested]
+        if len(selected) != len(requested):
+            if missing_as_404:
+                raise Http404
+            raise ContributionConflict("A selected question changed. Refresh and retry.")
+        if any(item.revision != requested[item.id] for item in selected):
+            raise ContributionConflict("A selected question changed. Refresh and retry.")
+        selected_ids = set(requested)
+        from .models import (
+            ExamScenario, ExamScenarioMember, GeneratedExamItem,
+            GenerationSourceQuestionSnapshot, QuestionBlueprintPlacement,
+        )
+        if (GeneratedExamItem.objects.filter(source_question_id__in=selected_ids).exists()
+                or GenerationSourceQuestionSnapshot.objects.filter(source_question_id__in=selected_ids).exists()):
+            raise ContributionConflict("A selected question belongs to historical generated output and cannot be deleted.")
         before_revision = contribution.revision
         remaining = sorted(
-            (item for item in questions if item.id != deleted_id),
+            (item for item in questions if item.id not in selected_ids),
             key=lambda item: item.position,
         )
-        from .models import ExamScenario, ExamScenarioMember, QuestionBlueprintPlacement
-
-        membership = ExamScenarioMember.objects.select_for_update().filter(
-            question=question
-        ).first()
-        deleted_scenario_id = membership.scenario_id if membership else None
-        if membership:
-            membership.delete()
-            scenario = ExamScenario.objects.select_for_update().get(
-                pk=deleted_scenario_id
-            )
+        scenario_ids = sorted(set(ExamScenarioMember.objects.filter(
+            question_id__in=selected_ids, active_marker=1,
+        ).values_list("scenario_id", flat=True)))
+        scenarios = list(ExamScenario.objects.select_for_update().filter(
+            pk__in=scenario_ids, active_marker=1,
+        ).order_by("id"))
+        if len(scenarios) != len(scenario_ids):
+            raise ContributionConflict("Case membership changed. Refresh and retry.")
+        memberships = list(ExamScenarioMember.objects.select_for_update().filter(
+            question_id__in=selected_ids, active_marker=1).order_by("scenario_id", "position", "id"))
+        if {row.scenario_id for row in memberships} != set(scenario_ids):
+            raise ContributionConflict("Case membership changed. Refresh and retry.")
+        ExamScenarioMember.objects.filter(pk__in=[row.id for row in memberships]).delete()
+        for scenario in scenarios:
             scenario.revision += 1
             scenario.updated_by = user
             scenario.save(update_fields=["revision", "updated_by", "updated_at"])
             remaining_members = list(
                 ExamScenarioMember.objects.select_for_update()
-                .filter(scenario_id=deleted_scenario_id)
+                .filter(scenario=scenario)
                 .order_by("position", "id")
             )
             for position, member in enumerate(remaining_members, start=1):
@@ -975,25 +1015,30 @@ class QuestionMutationService:
                     member.position = position
                     member.save(update_fields=["position", "updated_at"])
         QuestionBlueprintPlacement.objects.select_for_update().filter(
-            question=question
+            question_id__in=selected_ids
         ).delete()
-        question.delete()
+        Question.objects.filter(pk__in=selected_ids, contribution=contribution).delete()
         cls._rewrite_positions(remaining)
         cls._increment_contribution(contribution)
         cls._audit(
-            action="DE_EXAM_QUESTION_DELETED",
+            action=("DE_EXAM_QUESTION_DELETED" if len(selected) == 1 else "DE_EXAM_QUESTIONS_BULK_DELETED"),
             contribution=contribution,
             actor=user,
-            question_id=deleted_id,
+            question_id=selected[0].id if len(selected) == 1 else None,
             metadata={
-                "deleted_position": deleted_position,
+                "deleted_question_ids": sorted(selected_ids),
+                "deleted_positions": {str(row.id): row.position for row in selected},
+                **({"deleted_position": selected[0].position,
+                    "scenario_id": scenario_ids[0] if scenario_ids else None}
+                   if len(selected) == 1 else {}),
                 "resulting_count": len(remaining),
                 "revision_before": before_revision,
                 "revision_after": contribution.revision,
-                "scenario_id": deleted_scenario_id,
+                "scenario_ids": scenario_ids,
             },
             request=request,
         )
+        return len(selected)
 
     @classmethod
     @transaction.atomic

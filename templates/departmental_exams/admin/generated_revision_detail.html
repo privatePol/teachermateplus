@@ -11,6 +11,8 @@
   </div>
 </header>
 
+{% if revision.status == 'SUPERSEDED' %}<div class="alert alert-warning" role="status"><strong>Superseded historical revision.</strong> This exact output remains available to authorized administrators for audit. It is no longer available through Faculty releases; a replacement needs separate new releases.</div>{% endif %}
+
 {% if revision.status == 'LOCKED' %}<div class="de-locked-panel mb-3" role="status"><span class="badge text-bg-light text-dark mb-2">LOCKED</span><h2 class="h5">This is the permanent final examination.</h2><p class="mb-0">Set A, Set B, their ordering, correct answers, sections, and scenario snapshots cannot be changed or regenerated. This page renders only the approved snapshots.</p></div>{% endif %}
 
 <nav class="de-generation-set-nav d-flex flex-wrap gap-2 mb-3" aria-label="Generated set navigation">

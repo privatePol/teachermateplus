@@ -734,9 +734,10 @@ def assigned_course_examinations_view(request):
         configuration = getattr(course, "configuration", None)
         course.can_reopen_contributions = bool(
             course.can_manage_generation
-            and course.cycle.status == ExaminationCycle.Status.OPEN
-            and configuration and configuration.workflow_status == "CLOSED"
-            and CourseExamConfigurationService.reopen_deadline_available(configuration)
+            and course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            and course.cycle.status in (ExaminationCycle.Status.OPEN, ExaminationCycle.Status.CLOSED)
+            and configuration and configuration.workflow_status in ("OPEN", "CLOSED")
+            and configuration.active_contribution_deadline is not None
         )
         course.locked_revision = next(
             (
@@ -1115,7 +1116,18 @@ def course_configuration_view(request, cycle_course_id):
         }
     )
     from .setup_services import CourseSetupService
-    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "effective_configuration": CourseSetupService.effective(parent), "readiness": readiness, "action_flags": action_flags, "setup_row": setup_row, "form": form, "close_form": close_form, "structured_exam_lifecycle_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(tenant_id=tenant_id)}, status=status)
+    can_correct_automatic = bool(
+        parent.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        and parent.cycle.status in (ExaminationCycle.Status.OPEN, ExaminationCycle.Status.CLOSED)
+        and parent.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+        and configuration and configuration.workflow_status in ("OPEN", "CLOSED")
+        and configuration.active_contribution_deadline is not None
+        and DepartmentalExamAuthorizationService.has_automatic_course_permission(
+            user=request.user, cycle_course=parent,
+            permissions=(DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,),
+        )
+    )
+    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "effective_configuration": CourseSetupService.effective(parent), "readiness": readiness, "action_flags": action_flags, "setup_row": setup_row, "form": form, "close_form": close_form, "can_correct_automatic": can_correct_automatic, "structured_exam_lifecycle_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(tenant_id=tenant_id)}, status=status)
 
 
 @portal_required("ADMIN")

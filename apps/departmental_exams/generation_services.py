@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from apps.core.services.audit import AuditService
 
-from .blueprint_services import Stage6Conflict, require_stage6_open_cycle
+from .blueprint_services import Stage6Conflict, automatic_correction_cycle_allowed, require_stage6_open_cycle
 from .contribution_services import Stage5LockService
 from .exam_units import resolve_examination_unit
 from .generation_algorithms import (
@@ -128,18 +128,18 @@ class ExamGenerationService:
             )
             scenarios = list(
                 ExamScenario.objects.select_for_update()
-                .filter(blueprint=blueprint)
+                .filter(blueprint=blueprint, active_marker=1)
                 .filter(**({} if structured_automatic else {"contribution__isnull": True}))
                 .order_by("id")
             )
             list(
                 ExamScenarioMember.objects.select_for_update()
-                .filter(scenario_id__in=[scenario.id for scenario in scenarios])
+                .filter(scenario_id__in=[scenario.id for scenario in scenarios], active_marker=1)
                 .order_by("id")
             )
         contributions = list(
             FacultyContribution.objects.select_for_update()
-            .filter(cycle_course__in=members)
+            .filter(cycle_course__in=members, active_marker=1)
             .order_by("id")
         )
         list(
@@ -154,7 +154,7 @@ class ExamGenerationService:
         )
         list(
             Question.objects.select_for_update()
-            .filter(contribution__cycle_course__in=members)
+            .filter(contribution__cycle_course__in=members, contribution__active_marker=1)
             .order_by("id")
         )
         revisions = list(
@@ -285,7 +285,11 @@ class ExamGenerationService:
             course,
             conflict_class=GenerationConflict,
         )
-        require_stage6_open_cycle(cycle, conflict_class=GenerationConflict)
+        if automatic_mode:
+            if not automatic_correction_cycle_allowed(course, configuration):
+                raise GenerationConflict("The examination cycle is not open for Automatic correction.")
+        else:
+            require_stage6_open_cycle(cycle, conflict_class=GenerationConflict)
         duplicate = next(
             (row for row in revisions if row.request_token_digest == token_digest),
             None,
@@ -557,6 +561,12 @@ class ExamGenerationService:
             request=request,
             metadata={**reason_metadata, **selection_metadata},
         )
+        if automatic_mode and configuration.closed_cycle_correction_active:
+            unit = resolve_examination_unit(course)
+            CourseExamConfiguration.objects.filter(
+                cycle_course_id__in=unit.member_ids,
+                closed_cycle_correction_active=True,
+            ).update(closed_cycle_correction_active=False)
         return GenerationOutcome(revision=revision)
 
     @staticmethod

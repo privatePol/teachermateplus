@@ -54,6 +54,7 @@ from .models import (
     GeneratedExamSet,
     ExamGenerationRevision,
     ExaminationCycle,
+    FacultyContribution,
     QuestionnairePrintRelease,
 )
 from .forms import (
@@ -355,13 +356,13 @@ def blueprint_review_view(request, cycle_course_id):
             )
         scenarios = list(
             ExamScenario.objects.filter(
-                blueprint=blueprint, contribution__isnull=True
+                blueprint=blueprint, contribution__isnull=True, active_marker=1
             )
             .select_related("section")
             .prefetch_related(
                 Prefetch(
                     "members",
-                    queryset=ExamScenarioMember.objects.select_related("question").order_by(
+                    queryset=ExamScenarioMember.objects.filter(active_marker=1).select_related("question").order_by(
                         "position", "id"
                     ),
                 )
@@ -1740,17 +1741,28 @@ def automatic_contribution_reopen_view(request, cycle_course_id):
     configuration = getattr(course, "configuration", None)
     if configuration is None:
         raise Http404("Course configuration does not exist.")
+    unit = resolve_examination_unit(course)
+    submitted = list(FacultyContribution.objects.filter(
+        cycle_course_id__in=unit.member_ids, active_marker=1,
+        status=FacultyContribution.Status.SUBMITTED,
+    ).select_related("faculty_user", "cycle_course__course").order_by(
+        "cycle_course__course__code", "faculty_user__last_name", "id"))
+    state_token = AutomaticContributionReopenService.state_token(course)
     form = AutomaticContributionReopenForm(
         request.POST or None,
-        initial={"expected_revision": configuration.revision},
+        contribution_choices=[
+            (str(row.id), f"{row.cycle_course.course.code} · {row.faculty_user.full_name or row.faculty_user.username}")
+            for row in submitted
+        ],
+        initial={"expected_revision": configuration.revision,
+                 "expected_state_token": state_token,
+                 "new_deadline": configuration.active_contribution_deadline},
     )
     status = 200
     can_reopen = True
     reopen_error = ""
-    try:
-        CourseExamConfigurationService.require_existing_intake_deadline(configuration)
-    except ValidationError as exc:
-        reopen_error = " ".join(exc.messages)
+    if course.cycle.processing_mode != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+        reopen_error = "Only Automatic examination units use correction reopening."
         status = 400
         can_reopen = False
     if can_reopen and request.method == "POST" and form.is_valid():
@@ -1761,6 +1773,9 @@ def automatic_contribution_reopen_view(request, cycle_course_id):
                 actor=request.user,
                 expected_revision=form.cleaned_data["expected_revision"],
                 new_deadline=form.cleaned_data["new_deadline"],
+                reason=form.cleaned_data["reason"],
+                selected_contribution_ids=form.cleaned_data["selected_contributions"],
+                expected_state_token=form.cleaned_data["expected_state_token"],
                 request=request,
             )
         except CourseExamConfigurationConflict as exc:
@@ -1772,7 +1787,7 @@ def automatic_contribution_reopen_view(request, cycle_course_id):
         else:
             messages.success(
                 request,
-                "Contributions reopened. Submitted contributions remain immutable.",
+                "Contribution correction opened. Selected submissions have editable Draft copies; prior submissions remain in history.",
             )
             return redirect(
                 "departmental_exams:automatic_generation_summary",

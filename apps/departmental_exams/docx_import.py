@@ -981,7 +981,7 @@ class QuestionDOCXImportService(QuestionCSVImportService):
             ))
         existing_fingerprints = {
             QuestionPayloadService.question_fingerprint(value, content_format)
-            for value, content_format in Question.objects.filter(contribution__faculty_user=user).values_list("question_text", "content_format")
+            for value, content_format in Question.objects.filter(contribution__faculty_user=user, contribution__active_marker=1).values_list("question_text", "content_format")
         }
         seen = set()
         for row in data_rows:
@@ -1085,7 +1085,7 @@ class QuestionDOCXImportService(QuestionCSVImportService):
         rows = list(QuestionImportRow.objects.select_for_update().filter(batch=batch).order_by("row_number"))
         existing = {
             QuestionPayloadService.question_fingerprint(value, content_format)
-            for value, content_format in Question.objects.filter(contribution__faculty_user=user).values_list("question_text", "content_format")
+            for value, content_format in Question.objects.filter(contribution__faculty_user=user, contribution__active_marker=1).values_list("question_text", "content_format")
         }
         seen = set()
         for staged in rows:

@@ -1,3 +1,23 @@
+## Reviewer Case campus reassignment - 2026-09-17
+
+- An Open Automatic correction Draft may keep reviewer Case edit and replacement access when roster synchronization moves its eligible primary assignment to another campus in the same examination course. The immediately superseded Submitted contribution still supplies historical Case membership; its original campus remains preserved. The current Draft's reassigned primary source must be retained and currently eligible, including current-campus permission and direct-DENY checks. Faculty edit GET now checks the same Case authority as POST, workspace discovery, submission and member validation. No schema or migration change.
+
+## Reviewer Case correction authority - 2026-09-17
+
+- A returned Automatic contribution may add replacement questions to a current reviewer Case only when its immediately superseded Submitted contribution belonged to that Case's archived lineage. Older contribution membership cannot restore access after a later submission removed all of that contributor's Case questions. Workspace links, direct Faculty routes, question mutation, and membership validation share this rule. Current-window last-member recovery and valid later Case revisions remain available. No schema or migration change was needed.
+
+## Reviewer Case correction recovery - 2026-09-17
+
+- Returned Automatic Draft owners can now edit their copied questions in a current Admin-owned Case and add replacements there, even after deleting their last current member. The Faculty workspace keeps that Case visible, shows only the owner's questions, and offers a Case-scoped replacement form with an explicit insertion position. Server checks use the immediately superseded Submitted contribution and archived Case lineage, the frozen examination unit, current Case revision, Draft mutation authority and existing single/bulk deletion rules; other contributors' questions and the Admin narrative remain protected.
+- An empty or one-question current correction Case blocks Final Submission and authoritative generation with recovery guidance. Historical Cases, R1 content, generated/released revision snapshots and the existing Manual Review path stay intact. No schema or migration change was needed for this remediation.
+
+## Departmental Automatic contribution correction - 2026-09-17
+
+- Admin-owned Cases now receive one current successor when selected contributors' questions are copied. Historical Case narratives, member order, source links and generated R1/R2 snapshots remain intact; current readiness, generation, reservations and Case mutation use only active Case links. The member relation permits historical and current links to an unaffected submitted question while enforcing one active Case membership. Copied Draft questions in those Cases can be edited, submitted and bulk-deleted under the existing contributor checks. A further reopening that would archive a Case containing another editable Draft waits for that Draft's submission, preserving its historical question content.
+- Authorized Automatic generation managers can reopen a grouped examination with a reason and future deadline, even after intake or cycle closure. They may select current Submitted contributors to return to Draft. Each returned Draft receives copied questions, placements and Cases under new IDs while the Submitted source remains historical. Existing unfinished Drafts become editable during the same correction window where their retained eligibility proof permits it.
+- Reopening supersedes the current generated revision, revokes active Questionnaire and Answer Key releases, and pauses deadline processing. After the new deadline, the existing processor closes the intake and may produce the next immutable revision. New Questionnaire and Answer Key releases are separate actions. Manual Review policy, frozen blueprints, quota and difficulty rules remain unchanged.
+- Contributors can filter and select visible questions in their own editable Draft, confirm one bulk deletion, and retain empty Cases for explicit resolution. The server checks exact ownership, active Draft status, deadline and contribution/question revisions atomically; historical or generated-source questions cannot be deleted.
+
 ## Rich-text MCQ Step A foundation - 2026-09-16
 
 - Added the non-UI storage and integrity foundation for rich standalone and Case-linked MCQ stems/choices: explicit `PLAIN_TEXT`/`RICH_HTML_V1` format evidence, bounded server-side canonical HTML validation, safe accounting-table semantics, and versioned immutable source/generated snapshots. Existing Case narrative normalization/profile remains unchanged.

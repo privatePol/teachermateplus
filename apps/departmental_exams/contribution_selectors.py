@@ -24,6 +24,7 @@ class ContributionSelector:
         return (
             FacultyContribution.objects.filter(
                 faculty_user=user,
+                active_marker=1,
                 cycle_course__cycle__tenant_id=tenant_id,
                 cycle_course__cycle__tenant__is_active=True,
             )
@@ -171,7 +172,7 @@ class ContributionMonitoringSelector:
             .order_by("assignment_id_snapshot", "id")
         )
         contributions = (
-            FacultyContribution.objects.select_related(
+            FacultyContribution.objects.filter(active_marker=1).select_related(
                 "faculty_user", "faculty_user__default_campus"
             )
             .prefetch_related(
@@ -213,12 +214,13 @@ class ContributionMonitoringSelector:
                 Prefetch("faculty_contributions", queryset=contributions),
             )
             .annotate(
-                contribution_count=Count("faculty_contributions", distinct=True),
+                contribution_count=Count("faculty_contributions", filter=Q(faculty_contributions__active_marker=1), distinct=True),
                 question_count=Count(
                     "faculty_contributions__questions",
                     filter=(
-                        Q(faculty_contributions__questions__import_batch__isnull=True)
+                        Q(faculty_contributions__active_marker=1, faculty_contributions__questions__import_batch__isnull=True)
                         | Q(
+                            faculty_contributions__active_marker=1,
                             faculty_contributions__questions__import_batch__status=QuestionImportBatch.Status.CONFIRMED
                         )
                     ),

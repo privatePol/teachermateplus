@@ -43,6 +43,9 @@ class QuestionForm(ContributionRevisionForm):
     expected_question_revision = forms.IntegerField(
         min_value=1, required=False, widget=forms.HiddenInput
     )
+    expected_scenario_revision = forms.IntegerField(
+        min_value=1, required=False, widget=forms.HiddenInput
+    )
     question_text = forms.CharField(
         max_length=MAX_RAW_BY_FIELD["question_text"],
         widget=forms.Textarea(attrs={"rows": 5}),
@@ -69,6 +72,7 @@ class QuestionForm(ContributionRevisionForm):
         require_section=False,
         fixed_section=None,
         scenario_id=None,
+        scenario_positions=None,
         rich_editor=False,
         **kwargs,
     ):
@@ -76,6 +80,7 @@ class QuestionForm(ContributionRevisionForm):
         self._case_require_section = require_section
         self._case_fixed_section = fixed_section
         self._case_scenario_id = scenario_id
+        self._case_scenario_positions = scenario_positions
         self._rich_editor = rich_editor
         super().__init__(*args, **kwargs)
 
@@ -102,6 +107,13 @@ class QuestionForm(ContributionRevisionForm):
                 widget=forms.HiddenInput,
                 initial=self._case_scenario_id,
             )
+            if self._case_scenario_positions is not None:
+                self.fields["insert_position"] = forms.TypedChoiceField(
+                    coerce=int, label="Position within Case",
+                    choices=[(position, f"Position {position}") for position in range(
+                        1, self._case_scenario_positions + 1,
+                    )],
+                )
         if self._rich_editor:
             for name in ("question_text", "choice_a", "choice_b", "choice_c", "choice_d"):
                 # Preserve the form's established Bootstrap contract even

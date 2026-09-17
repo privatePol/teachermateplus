@@ -425,14 +425,26 @@ class CourseContributionReopenForm(_ConfigurationActionForm):
 
 
 class AutomaticContributionReopenForm(_ConfigurationActionForm):
+    expected_state_token = forms.CharField(widget=forms.HiddenInput)
+    reason = forms.CharField(
+        min_length=10, max_length=500,
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+    )
+    selected_contributions = forms.MultipleChoiceField(
+        required=False, widget=forms.CheckboxSelectMultiple,
+    )
     new_deadline = forms.DateTimeField(
         input_formats=["%Y-%m-%dT%H:%M"],
         widget=forms.DateTimeInput(
             format="%Y-%m-%dT%H:%M",
             attrs={"type": "datetime-local", "class": "form-control"},
         ),
-        help_text="Set a new Asia/Manila deadline for unfinished Draft contributions.",
+        help_text="Set a future Asia/Manila deadline for the whole grouped examination unit.",
     )
+
+    def __init__(self, *args, contribution_choices=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["selected_contributions"].choices = contribution_choices
 
     def clean_new_deadline(self):
         return normalize_contribution_deadline_to_minute(

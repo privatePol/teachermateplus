@@ -698,6 +698,7 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
                 actor=self.admin,
                 expected_revision=fixture["configurations"][0].revision,
                 new_deadline=new_deadline,
+                reason="Correct the grouped examination intake.",
             )
         rows = list(
             CourseExamConfiguration.objects.filter(
@@ -723,19 +724,12 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             fixture["primary"],
         )
 
-    def test_expired_group_reopen_and_open_leave_every_member_unchanged(self):
+    def test_expired_group_correction_reopens_all_members_but_ordinary_open_stays_blocked(self):
         from django.db import transaction
         from .setup_services import CourseSetupService
         fixture = self._ready_group()
         before = list(CourseExamConfiguration.objects.order_by("id").values())
         audit_before = list(AuditLog.objects.order_by("id").values())
-        with patch("apps.departmental_exams.automatic_workflow.DepartmentalExamAuthorizationService.require_generation_management"):
-            with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
-                AutomaticContributionReopenService.reopen(
-                    cycle_course_id=fixture["secondary"].id, tenant_id=self.tenant.id,
-                    actor=self.admin, expected_revision=fixture["configurations"][0].revision,
-                    new_deadline=timezone.now() + timezone.timedelta(days=1),
-                )
         with transaction.atomic(), patch.object(CourseSetupService, "prepare_structure") as prepare:
             with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
                 CourseSetupService.open_group_locked(
@@ -746,6 +740,45 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             prepare.assert_not_called()
         self.assertEqual(before, list(CourseExamConfiguration.objects.order_by("id").values()))
         self.assertEqual(audit_before, list(AuditLog.objects.order_by("id").values()))
+        with patch("apps.departmental_exams.automatic_workflow.DepartmentalExamAuthorizationService.require_generation_management"), patch(
+            "apps.departmental_exams.automatic_workflow.ContributionRosterService._synchronize_locked"
+        ):
+            AutomaticContributionReopenService.reopen(
+                cycle_course_id=fixture["secondary"].id, tenant_id=self.tenant.id,
+                actor=self.admin, expected_revision=fixture["configurations"][0].revision,
+                new_deadline=timezone.now() + timezone.timedelta(days=1),
+                reason="Correct the grouped examination intake.",
+            )
+        self.assertEqual(set(CourseExamConfiguration.objects.filter(
+            cycle_course_id__in=(fixture["primary"].id, fixture["secondary"].id)
+        ).values_list("workflow_status", flat=True)), {"OPEN"})
+
+    def test_group_correction_requires_every_campus_and_honors_direct_deny(self):
+        fixture = self._ready_group()
+        before = list(CourseExamConfiguration.objects.order_by("id").values())
+        manager = self._primary_only_manager("eq-correction-partial")
+        with self.assertRaises(PermissionDenied):
+            AutomaticContributionReopenService.reopen(
+                cycle_course_id=fixture["secondary"].id, tenant_id=self.tenant.id,
+                actor=manager, expected_revision=fixture["configurations"][0].revision,
+                new_deadline=timezone.now() + timezone.timedelta(days=1),
+                reason="Correct the grouped examination intake.",
+            )
+        global_manager = self._global_manager("eq-correction-denied")
+        UserPermission.objects.create(
+            user=global_manager,
+            permission=Permission.objects.get(code="departmental_exams.manage_exam_generation"),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant, campus=fixture["third_campus"],
+        )
+        with self.assertRaises(PermissionDenied):
+            AutomaticContributionReopenService.reopen(
+                cycle_course_id=fixture["primary"].id, tenant_id=self.tenant.id,
+                actor=global_manager, expected_revision=fixture["configurations"][0].revision,
+                new_deadline=timezone.now() + timezone.timedelta(days=1),
+                reason="Correct the grouped examination intake.",
+            )
+        self.assertEqual(before, list(CourseExamConfiguration.objects.order_by("id").values()))
 
     def test_unit_authority_across_every_member_campus_allows_group_creation(self):
         cycle, primary, secondary, _configurations = self._pair()

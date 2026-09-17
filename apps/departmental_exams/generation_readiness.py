@@ -7,14 +7,14 @@ from dataclasses import dataclass
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 
 from .blueprint_services import (
     STAGE6_CYCLE_NOT_OPEN_CODE,
     STAGE6_CYCLE_NOT_OPEN_MESSAGE,
     ContributorRosterReadiness,
     ContributorRosterReadinessService,
-    stage6_cycle_is_open,
+    automatic_correction_cycle_allowed,
 )
 from .duplicate_contract import VERSION as DUPLICATE_IDENTITY_VERSION, question_identity
 from .exam_units import resolve_examination_unit
@@ -246,14 +246,19 @@ def _assessed_submitted_question_pool(
         Question.objects.filter(
             contribution__cycle_course__in=member_courses,
             contribution__status=FacultyContribution.Status.SUBMITTED,
+            contribution__active_marker=1,
         )
         .select_related(
             "contribution__source_campus",
             "contribution__faculty_user",
             "import_batch",
-            "exam_scenario_membership__scenario",
         )
         .prefetch_related(
+            Prefetch(
+                "exam_scenario_memberships",
+                queryset=ExamScenarioMember.objects.filter(active_marker=1).select_related("scenario"),
+                to_attr="_current_case_memberships",
+            ),
             Prefetch(
                 "contribution__eligibility_sources",
                 queryset=FacultyContributionEligibilitySource.objects.select_related(
@@ -556,7 +561,7 @@ class Stage6ReadinessService:
             else ExamBlueprint.objects.filter(cycle_course=cycle_course).first()
         )
 
-        if not question_pool_only and not stage6_cycle_is_open(cycle_course.cycle):
+        if not question_pool_only and not automatic_correction_cycle_allowed(cycle_course, configuration):
             cls._block(
                 blockers,
                 STAGE6_CYCLE_NOT_OPEN_CODE,
@@ -719,12 +724,34 @@ class Stage6ReadinessService:
             from .structured_generation import assess_whole_units
             # Include excluded input state as well: stale-input rejection cannot
             # depend only on the selected/usable subset.
+            active_scenarios = ExamScenario.objects.filter(blueprint=blueprint, active_marker=1).filter(
+                Q(contribution__active_marker=1)
+                | Q(contribution__isnull=True, supersedes__isnull=False)
+                | Q(contribution__isnull=True, members__active_marker=1,
+                    members__question__contribution__active_marker=1)
+            ).distinct()
+            incomplete_corrections = [
+                scenario.id for scenario in active_scenarios.filter(
+                    contribution__isnull=True, supersedes__isnull=False,
+                ) if ExamScenarioMember.objects.filter(scenario=scenario, active_marker=1).count() < 2
+            ]
+            if incomplete_corrections:
+                cls._block(
+                    blockers, "CORRECTION_CASE_INCOMPLETE",
+                    "A reopened reviewer Case has fewer than two current Linked Questions. Its contributor must add corrected Linked Questions within that Case and submit before generation.",
+                    scenario_ids=tuple(incomplete_corrections),
+                )
             structured_input = {
-                "scenarios": list(ExamScenario.objects.filter(blueprint=blueprint).order_by("id").values(
+                "scenarios": list(active_scenarios.order_by("id").values(
                     "id", "revision", "contribution_id", "section_id", "title", "stimulus", "content_format")),
-                "members": list(ExamScenarioMember.objects.filter(scenario__blueprint=blueprint).order_by("id").values(
+                "members": list(ExamScenarioMember.objects.filter(scenario__in=active_scenarios, active_marker=1).filter(
+                    Q(scenario__contribution__active_marker=1)
+                    | Q(scenario__contribution__isnull=True, question__contribution__active_marker=1)
+                ).order_by("id").values(
                     "id", "scenario_id", "question_id", "position")),
-                "placements": list(QuestionBlueprintPlacement.objects.filter(blueprint=blueprint).order_by("id").values(
+                "placements": list(QuestionBlueprintPlacement.objects.filter(
+                    blueprint=blueprint, question__contribution__active_marker=1
+                ).order_by("id").values(
                     "question_id", "section_id", "revision")),
                 "sections": [(row.id, row.title, row.instructions, row.display_order, row.item_quota) for row in section_rows],
                 "sources": [(row.source_id, row.source_digest, row.eligible_for_generation, row.exclusion_code)
@@ -861,13 +888,13 @@ class Stage6ReadinessService:
         if not automatic_flat_mode and blueprint is not None:
             scenarios = list(
                 ExamScenario.objects.filter(
-                    blueprint=blueprint, contribution__isnull=True
+                    blueprint=blueprint, contribution__isnull=True, active_marker=1
                 )
                 .select_related("section")
                 .prefetch_related(
                     Prefetch(
                         "members",
-                        queryset=ExamScenarioMember.objects.select_related(
+                        queryset=ExamScenarioMember.objects.filter(active_marker=1).select_related(
                             "question__contribution__source_campus"
                         ).order_by("position", "id"),
                     )
@@ -1032,6 +1059,7 @@ class Stage6ReadinessService:
             "ELIGIBLE_POOL_INVALID",
             "QUESTION_PLACEMENTS_INCOMPLETE",
             "SCENARIOS_INVALID",
+            "CORRECTION_CASE_INCOMPLETE",
             "QUESTION_SHORTAGES",
             "UNIQUE_QUESTION_SHORTAGES",
         }

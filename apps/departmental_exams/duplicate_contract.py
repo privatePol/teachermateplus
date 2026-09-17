@@ -8,7 +8,7 @@ from html.parser import HTMLParser
 
 from django.core.exceptions import ValidationError
 from django.db import connection
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 
 VERSION = "course-question-v4"
 # Case narrative identity is deliberately frozen at its v3 representation.
@@ -158,10 +158,16 @@ def reserves(contribution):
 def pool_claims(course, *, limit=20000, narrative_cache=None):
     """Read-only inventory, including unpublished accepted import candidates."""
     from .exam_units import resolve_examination_unit
-    from .models import Question, QuestionImportBatch
+    from .models import ExamScenarioMember, Question, QuestionImportBatch
     unit = resolve_examination_unit(course)
-    questions = list(Question.objects.filter(contribution__cycle_course_id__in=unit.member_ids)
-                     .select_related("contribution__cycle_course__cycle", "exam_scenario_membership__scenario")
+    questions = list(Question.objects.filter(contribution__cycle_course_id__in=unit.member_ids,
+                                             contribution__active_marker=1)
+                     .select_related("contribution__cycle_course__cycle")
+                     .prefetch_related(Prefetch(
+                         "exam_scenario_memberships",
+                         queryset=ExamScenarioMember.objects.filter(active_marker=1).select_related("scenario"),
+                         to_attr="_current_case_memberships",
+                     ))
                      .order_by("id")[:limit + 1])
     if len(questions) > limit:
         raise ValidationError("Duplicate preflight scope exceeds its bounded question limit.")
@@ -174,6 +180,7 @@ def pool_claims(course, *, limit=20000, narrative_cache=None):
         if reserves(question.contribution):
             claims[question_identity(question, narrative_cache=narrative_cache)].append((question.id, None, None))
     batches = list(QuestionImportBatch.objects.filter(contribution__cycle_course_id__in=unit.member_ids,
+                    contribution__active_marker=1,
                    status__in=QuestionImportBatch.active_statuses())
                    .select_related("contribution__cycle_course__cycle").order_by("id")[:limit + 1])
     if len(batches) > limit:
@@ -211,7 +218,7 @@ def reconcile(course, *, legacy=False):
     Legacy collisions fail closed without selecting a winner. Deleting/replacing
     derived reservations never deletes academic content or source history.
     """
-    from .models import ExaminationCycle, ExamScenario, QuestionIdentityReservation
+    from .models import ExaminationCycle, ExamScenario, ExamScenarioMember, QuestionIdentityReservation
     if not connection.in_atomic_block:
         raise RuntimeError("Duplicate reservations require the cycle transaction.")
     ExaminationCycle.objects.select_for_update().get(pk=course.cycle_id)
@@ -226,7 +233,12 @@ def reconcile(course, *, legacy=False):
         raise LegacyPoolConflict() if legacy else ValidationError(DUPLICATE_MESSAGE)
     bundles = {}
     claimed_questions = [owner[0] for owners in claims.values() for owner in owners if owner[0]]
-    for scenario in ExamScenario.objects.filter(members__question_id__in=claimed_questions).distinct().prefetch_related("members__question"):
+    for scenario in ExamScenario.objects.filter(
+        active_marker=1, members__question_id__in=claimed_questions,
+        members__active_marker=1,
+    ).distinct().prefetch_related(Prefetch(
+        "members", queryset=ExamScenarioMember.objects.filter(active_marker=1).select_related("question"),
+    )):
         members = sorted(scenario.members.all(), key=lambda row: row.position)
         key = bundle_identity(scenario, members, narrative_cache=cache)
         bundles.update({member.question_id: key for member in members})

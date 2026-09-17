@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Max, Q
+from django.db.models import Q
 from django.http import Http404
 
 from apps.core.services.audit import AuditService
@@ -23,6 +23,78 @@ from .scenario_content import canonicalize_scenario_content
 
 
 class FacultyCasePolicy:
+    @classmethod
+    def correction_admin_case(cls, *, contribution, scenario_id, tenant_id,
+                              for_update=False):
+        """Resolve a current reviewer Case from retained correction ownership."""
+        context = cls.context(
+            contribution=contribution, tenant_id=tenant_id,
+            for_update=for_update, required=False,
+        )
+        if (context is None or contribution.active_marker != 1
+                or contribution.status not in (
+                    FacultyContribution.Status.DRAFT, FacultyContribution.Status.SUBMITTED,
+                )
+                or contribution.supersedes_id is None
+                or contribution.cycle_course.cycle.processing_mode
+                != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION):
+            raise Http404
+        blueprint, _sections = context
+        scenarios = ExamScenario.objects
+        if for_update:
+            scenarios = scenarios.select_for_update()
+        scenario = scenarios.filter(
+            pk=scenario_id, blueprint=blueprint, contribution__isnull=True,
+            active_marker=1, supersedes__isnull=False,
+        ).first()
+        if scenario is None:
+            raise Http404
+        # Replacement authority belongs to this correction window only. An
+        # older submission may have left the Case before the latest return.
+        previous = FacultyContribution.objects.filter(
+            pk=contribution.supersedes_id,
+            faculty_user_id=contribution.faculty_user_id,
+            cycle_course_id=contribution.cycle_course_id,
+            status=FacultyContribution.Status.SUBMITTED,
+            active_marker__isnull=True,
+        ).first()
+        if previous is None:
+            raise Http404
+        if previous.source_campus_id != contribution.source_campus_id:
+            # Roster sync may rebind only the current Draft. Its new primary
+            # source must still be retained and eligible in the new campus.
+            from .contribution_authorization import ContributorEligibilityService
+            if not contribution.eligibility_sources.filter(
+                assignment_id_snapshot=contribution.source_assignment_id,
+                tenant_id_snapshot=tenant_id,
+                campus_id_snapshot=contribution.source_campus_id,
+                is_current=True,
+            ).exists():
+                raise Http404
+            inventory = ContributorEligibilityService.source_inventory(
+                cycle_course=contribution.cycle_course,
+                faculty_user_id=contribution.faculty_user_id,
+            )
+            if contribution.source_assignment_id not in {
+                assignment.id for assignment in inventory.eligible_sources
+            }:
+                raise Http404
+        case_ids = set()
+        ancestor_case = scenario
+        while ancestor_case.supersedes_id:
+            ancestor_case = ExamScenario.objects.filter(pk=ancestor_case.supersedes_id).first()
+            if (ancestor_case is None or ancestor_case.id in case_ids
+                    or ancestor_case.blueprint_id != blueprint.id
+                    or ancestor_case.active_marker is not None):
+                raise Http404
+            case_ids.add(ancestor_case.id)
+        if not case_ids or not ExamScenarioMember.objects.filter(
+            scenario_id__in=case_ids, question__contribution_id=previous.id,
+            active_marker__isnull=True,
+        ).exists():
+            raise Http404
+        return scenario
+
     @classmethod
     def context(cls, *, contribution, tenant_id, for_update=False, required=True):
         enabled = FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
@@ -87,6 +159,8 @@ class FacultyCasePolicy:
         tenant_id,
         section_id=None,
         scenario_id=None,
+        expected_scenario_revision=None,
+        insert_position=None,
     ):
         context = cls.context(
             contribution=contribution,
@@ -135,23 +209,45 @@ class FacultyCasePolicy:
                 pk=scenario_id,
                 contribution=contribution,
                 blueprint=blueprint,
+                active_marker=1,
             ).first()
             if scenario is None:
-                raise Http404
+                scenario = cls.correction_admin_case(
+                    contribution=contribution, scenario_id=scenario_id,
+                    tenant_id=tenant_id, for_update=True,
+                )
+            if scenario.contribution_id is None and scenario.revision != expected_scenario_revision:
+                from .contribution_services import ContributionConflict
+                raise ContributionConflict("This Case changed after the page was loaded. Refresh and retry.")
             if scenario.section_id != (section.id if section else None):
                 raise ValidationError("Linked Questions must use the Case Exam Section.")
             existing = ExamScenarioMember.objects.select_for_update().filter(
-                question=question
+                question=question, active_marker=1
             ).first()
             if existing is not None and existing.scenario_id != scenario.id:
                 raise ValidationError("A question may belong to at most one Case.")
             if existing is None:
-                position = (
-                    ExamScenarioMember.objects.select_for_update()
-                    .filter(scenario=scenario)
-                    .aggregate(value=Max("position"))["value"]
-                    or 0
-                ) + 1
+                rows = list(ExamScenarioMember.objects.select_for_update().filter(
+                    scenario=scenario, active_marker=1,
+                ).order_by("position", "id"))
+                position = len(rows) + 1
+                if scenario.contribution_id is None:
+                    try:
+                        position = int(insert_position)
+                    except (TypeError, ValueError) as exc:
+                        raise ValidationError("Select a valid Linked Question position.") from exc
+                    if position < 1 or position > len(rows) + 1:
+                        raise ValidationError("Linked Question order changed. Refresh and retry.")
+                    if [row.position for row in rows] != list(range(1, len(rows) + 1)):
+                        raise ValidationError("Case question order is incomplete. Ask an administrator to inspect it.")
+                    if position <= len(rows):
+                        temporary = len(rows) + 1
+                        for offset, row in enumerate(rows, start=1):
+                            row.position = temporary + offset
+                            row.save(update_fields=["position", "updated_at"])
+                        for final_position, row in enumerate(rows, start=1):
+                            row.position = final_position + (final_position >= position)
+                            row.save(update_fields=["position", "updated_at"])
                 member = ExamScenarioMember(
                     scenario=scenario, question=question, position=position
                 )
@@ -172,7 +268,7 @@ class FacultyCasePolicy:
             required=False,
         )
         if context is None:
-            if ExamScenario.objects.filter(contribution=contribution).exists():
+            if ExamScenario.objects.filter(contribution=contribution, active_marker=1).exists():
                 raise ValidationError(
                     "This contribution contains Cases, but its structured workflow is unavailable."
                 )
@@ -199,25 +295,57 @@ class FacultyCasePolicy:
 
         scenarios = list(
             ExamScenario.objects.select_for_update()
-            .filter(contribution=contribution)
+            .filter(contribution=contribution, active_marker=1)
             .order_by("id")
         )
         scenario_ids = {scenario.id for scenario in scenarios}
+        admin_scenarios = list(
+            ExamScenario.objects.select_for_update().filter(
+                blueprint=blueprint, contribution__isnull=True,
+                active_marker=1, supersedes__isnull=False,
+            ).order_by("id")
+        ) if contribution.supersedes_id else []
         members = list(
             ExamScenarioMember.objects.select_for_update()
-            .filter(Q(scenario_id__in=scenario_ids) | Q(question_id__in=question_ids))
+            .filter(Q(scenario_id__in=scenario_ids) | Q(question_id__in=question_ids), active_marker=1)
             .select_related("question", "scenario")
             .order_by("scenario_id", "position", "id")
         )
+        authorized_admin_cases = set()
+        rejected_admin_cases = set()
+        def correction_admin_member(scenario_id):
+            if scenario_id in authorized_admin_cases:
+                return True
+            if scenario_id in rejected_admin_cases:
+                return False
+            try:
+                cls.correction_admin_case(
+                    contribution=contribution, scenario_id=scenario_id,
+                    tenant_id=tenant_id, for_update=True,
+                )
+            except Http404:
+                rejected_admin_cases.add(scenario_id)
+                return False
+            authorized_admin_cases.add(scenario_id)
+            return True
+
         if any(
             member.question_id in question_ids
             and member.scenario_id not in scenario_ids
+            and not correction_admin_member(member.scenario_id)
             for member in members
         ):
             raise ValidationError(
                 "A contribution question belongs to a Case outside this contribution."
             )
         members = [member for member in members if member.scenario_id in scenario_ids]
+        for scenario in admin_scenarios:
+            if not correction_admin_member(scenario.id):
+                continue
+            if scenario.members.filter(active_marker=1).count() < 2:
+                raise ValidationError(
+                    "A corrected Admin Case needs at least two Linked Questions before Final Submission. Add replacements within the Case."
+                )
         member_counts = {scenario.id: 0 for scenario in scenarios}
         seen_questions = set()
         for member in members:
@@ -315,6 +443,7 @@ class FacultyCaseMutationService:
                 pk=scenario_id,
                 contribution=contribution,
                 blueprint=blueprint,
+                active_marker=1,
             ).first()
             if scenario is None:
                 raise Http404
@@ -392,7 +521,7 @@ class FacultyCaseMutationService:
             contribution=contribution, tenant_id=tenant_id, for_update=True
         )
         scenario = ExamScenario.objects.select_for_update().filter(
-            pk=scenario_id, contribution=contribution
+            pk=scenario_id, contribution=contribution, active_marker=1
         ).first()
         if scenario is None:
             raise Http404
@@ -449,7 +578,7 @@ class FacultyCaseMutationService:
             contribution=contribution, tenant_id=tenant_id, for_update=True
         )
         scenario = ExamScenario.objects.select_for_update().filter(
-            pk=scenario_id, contribution=contribution
+            pk=scenario_id, contribution=contribution, active_marker=1
         ).first()
         if scenario is None:
             raise Http404

@@ -5,6 +5,7 @@ from django.http import Http404
 from django.test import override_settings
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering, FacultyAssignment, Section
@@ -25,7 +26,7 @@ from .contribution_services import (
     QuestionMutationService,
 )
 from .generation_algorithms import allocate_difficulties
-from .models import CycleCourse, CycleCourseOffering, FacultyContribution, Question
+from .models import CycleCourse, CycleCourseOffering, FacultyContribution, Question, QuestionImportBatch
 from .services import CourseExamConfigurationService
 from .stage4_test_support import Stage4TestCase
 
@@ -1861,3 +1862,91 @@ class Stage5QuestionDeleteTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(self.question_state(), state_before)
         self.assertEqual(self.contribution.revision, revision_before)
         self.assertFalse(self.delete_audits().exists())
+
+    def test_bulk_delete_two_questions_resequences_once_and_audits_ids(self):
+        first, middle, last = self.create_questions(3)
+        before_revision = self.contribution.revision
+
+        deleted = QuestionMutationService.delete_many(
+            contribution_id=self.contribution.id,
+            selected_questions=[(first.id, first.revision), (last.id, last.revision)],
+            user=self.faculty, tenant_id=self.tenant.id, campus_id=self.campus.id,
+            expected_contribution_revision=before_revision,
+        )
+
+        self.contribution.refresh_from_db()
+        self.assertEqual(deleted, 2)
+        self.assertEqual(self.question_state(), [(middle.id, 1, middle.revision)])
+        self.assertEqual(self.contribution.revision, before_revision + 1)
+        audit = AuditLog.objects.get(action="DE_EXAM_QUESTIONS_BULK_DELETED")
+        self.assertEqual(audit.metadata_json["deleted_question_ids"], [first.id, last.id])
+        self.assertEqual(audit.metadata_json["resulting_count"], 1)
+
+    def test_bulk_delete_stale_and_foreign_selections_are_atomic(self):
+        first, second = self.create_questions(2)
+        state_before = self.question_state()
+        revision_before = self.contribution.revision
+        other_faculty = self.make_faculty("bulk-delete-other")
+        self.make_assignment(self.parent, other_faculty)
+        ContributionRosterService.synchronize(
+            cycle_course_id=self.parent.id, tenant_id=self.tenant.id, actor=self.configurer,
+        )
+        other_contribution = FacultyContribution.objects.get(faculty_user=other_faculty)
+        foreign = Question.objects.create(
+            contribution=other_contribution, question_text="Foreign", choice_a="A",
+            choice_b="B", choice_c="C", choice_d="D", correct_answer="A",
+            difficulty="EASY", position=1,
+        )
+        for selection in (
+            [(first.id, first.revision), (second.id, second.revision + 1)],
+            [(first.id, first.revision), (foreign.id, foreign.revision)],
+            [(first.id, first.revision), (first.id, first.revision)],
+        ):
+            with self.assertRaises(ContributionConflict):
+                QuestionMutationService.delete_many(
+                    contribution_id=self.contribution.id, selected_questions=selection,
+                    user=self.faculty, tenant_id=self.tenant.id, campus_id=self.campus.id,
+                    expected_contribution_revision=revision_before,
+                )
+            self.assertEqual(self.question_state(), state_before)
+        self.contribution.refresh_from_db()
+        self.assertEqual(self.contribution.revision, revision_before)
+        self.assertTrue(Question.objects.filter(pk=foreign.id).exists())
+        self.assertFalse(AuditLog.objects.filter(action="DE_EXAM_QUESTIONS_BULK_DELETED").exists())
+
+    def test_bulk_delete_post_requires_fresh_owned_selection(self):
+        first, second = self.create_questions(2)
+        self.client.force_login(self.faculty)
+        url = reverse("departmental_exams:question_bulk_delete", args=[self.contribution.id])
+        payload = {
+            "expected_contribution_revision": self.contribution.revision,
+            "selected_questions": [f"{first.id}:{first.revision}", f"{second.id}:{second.revision}"],
+        }
+        stale = self.client.post(url, {**payload, "selected_questions": [f"{first.id}:{first.revision + 1}"]})
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(self.question_state(), [(first.id, 1, first.revision), (second.id, 2, second.revision)])
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Question.objects.filter(pk__in=[first.id, second.id]).exists())
+
+    def test_bulk_delete_rejects_active_import_without_partial_changes(self):
+        first, second = self.create_questions(2)
+        now = timezone.now()
+        QuestionImportBatch.objects.create(
+            tenant=self.tenant, contribution=self.contribution,
+            active_contribution=self.contribution, uploading_user=self.faculty,
+            status=QuestionImportBatch.Status.IMPORTING,
+            contribution_revision_snapshot=self.contribution.revision,
+            file_sha256="a" * 64, filename_sha256="b" * 64,
+            total_rows=1, valid_rows=1, committed_rows=0, next_row_number=2,
+            started_at=now, progress_updated_at=now,
+            expires_at=now + timezone.timedelta(minutes=30),
+        )
+        with self.assertRaises(PermissionDenied):
+            QuestionMutationService.delete_many(
+                contribution_id=self.contribution.id,
+                selected_questions=[(first.id, first.revision), (second.id, second.revision)],
+                user=self.faculty, tenant_id=self.tenant.id, campus_id=self.campus.id,
+                expected_contribution_revision=self.contribution.revision,
+            )
+        self.assertEqual(self.question_state(), [(first.id, 1, first.revision), (second.id, 2, second.revision)])

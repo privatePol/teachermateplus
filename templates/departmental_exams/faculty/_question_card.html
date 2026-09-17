@@ -1,8 +1,8 @@
 {% load departmental_exam_content %}
-<article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}" data-scientific-group>
+<article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}" data-difficulty="{{ question.difficulty }}" data-linked="{% if linked %}1{% else %}0{% endif %}" data-scientific-group>
   <div class="card-body">
     <div class="d-flex justify-content-between gap-3">
-      <h3 class="h6">Question <span class="question-position">{{ question.presentation_number|default:question.position }}</span></h3>
+      <h3 class="h6">{% if is_mutable %}<label class="me-2"><input type="checkbox" name="selected_questions" value="{{ question.id }}:{{ question.revision }}" form="bulk-question-delete-form" data-bulk-question> <span class="visually-hidden">Select question {{ question.presentation_number|default:question.position }} for deletion</span></label>{% endif %}Question <span class="question-position">{{ question.presentation_number|default:question.position }}</span></h3>
       <span class="badge text-bg-light">{{ question.get_difficulty_display }} &middot; {{ question.get_entry_method_display }}</span>
     </div>
     {% if question.section_assignment_required %}<p class="small text-warning">Section assignment required</p>{% endif %}

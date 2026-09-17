@@ -12,6 +12,7 @@
     {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
     {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
     {% if form.section_id and not form.section_id.field.widget.is_hidden %}<div class="mb-3"><label class="form-label" for="{{ form.section_id.id_for_label }}">{{ form.section_id.label }} <span class="text-danger">*</span></label>{{ form.section_id }}{% for error in form.section_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>{% endif %}
+    {% if form.insert_position %}<div class="mb-3"><label class="form-label" for="{{ form.insert_position.id_for_label }}">Position within Case <span class="text-danger">*</span></label>{{ form.insert_position }}<div class="form-text">Other contributors' Linked Questions keep their relative order.</div>{% for error in form.insert_position.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>{% endif %}
     {% for editor in editor_fields %}
       <section class="mb-4" data-question-rich-field="{{ editor.name }}" data-question-field-label="{{ editor.label }}" data-question-editor-help="question-editor-help-{{ editor.name }}">
         <div class="form-label" id="question-editor-label-{{ editor.name }}">{{ editor.label }} <span class="text-danger" aria-hidden="true">*</span></div>

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.http import Http404
 from django.utils import timezone
 
@@ -15,7 +15,7 @@ from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 
 from .automatic_processing_isolation import AUTOMATIC_PROCESSING_TIMEOUT_CODE
-from .contribution_authorization import ContributorEligibilityService
+from .contribution_authorization import ContributionAuthorizationService, ContributorEligibilityService
 from .contribution_services import ContributionRosterService, Stage5LockService
 from .generation_algorithms import allocate_difficulties
 from .generation_readiness import (
@@ -29,9 +29,17 @@ from .models import (
     CycleCourse,
     ExamCourseEquivalencyMembership,
     ExamGenerationRevision,
+    ExamBlueprint,
+    ExamScenario,
+    ExamScenarioMember,
     ExaminationCycle,
     FacultyContribution,
+    FacultyContributionEligibilitySource,
     GeneratedExamSet,
+    Question,
+    QuestionBlueprintPlacement,
+    QuestionnairePrintRelease,
+    AnswerKeyRelease,
     normalize_contribution_deadline_to_minute,
 )
 from .services import (
@@ -221,7 +229,7 @@ class FacultyContributionPreparationService:
                         course,
                         status="Preserved",
                         reason="Course contributions are already closed",
-                        recommended_action="Reopening is available only before the existing effective deadline. After it, preserve this record and prepare a new cycle if more contributions are needed.",
+                        recommended_action="For justified corrections, an authorized Automatic generation manager can reopen this grouped examination with a reason and future deadline.",
                     )
                 )
                 continue
@@ -402,17 +410,17 @@ def readiness_recommendation(report):
         "CONTRIBUTION_NOT_CLOSED": "Wait for automatic deadline processing.",
         "WAITING_FOR_DEADLINE": "Monitor faculty contributions until the deadline.",
         "AUTOMATIC_PROCESSING_PENDING": "No admin action is needed; automatic processing is pending.",
-        "ROSTER_STALE": "Review source eligibility and roster evidence. After the effective deadline, preserve this record and prepare a new cycle if more contributions are needed.",
-        "ACTIVE_CONTRIBUTORS_INCOMPLETE": "Complete required contributions before the effective deadline. After it, preserve this record and prepare a new cycle if more contributions are needed.",
+        "ROSTER_STALE": "Review source eligibility and roster evidence. Authorized correction can reopen intake with a future deadline.",
+        "ACTIVE_CONTRIBUTORS_INCOMPLETE": "Complete required contributions; authorized correction can provide a future deadline.",
         "BLOCKED_DRAFTS_UNRESOLVED": "Resolve current Blocked Draft contributions.",
-        "QUESTION_SHORTAGES": "Each section must meet its exact quota using whole Cases and standalone questions; surplus in another section cannot fill a shortage. After the deadline, use a new cycle for additional contributions.",
-        "UNIQUE_QUESTION_SHORTAGES": "Each section needs enough unique usable Submitted questions. After the deadline, use a new cycle for additional contributions.",
+        "QUESTION_SHORTAGES": "Each section must meet its exact quota using whole Cases and standalone questions; surplus in another section cannot fill a shortage. Authorized correction can reopen intake.",
+        "UNIQUE_QUESTION_SHORTAGES": "Each section needs enough unique usable Submitted questions. Authorized correction can reopen intake.",
         "HARD_CONSTRAINTS_INFEASIBLE": "Review the eligible pool and required allocation constraints.",
         "FEASIBILITY_LIMIT": "Contact an administrator to review the solver limit.",
         AUTOMATIC_PROCESSING_TIMEOUT_CODE: (
-            "Ask an administrator to review the processing failure. Reopening is unavailable after the effective deadline; preserve the existing record."
+            "Ask an administrator to review the processing failure and whether a reasoned correction window is justified."
         ),
-        "PROCESSING_ERROR": "Ask an administrator to review the secured processor log and arrange authorized technical recovery. Do not reopen expired intake.",
+        "PROCESSING_ERROR": "Ask an administrator to review the secured processor log and arrange authorized technical recovery or correction.",
     }.get(code, "Review the readiness details and correct the blocking input.")
 
 
@@ -697,7 +705,12 @@ class AutomaticExamDeadlineService:
         if (
             cycle.processing_mode
             != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-            or cycle.status != ExaminationCycle.Status.OPEN
+            or not (
+                cycle.status == ExaminationCycle.Status.OPEN
+                or (cycle.status == ExaminationCycle.Status.CLOSED
+                    and configuration is not None
+                    and configuration.closed_cycle_correction_active)
+            )
             or course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
             or configuration is None
         ):
@@ -785,8 +798,9 @@ class AutomaticExamDeadlineService:
         course_processor = course_processor or cls.process_course
         candidates = list(
             CycleCourse.objects.filter(
+                Q(cycle__status=ExaminationCycle.Status.OPEN)
+                | Q(configuration__closed_cycle_correction_active=True),
                 cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
-                cycle__status=ExaminationCycle.Status.OPEN,
                 inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
                 configuration__workflow_status__in=(
                     CourseExamConfiguration.WorkflowStatus.OPEN,
@@ -926,6 +940,199 @@ class AutomaticExamDeadlineService:
 
 
 class AutomaticContributionReopenService:
+    @staticmethod
+    def state_token(course):
+        """Optimistic confirmation of the whole examination-unit correction state."""
+        unit = resolve_examination_unit(course)
+        ids = unit.member_ids
+        state = (
+            tuple(ids),
+            tuple(CourseExamConfiguration.objects.filter(cycle_course_id__in=ids)
+                  .order_by("cycle_course_id").values_list(
+                      "cycle_course_id", "revision", "workflow_status",
+                      "reopened_contribution_deadline", "closed_cycle_correction_active")),
+            tuple(FacultyContribution.objects.filter(cycle_course_id__in=ids, active_marker=1)
+                  .order_by("id").values_list("id", "revision", "status")),
+            tuple(ExamScenario.objects.filter(blueprint__cycle_course_id__in=ids, active_marker=1)
+                  .order_by("id").values_list("id", "revision", "contribution_id")),
+            tuple(ExamScenarioMember.objects.filter(scenario__blueprint__cycle_course_id__in=ids,
+                  active_marker=1).order_by("id").values_list("id", "scenario_id", "question_id", "position")),
+            tuple(ExamGenerationRevision.objects.filter(cycle_course_id__in=ids, current_marker=1)
+                  .order_by("id").values_list("id", "status")),
+            tuple(QuestionnairePrintRelease.objects.filter(cycle_course_id=unit.primary.id,
+                  active_marker=1).order_by("id").values_list("id", "generation_revision_id")),
+            tuple(AnswerKeyRelease.objects.filter(cycle_course_id=unit.primary.id,
+                  active_marker=1).order_by("id").values_list("id", "generation_revision_id")),
+        )
+        return hashlib.sha256(repr(state).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _draft_successor(original, *, actor, configuration, reason, now, request=None,
+                         question_ids_out=None):
+        """Copy editable content, retaining the exact Submitted source graph."""
+        sources = list(FacultyContributionEligibilitySource.objects.select_for_update()
+                       .filter(contribution=original).order_by("id"))
+        questions = list(Question.objects.select_for_update().filter(contribution=original).order_by("id"))
+        placements = list(QuestionBlueprintPlacement.objects.select_for_update()
+                          .filter(question_id__in=[row.id for row in questions]).order_by("id"))
+        cases = list(ExamScenario.objects.select_for_update().filter(
+            contribution=original, active_marker=1).order_by("id"))
+        members = list(ExamScenarioMember.objects.select_for_update()
+                       .filter(scenario_id__in=[row.id for row in cases], active_marker=1).order_by("id"))
+        if any(member.question_id not in {question.id for question in questions} for member in members):
+            raise CourseExamConfigurationConflict("Case membership changed. Refresh and retry.")
+        ContributionAuthorizationService.require_no_active_import(contribution=original)
+        original.active_marker = None
+        original.save(update_fields=["active_marker", "updated_at"])
+        successor = FacultyContribution.objects.create(
+            cycle_course=original.cycle_course, faculty_user=original.faculty_user,
+            source_assignment=original.source_assignment, source_campus=original.source_campus,
+            quota_snapshot=original.quota_snapshot,
+            configuration_revision_snapshot=configuration.revision + 1,
+            revision=1, roster_status=original.roster_status,
+            roster_blocked_at=original.roster_blocked_at,
+            status=FacultyContribution.Status.DRAFT, submitted_at=None,
+            active_marker=1, supersedes=original,
+        )
+        FacultyContributionEligibilitySource.objects.bulk_create([
+            FacultyContributionEligibilitySource(
+                contribution=successor, assignment=row.assignment,
+                assignment_id_snapshot=row.assignment_id_snapshot,
+                offering_id_snapshot=row.offering_id_snapshot,
+                tenant_id_snapshot=row.tenant_id_snapshot,
+                campus_id_snapshot=row.campus_id_snapshot,
+                eligibility_proven_at=row.eligibility_proven_at,
+                is_current=row.is_current, invalidated_at=row.invalidated_at,
+            ) for row in sources
+        ])
+        question_ids = {}
+        for row in questions:
+            copy = Question.objects.create(
+                contribution=successor, content_format=row.content_format,
+                question_text=row.question_text, choice_a=row.choice_a,
+                choice_b=row.choice_b, choice_c=row.choice_c, choice_d=row.choice_d,
+                correct_answer=row.correct_answer, difficulty=row.difficulty,
+                position=row.position, entry_method=row.entry_method,
+                import_batch=None, import_row_number=None,
+            )
+            question_ids[row.id] = copy.id
+        for row in placements:
+            QuestionBlueprintPlacement.objects.create(
+                blueprint=row.blueprint, question_id=question_ids[row.question_id],
+                section=row.section, placed_by=row.placed_by,
+            )
+        case_ids = {}
+        for row in cases:
+            row.active_marker = None
+            row.save(update_fields=["active_marker", "updated_at"])
+            copy = ExamScenario.objects.create(
+                blueprint=row.blueprint, section=row.section, contribution=successor,
+                title=row.title, stimulus=row.stimulus, content_format=row.content_format,
+                created_by=row.created_by, updated_by=row.updated_by, supersedes=row,
+            )
+            case_ids[row.id] = copy.id
+        for row in members:
+            row.active_marker = None
+            row.save(update_fields=["active_marker", "updated_at"])
+            ExamScenarioMember.objects.create(
+                scenario_id=case_ids[row.scenario_id],
+                question_id=question_ids[row.question_id], position=row.position,
+            )
+        AuditService.log_event(
+            action="DE_EXAM_CONTRIBUTION_RETURNED_TO_DRAFT", portal="ADMIN",
+            entity_type="FacultyContribution", entity_id=successor.id,
+            actor=actor, tenant=original.cycle_course.cycle.tenant_id,
+            campus=original.source_campus_id,
+            metadata={"old_contribution_id": original.id, "new_contribution_id": successor.id,
+                      "old_submitted_at": original.submitted_at,
+                      "question_ids": question_ids, "case_ids": case_ids,
+                      "reason": reason, "returned_at": now},
+            request=request,
+        )
+        if question_ids_out is not None:
+            question_ids_out.update(question_ids)
+        return successor
+
+    @staticmethod
+    def _copy_admin_cases(*, cases, members, question_ids, unit, actor):
+        """Version each affected reviewer Case once, after all question copies exist."""
+        from .exam_units import contribution_matches_structure
+        affected = set(question_ids)
+        by_case = {}
+        for member in members:
+            by_case.setdefault(member.scenario_id, []).append(member)
+        successors = {}
+        for case in cases:
+            if case.contribution_id is not None:
+                continue
+            rows = sorted(by_case.get(case.id, ()), key=lambda row: (row.position, row.id))
+            if not any(row.question_id in affected for row in rows):
+                continue
+            if not rows or [row.position for row in rows] != list(range(1, len(rows) + 1)):
+                raise CourseExamConfigurationConflict("Case membership changed. Refresh and retry.")
+            for row in rows:
+                if (row.question.contribution.cycle_course_id not in unit.member_ids
+                        or not contribution_matches_structure(
+                            contribution=row.question.contribution, blueprint=case.blueprint)):
+                    raise CourseExamConfigurationConflict("Case membership changed. Refresh and retry.")
+                if row.question_id not in affected and row.question.contribution.active_marker != 1:
+                    raise CourseExamConfigurationConflict("Case membership changed. Refresh and retry.")
+                if (row.question_id not in affected
+                        and row.question.contribution.status != FacultyContribution.Status.SUBMITTED):
+                    raise CourseExamConfigurationConflict(
+                        "An affected Case contains an editable Draft. Complete its submission before reopening another member."
+                    )
+            case.active_marker = None
+            case.save(update_fields=["active_marker", "updated_at"])
+            ExamScenarioMember.objects.filter(pk__in=[row.id for row in rows]).update(active_marker=None)
+            copy = ExamScenario.objects.create(
+                blueprint=case.blueprint, section=case.section, contribution=None,
+                title=case.title, stimulus=case.stimulus, content_format=case.content_format,
+                revision=1, created_by=case.created_by, updated_by=actor, supersedes=case,
+            )
+            ExamScenarioMember.objects.bulk_create([
+                ExamScenarioMember(
+                    scenario=copy, question_id=question_ids.get(row.question_id, row.question_id),
+                    position=row.position,
+                ) for row in rows
+            ])
+            successors[case.id] = copy.id
+        return successors
+
+    @staticmethod
+    def _revoke_releases(*, course, unit, actor, request, now):
+        from .answer_key_release import AnswerKeyReleaseService
+        from .questionnaire_printing import QuestionnairePrintReleaseService
+        print_rows = list(QuestionnairePrintRelease.objects.select_for_update().filter(
+            cycle_course=course, status=QuestionnairePrintRelease.Status.ACTIVE,
+            active_marker=1).order_by("id"))
+        key_rows = list(AnswerKeyRelease.objects.select_for_update().filter(
+            cycle_course=course, status=AnswerKeyRelease.Status.ACTIVE,
+            active_marker=1).order_by("id"))
+        if any(row.recipient_course_id is not None and row.recipient_course_id not in unit.member_ids
+               for row in key_rows):
+            raise CourseExamConfigurationConflict("Release scope changed. Refresh and retry.")
+        for row in print_rows:
+            row.status = QuestionnairePrintRelease.Status.REVOKED
+            row.active_marker = None
+            row.revoked_by = actor
+            row.revoked_at = now
+            row.full_clean()
+            row.save(update_fields=["status", "active_marker", "revoked_by", "revoked_at", "updated_at"])
+            QuestionnairePrintReleaseService._audit_release(
+                action="DE_QUESTIONNAIRE_PRINT_RELEASE_REVOKED", release=row,
+                actor=actor, request=request, metadata={"reason": "contribution_correction"})
+        for row in key_rows:
+            row.status = AnswerKeyRelease.Status.REVOKED
+            row.active_marker = None
+            row.revoked_by = actor
+            row.revoked_at = now
+            row.full_clean()
+            row.save(update_fields=["status", "active_marker", "revoked_by", "revoked_at", "updated_at"])
+            AnswerKeyReleaseService._audit(
+                action="DE_ANSWER_KEY_RELEASE_REVOKED", release=row,
+                actor=actor, request=request, metadata={"reason": "contribution_correction"})
+
     @classmethod
     @transaction.atomic
     def reopen(
@@ -936,13 +1143,23 @@ class AutomaticContributionReopenService:
         actor,
         expected_revision,
         new_deadline,
+        reason=None,
+        selected_contribution_ids=(),
+        expected_state_token=None,
         request=None,
     ):
+        requested = CycleCourse.objects.select_related("cycle").filter(
+            pk=cycle_course_id, cycle__tenant_id=tenant_id).first()
+        if requested is None:
+            raise Http404
+        primary_id = resolve_examination_unit(requested).primary.id
         cycle, course, configuration = Stage5LockService.lock_cycle_course(
-            cycle_course_id=cycle_course_id,
+            cycle_course_id=primary_id,
             tenant_id=tenant_id,
         )
         unit = resolve_examination_unit(course, for_update=True)
+        if cycle_course_id not in unit.member_ids or unit.primary.id != course.id:
+            raise CourseExamConfigurationConflict("The grouped examination unit changed. Refresh and retry.")
         course = unit.primary
         configurations = {
             row.cycle_course_id: row
@@ -955,8 +1172,13 @@ class AutomaticContributionReopenService:
             user=actor,
             cycle_course=course,
         )
-        if cycle.status != ExaminationCycle.Status.OPEN:
-            raise ValidationError("Only an Open cycle permits contribution reopen.")
+        if cycle.processing_mode != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION or cycle.status not in (
+            ExaminationCycle.Status.OPEN, ExaminationCycle.Status.CLOSED
+        ):
+            raise ValidationError("Only an Automatic examination can be reopened for correction.")
+        reason = str(reason or "").strip()
+        if not 10 <= len(reason) <= 500:
+            raise ValidationError("A correction reason of 10 to 500 characters is required.")
         from .setup_services import automatic_structure_blockers
         structure_blockers = automatic_structure_blockers(course)
         if structure_blockers:
@@ -964,22 +1186,60 @@ class AutomaticContributionReopenService:
         if configuration is None or any(
             configurations.get(member.id) is None
             or configurations[member.id].workflow_status
-            != CourseExamConfiguration.WorkflowStatus.CLOSED
+            not in (CourseExamConfiguration.WorkflowStatus.OPEN,
+                    CourseExamConfiguration.WorkflowStatus.CLOSED)
             for member in unit.members
         ):
-            raise ValidationError("Only a closed automatic contribution intake may be reopened.")
+            raise ValidationError("The grouped contribution intake must already be open or closed.")
         if configuration.revision != expected_revision:
             raise CourseExamConfigurationConflict(
                 "The course configuration changed after this page was loaded."
             )
         now = timezone.now()
-        for member in unit.members:
-            CourseExamConfigurationService.require_existing_intake_deadline(
-                configurations[member.id], now=now,
-            )
+        if expected_state_token is not None and expected_state_token != cls.state_token(course):
+            raise CourseExamConfigurationConflict("The grouped correction state changed. Refresh and retry.")
+        if any(configurations[member.id].active_contribution_deadline is None for member in unit.members):
+            raise ValidationError("Every grouped course needs an existing contribution deadline.")
         normalized_deadline = normalize_contribution_deadline_to_minute(new_deadline)
         if normalized_deadline is None or normalized_deadline <= now:
             raise ValidationError("The new contribution deadline must be in the future.")
+
+        try:
+            selected_ids = tuple(int(value) for value in selected_contribution_ids)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Selected contributions are invalid. Refresh and retry.") from exc
+        if len(selected_ids) != len(set(selected_ids)):
+            raise CourseExamConfigurationConflict("Selected contributions changed. Refresh and retry.")
+        # Follow the generation path's blueprint -> contribution -> content lock order.
+        list(ExamBlueprint.objects.select_for_update().filter(
+            cycle_course_id__in=unit.member_ids).order_by("id"))
+        locked_cases = list(ExamScenario.objects.select_for_update().filter(
+            blueprint__cycle_course_id__in=unit.member_ids, active_marker=1).order_by("id"))
+        locked_members = list(ExamScenarioMember.objects.select_for_update().filter(
+            scenario_id__in=[row.id for row in locked_cases], active_marker=1
+        ).select_related("question__contribution", "scenario__blueprint").order_by("id"))
+        contributions = list(FacultyContribution.objects.select_for_update().filter(
+            cycle_course_id__in=unit.member_ids, active_marker=1).order_by("id"))
+        selected = [row for row in contributions if row.id in selected_ids]
+        if len(selected) != len(selected_ids) or any(
+            row.status != FacultyContribution.Status.SUBMITTED for row in selected
+        ):
+            raise CourseExamConfigurationConflict("Selected submissions changed. Refresh and retry.")
+        successor_ids = []
+        question_ids = {}
+        admin_case_ids = {}
+        for row in selected:
+            successor = cls._draft_successor(
+                row, actor=actor, configuration=configurations[row.cycle_course_id],
+                reason=reason, now=now, request=request, question_ids_out=question_ids)
+            successor_ids.append(successor.id)
+        if selected:
+            admin_case_ids = cls._copy_admin_cases(
+                cases=locked_cases, members=locked_members, question_ids=question_ids,
+                unit=unit, actor=actor,
+            )
+            from .duplicate_contract import reconcile
+            reconcile(course)
 
         revisions = list(
             ExamGenerationRevision.objects.select_for_update()
@@ -1005,15 +1265,19 @@ class AutomaticContributionReopenService:
                 metadata={"stale_after_reopen": True},
             )
 
+        cls._revoke_releases(course=course, unit=unit, actor=actor, request=request, now=now)
+
         for member in unit.members:
             member_configuration = configurations[member.id]
             before_revision = member_configuration.revision
+            previous_deadline = member_configuration.active_contribution_deadline
             member_configuration.workflow_status = (
                 CourseExamConfiguration.WorkflowStatus.OPEN
             )
             member_configuration.closed_at = None
             member_configuration.closed_by = None
             member_configuration.reopened_contribution_deadline = normalized_deadline
+            member_configuration.closed_cycle_correction_active = True
             member_configuration.revision += 1
             member_configuration.automatic_processing_status = ""
             member_configuration.automatic_processing_code = ""
@@ -1024,6 +1288,7 @@ class AutomaticContributionReopenService:
                     "closed_at",
                     "closed_by",
                     "reopened_contribution_deadline",
+                    "closed_cycle_correction_active",
                     "revision",
                     "automatic_processing_status",
                     "automatic_processing_code",
@@ -1055,7 +1320,12 @@ class AutomaticContributionReopenService:
                     ),
                     "previous_configuration_revision": before_revision,
                     "resulting_configuration_revision": member_configuration.revision,
+                    "previous_deadline": previous_deadline,
                     "new_deadline": normalized_deadline,
+                    "reason": reason,
+                    "returned_contribution_ids": list(selected_ids),
+                    "draft_successor_ids": successor_ids,
+                    "admin_case_successor_ids": admin_case_ids,
                     "superseded_generation_revision": (
                         current.revision_number if current else None
                     ),
@@ -1295,7 +1565,7 @@ class AutomaticGenerationSummaryService:
             .select_related("course", "configuration")
             .prefetch_related(
                 "offering_snapshots__campus",
-                "faculty_contributions",
+                Prefetch("faculty_contributions", queryset=FacultyContribution.objects.filter(active_marker=1)),
                 Prefetch(
                     "generation_revisions",
                     queryset=ExamGenerationRevision.objects.filter(
@@ -1385,6 +1655,7 @@ class AutomaticGenerationSummaryService:
                     contribution
                     for member in unit.members
                     for contribution in member.faculty_contributions.all()
+                    if contribution.active_marker == 1
                 ),
                 key=lambda contribution: (
                     contribution.cycle_course_id,
@@ -1404,12 +1675,12 @@ class AutomaticGenerationSummaryService:
             common = {
                 "course": course,
                 "can_reopen": (
-                    cycle.status == ExaminationCycle.Status.OPEN
+                    cycle.status in (ExaminationCycle.Status.OPEN, ExaminationCycle.Status.CLOSED)
                     and (not current or current.status != ExamGenerationRevision.Status.LOCKED)
                     and all(
                         getattr(member, "configuration", None)
-                        and member.configuration.workflow_status == "CLOSED"
-                        and CourseExamConfigurationService.reopen_deadline_available(member.configuration, now=now)
+                        and member.configuration.workflow_status in ("OPEN", "CLOSED")
+                        and member.configuration.active_contribution_deadline is not None
                         for member in unit.members
                     )
                 ),

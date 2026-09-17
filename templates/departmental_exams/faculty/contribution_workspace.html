@@ -60,8 +60,10 @@
   <div class="alert alert-danger" data-import-error role="alert" hidden></div>
 {% elif contribution.status == 'SUBMITTED' %}
   <div class="alert alert-success"><strong>Submitted and read-only.</strong> Submitted {{ contribution.submitted_at|date:"M j, Y g:i A" }}. Your questions remain visible to you, but no further changes are allowed.</div>
+{% elif contribution.supersedes_id %}
+  <div class="alert {% if is_mutable %}alert-info{% else %}alert-warning{% endif %}"><strong>Returned Draft{% if not is_mutable %} — read-only{% endif %}.</strong> Your questions and Cases were copied for correction until the deadline shown above. Your prior submission remains preserved in the exam history.</div>
 {% elif reopened_draft %}
-  <div class="alert alert-info"><strong>Reopened Draft.</strong> An authorized administrator reopened this existing Draft until the deadline shown above. Historical assignment and roster status remain unchanged.</div>
+  <div class="alert alert-info"><strong>Reopened Draft.</strong> An authorized administrator reopened this Draft until the deadline shown above. Historical assignment and roster status remain unchanged.</div>
 {% elif contribution.roster_status == 'BLOCKED' %}
   <div class="alert alert-warning"><strong>This Draft is blocked and read-only.</strong> Your current teaching-assignment eligibility is no longer valid. Your saved content remains private and visible here; contact an authorized administrator.</div>
 {% elif live_eligibility_read_only %}
@@ -83,6 +85,17 @@
     <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:csv_template' contribution.id %}">Download CSV template</a>
     {% if saved_count == quota %}<a class="btn btn-success" href="{% url 'departmental_exams:contribution_submit' contribution.id %}">Final submission</a>{% endif %}
   </div>
+  {% if saved_count %}
+  <form id="bulk-question-delete-form" method="post" action="{% url 'departmental_exams:question_bulk_delete' contribution.id %}" class="card card-body mb-3" data-bulk-question-form>
+    {% csrf_token %}<input type="hidden" name="expected_contribution_revision" value="{{ contribution.revision }}">
+    <div class="d-flex flex-wrap align-items-end gap-3">
+      <div><label class="form-label" for="bulk-question-filter">Show questions</label><select id="bulk-question-filter" class="form-select" data-bulk-question-filter><option value="all">All</option><option value="EASY">Easy</option><option value="MODERATE">Moderate</option><option value="DIFFICULT">Difficult</option><option value="linked">Case linked</option><option value="standalone">Standalone</option></select></div>
+      <label class="form-check"><input class="form-check-input" type="checkbox" data-bulk-select-all> <span class="form-check-label">Select all visible questions</span></label>
+      <button class="btn btn-outline-danger" type="submit" data-bulk-delete-button disabled>Delete selected questions (<span data-bulk-selected-count>0</span>)</button>
+    </div>
+    <p class="small text-muted mt-2 mb-0">Filtering clears selections that become hidden. Deleting linked questions leaves their Case in place. Add replacements within a reviewer Case before submission; a Faculty Case can be resolved or deleted separately.</p>
+  </form>
+  {% endif %}
 {% endif %}
 {% if case_authoring_enabled %}
   <p class="small text-muted">Question numbers follow section and Case order, not the order you added questions. These are workspace numbers, not final exam item numbers.</p>
@@ -95,19 +108,22 @@
         <div class="card-header d-flex flex-wrap justify-content-between gap-2">
           <div>
             <div><strong>{{ scenario.title|default:"Case / Scenario" }}</strong>{% if scenario.section %} <span class="badge text-bg-secondary">{{ scenario.section.title }}</span>{% endif %}</div>
-            <div class="small text-muted">{{ scenario.ordered_members|length }} Linked Question{{ scenario.ordered_members|length|pluralize }}</div>
+            <div class="small text-muted">{% if scenario.is_correction_admin %}{{ scenario.ordered_members|length }} of your Linked Question{{ scenario.ordered_members|length|pluralize }} in this reviewer Case{% else %}{{ scenario.ordered_members|length }} Linked Question{{ scenario.ordered_members|length|pluralize }}{% endif %}</div>
           </div>
           <div class="d-flex flex-wrap align-items-center gap-2">
             <button id="workspace-case-toggle-{{ scenario.id }}" class="btn btn-sm btn-outline-secondary tmp-case-collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#workspace-case-{{ scenario.id }}" aria-expanded="false" aria-controls="workspace-case-{{ scenario.id }}"><span data-case-collapse-label>Show Case</span></button>
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:faculty_case_detail' contribution.id scenario.id %}">View Case</a>
+            {% if scenario.is_correction_admin %}
+              {% if is_mutable and not quota_reached %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:faculty_case_question_create' contribution.id scenario.id %}">Add replacement Linked Question</a>{% endif %}
+            {% else %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:faculty_case_detail' contribution.id scenario.id %}">View Case</a>{% endif %}
           </div>
         </div>
         <div id="workspace-case-{{ scenario.id }}" class="collapse tmp-case-collapse" role="region" aria-labelledby="workspace-case-toggle-{{ scenario.id }}"><div class="card-body">
           <div class="tmp-case-content mb-3" data-scientific-content>{{ scenario.stimulus|scenario_content:scenario.content_format }}</div>
+          {% if scenario.is_correction_admin and scenario.case_member_count < 2 %}<div class="alert alert-warning">This corrected reviewer Case has fewer than two current Linked Questions. Add corrected Linked Questions within this Case before Final Submission and generation.{% if quota_reached and is_mutable %} Delete an incorrect saved question to make room first.{% endif %}</div>{% endif %}
           {% for member in scenario.ordered_members %}
-            {% include "departmental_exams/faculty/_question_card.html" with question=member.question show_global_reorder=False %}
+            {% include "departmental_exams/faculty/_question_card.html" with question=member.question linked=True show_global_reorder=False %}
           {% empty %}
-            <div class="alert alert-warning mb-0">This Case has no Linked Questions yet.</div>
+            <div class="alert alert-warning mb-0">{% if scenario.is_correction_admin %}Your questions were removed from this reviewer Case. Add corrected Linked Questions within this Case; it needs at least two current Linked Questions before Final Submission and generation.{% if quota_reached and is_mutable %} Delete an incorrect saved question to make room for a replacement.{% endif %}{% else %}This Case has no Linked Questions yet.{% endif %}</div>
           {% endfor %}
         </div></div>
       </article>
@@ -151,6 +167,7 @@
 {% endblock %}
 {% block extra_js %}{{ block.super }}
 <script src="{% static 'js/departmental_exam_case_disclosure.js' %}?v=case-navigation-20260914"></script>
+<script src="{% static 'js/departmental_exam_bulk_question_delete.js' %}?v=20260917"></script>
 <script>
 (() => {
   const list = document.getElementById("question-list");

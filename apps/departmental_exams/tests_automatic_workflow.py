@@ -105,6 +105,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             cycle_course_id=parent.id, tenant_id=self.tenant.id,
             actor=self.generation_manager, expected_revision=configuration.revision,
             new_deadline=configuration.active_contribution_deadline + timezone.timedelta(hours=1),
+            reason="Extend contribution correction window.",
         )
         self.assertEqual(before, list(FacultyContributionEligibilitySource.objects.filter(
             contribution__cycle_course=parent).order_by("id").values("id", "is_current", "invalidated_at")))
@@ -149,24 +150,20 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         AutomaticContributionReopenService.reopen(
             cycle_course_id=parent.id, tenant_id=self.tenant.id, actor=self.generation_manager,
             expected_revision=configuration.revision, new_deadline=self.future_deadline(),
+            reason="Restore an unfinished faculty draft.",
         )
         source.refresh_from_db()
         self.assertFalse(source.is_current)
         self.assertEqual(source.contribution.roster_status, "BLOCKED")
         self.assertEqual(FacultyContribution.objects.filter(cycle_course=parent, roster_status="ACTIVE").count(), 2)
 
-    def test_reopen_deadline_boundary_and_direct_open_preserve_all_state(self):
+    def test_direct_ordinary_open_preserves_state_at_deadline_boundary(self):
         from .services import CourseExamConfigurationService
         parent, configuration, _ = self._ready_automatic_course(due=False, clear_manual_assignment=False)
         deadline = configuration.active_contribution_deadline
         before = self._correction_state()
         for now in (deadline, deadline + timezone.timedelta(microseconds=1)):
             with self.subTest(now=now), patch("django.utils.timezone.now", return_value=now):
-                with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
-                    AutomaticContributionReopenService.reopen(
-                        cycle_course_id=parent.id, tenant_id=self.tenant.id, actor=self.generation_manager,
-                        expected_revision=configuration.revision, new_deadline=deadline + timezone.timedelta(days=2),
-                    )
                 for service in (CourseExamConfigurationService.open_for_contribution,
                                 CourseExamConfigurationService.reopen_contribution):
                     with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
@@ -174,31 +171,34 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                                 user=self.generation_manager, expected_revision=configuration.revision)
                 self.assertEqual(before, self._correction_state())
 
-    def test_expired_reopen_get_post_and_summary_have_no_action(self):
+    def test_expired_reopen_get_post_and_summary_offer_correction(self):
         parent, configuration, _ = self._ready_automatic_course()
         client = Client()
         client.force_login(self.generation_manager)
         url = reverse("departmental_exams:automatic_contribution_reopen", args=[parent.id])
-        before = self._correction_state()
-        for response in (client.get(url), client.post(url, {
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'type="submit"')
+        response = client.post(url, {
             "expected_revision": configuration.revision,
+            "expected_state_token": response.context["form"]["expected_state_token"].value(),
             "new_deadline": self.future_deadline().strftime("%Y-%m-%dT%H:%M"),
-        })):
-            self.assertEqual(response.status_code, 400)
-            self.assertContains(response, "cannot be reopened", status_code=400)
-            self.assertNotContains(response, 'type="submit"', status_code=400)
-        self.assertEqual(before, self._correction_state())
+            "reason": "Restore this expired contribution intake.",
+        })
+        self.assertEqual(response.status_code, 302)
         response = client.get(reverse("departmental_exams:automatic_generation_summary", args=[parent.cycle_id]))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, url)
         response = client.get(reverse("departmental_exams:assigned_course_examinations"))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, url)
         for route in ("course_contribution_open", "course_contribution_reopen"):
             ordinary_url = reverse("departmental_exams:" + route, args=[parent.id])
             self.assertEqual(client.get(ordinary_url).status_code, 404)
-            self.assertEqual(client.post(ordinary_url, {"expected_revision": configuration.revision}).status_code, 404)
-        self.assertEqual(before, self._correction_state())
+            self.assertEqual(
+                client.post(ordinary_url, {"expected_revision": configuration.revision}).status_code,
+                409 if route == "course_contribution_open" else 404,
+            )
+        configuration.refresh_from_db()
+        self.assertEqual(configuration.workflow_status, "OPEN")
 
     def test_sufficient_pool_excludes_blocked_drafts_without_mutating_them(self):
         parent, configuration, _ = self._ready_automatic_course()
@@ -2498,19 +2498,22 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertEqual(controls["reason"]["tag"], "textarea")
         self.assertNotIn("disabled", controls["reason"]["attributes"])
 
-    def test_expired_reopen_preserves_current_generation_and_submissions(self):
+    def test_expired_reopen_supersedes_current_generation_and_preserves_submissions(self):
         parent, configuration, problem = self._ready_automatic_course()
         self._process_with_proved_selection(parent=parent, problem=problem)
-        before = self._correction_state()
-        with self.assertRaisesMessage(ValidationError, "effective contribution deadline"):
-            AutomaticContributionReopenService.reopen(
-                cycle_course_id=parent.id, tenant_id=self.tenant.id,
-                actor=self.generation_manager, expected_revision=configuration.revision,
-                new_deadline=timezone.now() + timezone.timedelta(days=1),
-            )
-        self.assertEqual(before, self._correction_state())
+        submitted_ids = list(FacultyContribution.objects.filter(
+            cycle_course=parent, status="SUBMITTED").values_list("id", flat=True))
+        AutomaticContributionReopenService.reopen(
+            cycle_course_id=parent.id, tenant_id=self.tenant.id,
+            actor=self.generation_manager, expected_revision=configuration.revision,
+            new_deadline=timezone.now() + timezone.timedelta(days=1),
+            reason="Correct the generated examination sources.",
+        )
+        self.assertFalse(ExamGenerationRevision.objects.filter(cycle_course=parent, current_marker=1).exists())
+        self.assertEqual(submitted_ids, list(FacultyContribution.objects.filter(
+            cycle_course=parent, status="SUBMITTED").values_list("id", flat=True)))
         summary = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
-        self.assertFalse(summary["generated"][0]["can_reopen"])
+        self.assertTrue(summary["not_generated"][0]["can_reopen"])
 
     def test_summary_is_generated_first_content_safe_and_scope_denies_win(self):
         parent, _configuration, problem = self._ready_automatic_course(
@@ -3069,18 +3072,19 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             scenario_ids,
         )
 
-    def test_expired_reopen_post_preserves_flat_generation(self):
+    def test_expired_reopen_post_supersedes_flat_generation(self):
         parent, configuration, problem = self._ready_automatic_course()
         self._process_with_proved_selection(parent=parent, problem=problem)
         client = Client()
         client.force_login(self.generation_manager)
-        before = self._correction_state()
         response = client.post(reverse("departmental_exams:automatic_contribution_reopen", args=[parent.id]), {
             "expected_revision": configuration.revision,
+            "expected_state_token": AutomaticContributionReopenService.state_token(parent),
             "new_deadline": self.future_deadline().strftime("%Y-%m-%dT%H:%M"),
+            "reason": "Correct the generated flat examination.",
         })
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(before, self._correction_state())
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(ExamGenerationRevision.objects.filter(cycle_course=parent, current_marker=1).exists())
         self.assertEqual(ExamBlueprint.objects.get(cycle_course=parent).mode, "NO_SECTIONS")
 
     def test_null_department_blueprint_placement_and_scenario_audits_are_safe(self):

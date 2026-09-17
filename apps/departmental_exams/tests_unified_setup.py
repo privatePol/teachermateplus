@@ -879,7 +879,8 @@ class UnifiedSetupTests(Stage4TestCase):
         with self.assertRaisesMessage(ValidationError, "Explicit Exam Sections"):
             AutomaticContributionReopenService.reopen(cycle_course_id=course.id,
                 tenant_id=self.tenant.id, actor=self.bulk_manager,
-                expected_revision=configuration.revision, new_deadline=self.future_deadline())
+                expected_revision=configuration.revision, new_deadline=self.future_deadline(),
+                reason="Correct the automatic intake structure.")
         report = Stage6ReadinessService.evaluate(cycle_course=course)
         self.assertIn("AUTOMATIC_STRUCTURE_UNSUPPORTED", {b["code"] for b in report["blockers"]})
         configuration.refresh_from_db()

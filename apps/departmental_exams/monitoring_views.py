@@ -193,7 +193,7 @@ def _course_contributions(course):
     contributions = getattr(course, "monitoring_contributions", None)
     if contributions is not None:
         return contributions
-    return list(course.faculty_contributions.all())
+    return list(course.faculty_contributions.filter(active_marker=1))
 
 
 def _decorate_contribution_metrics(courses):
@@ -522,12 +522,13 @@ def contributor_monitoring_draft_print_view(request, cycle_id):
             cycle_id=cycle_id,
             inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
             faculty_contributions__status=FacultyContribution.Status.DRAFT,
+            faculty_contributions__active_marker=1,
         )
         .distinct()
         .order_by("course__code", "course__title", "id")
     )
     for course in courses:
-        course.monitoring_contributions = list(course.faculty_contributions.all())
+        course.monitoring_contributions = list(course.faculty_contributions.filter(active_marker=1))
     _decorate_contribution_metrics(courses)
     _decorate_contributor_locations(courses=courses, tenant_id=tenant_id)
     faculty_summary = _faculty_contribution_summary(
@@ -599,7 +600,7 @@ def contributor_monitoring_faculty_submission_print_view(request, cycle_id):
     )
     qualifying_contributions = []
     for course in courses:
-        for contribution in course.faculty_contributions.all():
+        for contribution in course.faculty_contributions.filter(active_marker=1):
             if (
                 contribution.status
                 in (

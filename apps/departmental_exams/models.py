@@ -848,6 +848,8 @@ class CourseExamConfiguration(TimeStampedModel):
     )
     automatic_processing_code = models.CharField(max_length=64, blank=True, default="")
     automatic_processed_at = models.DateTimeField(null=True, blank=True)
+    # A reasoned Automatic correction may finish after its cycle has closed.
+    closed_cycle_correction_active = models.BooleanField(default=False)
 
     objects = _CourseExamConfigurationQuerySet.as_manager()
 
@@ -1032,11 +1034,20 @@ class FacultyContribution(TimeStampedModel):
     roster_blocked_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
     submitted_at = models.DateTimeField(null=True, blank=True)
+    active_marker = models.PositiveSmallIntegerField(null=True, blank=True, default=1)
+    supersedes = models.OneToOneField(
+        "self", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="correction_successor",
+    )
 
     class Meta:
         db_table = "departmental_exam_faculty_contributions"
         constraints = [
-            models.UniqueConstraint(fields=["cycle_course", "faculty_user"], name="uq_de_contribution_faculty_course"),
+            models.UniqueConstraint(fields=["cycle_course", "faculty_user", "active_marker"], name="uq_de_contribution_current"),
+            models.CheckConstraint(
+                condition=models.Q(active_marker=1) | models.Q(active_marker__isnull=True),
+                name="ck_de_contribution_active_marker",
+            ),
             models.CheckConstraint(
                 condition=models.Q(quota_snapshot__gte=50, quota_snapshot__lte=75),
                 name="ck_de_contrib_quota_50_75",
@@ -1062,6 +1073,7 @@ class FacultyContribution(TimeStampedModel):
         ]
         indexes = [
             models.Index(fields=["faculty_user", "status"], name="idx_de_contrib_user_status"),
+            models.Index(fields=["cycle_course", "active_marker", "status"], name="idx_de_contrib_current"),
             models.Index(
                 fields=["cycle_course", "status", "roster_status"],
                 name="idx_de_contrib_monitor",
@@ -1195,6 +1207,14 @@ class Question(TimeStampedModel):
             ),
         ]
         indexes = [models.Index(fields=["contribution", "difficulty"], name="idx_de_q_contrib_difficulty")]
+
+    @property
+    def exam_scenario_membership(self):
+        """The current Case link; old revisions may retain historical links."""
+        prefetched = getattr(self, "_current_case_memberships", None)
+        if prefetched is not None:
+            return prefetched[0] if prefetched else None
+        return self.exam_scenario_memberships.filter(active_marker=1).select_related("scenario").first()
 
 
 class QuestionIdentityReservation(models.Model):
@@ -2114,6 +2134,11 @@ class ExamScenario(TimeStampedModel):
         default=ContentFormat.PLAIN_TEXT,
     )
     revision = models.PositiveIntegerField(default=1)
+    active_marker = models.PositiveSmallIntegerField(default=1, null=True, blank=True)
+    supersedes = models.OneToOneField(
+        "self", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="correction_successor",
+    )
     created_by = models.ForeignKey(
         "accounts.User",
         on_delete=models.PROTECT,
@@ -2131,7 +2156,11 @@ class ExamScenario(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(revision__gte=1),
                 name="ck_de_scenario_revision",
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(active_marker=1) | models.Q(active_marker__isnull=True),
+                name="ck_de_scenario_active_marker",
+            ),
         ]
         indexes = [
             models.Index(
@@ -2179,12 +2208,13 @@ class ExamScenarioMember(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="members",
     )
-    question = models.OneToOneField(
+    question = models.ForeignKey(
         Question,
         on_delete=models.PROTECT,
-        related_name="exam_scenario_membership",
+        related_name="exam_scenario_memberships",
     )
     position = models.PositiveSmallIntegerField()
+    active_marker = models.PositiveSmallIntegerField(default=1, null=True, blank=True)
 
     class Meta:
         db_table = "departmental_exam_scenario_members"
@@ -2196,6 +2226,14 @@ class ExamScenarioMember(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(position__gte=1),
                 name="ck_de_scenario_member_position",
+            ),
+            models.UniqueConstraint(
+                fields=["question", "active_marker"],
+                name="uq_de_current_case_question",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(active_marker=1) | models.Q(active_marker__isnull=True),
+                name="ck_de_member_active_marker",
             ),
         ]
         indexes = [
@@ -2221,7 +2259,17 @@ class ExamScenarioMember(TimeStampedModel):
                         "Faculty Case membership may be changed only while the contribution is Draft."
                     )
             elif contribution.status != FacultyContribution.Status.SUBMITTED:
-                raise ValidationError("Only Submitted questions may belong to reviewer scenarios.")
+                from .faculty_case_services import FacultyCasePolicy
+                from django.http import Http404
+                try:
+                    FacultyCasePolicy.correction_admin_case(
+                        contribution=contribution, scenario_id=self.scenario_id,
+                        tenant_id=contribution.cycle_course.cycle.tenant_id,
+                    )
+                except Http404 as exc:
+                    raise ValidationError(
+                        "Only Submitted questions or their correction Draft copies may belong to reviewer scenarios."
+                    ) from exc
 
 
 class ExamGenerationRevision(TimeStampedModel):

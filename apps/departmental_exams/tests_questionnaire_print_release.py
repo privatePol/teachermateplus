@@ -957,14 +957,14 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             ).exists()
         )
 
-    def test_bulk_current_only_does_not_change_individual_historical_release(self):
+    def test_automatic_individual_release_rejects_historical_revision(self):
         superseded = self.r2
         self._newer_revision(self.parent, superseded)
 
-        release = self._release(revision=superseded)
+        with self.assertRaises(ValidationError):
+            self._release(revision=superseded)
 
-        self.assertEqual(release.generation_revision_id, superseded.id)
-        self.assertEqual(release.status, QuestionnairePrintRelease.Status.ACTIVE)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
 
     def test_bulk_release_applies_same_window_to_each_record(self):
         second_parent, second_revision = self._second_bulk_target()

@@ -352,7 +352,8 @@ class QuestionCSVImportService:
                 value, content_format
             )
             for value, content_format in Question.objects.filter(
-                contribution__faculty_user=user
+                contribution__faculty_user=user,
+                contribution__active_marker=1,
             ).values_list("question_text", "content_format")
         }
         seen_fingerprints = set()

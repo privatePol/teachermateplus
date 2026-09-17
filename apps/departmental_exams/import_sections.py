@@ -55,7 +55,7 @@ def validate_import_placements(*, questions, section, actor_id):
     placements = list(QuestionBlueprintPlacement.objects.select_for_update().filter(
         question_id__in=question_ids,
     ))
-    if ExamScenarioMember.objects.filter(question_id__in=question_ids).exists():
+    if ExamScenarioMember.objects.filter(question_id__in=question_ids, active_marker=1).exists():
         raise ValidationError("Imported standalone questions cannot be linked to a Case.")
     if section is None:
         valid = not placements

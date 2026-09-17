@@ -662,6 +662,7 @@ class FacultyAnswerKeyReleaseService:
             or not actor.is_authenticated
             or not actor.is_active
             or actor.id != contribution.faculty_user_id
+            or contribution.active_marker != 1
         ):
             raise PermissionDenied("Answer Key access is unavailable.")
         normalized_set = (set_code or "").strip().upper()

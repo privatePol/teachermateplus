@@ -55,6 +55,20 @@ def stage6_cycle_is_open(cycle):
     return cycle.status == cycle.Status.OPEN
 
 
+def automatic_correction_cycle_allowed(cycle_course, configuration=None):
+    """Permit only a specifically reopened Automatic unit in a Closed cycle."""
+    cycle = cycle_course.cycle
+    if stage6_cycle_is_open(cycle):
+        return True
+    configuration = configuration or getattr(cycle_course, "configuration", None)
+    return bool(
+        cycle.status == cycle.Status.CLOSED
+        and cycle.processing_mode == cycle.ProcessingMode.AUTOMATIC_GENERATION
+        and configuration is not None
+        and configuration.closed_cycle_correction_active
+    )
+
+
 def require_stage6_open_cycle(cycle, *, conflict_class=Stage6Conflict):
     if not stage6_cycle_is_open(cycle):
         raise conflict_class(STAGE6_CYCLE_NOT_OPEN_MESSAGE)
@@ -178,7 +192,7 @@ class ContributorRosterReadinessService:
             )
 
         contributions = list(
-            FacultyContribution.objects.filter(cycle_course=cycle_course)
+            FacultyContribution.objects.filter(cycle_course=cycle_course, active_marker=1)
             .prefetch_related("eligibility_sources", "blocked_resolution_events")
             .order_by("id")
         )
@@ -358,6 +372,7 @@ class BlockedContributionResolutionService:
     ):
         identity = FacultyContribution.objects.filter(
             pk=contribution_id,
+            active_marker=1,
             cycle_course__cycle__tenant_id=tenant_id,
         ).values("cycle_course_id").first()
         if identity is None:
@@ -377,7 +392,7 @@ class BlockedContributionResolutionService:
         contribution = (
             FacultyContribution.objects.select_for_update()
             .prefetch_related("eligibility_sources")
-            .get(pk=contribution_id, cycle_course=cycle_course)
+            .get(pk=contribution_id, active_marker=1, cycle_course=cycle_course)
         )
         list(
             FacultyContributionEligibilitySource.objects.select_for_update()
@@ -927,6 +942,7 @@ def _stage6_question_identity(*, question_id, tenant_id):
     identity = Question.objects.filter(
         pk=question_id,
         contribution__cycle_course__cycle__tenant_id=tenant_id,
+        contribution__active_marker=1,
     ).values("contribution__cycle_course_id").first()
     if identity is None:
         raise Http404
@@ -952,6 +968,7 @@ def _lock_stage6_questions(*, cycle_course, question_ids):
             pk__in=question_ids,
             contribution__cycle_course=cycle_course,
             contribution__status=FacultyContribution.Status.SUBMITTED,
+            contribution__active_marker=1,
         )
         .order_by("id")
     )
@@ -1058,6 +1075,7 @@ def get_stage6_question(*, question_id, tenant_id, for_update=False):
         pk=question_id,
         contribution__cycle_course__cycle__tenant_id=tenant_id,
         contribution__status=FacultyContribution.Status.SUBMITTED,
+        contribution__active_marker=1,
         contribution__cycle_course__inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
     ).first()
     if question is None:
@@ -1175,7 +1193,7 @@ class ScenarioMutationService:
         scenario = None
         if scenario_id is not None:
             scenario = ExamScenario.objects.select_for_update().filter(
-                pk=scenario_id, blueprint=blueprint, contribution__isnull=True
+                pk=scenario_id, blueprint=blueprint, contribution__isnull=True, active_marker=1
             ).first()
             if scenario is None:
                 raise Http404
@@ -1188,7 +1206,7 @@ class ScenarioMutationService:
             member_filter |= Q(scenario=scenario)
         locked_members = list(
             ExamScenarioMember.objects.select_for_update()
-            .filter(member_filter)
+            .filter(member_filter, active_marker=1)
             .order_by("id")
         )
         if any(
@@ -1266,6 +1284,7 @@ class ScenarioMutationService:
         identity = ExamScenario.objects.filter(
             pk=scenario_id,
             contribution__isnull=True,
+            active_marker=1,
             blueprint__cycle_course__cycle__tenant_id=tenant_id,
         ).values("blueprint__cycle_course_id").first()
         if identity is None:
@@ -1281,7 +1300,7 @@ class ScenarioMutationService:
         if blueprint is None:
             raise Http404
         scenario = ExamScenario.objects.select_for_update().get(
-            pk=scenario_id, blueprint=blueprint, contribution__isnull=True
+            pk=scenario_id, blueprint=blueprint, contribution__isnull=True, active_marker=1
         )
         if scenario.revision != expected_revision:
             raise Stage6Conflict("The scenario changed after the page was loaded.")

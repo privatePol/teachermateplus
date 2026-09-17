@@ -425,11 +425,12 @@ class ContributionAuthorizationService:
         cycle_course = contribution.cycle_course
         cycle = cycle_course.cycle
         now = now or timezone.now()
+        from .blueprint_services import automatic_correction_cycle_allowed
         if (
             not user
             or user != contribution.faculty_user
             or contribution.status != FacultyContribution.Status.DRAFT
-            or cycle.status != cycle.Status.OPEN
+            or not automatic_correction_cycle_allowed(cycle_course, configuration)
             or cycle.processing_mode != cycle.ProcessingMode.AUTOMATIC_GENERATION
             or cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
             or configuration is None
@@ -467,7 +468,12 @@ class ContributionAuthorizationService:
             )
         }
         authorized_historical_scope = any(
-            source.eligibility_proven_at is not None
+            (source.eligibility_proven_at is not None or (
+                contribution.supersedes_id is not None
+                and contribution.supersedes.status == FacultyContribution.Status.SUBMITTED
+                and contribution.supersedes.faculty_user_id == contribution.faculty_user_id
+                and contribution.supersedes.cycle_course_id == contribution.cycle_course_id
+            ))
             and source.tenant_id_snapshot == cycle.tenant_id
             and (source.offering_id_snapshot, source.campus_id_snapshot)
             in valid_offering_scopes
@@ -573,9 +579,12 @@ class ContributionAuthorizationService:
         )
         if user != contribution.faculty_user:
             raise PermissionDenied("Only the contribution owner may make changes.")
+        if contribution.active_marker != 1:
+            raise PermissionDenied("This contribution is historical and read-only.")
         if contribution.status != FacultyContribution.Status.DRAFT:
             raise PermissionDenied("Submitted contributions are read-only.")
-        if cycle.status != cycle.Status.OPEN:
+        from .blueprint_services import automatic_correction_cycle_allowed
+        if not automatic_correction_cycle_allowed(cycle_course, configuration):
             raise PermissionDenied("The examination cycle is not open.")
         if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             raise PermissionDenied("Exempt course examinations are read-only.")
