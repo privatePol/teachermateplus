@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from apps.core.services.settings import SystemSettingService
+from apps.tenants.models import SystemSetting
 
 
 class FeatureSettingsService:
@@ -10,6 +11,7 @@ class FeatureSettingsService:
     )
     DEPARTMENTAL_EXAM_DOCX_IMPORT_ENABLED_KEY = "FEATURE_DEPARTMENTAL_EXAM_DOCX_IMPORT_ENABLED"
     DEPARTMENTAL_EXAM_QUESTION_REUSE_ENABLED_KEY = "FEATURE_DEPARTMENTAL_EXAM_QUESTION_REUSE_ENABLED"
+    CONTRIBUTION_DEADLINE_REMINDER_ENABLED_KEY = "FEATURE_CONTRIBUTION_DEADLINE_REMINDER_ENABLED"
     CORRECTION_OFFICIAL_REPORT_ENABLED_KEY = "FEATURE_CORRECTION_OFFICIAL_REPORT_ENABLED"
     CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY = "FEATURE_CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED"
     CORRECTION_SUBMISSION_APPROVAL_EMAIL_ROLE_CODES_KEY = "FEATURE_CORRECTION_SUBMISSION_APPROVAL_EMAIL_ROLE_CODES"
@@ -867,6 +869,28 @@ class FeatureSettingsService:
     @classmethod
     def is_departmental_exam_builder_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
         return bool(SystemSettingService.get(cls.DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY, tenant_id=tenant_id, default=default))
+
+    @classmethod
+    def is_contribution_deadline_reminder_tenant_enabled(cls, *, tenant_id: int | None) -> bool:
+        if tenant_id is None:
+            return False
+        setting = SystemSetting.objects.filter(
+            setting_key=cls.CONTRIBUTION_DEADLINE_REMINDER_ENABLED_KEY,
+            tenant_id=tenant_id,
+            is_active=True,
+        ).first()
+        return bool(
+            setting
+            and setting.value_type == SystemSetting.ValueType.BOOL
+            and SystemSettingService._cast_value(setting.setting_value, setting.value_type)
+        )
+
+    @classmethod
+    def is_contribution_deadline_reminder_enabled(cls, *, tenant_id: int | None) -> bool:
+        return (
+            cls.is_departmental_exam_builder_enabled(tenant_id=tenant_id)
+            and cls.is_contribution_deadline_reminder_tenant_enabled(tenant_id=tenant_id)
+        )
 
     @classmethod
     def is_departmental_exam_structured_lifecycle_enabled(

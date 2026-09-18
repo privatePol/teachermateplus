@@ -1,0 +1,5 @@
+Your departmental exam contributions are due tomorrow. Please review and submit any pending work in your Faculty Portal Question Bank:
+
+{{ workspace_url }}
+
+If you have already submitted all applicable contributions, no further action is needed.

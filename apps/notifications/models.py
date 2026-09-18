@@ -382,3 +382,38 @@ class SubmissionReadinessNotificationLog(TimeStampedModel):
 
     def __str__(self):
         return f"{self.recipient_id}:{self.template_period_id}:{self.status}"
+
+
+class ContributionDeadlineReminderDelivery(TimeStampedModel):
+    """One durable delivery decision for a faculty member's local due date."""
+
+    class Status(models.TextChoices):
+        PREPARING = "PREPARING", "Preparing"
+        DISPATCHING = "DISPATCHING", "Dispatching"
+        SENT = "SENT", "Sent"
+        SKIPPED = "SKIPPED", "Skipped"
+        FAILED_PRE_SEND = "FAILED_PRE_SEND", "Failed before send"
+        UNCERTAIN = "UNCERTAIN", "Delivery uncertain"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT)
+    faculty_user = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
+    deadline_local_date = models.DateField()
+    policy_version = models.CharField(max_length=16, default="v1")
+    status = models.CharField(max_length=20, choices=Status.choices)
+    recipient_email = models.EmailField(blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    failure_code = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        db_table = "contribution_deadline_reminder_deliveries"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "faculty_user", "deadline_local_date", "policy_version"],
+                name="uq_de_reminder_tenant_user_date_policy",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["status", "claimed_at"], name="idx_de_reminder_status_claim"),
+        ]

@@ -1,3 +1,7 @@
+## Contribution deadline reminder (isolated implementation) - 2026-09-18
+
+- Added a default-off tenant setting and a daily command that sends one private Faculty Question Bank reminder per tenant, faculty member, and Manila deadline date at or after 09:00 on the preceding day. It rechecks current Draft authority before email, omits course/campus/question details, and records durable delivery decisions. An interrupted network-stage send is delivery-uncertain and is never automatically resent. Scheduling remains inactive; no live email or non-test migration was run.
+
 ## Question Bank workspace and question authoring UX - 2026-09-18
 
 - Added an authoritative saved/configured/remaining summary with progress, status, deadline, and compact preferred difficulty indicators. Saved question cards now use gradient stem headers, white choice bodies, and metadata footers. Draft actions stay accessible while scrolling; a filter-aware Question Index navigates standalone and Case questions without changing deletion selections.

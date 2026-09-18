@@ -3453,6 +3453,14 @@ class ConfigurableFeatureSettingForm(forms.Form):
             "contributor completion monitoring for this tenant."
         ),
     )
+    contribution_deadline_reminder_enabled = forms.BooleanField(
+        required=False,
+        label="Email faculty before contribution deadlines",
+        help_text=(
+            "Send one private reminder per faculty member and deadline date at 9:00 a.m. "
+            "Asia/Manila on the preceding calendar day, when scheduled delivery is enabled."
+        ),
+    )
     departmental_exam_structured_lifecycle_enabled = forms.BooleanField(
         required=False,
         label="Enable Structured Case/Scenario Exam Lifecycle",

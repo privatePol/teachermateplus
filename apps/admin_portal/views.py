@@ -4778,6 +4778,9 @@ def configurable_features_settings_view(request):
     current_departmental_exam_builder_enabled = FeatureSettingsService.is_departmental_exam_builder_enabled(
         tenant_id=tenant_id, default=False
     )
+    current_contribution_deadline_reminder_enabled = (
+        FeatureSettingsService.is_contribution_deadline_reminder_tenant_enabled(tenant_id=tenant_id)
+    )
     current_departmental_exam_structured_lifecycle_enabled = (
         FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
             tenant_id=tenant_id, default=False
@@ -4798,6 +4801,7 @@ def configurable_features_settings_view(request):
         request.POST or None,
         initial={
             "departmental_exam_builder_enabled": current_departmental_exam_builder_enabled,
+            "contribution_deadline_reminder_enabled": current_contribution_deadline_reminder_enabled,
             "departmental_exam_structured_lifecycle_enabled": (
                 current_departmental_exam_structured_lifecycle_enabled
             ),
@@ -4952,6 +4956,13 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY,
             bool(form.cleaned_data["departmental_exam_builder_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.CONTRIBUTION_DEADLINE_REMINDER_ENABLED_KEY,
+            bool(form.cleaned_data["contribution_deadline_reminder_enabled"]),
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
@@ -5477,6 +5488,7 @@ def configurable_features_settings_view(request):
             campus=getattr(request, "scope", {}).get("campus_id"),
             before_data={
                 "departmental_exam_builder_enabled": current_departmental_exam_builder_enabled,
+                "contribution_deadline_reminder_enabled": current_contribution_deadline_reminder_enabled,
                 "departmental_exam_structured_lifecycle_enabled": (
                     current_departmental_exam_structured_lifecycle_enabled
                 ),
@@ -5550,6 +5562,7 @@ def configurable_features_settings_view(request):
             },
             after_data={
                 "departmental_exam_builder_enabled": bool(form.cleaned_data["departmental_exam_builder_enabled"]),
+                "contribution_deadline_reminder_enabled": bool(form.cleaned_data["contribution_deadline_reminder_enabled"]),
                 "departmental_exam_structured_lifecycle_enabled": bool(
                     form.cleaned_data[
                         "departmental_exam_structured_lifecycle_enabled"
@@ -5716,6 +5729,7 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.FACULTY_ASSIGNMENT_PRIMARY_DEFAULT_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_REMINDER_CENTER_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_REMINDER_EMAIL_ENABLED_KEY,
+                    FeatureSettingsService.CONTRIBUTION_DEADLINE_REMINDER_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_MEMO_CENTER_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_QUICK_TOUR_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_QUICK_SCORE_ENCODING_KEY,
