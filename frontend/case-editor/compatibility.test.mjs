@@ -5,12 +5,12 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {readFileSync} from 'node:fs';
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {url:'http://localhost/',pretendToBeVisual:true});
-for (const key of ['window','document','DOMParser','Node','HTMLElement','Element','MutationObserver','getComputedStyle','navigator']) Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});
+for (const key of ['window','document','DOMParser','Node','HTMLElement','Element','MutationObserver','CustomEvent','getComputedStyle','navigator']) Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});
 globalThis.requestAnimationFrame=callback => setTimeout(callback,0);
 globalThis.cancelAnimationFrame=clearTimeout;
 const {createCaseEditor}=await import('./extensions.js');
 const {serializeEditor,normalizeClipboard,semanticSignature}=await import('./compatibility.js');
-const {mountCaseEditor}=await import('../../static/js/departmental_exam_case_editor.js');
+const {mountCaseEditor,mountQuestionEditors}=await import('../../static/js/departmental_exam_case_editor.js');
 function make(html='<p>Accounting ₱1,250</p>') { const host=document.createElement('div'); document.body.append(host); return createCaseEditor(host,html); }
 function cellPositions(editor) { const result=[]; editor.state.doc.descendants((node,pos) => { if (['tableCell','tableHeader'].includes(node.type.name)) result.push(pos); }); return result; }
 const rules = editor => cellPositions(editor).map(pos=>editor.state.doc.nodeAt(pos).attrs.accountingRule);
@@ -560,6 +560,42 @@ test('final bundle initializes an empty typing surface with matching local CSS',
     page.window.document.querySelector('[data-case-rich-editor]').click();assert.equal(page.window.document.activeElement,editable);
     assert.equal(page.window.document.querySelectorAll('[data-case-toolbar] [role=group]').length,7);
   } finally {page.window.close();}
+});
+
+test('question advanced tools keep the selected table cell when expanded', () => {
+  const form=document.createElement('form');
+  form.dataset.questionEditorForm='';
+  form.innerHTML=`<input name="content_format" value="RICH_HTML_V1"><input name="csrfmiddlewaretoken" value="test">
+    <textarea name="question_text"></textarea>
+    <section data-question-rich-field="question_text" data-question-field-label="Question stem" data-question-editor-help="help">
+      <div data-question-toolbar></div>
+      <div data-question-rich-editor><table><tr><td>First</td><td>Second</td></tr></table></div>
+      <div data-question-field-errors hidden></div>
+      <section data-question-paste-recovery hidden><textarea data-question-clipboard-html></textarea><textarea data-question-clipboard-text></textarea><span data-question-paste-note></span><button type="button" data-question-paste-dismiss></button><button type="button" data-question-paste-retry></button></section>
+      <details data-question-original-source><textarea></textarea></details>
+    </section><div data-question-editor-errors hidden></div><p data-question-editor-status></p>
+    <button type="button" data-question-preview-button disabled></button><button type="submit" data-question-save disabled></button>`;
+  document.body.append(form);
+  const {states}=mountQuestionEditors(form);
+  const editor=states[0].editor;
+  try {
+    assert.equal(form.querySelector('[data-question-save]').disabled,false);
+    const cells=cellPositions(editor);
+    editor.commands.setTextSelection(cells[1]+2);
+    const selectedCell=editor.state.selection.from;
+    const accounting=[...form.querySelectorAll('details.tmp-case-tool-group')].find(item=>item.getAttribute('aria-label')==='Accounting rules');
+    assert.ok(accounting);
+    accounting.querySelector('summary').click();
+    assert.equal(accounting.open,true);
+    assert.equal(editor.state.selection.from,selectedCell);
+    const action=accounting.querySelector('[aria-label="Single Rule"]');
+    const down=new dom.window.MouseEvent('mousedown',{bubbles:true,cancelable:true});
+    action.dispatchEvent(down);
+    assert.equal(down.defaultPrevented,true);
+    action.click();
+    assert.deepEqual(rules(editor),[null,'single']);
+    assert.equal(form.querySelectorAll('details.tmp-case-tool-group').length,3);
+  } finally {editor.destroy();form.remove();}
 });
 
 test('editor output round trips through the actual Python canonicalizer repeatedly', t => {

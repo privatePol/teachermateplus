@@ -1,10 +1,10 @@
 {% extends "faculty_portal/base.html" %}
 {% load static departmental_exam_content %}
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-navigation-20260914">{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-navigation-20260914"><link rel="stylesheet" href="{% static 'css/departmental_exam_question_bank_workspace.css' %}?v=20260918">{% endblock %}
 {% block faculty_content %}
 {% include "departmental_exams/_classification_badge.html" with course=contribution.cycle_course %}
-<div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
+<div data-import-page data-question-bank-workspace{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}?cycle_status={{ contribution.cycle_course.cycle.status }}">Question Bank</a></li><li class="breadcrumb-item active">{{ contribution.cycle_course.course.code }}</li></ol></nav>
 <div class="card shadow-sm mb-3">
   <div class="card-body">
@@ -14,13 +14,16 @@
         <p class="text-muted mb-1">{{ contribution.cycle_course.cycle.get_exam_period_display }} · {{ contribution.cycle_course.cycle.academic_year }} · {{ contribution.cycle_course.cycle.term }}</p>
         <p class="mb-0"><strong>Coverage:</strong> {{ configuration.coverage|default:"Not provided" }}</p>
       </div>
-      <div class="text-end">
-        <div><strong>{{ saved_count }} / {{ quota }}</strong> questions</div>
-        <div>{{ progress_percent }}% complete</div>
-        <div><strong>Deadline:</strong> {{ configuration.active_contribution_deadline|date:"M j, Y g:i A" }}</div>
+      <div class="qb-contribution-summary">
+        <div class="qb-summary-count"><strong>{{ saved_count }} / {{ quota }}</strong> saved / configured</div>
+        <div class="small">{{ remaining }} remaining &middot; {{ progress_percent }}% complete</div>
+        <div class="small"><strong>Status:</strong> {% if contribution.status == 'SUBMITTED' %}Submitted / read-only{% elif is_mutable %}Draft / editing available{% else %}Read-only Draft{% endif %}</div>
+        <div class="small"><strong>Deadline:</strong> {% if configuration.active_contribution_deadline %}{{ configuration.active_contribution_deadline|date:"M j, Y g:i A" }}{% else %}Not configured{% endif %}</div>
         <div class="small text-muted">{% if configuration.reopened_contribution_deadline %}Authorized reopened deadline{% else %}{{ configuration.get_contribution_deadline_source_display|default:"No deadline provenance" }}{% endif %}</div>
       </div>
     </div>
+    <div class="progress qb-contribution-progress mt-3" role="progressbar" aria-label="Saved questions: {{ saved_count }} of {{ quota }} configured" aria-valuenow="{{ saved_count }}" aria-valuemin="0" aria-valuemax="{{ quota }}"><div class="progress-bar" style="width: {{ progress_percent }}%"></div></div>
+    <p class="small text-muted mt-2 mb-0">Saved count tracks the configured target. Final Submission also checks the applicable Case, section, eligibility, and deadline rules.</p>
     {% if configuration.contributor_instructions_snapshot %}<hr><div>{{ configuration.contributor_instructions_snapshot|linebreaksbr }}</div>{% endif %}
     {% if configuration.additional_instructions %}<div class="mt-2"><strong>Course instructions:</strong><br>{{ configuration.additional_instructions|linebreaksbr }}</div>{% endif %}
   </div>
@@ -28,16 +31,7 @@
 <div class="card shadow-sm mb-3">
   <div class="card-body">
     <h2 class="h5">Preferred Difficulty Distribution</h2>
-    <div class="table-responsive">
-      <table class="table table-sm align-middle mb-2">
-        <thead><tr><th scope="col">Difficulty</th><th scope="col">Current / Required</th></tr></thead>
-        <tbody>
-          {% for row in difficulty_distribution.rows %}
-            <tr><th scope="row">{{ row.label }}</th><td>{{ row.current }} / {{ row.required }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <div class="qb-difficulty-grid">{% for row in difficulty_distribution.rows %}<div class="qb-difficulty-item"><strong>{{ row.label }}</strong><span>{{ row.current }} / {{ row.required }}</span></div>{% endfor %}</div>
     <p class="mb-0 {% if difficulty_distribution.compliant %}text-success{% else %}text-warning{% endif %}">{{ difficulty_distribution.guidance }}</p>
   </div>
 </div>
@@ -75,7 +69,7 @@
   <div class="alert {% if difficulty_distribution.compliant %}alert-success{% else %}alert-warning{% endif %}" role="status"><strong>Quota reached.</strong> You have reached the required quota of {{ quota }} questions. {% if difficulty_distribution.compliant %}You may now submit your contribution.{% else %}Your mix differs from the preferred target; Final Submission is still allowed.{% endif %}</div>
 {% endif %}
 {% if is_mutable %}
-  <div class="d-flex flex-wrap gap-2 mb-3">
+  <div class="qb-action-toolbar d-flex flex-wrap align-items-center gap-2 mb-3" data-qb-action-toolbar>
     {% if not quota_reached %}
       <a class="btn btn-primary" href="{% url 'departmental_exams:question_create' contribution.id %}">{% if case_authoring_enabled %}Add Standalone MCQ{% else %}Add question{% endif %}</a>
       {% if case_mutation_enabled %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:faculty_case_create' contribution.id %}">Create Case-Based Question Group</a>{% endif %}
@@ -83,7 +77,7 @@
       {% if docx_import_enabled %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:docx_upload' contribution.id %}">Import from Word (.docx)</a>{% endif %}
     {% endif %}
     {% if question_reuse_enabled %}<a class="btn btn-outline-primary" href="{% url 'departmental_exams:question_reuse' contribution.id %}">Reuse My Previous Questions</a>{% endif %}
-    <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:csv_template' contribution.id %}">Download CSV template</a>
+    <details class="qb-secondary-actions"><summary class="btn btn-outline-secondary">Templates</summary><div class="qb-secondary-menu"><a class="btn btn-sm btn-outline-secondary" href="{% url 'departmental_exams:csv_template' contribution.id %}">Download CSV template</a></div></details>
     {% if saved_count == quota %}<a class="btn btn-success" href="{% url 'departmental_exams:contribution_submit' contribution.id %}">Final submission</a>{% endif %}
   </div>
   {% if saved_count %}
@@ -98,6 +92,8 @@
   </form>
   {% endif %}
 {% endif %}
+<div class="qb-workspace-layout" data-qb-layout>
+<div class="qb-workspace-primary" data-qb-question-list>
 {% if case_authoring_enabled %}
   <p class="small text-muted">Question numbers follow section and Case order, not the order you added questions. These are workspace numbers, not final exam item numbers.</p>
   {% for group in presentation_sections %}
@@ -105,7 +101,7 @@
     <h2 class="h4">{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}{% if group.section %} <span class="fs-6 fw-normal text-muted">Final exam: {{ group.section.item_quota }} items | Your saved questions: {{ group.saved_question_count }}</span>{% endif %}</h2>
     {% if group.assignment_required %}<p class="alert alert-warning">These saved questions still need an Exam Section before Final Submission.{% if is_mutable %} Use Edit to select a frozen Exam Section.{% else %} Section assignment is unavailable while this contribution is read-only.{% endif %}</p>{% endif %}
     {% for scenario in group.cases %}
-      <article class="card shadow-sm mb-3">
+      <article class="card shadow-sm mb-3 qb-case-card" id="qb-case-{{ scenario.id }}" data-qb-case-title="{{ scenario.title|default:'Case / Scenario' }}">
         <div class="card-header d-flex flex-wrap justify-content-between gap-2">
           <div>
             <div><strong>{{ scenario.title|default:"Case / Scenario" }}</strong>{% if scenario.section %} <span class="badge text-bg-secondary">{{ scenario.section.title }}</span>{% endif %}</div>
@@ -156,6 +152,15 @@
 {% endif %}
 {% endif %}
 </div>
+<aside class="qb-index-shell" data-qb-index-shell>
+  <section class="qb-index-panel" id="qb-question-index" data-qb-index-panel aria-label="Question Index">
+    <div class="qb-index-heading"><strong>Question Index</strong><button class="btn btn-sm btn-outline-secondary" type="button" data-qb-index-close aria-label="Close question index">Close</button></div>
+    <div data-qb-index-list></div><p class="small text-muted p-2" data-qb-index-empty hidden>No visible questions.</p>
+  </section>
+  <button class="qb-index-reopen" type="button" data-qb-index-reopen aria-controls="qb-question-index" aria-expanded="false" aria-label="Open question index">Question Index</button>
+</aside>
+</div>
+</div>
 {% if active_import %}
 <div class="position-fixed top-0 start-0 w-100 h-100 bg-body bg-opacity-75 d-flex align-items-center justify-content-center p-3" data-import-overlay role="status" aria-live="assertive" hidden style="z-index: 1080;">
   <div class="card shadow border-primary" style="max-width: 34rem;"><div class="card-body">
@@ -169,6 +174,7 @@
 {% block extra_js %}{{ block.super }}
 <script src="{% static 'js/departmental_exam_case_disclosure.js' %}?v=case-navigation-20260914"></script>
 <script src="{% static 'js/departmental_exam_bulk_question_delete.js' %}?v=20260917"></script>
+<script src="{% static 'js/departmental_exam_question_bank_workspace.js' %}?v=20260918"></script>
 <script>
 (() => {
   const list = document.getElementById("question-list");
@@ -181,6 +187,7 @@
     if (event.target.classList.contains("move-up") && card.previousElementSibling) list.insertBefore(card, card.previousElementSibling);
     if (event.target.classList.contains("move-down") && card.nextElementSibling) list.insertBefore(card.nextElementSibling, card);
     renumber();
+    document.dispatchEvent(new CustomEvent('tmp:question-bank-order-changed'));
   });
   form.addEventListener("submit", () => document.getElementById("ordered-question-ids").value = [...list.querySelectorAll(".question-card")].map(card => card.dataset.questionId).join(","));
 })();

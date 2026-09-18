@@ -71,6 +71,11 @@ class RichQuestionEditorViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertIn("data-question-save disabled", body)
         self.assertIn("data-question-paste-recovery", body)
         self.assertIn("The answer letter remains fixed to Choice A, B, C, or D", body)
+        for heading in ("Question", "Answer Choices", "Difficulty &amp; Correct Answer"):
+            self.assertIn(heading, body)
+        self.assertIn('data-question-author-actions', body)
+        self.assertEqual(body.count('class="qb-author-advanced"'), 5)
+        self.assertIn('departmental_exam_question_authoring.css', body)
 
         preview_url = reverse("departmental_exams:question_preview", args=[self.contribution.id])
         payload = self._create_payload()
@@ -228,6 +233,8 @@ class RichLinkedQuestionEditorTests(FacultyCaseFixtureMixin, Stage4TestCase):
         page = self.client.get(create_url)
         self.assertEqual(page.status_code, 200)
         self.assertEqual(page.content.decode().count("data-question-rich-field="), 5)
+        self.assertContains(page, 'data-question-author-actions')
+        self.assertContains(page, 'departmental_exam_question_authoring.css')
         payload = {
             "expected_contribution_revision": self.contribution.revision,
             "scenario_id": scenario.id,

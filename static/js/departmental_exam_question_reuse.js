@@ -15,6 +15,15 @@
   const retry = form.querySelector('[data-reuse-retry]');
   const sentinel = form.querySelector('[data-reuse-sentinel]');
   const backTop = document.querySelector('[data-reuse-back-top]');
+  const layout = document.querySelector('[data-reuse-layout]');
+  const topbar = document.querySelector('.faculty-topbar');
+  const toolbar = form.querySelector('[data-reuse-toolbar]');
+  const indexPanel = layout.querySelector('[data-reuse-index-panel]');
+  const indexList = layout.querySelector('[data-reuse-index-list]');
+  const indexEmpty = layout.querySelector('[data-reuse-index-empty]');
+  const indexClose = layout.querySelector('[data-reuse-index-close]');
+  const indexReopen = layout.querySelector('[data-reuse-index-reopen]');
+  const narrow = window.matchMedia?.('(max-width: 1199.98px)');
   const remaining = Number(form.dataset.remaining);
   let nextPage = Number(form.dataset.nextPage) || null;
   let loading = false;
@@ -24,8 +33,130 @@
   let loadFailed = false;
   let generation = 0;
   let controller = null;
+  let browseAnchor = null;
+  let indexEntries = [];
+  let currentTargetId = null;
+  let currentFrame = null;
   const initialFilters = new URLSearchParams(new FormData(filters)).toString();
   const tokens = new Set([...cards.querySelectorAll('[data-reuse-item]')].map(item => item.dataset.reuseToken));
+
+  function headerHeight() { return topbar?.getBoundingClientRect().height || 0; }
+  function toolbarHeight() { return toolbar.getBoundingClientRect().height || 0; }
+  function syncOffsets() {
+    layout.style.setProperty('--reuse-header-height', `${headerHeight()}px`);
+    layout.style.setProperty('--reuse-toolbar-height', `${toolbarHeight()}px`);
+    scheduleCurrent();
+  }
+
+  function setIndexOpen(open) {
+    layout.classList.toggle('index-collapsed', !open);
+    indexPanel.setAttribute('aria-hidden', String(!open));
+    indexPanel.inert = !open;
+    indexReopen.setAttribute('aria-expanded', String(open));
+    if (open) scheduleCurrent();
+  }
+
+  function indexLabel(element) {
+    return (element?.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function renderIndex() {
+    const previousScroll = indexPanel.scrollTop;
+    const fragment = document.createDocumentFragment();
+    const entries = [];
+    let number = 0;
+    function add(target, label, kind, selected) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `reuse-index-entry is-${kind}`;
+      button.dataset.reuseIndexTarget = target.id;
+      button.append(document.createTextNode(label));
+      if (selected) {
+        const marker = document.createElement('span');
+        marker.className = 'reuse-index-selected';
+        marker.setAttribute('aria-label', 'Selected for copy');
+        marker.textContent = '✓';
+        button.append(marker);
+      }
+      fragment.append(button);
+      entries.push({ target, button });
+    }
+    cards.querySelectorAll('[data-reuse-item]').forEach(card => {
+      if (card.hidden) return;
+      const selected = card.querySelector('[data-reuse-checkbox]').checked;
+      if (card.dataset.kind === 'case') {
+        add(card, indexLabel(card.querySelector('[data-reuse-index-title]')), 'case', selected);
+        card.querySelectorAll('[data-reuse-member]').forEach(member => {
+          number += 1;
+          add(member, `${number}. ${indexLabel(member.querySelector('.reuse-question-stem'))}`, 'member', selected);
+        });
+      } else {
+        number += 1;
+        add(card, `${number}. ${indexLabel(card.querySelector('[data-reuse-index-title]'))}`, 'question', selected);
+      }
+    });
+    indexEntries = entries;
+    indexList.replaceChildren(fragment);
+    indexPanel.scrollTop = previousScroll;
+    indexEmpty.hidden = entries.length > 0;
+    currentTargetId = null;
+    scheduleCurrent();
+  }
+
+  function revealIndexEntry(button) {
+    if (layout.classList.contains('index-collapsed')) return;
+    const panelRect = indexPanel.getBoundingClientRect();
+    const headingBottom = indexPanel.querySelector('.reuse-index-heading').getBoundingClientRect().bottom;
+    const entryRect = button.getBoundingClientRect();
+    if (entryRect.top < headingBottom) indexPanel.scrollTop -= headingBottom - entryRect.top + 4;
+    else if (entryRect.bottom > panelRect.bottom) indexPanel.scrollTop += entryRect.bottom - panelRect.bottom + 4;
+  }
+
+  function updateCurrent() {
+    currentFrame = null;
+    const readingLine = headerHeight() + toolbarHeight() + 20;
+    let active = indexEntries[0];
+    for (const entry of indexEntries) {
+      if (entry.target.getBoundingClientRect().top <= readingLine) active = entry;
+      else break;
+    }
+    const nextId = active?.target.id || null;
+    if (nextId === currentTargetId) return;
+    currentTargetId = nextId;
+    indexEntries.forEach(entry => {
+      const current = entry.target.id === nextId;
+      entry.button.classList.toggle('is-current', current);
+      if (current) entry.button.setAttribute('aria-current', 'location');
+      else entry.button.removeAttribute('aria-current');
+    });
+    cards.querySelectorAll('[data-reuse-item].is-reading').forEach(card => card.classList.remove('is-reading'));
+    active?.target.closest('[data-reuse-item]')?.classList.add('is-reading');
+    if (active) revealIndexEntry(active.button);
+  }
+
+  function scheduleCurrent() {
+    if (currentFrame !== null) return;
+    currentFrame = window.requestAnimationFrame ? window.requestAnimationFrame(updateCurrent) : window.setTimeout(updateCurrent, 0);
+  }
+
+  function captureBrowseAnchor() {
+    const line = headerHeight() + toolbarHeight() + 20;
+    const visible = [...cards.querySelectorAll('[data-reuse-item]')].filter(card => !card.hidden);
+    const card = visible.find(item => item.getBoundingClientRect().bottom > line) || visible.at(-1);
+    return card ? { token: card.dataset.reuseToken, offset: card.getBoundingClientRect().top } : null;
+  }
+
+  function restoreBrowseAnchor() {
+    if (!browseAnchor) return;
+    const card = [...cards.querySelectorAll('[data-reuse-item]')]
+      .find(item => item.dataset.reuseToken === browseAnchor.token && !item.hidden);
+    if (card) {
+      const displacement = card.getBoundingClientRect().top - browseAnchor.offset;
+      if (Math.abs(displacement) > 1) window.scrollTo({ top: Math.max(0, window.scrollY + displacement), behavior: 'auto' });
+    }
+    browseAnchor = null;
+    scheduleCurrent();
+  }
 
   function boxes() {
     return [...cards.querySelectorAll('[data-reuse-checkbox]')];
@@ -53,6 +184,8 @@
     overflow.hidden = excess === 0;
     overflow.textContent = excess ? `Deselect ${excess} question${excess === 1 ? '' : 's'} to fit the remaining Draft slots. A Case cannot be split.` : '';
     copyButtons.forEach(button => { button.disabled = submitting || checked.length === 0 || excess > 0; });
+    renderIndex();
+    syncOffsets();
   }
 
   all.addEventListener('change', () => {
@@ -64,6 +197,7 @@
     if (event.target.matches('[data-reuse-checkbox]')) update();
   });
   selectedOnlyButton.addEventListener('click', () => {
+    if (!selectedOnly) browseAnchor = captureBrowseAnchor();
     selectedOnly = !selectedOnly;
     if (selectedOnly && controller) {
       generation += 1;
@@ -72,6 +206,7 @@
     selectedOnlyButton.setAttribute('aria-pressed', String(selectedOnly));
     selectedOnlyButton.textContent = selectedOnly ? 'Show all questions' : 'Show all selected';
     update();
+    if (!selectedOnly) restoreBrowseAnchor();
     if (selectedOnly) {
       retry.hidden = true;
       status.textContent = 'Showing selected questions. Return to all questions to load more.';
@@ -87,6 +222,7 @@
   function invalidateFilters() {
     if (filterChanged) return;
     filterChanged = true;
+    browseAnchor = null;
     generation += 1;
     if (controller) controller.abort();
     loadFailed = false;
@@ -180,6 +316,43 @@
     if (backTop) backTop.hidden = window.scrollY < 300;
   }
   window.addEventListener('scroll', updateBackTop, { passive: true });
+  window.addEventListener('scroll', scheduleCurrent, { passive: true });
+  window.addEventListener('resize', syncOffsets);
+  if (window.ResizeObserver) {
+    const sizes = new window.ResizeObserver(syncOffsets);
+    if (topbar) sizes.observe(topbar);
+    sizes.observe(toolbar);
+    sizes.observe(cards);
+  }
+  cards.addEventListener('load', scheduleCurrent, true);
+  narrow?.addEventListener?.('change', event => {
+    if (event.matches) setIndexOpen(false);
+    syncOffsets();
+  });
+  indexClose.addEventListener('click', () => {
+    setIndexOpen(false);
+    indexReopen.focus({ preventScroll: true });
+  });
+  indexReopen.addEventListener('click', () => {
+    setIndexOpen(true);
+    indexClose.focus({ preventScroll: true });
+  });
+  indexList.addEventListener('click', event => {
+    const button = event.target.closest('[data-reuse-index-target]');
+    if (!button) return;
+    const target = document.getElementById(button.dataset.reuseIndexTarget);
+    if (!target || target.closest('[data-reuse-item]')?.hidden) return;
+    const top = Math.max(0, window.scrollY + target.getBoundingClientRect().top - headerHeight() - toolbarHeight() - 20);
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top, behavior: reduced ? 'auto' : 'smooth' });
+    target.classList.add('reuse-nav-flash');
+    window.setTimeout(() => target.classList.remove('reuse-nav-flash'), 1500);
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    if (narrow?.matches) setIndexOpen(false);
+    scheduleCurrent();
+  });
+  setIndexOpen(!narrow?.matches);
   update();
   updateBackTop();
   status.textContent = nextPage ? `${boxes().length} items loaded. Scroll for more.` : 'All matching questions loaded.';

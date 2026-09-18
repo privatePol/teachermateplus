@@ -161,6 +161,25 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(question.question_text, "Edited standalone")
         self.assertEqual(question.revision, 2)
 
+    def test_question_bank_summary_uses_snapshot_quota_and_read_only_hides_actions(self):
+        FacultyContribution.objects.filter(pk=self.contribution.pk).update(quota_snapshot=60)
+        self.contribution.refresh_from_db()
+        url = reverse("departmental_exams:contribution_workspace", args=[self.contribution.id])
+        draft = self.client.get(url)
+        self.assertContains(draft, "0 / 60")
+        self.assertContains(draft, "60 remaining")
+        self.assertContains(draft, "Draft / editing available")
+        self.assertContains(draft, 'data-qb-action-toolbar')
+        self.assertContains(draft, 'aria-label="Question Index"')
+        self.assertContains(draft, ">Add question<")
+        FacultyContribution.objects.filter(pk=self.contribution.pk).update(
+            status=FacultyContribution.Status.SUBMITTED, submitted_at=timezone.now()
+        )
+        submitted = self.client.get(url)
+        self.assertContains(submitted, "Submitted / read-only")
+        self.assertNotContains(submitted, 'data-qb-action-toolbar')
+        self.assertNotContains(submitted, ">Add question<")
+
     def test_standalone_payload_errors_preserve_form_and_reject_scenario_injection(self):
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.faculty)
@@ -726,7 +745,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(workspace, "Download CSV template")
         self.assertContains(workspace, "Save displayed order")
         self.assertContains(workspace, "Edit", count=50)
-        self.assertContains(workspace, "Delete", count=50)
+        self.assertContains(workspace, ">Delete<", count=50)
 
         deleted = self.client.post(
             reverse(

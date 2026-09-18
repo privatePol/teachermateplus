@@ -288,9 +288,10 @@ function createQuestionToolbar({editor, toolbar, errorBox, status, controls, get
   const compact = {Bold:'B',Italic:'I',Underline:'U',Superscript:'x²',Subscript:'x₂',
     'Bulleted list':'• List','Numbered list':'1. List','Decrease indent':'− Indent','Increase indent':'+ Indent'};
   const group = label => {
-    const section=document.createElement('div'); section.className='tmp-case-tool-group';
+    const advanced=['Table structure','Cell alignment','Accounting rules'].includes(label);
+    const section=document.createElement(advanced?'details':'div'); section.className='tmp-case-tool-group';
     section.setAttribute('role','group'); section.setAttribute('aria-label',label);
-    const heading=document.createElement('span'); heading.className='tmp-case-tool-label'; heading.textContent=label;
+    const heading=document.createElement(advanced?'summary':'span'); heading.className='tmp-case-tool-label'; heading.textContent=label;
     groupControls=document.createElement('div'); groupControls.className='tmp-case-tool-controls';
     section.append(heading,groupControls); toolbar.append(section);
   };
@@ -302,6 +303,7 @@ function createQuestionToolbar({editor, toolbar, errorBox, status, controls, get
   const button = (label, command, active=null, enabled=null) => {
     const control=document.createElement('button'); control.type='button'; control.className='btn btn-sm btn-outline-secondary';
     control.textContent=compact[label] || label; control.title=label; control.setAttribute('aria-label',label);
+    control.addEventListener('mousedown', event => event.preventDefault());
     control.addEventListener('click', () => {
       try { command(); editor.commands.focus(); refresh(); }
       catch (error) { errorBox.textContent=error.accountingConflict ? error.message : 'The formatting action could not be completed safely.'; errorBox.hidden=false; status.textContent='Existing content is unchanged.'; }
@@ -344,7 +346,7 @@ function createQuestionToolbar({editor, toolbar, errorBox, status, controls, get
   return refresh;
 }
 
-function mountQuestionEditors(form) {
+export function mountQuestionEditors(form) {
   const saveButton=form.querySelector('[data-question-save]'), previewButton=form.querySelector('[data-question-preview-button]');
   const globalErrors=form.querySelector('[data-question-editor-errors]'), status=form.querySelector('[data-question-editor-status]');
   const format=form.querySelector('[name=content_format]'), csrf=form.querySelector('[name=csrfmiddlewaretoken]');
@@ -419,6 +421,7 @@ function mountQuestionEditors(form) {
     } catch (_error) { if(request!==previewSequence||failed)return; setBusy(false); previewInvalid=true; show(globalErrors,['Preview could not be generated. Current content has not passed server validation.']); status.textContent='Preview failed. Save remains blocked until content changes or Preview succeeds.'; }
   });
   document.dispatchEvent(new CustomEvent('tmp:scientific-rich-editor-ready'));
+  return {states};
 }
 
 const caseForm = document.querySelector('[data-case-editor-form]');

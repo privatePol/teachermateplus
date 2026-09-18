@@ -1,0 +1,24 @@
+[data-question-editor-form] { --qb-author-header-height: 80px; }
+[data-question-editor-form] .qb-author-section { padding: 1rem; border: 1px solid #d7e4d5; border-radius: .6rem; background: #fbfdfb; scroll-margin-top: calc(var(--qb-author-header-height) + 1rem); }
+[data-question-editor-form] .qb-author-heading { margin-bottom: .9rem; padding-bottom: .5rem; border-bottom: 2px solid #d6bb55; color: #174e30; }
+[data-question-editor-form] .form-label { font-size: 1.05rem; font-weight: 700; color: #244a31; }
+[data-question-editor-form] .tmp-case-toolbar { align-items: flex-start; }
+[data-question-editor-form] .tmp-case-tool-group[open] { flex: 1 1 100%; }
+[data-question-editor-form] .tmp-case-tool-group summary { cursor: pointer; font-size: .85rem; margin-bottom: 0; }
+[data-question-editor-form] .tmp-case-tool-group[open] summary { margin-bottom: .45rem; }
+[data-question-editor-form] .qb-author-advanced { margin-top: .5rem; padding: .4rem .6rem; border: 1px solid #cbd5ce; border-radius: .35rem; background: #f6f8f6; }
+[data-question-editor-form] .qb-author-advanced summary { cursor: pointer; font-size: .85rem; font-weight: 600; color: #334b3c; }
+[data-question-editor-form] .qb-author-advanced .scientific-editor-tools { margin-top: .5rem; }
+[data-question-editor-form] .tmp-case-editor { font-size: 14pt; overflow-x: auto; overflow-y: visible; max-height: none; }
+[data-question-editor-form] .tmp-case-editor .tiptap { font-size: inherit; min-height: inherit; }
+[data-question-editor-form] [data-question-rich-field="question_text"] .tmp-case-editor,
+[data-question-editor-form] [data-question-rich-field="question_text"] .tmp-case-editor .tiptap { min-height: 16rem; }
+[data-question-editor-form] [data-question-rich-field^="choice_"] .tmp-case-editor,
+[data-question-editor-form] [data-question-rich-field^="choice_"] .tmp-case-editor .tiptap { min-height: 7rem; }
+[data-question-editor-form] .qb-author-actions { position: sticky; bottom: 0; z-index: 1020; padding: .7rem; margin: 0 -1rem -1rem; border-top: 1px solid #cbd7cb; background: #fff; box-shadow: 0 -3px 12px #153e2621; }
+[data-question-editor-form] .qb-author-actions .btn { max-width: 100%; white-space: normal; }
+@media (max-width: 575px) {
+  [data-question-editor-form] .qb-author-section { padding: .65rem; }
+  [data-question-editor-form] .qb-author-actions { gap: .4rem !important; }
+}
+@media print { [data-question-editor-form] .qb-author-actions { position: static; box-shadow: none; } }

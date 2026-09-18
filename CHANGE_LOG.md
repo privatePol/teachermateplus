@@ -1,3 +1,12 @@
+## Question Bank workspace and question authoring UX - 2026-09-18
+
+- Added an authoritative saved/configured/remaining summary with progress, status, deadline, and compact preferred difficulty indicators. Saved question cards now use gradient stem headers, white choice bodies, and metadata footers. Draft actions stay accessible while scrolling; a filter-aware Question Index navigates standalone and Case questions without changing deletion selections.
+- Add and Edit Question now use clear Question, Answer Choices, and Difficulty & Correct Answer sections, 14pt editing text, shorter expanding choice editors, expandable advanced formatting groups, and a sticky Preview/Save/Cancel bar. The local Tiptap bundle was rebuilt. Existing content, validation, authority, and submission rules are unchanged. Browser layout and editor interaction acceptance remains pending.
+
+## Reuse My Previous Questions navigation - 2026-09-18
+
+- Added a viewport-height, independently scrollable Loaded questions index with sequential question entries, owned Case members, current-reading and selected indicators, jump highlighting, and a collapsible right-side panel. The Faculty reuse selection controls now remain below the measured sticky header during scrolling. Returning from Show all selected restores the previous card and viewport offset; changing filters invalidates that anchor. No schema or copy-service change.
+
 ## Reuse My Previous Questions usability - 2026-09-18
 
 - Replaced page navigation with 12-card lazy batches and selection across loaded batches. Added selected-only view, visible-only select-all, selected question totals, coordinated Copy buttons, a back-to-filters control, and loading/end/retry feedback. Standalone stems and Case titles now lead gradient cards; question stems render at 14pt and selected cards show pale green. Locked POST validation now accepts filtered selections across batches while retaining source, revision, quota, duplicate, section, and authority checks. No schema change.

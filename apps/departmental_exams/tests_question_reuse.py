@@ -105,6 +105,9 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(page, "Previous unique stem")
         self.assertEqual(page.content.decode().count("Previous unique stem"), 1)
         self.assertContains(page, "reuse-item-header")
+        self.assertContains(page, 'data-reuse-index-panel')
+        self.assertContains(page, 'data-reuse-toolbar')
+        self.assertContains(page, 'id="reuse-card-question-')
         token = page.context["page"].object_list[0]["token"]
         response = self._copy(page, token)
         self.assertRedirects(response, self.workspace_url, fetch_redirect_response=False)
@@ -545,6 +548,8 @@ class QuestionReuseCaseHTTPTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertContains(page, "One linked question case")
         self.assertContains(page, "Single linked question")
         self.assertContains(page, "reuse-question-stem")
+        self.assertContains(page, f'id="reuse-card-case-{items[0]["object"].id}"')
+        self.assertContains(page, f'id="reuse-member-{linked.id}" data-reuse-member')
         self.assertContains(page, f"Correct answer:</strong> {linked.correct_answer}")
         token = items[0]["token"]
         copied_response = self._post(

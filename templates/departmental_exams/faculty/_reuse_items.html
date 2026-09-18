@@ -1,11 +1,11 @@
 {% load departmental_exam_content %}
 {% for entry in entries %}
-<article class="card shadow-sm mb-3 reuse-item{% if entry.selected %} is-selected{% endif %}" data-reuse-item data-reuse-token="{{ entry.token }}" data-size="{{ entry.size }}" data-kind="{{ entry.kind }}">
+<article class="card shadow-sm mb-3 reuse-item{% if entry.selected %} is-selected{% endif %}" id="reuse-card-{{ entry.kind }}-{{ entry.object.id }}" data-reuse-item data-reuse-token="{{ entry.token }}" data-size="{{ entry.size }}" data-kind="{{ entry.kind }}">
   <div class="card-header reuse-item-header d-flex gap-3 align-items-start" data-scientific-group>
     <input class="form-check-input flex-shrink-0" type="checkbox" id="reuse-{{ entry.kind }}-{{ entry.object.id }}" name="selected_items" value="{{ entry.token }}" data-reuse-checkbox aria-labelledby="reuse-title-{{ entry.kind }}-{{ entry.object.id }}"{% if entry.selected %} checked{% endif %}>
     <div class="reuse-item-heading" id="reuse-title-{{ entry.kind }}-{{ entry.object.id }}">
-      {% if entry.kind == 'case' %}<strong>Whole Case: {{ entry.object.title|default:"Case / Scenario" }}</strong>
-      {% else %}<div class="reuse-question-stem" data-scientific-content>{{ entry.object.question_text|question_content:entry.object.content_format }}</div>{% endif %}
+      {% if entry.kind == 'case' %}<strong data-reuse-index-title>Whole Case: {{ entry.object.title|default:"Case / Scenario" }}</strong>
+      {% else %}<div class="reuse-question-stem" data-reuse-index-title data-scientific-content>{{ entry.object.question_text|question_content:entry.object.content_format }}</div>{% endif %}
     </div>
   </div>
   <div class="card-body reuse-item-body">

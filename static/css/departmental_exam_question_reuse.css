@@ -1,3 +1,99 @@
+.reuse-layout {
+  --reuse-header-height: 80px;
+  --reuse-toolbar-height: 90px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 1rem;
+  align-items: start;
+  overflow-x: clip;
+}
+.reuse-primary { min-width: 0; }
+.reuse-layout.index-collapsed { grid-template-columns: minmax(0, 1fr) 3rem; }
+.reuse-selection-toolbar {
+  position: sticky;
+  top: calc(var(--reuse-header-height) + .5rem);
+  z-index: 1030;
+  box-shadow: 0 3px 12px rgba(21, 62, 38, .13);
+}
+.reuse-selection-toolbar .d-flex { min-width: 0; }
+.reuse-selection-toolbar .btn { max-width: 100%; white-space: normal; }
+.reuse-index-shell {
+  position: sticky;
+  top: calc(var(--reuse-header-height) + .5rem);
+  height: max(0px, calc(100dvh - var(--reuse-header-height) - 1rem));
+  min-width: 0;
+}
+.reuse-index-panel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 280px;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  border: 1px solid #d7e2d6;
+  border-radius: .6rem;
+  box-shadow: 0 4px 14px rgba(26, 59, 38, .1);
+  transition: transform .2s ease, visibility .2s ease;
+}
+.reuse-layout.index-collapsed .reuse-index-panel {
+  transform: translateX(calc(100% + 1rem));
+  visibility: hidden;
+  pointer-events: none;
+}
+.reuse-index-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .35rem;
+  padding: .65rem;
+  background: #f5f8f4;
+  border-bottom: 1px solid #cbd7cb;
+}
+.reuse-index-reopen {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: .75rem;
+  width: 3rem;
+  min-height: 8rem;
+  padding: .5rem .35rem;
+  writing-mode: vertical-rl;
+  border: 1px solid #a7bda9;
+  border-radius: .5rem 0 0 .5rem;
+  color: #143d25;
+  background: #e7f1e6;
+  font-weight: 700;
+}
+.reuse-layout.index-collapsed .reuse-index-reopen { display: block; }
+.reuse-layout.index-collapsed .reuse-index-shell { pointer-events: none; }
+.reuse-layout.index-collapsed .reuse-index-reopen { pointer-events: auto; }
+.reuse-index-entry {
+  display: block;
+  width: 100%;
+  padding: .55rem .65rem;
+  border: 0;
+  border-bottom: 1px solid #d8dddd;
+  border-left: 3px solid transparent;
+  color: #254331;
+  background: #fff;
+  text-align: left;
+  font-size: 10pt;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.reuse-index-entry:hover, .reuse-index-entry:focus-visible { background: #edf4ed; }
+.reuse-index-entry.is-member { padding-left: 1.5rem; }
+.reuse-index-entry.is-case { font-weight: 700; }
+.reuse-index-entry.is-current { border-left-color: #355ba0; background: #e8eefb; }
+.reuse-index-entry .reuse-index-selected { color: #207340; font-weight: 800; margin-left: .3rem; }
+.reuse-item.is-reading { outline: 2px solid #355ba0; outline-offset: 2px; }
+.reuse-item.reuse-nav-flash, [data-reuse-member].reuse-nav-flash { outline: 3px solid #cf9c18; outline-offset: 2px; }
+.reuse-item, [data-reuse-member] { scroll-margin-top: calc(var(--reuse-header-height) + var(--reuse-toolbar-height) + 1.5rem); }
 .reuse-item { border-color: #d7e2d6; overflow: hidden; }
 .reuse-item[hidden], [data-reuse-selected-empty][hidden], [data-reuse-no-results][hidden], [data-reuse-back-top][hidden] { display: none !important; }
 .reuse-item-header {
@@ -32,6 +128,27 @@
 @media (max-width: 575px) {
   .reuse-back-top { bottom: calc(6rem + env(safe-area-inset-bottom)); }
 }
+@media (max-width: 1199.98px) {
+  .reuse-layout, .reuse-layout.index-collapsed { display: block; }
+  .reuse-index-shell {
+    position: fixed;
+    right: 0;
+    top: calc(var(--reuse-header-height) + .5rem);
+    width: min(280px, calc(100vw - 1rem));
+    height: max(0px, calc(100dvh - var(--reuse-header-height) - 1rem));
+    z-index: 1040;
+  }
+  .reuse-index-panel { width: 100%; }
+  .reuse-selection-toolbar { padding: .65rem; }
+  .reuse-selection-toolbar .d-flex { gap: .5rem !important; }
+  .reuse-selection-toolbar .ms-auto { margin-left: 0 !important; }
+}
 @media (prefers-reduced-motion: reduce) {
   .reuse-item-body, .reuse-item-footer { transition: none; }
+  .reuse-index-panel { transition: none; }
+}
+@media print {
+  .reuse-index-shell { display: none; }
+  .reuse-layout, .reuse-layout.index-collapsed { display: block; }
+  .reuse-selection-toolbar { position: static; }
 }

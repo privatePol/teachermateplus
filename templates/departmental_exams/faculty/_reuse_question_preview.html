@@ -1,5 +1,5 @@
 {% load departmental_exam_content %}
-<div class="card card-body mb-2" data-scientific-group>
+<div class="card card-body mb-2"{% if show_stem %} id="reuse-member-{{ question.id }}" data-reuse-member{% endif %} data-scientific-group>
   <div class="d-flex justify-content-between gap-2">{% if show_stem %}<strong>Question {{ number }}</strong>{% else %}<span>Choices</span>{% endif %}<span class="badge text-bg-light">{{ question.get_difficulty_display }}</span></div>
   {% if show_stem %}<div class="tmp-case-content reuse-question-stem my-2" data-scientific-content>{{ question.question_text|question_content:question.content_format }}</div>{% endif %}
   <ol type="A" class="mb-2">

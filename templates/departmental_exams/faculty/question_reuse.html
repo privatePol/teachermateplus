@@ -3,6 +3,8 @@
 {% block title %}Reuse My Previous Questions | TeacherMate+{% endblock %}
 {% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_question_reuse.css' %}">{% endblock %}
 {% block faculty_content %}
+<div class="reuse-layout index-collapsed" data-reuse-layout>
+<div class="reuse-primary">
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_workspace' destination.id %}">Current Draft</a></li><li class="breadcrumb-item active">Reuse My Previous Questions</li></ol></nav>
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
   <div><h1 class="h3">Reuse My Previous Questions</h1><p class="text-muted mb-0">{{ destination.cycle_course.course.code }} · {{ destination.cycle_course.course.title }}</p></div>
@@ -26,7 +28,7 @@
   {% csrf_token %}{{ form.expected_contribution_revision }}
   {% for key, value in filters.items %}{% if key != 'page' %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
   {% if sections %}<div class="card card-body mb-3"><label class="form-label" for="id_target_section_id">Add these questions to section</label>{% if sole_section %}<p class="mb-1"><strong>{{ sole_section.title }}</strong> (the only frozen section)</p>{% endif %}{{ form.target_section_id }}{% if not sole_section %}<div class="form-text">Choose one destination section for every selected question and whole Case. Historical section names are not mapped automatically.</div>{% endif %}</div>{% else %}{{ form.target_section_id }}{% endif %}
-  <div class="card card-body mb-3" aria-label="Reuse selection controls"><div class="d-flex flex-wrap gap-3 align-items-center"><label><input type="checkbox" data-reuse-select-all> Select all visible eligible items</label><button class="btn btn-outline-primary btn-sm" type="button" data-reuse-selected-only aria-pressed="false">Show all selected</button><strong aria-live="polite">Selected questions: <span data-reuse-selected-count>0</span></strong><span>Remaining Draft slots: {{ remaining }}</span><span>Whole Cases selected: <span data-reuse-case-count>0</span></span><button class="btn btn-primary ms-auto" data-reuse-copy type="submit" disabled>Copy into Current Draft</button></div><p class="text-danger mt-2 mb-0" data-reuse-overflow hidden></p></div>
+  <div class="card card-body mb-3 reuse-selection-toolbar" data-reuse-toolbar aria-label="Reuse selection controls"><div class="d-flex flex-wrap gap-3 align-items-center"><label><input type="checkbox" data-reuse-select-all> Select all visible eligible items</label><button class="btn btn-outline-primary btn-sm" type="button" data-reuse-selected-only aria-pressed="false">Show all selected</button><strong aria-live="polite">Selected questions: <span data-reuse-selected-count>0</span></strong><span>Remaining Draft slots: {{ remaining }}</span><span>Whole Cases selected: <span data-reuse-case-count>0</span></span><button class="btn btn-primary ms-auto" data-reuse-copy type="submit" disabled>Copy into Current Draft</button></div><p class="text-danger mt-2 mb-0" data-reuse-overflow hidden></p></div>
   <div data-reuse-cards aria-live="off">{% include "departmental_exams/faculty/_reuse_items.html" with entries=page.object_list %}</div>
   <p class="alert alert-secondary" data-reuse-no-results{% if page.object_list %} hidden{% endif %}>No eligible previous questions match these filters.</p>
   <p class="alert alert-secondary" data-reuse-selected-empty hidden>No selected questions are currently shown. Return to all questions to select items.</p>
@@ -34,6 +36,16 @@
   <div class="d-flex flex-wrap gap-2 align-items-center mb-3"><p class="small text-muted mb-0" data-reuse-load-status role="status" aria-live="polite"></p><button type="button" class="btn btn-outline-primary btn-sm" data-reuse-retry hidden>Retry loading questions</button></div>
   <button class="btn btn-primary mb-3" data-reuse-copy type="submit" disabled>Copy into Current Draft</button>
 </form>
+</div>
+<aside class="reuse-index-shell" data-reuse-index-shell aria-label="Question navigation">
+  <section class="reuse-index-panel" id="reuse-question-index" data-reuse-index-panel aria-label="Loaded questions">
+    <div class="reuse-index-heading"><strong>Loaded questions</strong><button type="button" class="btn btn-sm btn-outline-secondary" data-reuse-index-close aria-label="Close question index">Close</button></div>
+    <div class="reuse-index-list" data-reuse-index-list></div>
+    <p class="small text-muted p-2" data-reuse-index-empty hidden>No loaded questions are shown.</p>
+  </section>
+  <button type="button" class="reuse-index-reopen" data-reuse-index-reopen aria-controls="reuse-question-index" aria-expanded="false" aria-label="Open question index">Loaded questions</button>
+</aside>
+</div>
 <button type="button" class="btn btn-success reuse-back-top" data-reuse-back-top aria-label="Back to filters and selection controls" hidden>↑</button>
 <script src="{% static 'js/departmental_exam_question_reuse.js' %}"></script>
 {% endblock %}
