@@ -979,12 +979,30 @@ def automatic_generation_summary_entry_view(request):
 
 @portal_required("ADMIN")
 @require_http_methods(["GET", "POST"])
-def questionnaire_print_release_view(request):
+def questionnaire_print_release_view(request, detail_course_id=None):
     from .cycle_visibility import selected_cycle_status
 
     tenant_id = _tenant_id(request)
     current_cycle_status = selected_cycle_status(request.GET)
-    courses = list(
+    revision_queryset = ExamGenerationRevision.objects.order_by("-revision_number")
+    print_release_queryset = QuestionnairePrintRelease.objects.select_related(
+        "generation_revision", "released_by", "revoked_by"
+    ).order_by("-released_at", "-id")
+    if detail_course_id is not None:
+        revision_queryset = revision_queryset.prefetch_related(
+            Prefetch(
+                "automatic_audit_runs",
+                queryset=AutomaticGenerationAuditRun.objects.select_related("run_by").order_by(
+                    "-run_at", "-id"
+                ),
+            )
+        )
+    else:
+        print_release_queryset = print_release_queryset.filter(
+            status=QuestionnairePrintRelease.Status.ACTIVE,
+            active_marker=1,
+        )
+    course_queryset = (
         CycleCourse.objects.filter(
             cycle__tenant_id=tenant_id,
             inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
@@ -1010,22 +1028,11 @@ def questionnaire_print_release_view(request):
             ),
             Prefetch(
                 "generation_revisions",
-                queryset=ExamGenerationRevision.objects.prefetch_related(
-                    Prefetch(
-                        "automatic_audit_runs",
-                        queryset=AutomaticGenerationAuditRun.objects.select_related(
-                            "run_by"
-                        ).order_by("-run_at", "-id"),
-                    )
-                ).order_by("-revision_number"),
+                queryset=revision_queryset,
             ),
             Prefetch(
                 "questionnaire_print_releases",
-                queryset=QuestionnairePrintRelease.objects.select_related(
-                    "generation_revision",
-                    "released_by",
-                    "revoked_by",
-                ).order_by("-released_at", "-id"),
+                queryset=print_release_queryset,
             ),
             Prefetch(
                 "answer_key_releases",
@@ -1045,6 +1052,9 @@ def questionnaire_print_release_view(request):
             "course__code",
         )
     )
+    if detail_course_id is not None:
+        course_queryset = course_queryset.filter(pk=detail_course_id)
+    courses = list(course_queryset)
     management_map = DepartmentalExamAuthorizationService.automatic_permission_map(
         user=request.user,
         courses=courses,
@@ -1093,7 +1103,7 @@ def questionnaire_print_release_view(request):
         )
     # Filter the operational list only; exact-release POST/direct routes keep
     # their existing independent authority and lifecycle checks.
-    if request.method == "GET":
+    if request.method == "GET" and detail_course_id is None:
         from .cycle_visibility import filter_cycle_rows
         courses = filter_cycle_rows(courses, request.GET)
     for course in courses:
@@ -1156,6 +1166,9 @@ def questionnaire_print_release_view(request):
                     "revision": revision,
                 }
             )
+    bulk_selection_by_course_id = {
+        row["course"].id: row for row in bulk_selection_rows
+    }
     bulk_selection_choices = tuple(
         (
             row["value"],
@@ -1252,7 +1265,7 @@ def questionnaire_print_release_view(request):
     bulk_answer_key_choices = tuple(
         (
             row["value"],
-            f"{row['course'].course.code} R{row['revision'].revision_number}",
+            f"{row['campus'].name} / {row['recipient'].course.code} / {row['course'].course.code} R{row['revision'].revision_number}",
         )
         for row in bulk_answer_key_rows
     )
@@ -1290,6 +1303,71 @@ def questionnaire_print_release_view(request):
     )
     ajax_error_message = ""
     if request.method == "POST":
+        if request.POST.get("review") == "1" and action in {"bulk_release", "bulk_answer_key_release"}:
+            review_form = (
+                BulkQuestionnairePrintReleaseForm(request.POST, selection_choices=bulk_selection_choices)
+                if action == "bulk_release"
+                else BulkAnswerKeyReleaseForm(request.POST, selection_choices=bulk_answer_key_choices)
+            )
+            if review_form.is_valid():
+                labels = dict(
+                    bulk_selection_choices
+                    if action == "bulk_release"
+                    else bulk_answer_key_choices
+                )
+                return render(
+                    request,
+                    "departmental_exams/admin/_release_selection_review.html",
+                    {
+                        "review_section": "Questionnaire" if action == "bulk_release" else "Answer Key",
+                        "final_action": action,
+                        "review_values": request.POST.getlist("selections"),
+                        "review_rows": tuple(
+                            (value, labels.get(value, value))
+                            for value in request.POST.getlist("selections")
+                        ),
+                        "review_form": review_form,
+                        "review_campus": next(
+                            (
+                                campus for campus in bulk_answer_key_campus_options
+                                if campus.id == review_form.cleaned_data.get("target_campus_id")
+                            ),
+                            None,
+                        ),
+                        "review_hidden_fields": tuple(
+                            (name, request.POST.get(name, ""))
+                            for name in (
+                                ("print_from", "print_until")
+                                if action == "bulk_release"
+                                else (
+                                    "target_campus_id",
+                                    "available_from",
+                                    "available_until",
+                                    "sessions_concluded",
+                                )
+                            )
+                        ),
+                        "review_from": (
+                            review_form.cleaned_data["print_from"]
+                            if action == "bulk_release"
+                            else review_form.cleaned_data["available_from"]
+                        ),
+                        "review_until": (
+                            review_form.cleaned_data["print_until"]
+                            if action == "bulk_release"
+                            else review_form.cleaned_data["available_until"]
+                        ),
+                    },
+                )
+            return render(
+                request,
+                "departmental_exams/admin/_release_selection_review.html",
+                {
+                    "review_section": "Questionnaire" if action == "bulk_release" else "Answer Key",
+                    "review_error": review_form.errors,
+                },
+                status=400,
+            )
         if action == "bulk_answer_key_release":
             bulk_answer_key_form = BulkAnswerKeyReleaseForm(
                 request.POST,
@@ -1574,7 +1652,11 @@ def questionnaire_print_release_view(request):
                 )
             )
             revision.can_run_automatic_audit = course.can_run_automatic_audit
-            revision.audit_history = list(revision.automatic_audit_runs.all())
+            revision.audit_history = (
+                list(revision.automatic_audit_runs.all())
+                if detail_course_id is not None
+                else []
+            )
             revision.latest_automatic_audit = (
                 revision.audit_history[0] if revision.audit_history else None
             )
@@ -1605,12 +1687,19 @@ def questionnaire_print_release_view(request):
                 for revision in course.available_revisions
             )
         )
+        course.bulk_selection = bulk_selection_by_course_id.get(course.id)
+        course.filter_search_text = f"{course.course.code} {course.course.title}"
+        department = course.responsible_department or course.course.exam_department
+        course.filter_department_id = department.id if department else ""
+        course.filter_release_status = course.print_window_status
         for release in course.answer_key_release_history:
             eligible = [r for r in course.available_revisions if AnswerKeyReleaseService.revision_is_eligible(r)]
             release.operational_status = AnswerKeyReleaseService.operational_status(
                 release=release, expected_revision=eligible[0] if len(eligible) == 1 else None, now=now,
             )
-        if not course.can_manage_release:
+        if not course.can_manage_release or (
+            detail_course_id is None and request.method == "GET"
+        ):
             course.release_form = None
         elif bound_form is not None and course.id == bound_course_id:
             course.release_form = bound_form
@@ -1675,6 +1764,22 @@ def questionnaire_print_release_view(request):
             status=status,
         )
 
+    if detail_course_id is not None:
+        if len(courses) != 1:
+            raise PermissionDenied("The requested questionnaire release details are unavailable.")
+        detail_template = (
+            "departmental_exams/admin/_questionnaire_release_details.html"
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            else "departmental_exams/admin/questionnaire_print_release.html"
+        )
+        response = render(
+            request,
+            detail_template,
+            {"course": courses[0], "now": now, "detail_mode": True},
+        )
+        response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+        return response
+
     return render(
         request,
         "departmental_exams/admin/questionnaire_print_release.html",
@@ -1701,9 +1806,28 @@ def questionnaire_print_release_view(request):
                 bulk_answer_key_form["selections"].value() or ()
             ),
             "initial_release_section": release_section,
+            "questionnaire_department_options": tuple(
+                sorted(
+                    {
+                        department.id: department
+                        for course in courses
+                        if (
+                            department := course.responsible_department
+                            or course.course.exam_department
+                        )
+                    }.values(),
+                    key=lambda department: (department.code, department.id),
+                )
+            ),
         },
         status=status,
     )
+
+
+@portal_required("ADMIN")
+@require_GET
+def questionnaire_print_release_details_view(request, cycle_course_id):
+    return questionnaire_print_release_view(request, detail_course_id=cycle_course_id)
 
 
 @portal_required("ADMIN")

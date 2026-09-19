@@ -3,402 +3,386 @@
 
   const root = document.getElementById("departmental-exam-release-center");
   if (!root) return;
-
   const feedback = document.getElementById("release-center-feedback");
+  const selected = {questionnaire: new Set(), "answer-key": new Set()};
+  const showingSelected = {questionnaire: false, "answer-key": false};
+  let detailRequest = 0;
+  const refreshRequest = {questionnaire: 0, "answer-key": 0};
+  let detailUrl = null;
+  let detailOpener = null;
 
-  function tokens(value) {
-    return (value || "").trim().split(/\s+/).filter(Boolean);
+  const config = {
+    questionnaire: {
+      pane: "questionnaire-releases-pane",
+      form: "bulk-print-release-form",
+      row: '[data-release-row="questionnaire"]',
+      checkbox: ".bulk-release-selection",
+      search: "questionnaire-course-search",
+      department: "questionnaire-department-filter",
+      status: "questionnaire-status-filter",
+      selected: "bulk-selected-count",
+      hidden: "bulk-hidden-selected-count",
+      visible: "questionnaire-visible-count",
+      eligible: null,
+      selectAll: "bulk-select-all",
+      empty: "questionnaire-no-filter-results"
+    },
+    "answer-key": {
+      pane: "answer-key-releases-pane",
+      form: "bulk-answer-key-release-form",
+      row: '[data-answer-key-row="true"]',
+      checkbox: ".bulk-answer-key-selection",
+      search: "answer-key-course-search",
+      department: "answer-key-department-filter",
+      status: "answer-key-status-filter",
+      selected: "bulk-answer-key-selected-count",
+      hidden: "bulk-answer-key-hidden-selected-count",
+      visible: "bulk-answer-key-visible-count",
+      eligible: "bulk-answer-key-visible-eligible-count",
+      selectAll: "bulk-answer-key-select-all",
+      empty: "bulk-answer-key-no-filter-results"
+    }
+  };
+
+  function byId(id) { return document.getElementById(id); }
+  function rows(kind) {
+    const form = byId(config[kind].form);
+    return form ? Array.from(form.querySelectorAll(config[kind].row)) : [];
   }
-
-  function showFeedback(kind, message, errors) {
+  function inputFor(kind, row) { return row.querySelector(config[kind].checkbox); }
+  function eligible(kind, row) {
+    const input = inputFor(kind, row);
+    return row.dataset.eligible === "true" && input && !input.disabled;
+  }
+  function announce(type, message) {
     if (!feedback) return;
-    feedback.className = "alert alert-" + kind;
-    feedback.replaceChildren();
-    const text = document.createElement("div");
-    text.textContent = message;
-    feedback.appendChild(text);
-    if (errors && errors.length > 1) {
-      const list = document.createElement("ul");
-      list.className = "mb-0 mt-2";
-      errors.slice(1).forEach(function (error) {
-        const item = document.createElement("li");
-        item.textContent = error;
-        list.appendChild(item);
-      });
-      feedback.appendChild(list);
-    }
+    feedback.className = "alert alert-" + type;
+    feedback.textContent = message;
   }
-
-  function focusWithoutScrolling(element) {
-    if (!element) return;
+  function rememberNotice(message) {
+    try { window.sessionStorage.setItem("tmp-release-center-notice", message); }
+    catch (error) { announce("info", message); }
+  }
+  function restoreNotice() {
     try {
-      element.focus({preventScroll: true});
-    } catch (error) {
-      element.focus();
+      const message = window.sessionStorage.getItem("tmp-release-center-notice");
+      if (message) {
+        window.sessionStorage.removeItem("tmp-release-center-notice");
+        announce("info", message);
+      }
+    } catch (error) { /* Storage is optional. */ }
+  }
+  function filterValues(kind) {
+    const c = config[kind];
+    return {
+      search: byId(c.search) ? byId(c.search).value : "",
+      department: byId(c.department) ? byId(c.department).value : "",
+      status: byId(c.status) ? byId(c.status).value : ""
+    };
+  }
+  function restoreFilters(kind, values) {
+    const c = config[kind];
+    [[c.search, values.search], [c.department, values.department], [c.status, values.status]]
+      .forEach(function (pair) { if (byId(pair[0])) byId(pair[0]).value = pair[1]; });
+  }
+  function matches(kind, row, values) {
+    const query = values.search.trim().toLocaleLowerCase();
+    const searchText = (row.dataset.courseSearch || "").toLocaleLowerCase();
+    const departmentIds = kind === "questionnaire"
+      ? [row.dataset.departmentId || ""]
+      : (row.dataset.departmentIds || "").trim().split(/\s+/).filter(Boolean);
+    const departmentMatch = !values.department ||
+      (values.department === "__none__"
+        ? departmentIds.length === 0 || departmentIds[0] === ""
+        : departmentIds.includes(values.department));
+    return (!query || searchText.includes(query)) && departmentMatch &&
+      (!values.status || row.dataset.releaseStatus === values.status);
+  }
+  function update(kind) {
+    const c = config[kind];
+    const allRows = rows(kind);
+    const visibleEligible = allRows.filter(function (row) { return !row.hidden && eligible(kind, row); });
+    const visibleSelected = visibleEligible.filter(function (row) {
+      return selected[kind].has(inputFor(kind, row).value);
+    }).length;
+    allRows.forEach(function (row) {
+      const input = inputFor(kind, row);
+      if (input) input.checked = selected[kind].has(input.value);
+    });
+    if (byId(c.selected)) byId(c.selected).textContent = selected[kind].size;
+    if (byId(c.hidden)) byId(c.hidden).textContent = selected[kind].size - visibleSelected;
+    if (byId(c.visible)) byId(c.visible).textContent =
+      allRows.filter(function (row) { return !row.hidden; }).length;
+    if (c.eligible && byId(c.eligible)) byId(c.eligible).textContent = visibleEligible.length;
+    const all = byId(c.selectAll);
+    if (all) {
+      all.disabled = visibleEligible.length === 0;
+      all.checked = visibleEligible.length > 0 && visibleSelected === visibleEligible.length;
+      all.indeterminate = visibleSelected > 0 && visibleSelected < visibleEligible.length;
+    }
+    const empty = byId(c.empty);
+    if (empty) empty.hidden = allRows.length === 0 || allRows.some(function (row) { return !row.hidden; });
+    const show = root.querySelector('[data-release-show-selected="' + kind + '"]');
+    if (show) {
+      show.setAttribute("aria-pressed", showingSelected[kind] ? "true" : "false");
+      show.textContent = showingSelected[kind] ? "Show all matching" : "Show selected";
     }
   }
-
-  function initializeQuestionnaireSelection() {
-    const form = document.getElementById("bulk-print-release-form");
-    if (!form || form.dataset.selectionInitialized === "true") return;
-    const selections = Array.from(
-      form.querySelectorAll(".bulk-release-selection:not(:disabled)")
-    );
-    const count = form.querySelector("#bulk-selected-count");
-    const selectAll = form.querySelector("#bulk-select-all");
-    if (!count || !selectAll) return;
-    const updateSelectionState = function () {
-      const selectedCount = selections.filter(function (selection) {
-        return selection.checked;
-      }).length;
-      count.textContent = selectedCount;
-      selectAll.checked = selections.length > 0 && selectedCount === selections.length;
-      selectAll.indeterminate = selectedCount > 0 && selectedCount < selections.length;
-    };
-    selectAll.addEventListener("change", function () {
-      selections.forEach(function (selection) {
-        selection.checked = selectAll.checked;
+  function applyFilters(kind) {
+    const values = filterValues(kind);
+    rows(kind).forEach(function (row) {
+      const input = inputFor(kind, row);
+      row.hidden = showingSelected[kind]
+        ? !(input && selected[kind].has(input.value))
+        : !matches(kind, row, values);
+    });
+    update(kind);
+  }
+  function reconcile(kind) {
+    const available = new Set(rows(kind).filter(function (row) {
+      return eligible(kind, row);
+    }).map(function (row) { return inputFor(kind, row).value; }));
+    let removed = 0;
+    selected[kind].forEach(function (value) {
+      if (!available.has(value)) { selected[kind].delete(value); removed += 1; }
+    });
+    if (removed) announce("warning", removed + " stale or unavailable selection" +
+      (removed === 1 ? " was" : "s were") + " removed.");
+  }
+  function initialize(kind) {
+    const c = config[kind];
+    const form = byId(c.form);
+    if (!form || form.dataset.releaseInitialized === "true") return;
+    form.querySelectorAll(c.checkbox).forEach(function (input) {
+      if (input.checked && !input.disabled) selected[kind].add(input.value);
+      input.addEventListener("change", function () {
+        if (input.checked) selected[kind].add(input.value);
+        else selected[kind].delete(input.value);
+        update(kind);
       });
-      updateSelectionState();
     });
-    selections.forEach(function (selection) {
-      selection.addEventListener("change", updateSelectionState);
-    });
-    form.dataset.selectionInitialized = "true";
-    updateSelectionState();
-  }
-
-  function answerKeyFilterState() {
-    const search = document.getElementById("answer-key-course-search");
-    const department = document.getElementById("answer-key-department-filter");
-    const campus = document.getElementById("answer-key-campus-filter");
-    const status = document.getElementById("answer-key-status-filter");
-    return {
-      search: search ? search.value : "",
-      department: department ? department.value : "",
-      campus: campus ? campus.value : "",
-      status: status ? status.value : ""
-    };
-  }
-
-  function restoreAnswerKeyFilterState(state) {
-    if (!state) return;
-    [
-      ["answer-key-course-search", state.search],
-      ["answer-key-department-filter", state.department],
-      ["answer-key-campus-filter", state.campus],
-      ["answer-key-status-filter", state.status]
-    ].forEach(function (entry) {
-      const control = document.getElementById(entry[0]);
-      if (control) control.value = entry[1] || "";
-    });
-  }
-
-  function initializeAnswerKeyFilters() {
-    const form = document.getElementById("bulk-answer-key-release-form");
-    if (!form || form.dataset.filterInitialized === "true") return;
-    const rows = Array.from(form.querySelectorAll('[data-answer-key-row="true"]'));
-    const search = document.getElementById("answer-key-course-search");
-    const department = document.getElementById("answer-key-department-filter");
-    const campus = document.getElementById("answer-key-campus-filter");
-    const status = document.getElementById("answer-key-status-filter");
-    const clear = document.getElementById("answer-key-clear-filters");
-    const visibleCount = document.getElementById("bulk-answer-key-visible-count");
-    const visibleEligibleCount = document.getElementById(
-      "bulk-answer-key-visible-eligible-count"
-    );
-    const selectedCount = document.getElementById("bulk-answer-key-selected-count");
-    const selectAll = document.getElementById("bulk-answer-key-select-all");
-    const noResults = document.getElementById("bulk-answer-key-no-filter-results");
-    if (!search || !department || !campus || !status || !selectAll) return;
-
-    const visibleEligibleRows = function () {
-      return rows.filter(function (row) {
-        const selection = row.querySelector(".bulk-answer-key-selection");
-        return !row.hidden && row.dataset.eligible === "true" &&
-          selection && !selection.disabled;
+    reconcile(kind);
+    [c.search, c.department, c.status].forEach(function (id) {
+      const control = byId(id);
+      if (control) control.addEventListener(id === c.search ? "input" : "change", function () {
+        applyFilters(kind);
       });
-    };
-
-    const deselectUnavailableRows = function () {
-      rows.forEach(function (row) {
-        const selection = row.querySelector(".bulk-answer-key-selection");
-        if (
-          selection &&
-          (row.hidden || row.dataset.eligible !== "true" || selection.disabled)
-        ) {
-          selection.checked = false;
+    });
+    const all = byId(c.selectAll);
+    if (all) all.addEventListener("change", function () {
+      rows(kind).forEach(function (row) {
+        if (!row.hidden && eligible(kind, row)) {
+          const value = inputFor(kind, row).value;
+          if (all.checked) selected[kind].add(value);
+          else selected[kind].delete(value);
         }
       });
-    };
-
-    const updateSelectionState = function () {
-      const visibleRows = visibleEligibleRows();
-      const visibleSelected = visibleRows.filter(function (row) {
-        return row.querySelector(".bulk-answer-key-selection").checked;
-      }).length;
-      if (selectedCount) selectedCount.textContent = visibleSelected;
-      if (visibleEligibleCount) visibleEligibleCount.textContent = visibleRows.length;
-      selectAll.disabled = visibleRows.length === 0;
-      selectAll.checked = visibleRows.length > 0 && visibleSelected === visibleRows.length;
-      selectAll.indeterminate = visibleSelected > 0 && visibleSelected < visibleRows.length;
-    };
-
-    const applyFilters = function () {
-      const query = search.value.trim().toLocaleLowerCase();
-      const departmentValue = department.value;
-      const campusValue = campus.value;
-      const statusValue = status.value;
-      rows.forEach(function (row) {
-        const departmentIds = tokens(row.dataset.departmentIds);
-        const matchesDepartment = !departmentValue ||
-          (departmentValue === "__none__" ? departmentIds.length === 0 :
-            departmentIds.includes(departmentValue));
-        const matchesCampus = !campusValue ||
-          tokens(row.dataset.campusIds).includes(campusValue);
-        row.hidden = !(
-          (!query || (row.dataset.courseSearch || "").toLocaleLowerCase().includes(query)) &&
-          matchesDepartment &&
-          matchesCampus &&
-          (!statusValue || row.dataset.releaseStatus === statusValue)
-        );
-      });
-      deselectUnavailableRows();
-      const shown = rows.filter(function (row) { return !row.hidden; }).length;
-      if (visibleCount) visibleCount.textContent = shown;
-      if (noResults) noResults.hidden = shown !== 0 || rows.length === 0;
-      updateSelectionState();
-    };
-
-    selectAll.addEventListener("change", function () {
-      visibleEligibleRows().forEach(function (row) {
-        const selection = row.querySelector(".bulk-answer-key-selection");
-        selection.checked = selectAll.checked;
-      });
-      updateSelectionState();
+      update(kind);
     });
-    rows.forEach(function (row) {
-      const selection = row.querySelector(".bulk-answer-key-selection");
-      if (selection) selection.addEventListener("change", updateSelectionState);
-    });
-    form.addEventListener("submit", function () {
-      deselectUnavailableRows();
-      updateSelectionState();
-    });
-    [search, department, status].forEach(function (control) {
-      control.addEventListener(control === search ? "input" : "change", applyFilters);
-    });
-    if (clear) {
-      clear.addEventListener("click", function () {
-        search.value = "";
-        department.value = "";
-        // Clearing search filters does not change the explicit recipient campus.
-        status.value = "";
-        applyFilters();
-        search.focus();
-      });
+    form.dataset.releaseInitialized = "true";
+    applyFilters(kind);
+  }
+  function clearSelection(kind, message) {
+    selected[kind].clear();
+    showingSelected[kind] = false;
+    applyFilters(kind);
+    if (message) announce("info", message);
+  }
+  function detailBody() { return byId("questionnaire-details-body"); }
+  function detailsModal() { return byId("questionnaire-details-modal"); }
+  function detailError() {
+    const body = detailBody();
+    if (!body) return;
+    body.replaceChildren();
+    const alert = document.createElement("div");
+    alert.className = "alert alert-warning";
+    alert.setAttribute("role", "alert");
+    alert.append("Details could not be loaded. ");
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "btn btn-sm btn-outline-secondary";
+    retry.textContent = "Retry";
+    retry.addEventListener("click", function () { loadDetails(detailUrl, detailOpener, false); });
+    alert.append(retry);
+    body.append(alert);
+  }
+  function loadDetails(url, opener, openModal) {
+    const body = detailBody();
+    const element = detailsModal();
+    if (!body || !element || !url) return;
+    detailUrl = url;
+    detailOpener = opener;
+    const request = ++detailRequest;
+    body.replaceChildren();
+    const loading = document.createElement("p");
+    loading.className = "text-muted";
+    loading.setAttribute("role", "status");
+    loading.textContent = "Loading questionnaire release details…";
+    body.append(loading);
+    if (openModal && window.bootstrap && window.bootstrap.Modal) {
+      window.bootstrap.Modal.getOrCreateInstance(element).show(opener);
     }
-    form.dataset.filterInitialized = "true";
-    applyFilters();
-  }
-
-  function initializeReleaseControls() {
-    const targetForm = document.getElementById("answer-key-target-form");
-    if (targetForm && !targetForm.dataset.initialized) {
-      const campus = targetForm.querySelector("select");
-      campus.addEventListener("change", function () {
-        root.querySelectorAll(".bulk-answer-key-selection").forEach(function (input) { input.checked = false; });
-        root.querySelectorAll('#answer-key-releases-pane form[method="post"] button, .bulk-answer-key-selection').forEach(function (control) {
-          control.disabled = true;
-        });
-        // Reload server-validated recipient rows; no old hidden targets can be submitted.
-        targetForm.requestSubmit();
-      });
-      targetForm.dataset.initialized = "true";
-    }
-    initializeQuestionnaireSelection();
-    initializeAnswerKeyFilters();
-  }
-
-  function selectedValues(form, selector) {
-    if (!form) return [];
-    return Array.from(form.querySelectorAll(selector + ":checked")).map(function (input) {
-      return input.value;
-    });
-  }
-
-  function restoreSelectedValues(form, selector, values) {
-    if (!form || !values) return;
-    const selected = new Set(values);
-    form.querySelectorAll(selector).forEach(function (input) {
-      input.checked = !input.disabled && selected.has(input.value);
-    });
-  }
-
-  async function refreshReleaseSection(payload, submittedAction) {
-    const section = payload.section;
-    const currentPane = document.getElementById(section + "-pane");
-    if (!currentPane) throw new Error("Release section is unavailable.");
-    const filterState = answerKeyFilterState();
-    const currentBulkForm = document.getElementById(
-      section === "answer-key-releases" ?
-        "bulk-answer-key-release-form" : "bulk-print-release-form"
-    );
-    const selectionSelector = section === "answer-key-releases" ?
-      ".bulk-answer-key-selection" : ".bulk-release-selection";
-    const preservedSelections = submittedAction.indexOf("bulk_") === 0 ? [] :
-      selectedValues(currentBulkForm, selectionSelector);
-    const refreshUrl = payload.refresh_url + "?section=" + encodeURIComponent(section) +
-      (section === "answer-key-releases" ? "&target_campus_id=" + encodeURIComponent(filterState.campus) : "");
-    const response = await window.fetch(refreshUrl, {
-      method: "GET",
-      credentials: "same-origin",
-      cache: "no-store",
+    window.fetch(url, {
+      method: "GET", credentials: "same-origin", cache: "no-store",
       headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "text/html"}
+    }).then(function (response) {
+      if (!response.ok) throw new Error("Details request failed.");
+      return response.text();
+    }).then(function (html) {
+      if (request !== detailRequest) return;
+      body.innerHTML = html;
+    }).catch(function () {
+      if (request === detailRequest) detailError();
     });
-    if (!response.ok) throw new Error("Updated release status could not be loaded.");
-    const documentText = await response.text();
-    const parsed = new DOMParser().parseFromString(documentText, "text/html");
-    const refreshedPane = parsed.getElementById(section + "-pane");
-    if (!refreshedPane) throw new Error("Updated release section is unavailable.");
+  }
+  function refresh(section) {
+    const kind = section === "answer-key-releases" ? "answer-key" : "questionnaire";
+    const pane = byId(config[kind].pane);
+    if (!pane) return Promise.resolve(false);
+    const values = filterValues(kind);
+    const selectedBefore = selected[kind].size;
+    const campus = byId("answer-key-campus-filter");
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", section);
+    if (kind === "answer-key") url.searchParams.set("target_campus_id", campus ? campus.value : "");
+    const request = ++refreshRequest[kind];
+    return window.fetch(url.pathname + url.search, {
+      method: "GET", credentials: "same-origin", cache: "no-store",
+      headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "text/html"}
+    }).then(function (response) {
+      if (!response.ok) throw new Error("Updated release status could not be loaded.");
+      return response.text();
+    }).then(function (html) {
+      if (request !== refreshRequest[kind]) return false;
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      const fresh = parsed.getElementById(config[kind].pane);
+      if (!fresh) throw new Error("Updated release section is unavailable.");
+      const existingModal = kind === "questionnaire" ? detailsModal() : null;
+      const freshModal = fresh.querySelector("#questionnaire-details-modal");
+      if (existingModal && freshModal) freshModal.remove();
+      pane.innerHTML = fresh.innerHTML;
+      if (existingModal) pane.append(existingModal);
+      restoreFilters(kind, values);
+      initialize(kind);
+      return {removed: selectedBefore - selected[kind].size};
+    });
+  }
 
-    if (section === "answer-key-releases") {
-      currentPane.innerHTML = refreshedPane.innerHTML;
-      restoreAnswerKeyFilterState(filterState);
-      restoreSelectedValues(document.getElementById("bulk-answer-key-release-form"), selectionSelector, preservedSelections);
-      initializeReleaseControls();
+  root.addEventListener("click", function (event) {
+    const clearFilters = event.target.closest("[data-release-clear], #answer-key-clear-filters");
+    if (clearFilters) {
+      const kind = clearFilters.dataset.releaseClear || "answer-key";
+      const c = config[kind];
+      [c.search, c.department, c.status].forEach(function (id) { if (byId(id)) byId(id).value = ""; });
+      showingSelected[kind] = false;
+      applyFilters(kind);
       return;
     }
-    const bulkId = section === "answer-key-releases" ?
-      "bulk-answer-key-release" : "bulk-print-release";
-    const currentBulk = document.getElementById(bulkId);
-    const refreshedBulk = refreshedPane.querySelector("#" + bulkId);
-    if (currentBulk && refreshedBulk) currentBulk.replaceWith(refreshedBulk);
-
-    (payload.affected_course_ids || []).forEach(function (courseId) {
-      const prefix = section === "answer-key-releases" ?
-        "answer-key-course-" : "questionnaire-course-";
-      const currentCourse = document.getElementById(prefix + courseId);
-      const refreshedCourse = refreshedPane.querySelector("#" + prefix + courseId);
-      if (currentCourse && refreshedCourse) currentCourse.replaceWith(refreshedCourse);
-    });
-
-    restoreAnswerKeyFilterState(filterState);
-    const newBulkForm = document.getElementById(
-      section === "answer-key-releases" ?
-        "bulk-answer-key-release-form" : "bulk-print-release-form"
-    );
-    restoreSelectedValues(newBulkForm, selectionSelector, preservedSelections);
-    initializeReleaseControls();
-  }
-
-  function processingButtons(form, submitter) {
-    const buttons = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]'));
-    if (submitter && !buttons.includes(submitter)) buttons.push(submitter);
-    buttons.forEach(function (button) {
-      button.dataset.releaseOriginalDisabled = button.disabled ? "true" : "false";
-      button.dataset.releaseOriginalText = button.textContent;
-      button.disabled = true;
-    });
-    if (submitter && submitter.dataset.processingLabel) {
-      submitter.textContent = submitter.dataset.processingLabel;
-    }
-    form.setAttribute("aria-busy", "true");
-    document.body.classList.add("de-release-processing");
-    return buttons;
-  }
-
-  function restoreProcessing(form, buttons) {
-    buttons.forEach(function (button) {
-      button.disabled = button.dataset.releaseOriginalDisabled === "true";
-      if (button.dataset.releaseOriginalText !== undefined) {
-        button.textContent = button.dataset.releaseOriginalText;
-      }
-      delete button.dataset.releaseOriginalDisabled;
-      delete button.dataset.releaseOriginalText;
-    });
-    form.removeAttribute("aria-busy");
-    delete form.dataset.ajaxSubmitting;
-    document.body.classList.remove("de-release-processing");
-  }
-
-  async function submitReleaseForm(form, submitter) {
-    if (form.dataset.ajaxSubmitting === "true") return;
-    form.dataset.ajaxSubmitting = "true";
-    const scrollPosition = window.scrollY;
-    const action = form.dataset.releaseAction || "";
-    const courseId = form.dataset.releaseCourseId || "";
-    const section = form.dataset.releaseSection || "questionnaire-releases";
-    const buttons = processingButtons(form, submitter);
-    const requestUrl = form.getAttribute("action") || window.location.href;
-    let requestPromise;
-    try {
-      requestPromise = window.fetch(requestUrl, {
-        method: "POST",
-        body: new FormData(form),
-        credentials: "same-origin",
-        headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
-      });
-    } catch (error) {
-      restoreProcessing(form, buttons);
-      HTMLFormElement.prototype.submit.call(form);
+    const show = event.target.closest("[data-release-show-selected]");
+    if (show) {
+      const kind = show.dataset.releaseShowSelected;
+      showingSelected[kind] = !showingSelected[kind];
+      applyFilters(kind);
       return;
     }
-
-    try {
-      const response = await requestPromise;
-      const contentType = response.headers.get("content-type") || "";
-      const payload = contentType.includes("application/json") ? await response.json() : null;
-      if (!response.ok || !payload || payload.success !== true) {
-        const message = payload && payload.message ? payload.message :
-          "The request was denied or could not be completed.";
-        showFeedback("danger", message, payload && payload.errors ? payload.errors : []);
-        focusWithoutScrolling(feedback);
-        window.scrollTo(0, scrollPosition);
-        return;
-      }
-      await refreshReleaseSection(payload, action);
-      showFeedback("success", payload.message, []);
-      const focusSelector = 'form[data-release-section="' + section + '"]' +
-        '[data-release-action="' + action + '"]' +
-        (courseId ? '[data-release-course-id="' + courseId + '"]' : "");
-      const refreshedForm = root.querySelector(focusSelector);
-      const focusTarget = refreshedForm ? refreshedForm.querySelector('button[type="submit"]') : feedback;
-      focusWithoutScrolling(focusTarget || feedback);
-      window.scrollTo(0, scrollPosition);
-    } catch (error) {
-      showFeedback(
-        "warning",
-        "The action may have completed, but the updated release status could not be displayed. Review the current status before retrying.",
-        []
-      );
-      focusWithoutScrolling(feedback);
-      window.scrollTo(0, scrollPosition);
-    } finally {
-      if (document.documentElement.contains(form)) restoreProcessing(form, buttons);
-      else document.body.classList.remove("de-release-processing");
-    }
-  }
-
-  if (window.fetch && window.FormData && window.DOMParser) {
-    root.addEventListener("submit", function (event) {
-      const form = event.target.closest('form[data-release-ajax="true"]');
-      if (!form) return;
+    const clear = event.target.closest("[data-release-clear-selection]");
+    if (clear) { clearSelection(clear.dataset.releaseClearSelection, "Selection cleared."); return; }
+    const detail = event.target.closest("[data-questionnaire-details-url]");
+    if (detail && window.fetch && window.bootstrap && window.bootstrap.Modal) {
       event.preventDefault();
-      submitReleaseForm(form, event.submitter || null);
+      loadDetails(detail.dataset.questionnaireDetailsUrl, detail, true);
+    }
+  });
+  const modal = detailsModal();
+  if (modal) modal.addEventListener("hidden.bs.modal", function () {
+    detailRequest += 1;
+    if (detailOpener && document.contains(detailOpener)) detailOpener.focus();
+    detailUrl = null;
+  });
+  const targetForm = byId("answer-key-target-form");
+  if (targetForm) {
+    const campus = byId("answer-key-campus-filter");
+    if (campus) campus.addEventListener("change", function () {
+      if (selected["answer-key"].size) rememberNotice("Target campus changed; Answer Key selections were cleared.");
+      clearSelection("answer-key");
+      targetForm.requestSubmit();
     });
   }
-
+  const cycle = byId("exam-cycle-status");
+  if (cycle) cycle.addEventListener("change", function () {
+    if (selected.questionnaire.size || selected["answer-key"].size) {
+      rememberNotice("Cycle changed; Release Center selections were cleared.");
+    }
+    clearSelection("questionnaire");
+    clearSelection("answer-key");
+  });
   root.addEventListener("shown.bs.tab", function (event) {
     const target = event.target.getAttribute("data-bs-target");
     if (target && window.history && window.history.replaceState) {
       window.history.replaceState(null, "", target);
     }
   });
-
-  const requestedHash = window.location.hash === "#bulk-answer-key-release" ?
-    "#answer-key-releases-pane" : window.location.hash;
+  const requestedHash = window.location.hash === "#bulk-answer-key-release"
+    ? "#answer-key-releases-pane" : window.location.hash;
   const hashTab = root.querySelector('[data-bs-target="' + requestedHash + '"]');
   if (hashTab && !hashTab.classList.contains("active")) hashTab.click();
-  initializeReleaseControls();
-})();
+
+  root.addEventListener("submit", function (event) {
+    const form = event.target.closest('form[data-release-ajax="true"]');
+    if (!form || !window.fetch || !window.FormData) return;
+    const submitter = event.submitter || null;
+    if (submitter && submitter.dataset.reviewRelease) {
+      const kind = submitter.dataset.reviewRelease;
+      if (!selected[kind].size) {
+        event.preventDefault();
+        announce("warning", "Select at least one eligible target before review.");
+        return;
+      }
+      const c = config[kind];
+      form.querySelectorAll(c.checkbox).forEach(function (input) {
+        input.checked = selected[kind].has(input.value);
+      });
+      // Keep the ordinary CSRF POST so the server renders the complete review.
+      return;
+    }
+    event.preventDefault();
+    if (form.dataset.releaseSubmitting === "true") return;
+    form.dataset.releaseSubmitting = "true";
+    const requestUrl = form.getAttribute("action") || window.location.href;
+    const detailAfter = detailUrl;
+    const openerAfter = detailOpener;
+    const body = submitter ? new FormData(form, submitter) : new FormData(form);
+    window.fetch(requestUrl, {
+      method: "POST", body: body, credentials: "same-origin",
+      headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+    }).then(function (response) {
+      return response.json().then(function (payload) {
+        if (!response.ok || payload.success !== true) {
+          throw new Error(payload.message || "The release could not be completed.");
+        }
+        return payload;
+      });
+    }).then(function (payload) {
+      return refresh(payload.section).then(function (applied) {
+        if (!applied) return;
+        announce("success", payload.message + (applied.removed
+          ? " " + applied.removed + " stale or unavailable selection" +
+            (applied.removed === 1 ? " was" : "s were") + " removed."
+          : ""));
+        if (payload.section === "questionnaire-releases" && detailAfter) {
+          const newOpener = root.querySelector(
+            '[data-questionnaire-details-url="' + detailAfter + '"]'
+          );
+          loadDetails(detailAfter, newOpener || openerAfter, true);
+        }
+      });
+    }).catch(function (error) {
+      announce("warning", error.message ||
+        "The action may have completed. Review current status before retrying.");
+    }).finally(function () { delete form.dataset.releaseSubmitting; });
+  });
+
+  initialize("questionnaire");
+  initialize("answer-key");
+  restoreNotice();
+}());

@@ -1,0 +1,23 @@
+{% extends "admin_portal/base.html" %}
+{% load tz %}
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:questionnaire_print_release' %}">Release Center</a></li><li class="breadcrumb-item active">Review {{ review_section }} targets</li></ol></nav>
+<section class="card de-exam-card"><div class="card-body p-4">
+  <h1 class="h4">Review selected {{ review_section }} targets</h1>
+  {% if review_error %}
+    <div class="alert alert-danger" role="alert">Selection or release window is invalid. Return to the Release Center and review the targets. {{ review_error }}</div>
+  {% else %}
+    <p>Review all {{ review_rows|length }} selected exact target{{ review_rows|length|pluralize }} before release. The final submission checks authority, eligibility, revision, and release state again.</p>
+    <ol>{% for value, label in review_rows %}<li>{{ label }}</li>{% endfor %}</ol>
+    <p><strong>Common window:</strong> {{ review_from|localtime|date:"M j, Y g:i A" }} – {{ review_until|localtime|date:"M j, Y g:i A" }} (Asia/Manila)</p>
+    {% if final_action == 'bulk_answer_key_release' %}<p><strong>Target campus:</strong> {% if review_campus %}{{ review_campus.code }} / {{ review_campus.name }}{% else %}{{ review_form.cleaned_data.target_campus_id }}{% endif %}. All examination sessions for every selected course were attested as concluded.</p>{% endif %}
+    <form method="post" action="{% url 'departmental_exams:questionnaire_print_release' %}">
+      {% csrf_token %}<input type="hidden" name="action" value="{{ final_action }}">
+      {% for value in review_values %}<input type="hidden" name="selections" value="{{ value }}">{% endfor %}
+      {% for name, value in review_hidden_fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+      <button class="btn btn-primary" type="submit">Confirm and release selected {{ review_section }} targets</button>
+    </form>
+  {% endif %}
+  <a class="btn btn-outline-secondary mt-3" href="{% url 'departmental_exams:questionnaire_print_release' %}">Back to Release Center</a>
+</div></section>
+{% endblock %}

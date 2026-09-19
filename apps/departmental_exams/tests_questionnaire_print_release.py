@@ -5,6 +5,8 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
+from django.db import connection
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import escape
@@ -23,6 +25,7 @@ from apps.rbac.models import Permission, UserPermission
 from apps.tenants.models import Program
 
 from .automatic_workflow import AutomaticGenerationSummaryService
+from .automatic_generation_audit import AutomaticGenerationAuditService
 from .exam_units import ExamCourseEquivalencyService
 from .models import (
     CourseExamConfiguration,
@@ -295,8 +298,13 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         self.assertFalse(QuestionnairePrintRelease.objects.exists())
         page = client.get(reverse("departmental_exams:questionnaire_print_release"))
         self.assertEqual(page.status_code, 200)
-        self.assertContains(page, "Print Set A")
-        self.assertContains(page, "Print Set B")
+        self.assertContains(page, "View details")
+        self.assertNotContains(page, "Print Set A")
+        details = client.get(
+            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
+        )
+        self.assertContains(details, "Print Set A")
+        self.assertContains(details, "Print Set B")
 
         for set_code in ("A", "B"):
             with self.subTest(set_code=set_code):
@@ -638,13 +646,15 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             tuple(campus.id for campus in course.print_release_campuses),
             (self.campus.id,),
         )
+        details = client.get(
+            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
+        )
+        self.assertEqual(details.status_code, 200)
         content = response.content.decode()
-        questionnaire_pane, answer_key_pane = content.split(
-            'id="questionnaire-releases-pane"', 1
-        )[1].split('id="answer-key-releases-pane"', 1)
+        answer_key_pane = content.split('id="answer-key-releases-pane"', 1)[1]
         campus_header = f"&middot; {self.campus.name}</div>"
-        # Questionnaire headers remain deduplicated. Answer Key recipients now require an explicit target.
-        self.assertEqual(questionnaire_pane.count(campus_header), 1)
+        # The on-demand Questionnaire detail keeps one campus despite repeated offerings.
+        self.assertEqual(details.content.decode().count(campus_header), 1)
         self.assertEqual(answer_key_pane.count(campus_header), 0)
         self.assertContains(response, "Target Campus (required)")
 
@@ -747,6 +757,14 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             response,
             "No current Generated revisions are available for bulk release.",
         )
+        self.assertContains(response, "View details")
+        client = Client()
+        client.force_login(self.manager_user)
+        details = client.get(
+            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
+        )
+        self.assertContains(details, "R2")
+        self.assertContains(details, "Print Set A")
 
     def test_bulk_select_all_and_selected_count_dom_contract(self):
         response = self._bulk_page()
@@ -930,6 +948,63 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(QuestionnairePrintRelease.objects.exists())
 
+    def test_review_is_read_only_and_final_post_revalidates_exact_targets(self):
+        second_parent, second_revision = self._second_bulk_target()
+        print_from, print_until = self._bulk_window()
+        payload = {
+            "action": "bulk_release",
+            "review": "1",
+            "selections": [
+                f"{self.parent.id}:{self.r2.id}",
+                f"{second_parent.id}:{second_revision.id}",
+            ],
+            "print_from": print_from.strftime("%Y-%m-%dT%H:%M"),
+            "print_until": print_until.strftime("%Y-%m-%dT%H:%M"),
+        }
+        client = Client()
+        client.force_login(self.manager_user)
+        url = reverse("departmental_exams:questionnaire_print_release")
+        review = client.post(url, payload)
+        self.assertEqual(review.status_code, 200)
+        self.assertContains(review, "Review all 2 selected exact targets")
+        for value in payload["selections"]:
+            self.assertContains(review, f'value="{value}"', html=False)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+        self.assertFalse(AuditLog.objects.filter(action="DE_QUESTIONNAIRE_PRINT_RELEASED").exists())
+
+        payload.pop("review")
+        self._newer_revision(second_parent, second_revision)
+        stale = client.post(url, payload)
+        self.assertEqual(stale.status_code, 400)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+        payload["selections"][1] = f"{self.parent.id}:{second_revision.id}"
+        tampered = client.post(url, payload)
+        self.assertEqual(tampered.status_code, 400)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+    def test_details_get_is_authorized_on_demand_and_main_get_skips_audit_history(self):
+        client = Client()
+        client.force_login(self.manager_user)
+        url = reverse("departmental_exams:questionnaire_print_release")
+        with patch.object(AutomaticGenerationAuditService, "run", side_effect=AssertionError("audit ran")):
+            with CaptureQueriesContext(connection) as queries:
+                main = client.get(url)
+            detail = client.get(
+                reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id]),
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+        self.assertEqual(main.status_code, 200)
+        self.assertEqual(detail.status_code, 200)
+        self.assertNotContains(main, "Print Set A")
+        self.assertContains(detail, "Print Set A")
+        self.assertIn("no-store", detail["Cache-Control"])
+        self.assertFalse(any("automaticgenerationauditrun" in query["sql"].lower() for query in queries))
+        client.force_login(self.faculty)
+        denied = client.get(
+            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
+        )
+        self.assertEqual(denied.status_code, 403)
+
     def test_direct_bulk_release_rejects_superseded_revision_and_rolls_back(self):
         second_parent, superseded = self._second_bulk_target()
         self._newer_revision(second_parent, superseded)
@@ -1112,6 +1187,15 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             squared_contributor_concentration=0,
         )
         print_from, print_until = self._bulk_window()
+        client = Client()
+        client.force_login(self.manager_user)
+        foreign_details = client.get(
+            reverse("departmental_exams:questionnaire_print_release_details", args=[foreign_parent.id])
+        )
+        self.assertEqual(foreign_details.status_code, 403)
+        self.assertNotContains(foreign_details, "FOREIGN-101", status_code=403)
+        forged_post = self._bulk_post(((self.parent, self.r2), (foreign_parent, foreign_revision)))
+        self.assertEqual(forged_post.status_code, 400)
 
         with self.assertRaises(Http404):
             QuestionnairePrintReleaseService.bulk_release(
@@ -1318,19 +1402,28 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         admin_client = Client()
         admin_client.force_login(self.manager_user)
         admin_page = admin_client.get(
-            reverse("departmental_exams:questionnaire_print_release")
+            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
         )
         self.assertContains(admin_page, "A newer generated revision exists.")
         self.assertContains(
             admin_page,
             "It is not printable until it receives its own explicit release.",
         )
+        self.assertContains(admin_page, "Release history (1)")
+        self.assertContains(admin_page, "Revoke Current Release")
+        self.assertContains(admin_page, "Run Automatic Audit")
+        self.assertContains(admin_page, "Print Set A")
+        self.assertContains(admin_page, "Print Set B")
 
         r3_release = self._release(revision=r3)
         r2_release.refresh_from_db()
         self.assertEqual(r2_release.status, QuestionnairePrintRelease.Status.REVOKED)
         self.assertIsNone(r2_release.active_marker)
         self.assertEqual(r3_release.generation_revision, r3)
+        refreshed_details = admin_client.get(
+            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
+        )
+        self.assertContains(refreshed_details, "Release history (2)")
         self.assertTrue(
             AuditLog.objects.filter(
                 action="DE_QUESTIONNAIRE_PRINT_RELEASE_REVOKED",

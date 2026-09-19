@@ -273,6 +273,7 @@ urlpatterns = [
     path("admin-portal/departmental-exams/automatic-summary/", stage6_views.automatic_generation_summary_entry_view, name="automatic_generation_summary_entry"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/automatic-summary/", stage6_views.automatic_generation_summary_view, name="automatic_generation_summary"),
     path("admin-portal/departmental-exams/questionnaire-print-release/", stage6_views.questionnaire_print_release_view, name="questionnaire_print_release"),
+    path("admin-portal/departmental-exams/questionnaire-print-release/<int:cycle_course_id>/details/", stage6_views.questionnaire_print_release_details_view, name="questionnaire_print_release_details"),
     path(
         "admin-portal/departmental-exams/answer-key-releases/<int:release_id>/viewers/",
         stage6_views.answer_key_viewers_view,

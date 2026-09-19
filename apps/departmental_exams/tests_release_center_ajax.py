@@ -19,6 +19,13 @@ class ReleaseCenterAjaxSourceContractTests(SimpleTestCase):
             / "admin"
             / "_questionnaire_release_pane.html"
         ).read_text(encoding="utf-8")
+        cls.questionnaire_details_template = (
+            repository_root
+            / "templates"
+            / "departmental_exams"
+            / "admin"
+            / "_questionnaire_release_details.html"
+        ).read_text(encoding="utf-8")
         cls.answer_key_template = (
             repository_root
             / "templates"
@@ -40,7 +47,11 @@ class ReleaseCenterAjaxSourceContractTests(SimpleTestCase):
         expected_actions = (
             (
                 self.questionnaire_template,
-                {"bulk_release", "release", "revoke"},
+                {"bulk_release"},
+            ),
+            (
+                self.questionnaire_details_template,
+                {"release", "revoke"},
             ),
             (
                 self.answer_key_template,

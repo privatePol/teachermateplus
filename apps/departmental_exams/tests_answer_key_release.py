@@ -1230,6 +1230,42 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         self.assertEqual({release.available_from for release in releases}, {local_start})
         self.assertEqual({release.available_until for release in releases}, {local_end})
 
+    def test_bulk_review_does_not_release_and_final_post_rechecks_attestation_and_revision(self):
+        now = timezone.localtime().replace(second=0, microsecond=0)
+        payload = {
+            "target_campus_id": str(self.campus.id),
+            "action": "bulk_answer_key_release",
+            "review": "1",
+            "selections": [f"{self.parent.id}:{self.r4.id}:{self.parent.id}:{self.campus.id}"],
+            "available_from": now.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": (now + timezone.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+            "sessions_concluded": "on",
+        }
+        client = Client()
+        client.force_login(self.release_manager)
+        url = reverse("departmental_exams:questionnaire_print_release")
+        review = client.post(url, payload)
+        self.assertEqual(review.status_code, 200)
+        self.assertContains(review, "Review all 1 selected exact target")
+        self.assertContains(review, f'value="{payload["selections"][0]}"', html=False)
+        self.assertContains(review, f'value="{self.campus.id}"', html=False)
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+        self.assertFalse(AuditLog.objects.filter(action="DE_ANSWER_KEY_RELEASED").exists())
+
+        payload.pop("review")
+        payload.pop("sessions_concluded")
+        unattested = client.post(url, payload)
+        self.assertEqual(unattested.status_code, 400)
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+        payload["sessions_concluded"] = "on"
+        ExamGenerationRevision.objects.filter(pk=self.r4.pk).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED,
+            current_marker=None,
+        )
+        stale = client.post(url, payload)
+        self.assertEqual(stale.status_code, 400)
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
     def test_bulk_cross_tenant_and_direct_deny_fail_closed_without_writes(self):
         now = timezone.now()
         with self.assertRaises(Http404):
@@ -1619,7 +1655,7 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
                 actor=self.release_manager,
             )
 
-    def test_release_center_filter_selection_and_ajax_source_contract(self):
+    def test_release_center_filter_selection_and_ajax_dom_contract(self):
         self.parent.course.exam_department = self.department
         self.parent.course.save(update_fields=["exam_department", "updated_at"])
         client = Client()
@@ -1660,46 +1696,13 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
             html=False,
         )
 
-        script = (
-            Path(__file__).resolve().parents[2]
-            / "static"
-            / "js"
-            / "departmental_exam_release_center.js"
-        ).read_text(encoding="utf-8")
-        for contract in (
-            '!row.hidden && row.dataset.eligible === "true"',
-            "selection && !selection.disabled",
-            "const deselectUnavailableRows = function ()",
-            '(row.hidden || row.dataset.eligible !== "true" || selection.disabled)',
-            "selection.checked = false",
-            "visibleEligibleRows().forEach",
-            "selectedCount.textContent = visibleSelected",
-            "selectAll.indeterminate =",
-            "row.hidden = !(",
-            "toLocaleLowerCase()",
-            "matchesDepartment",
-            "matchesCampus",
-            'row.dataset.releaseStatus === statusValue',
-            "[search, department, status].forEach",
-            'control === search ? "input" : "change"',
-            'form.addEventListener("submit", function ()',
-            "input.checked = !input.disabled && selected.has(input.value)",
-            '"X-Requested-With": "XMLHttpRequest"',
-            "body: new FormData(form)",
-            "currentCourse.replaceWith(refreshedCourse)",
-            "HTMLFormElement.prototype.submit.call(form)",
-            "window.scrollTo(0, scrollPosition)",
-        ):
-            self.assertIn(contract, script)
-        self.assertGreaterEqual(script.count("deselectUnavailableRows();"), 2)
-        self.assertLess(
-            script.index("row.hidden = !("),
-            script.index("deselectUnavailableRows();"),
-        )
-        self.assertLess(
-            script.index('form.addEventListener("submit", function ()'),
-            script.index("body: new FormData(form)"),
-        )
+        self.assertContains(response, 'id="bulk-answer-key-selected-count"', html=False)
+        self.assertContains(response, 'id="bulk-answer-key-hidden-selected-count"', html=False)
+        self.assertContains(response, 'data-release-show-selected="answer-key"', html=False)
+        self.assertContains(response, 'data-release-clear-selection="answer-key"', html=False)
+        self.assertContains(response, 'id="answer-key-clear-filters"', html=False)
+        self.assertContains(response, 'data-review-release="answer-key"', html=False)
+        self.assertContains(response, 'name="sessions_concluded"', html=False)
 
     def test_ajax_answer_key_release_is_safe_and_non_ajax_fallback_still_redirects(self):
         local_start = timezone.localtime().replace(second=0, microsecond=0)
