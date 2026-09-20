@@ -982,6 +982,56 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         self.assertEqual(tampered.status_code, 400)
         self.assertFalse(QuestionnairePrintRelease.objects.exists())
 
+    def test_closed_cycle_review_confirmation_returns_to_questionnaire_tab(self):
+        cycle = self.parent.cycle
+        cycle.status = ExaminationCycle.Status.CLOSED
+        cycle.save(update_fields=["status", "updated_at"])
+        client = Client()
+        client.force_login(self.manager_user)
+        center = reverse("departmental_exams:questionnaire_print_release")
+        context_url = f"{center}?cycle_status=CLOSED&section=questionnaire-releases"
+        page = client.get(context_url)
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, f'action="{context_url.replace("&", "&amp;")}#questionnaire-releases-pane"', html=False)
+        detail_url = reverse(
+            "departmental_exams:questionnaire_print_release_details",
+            args=[self.parent.id],
+        )
+        self.assertContains(page, f'{detail_url}?cycle_status=CLOSED&amp;section=questionnaire-releases', html=False)
+        detail = client.get(detail_url + "?cycle_status=CLOSED")
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "cycle_status=CLOSED")
+        self.assertContains(
+            detail,
+            f'action="{context_url.replace("&", "&amp;")}#questionnaire-releases-pane"',
+            html=False,
+        )
+
+        start, end = self._bulk_window()
+        payload = {
+            "action": "bulk_release", "review": "1",
+            "selections": [f"{self.parent.id}:{self.r2.id}"],
+            "print_from": start.strftime("%Y-%m-%dT%H:%M"),
+            "print_until": end.strftime("%Y-%m-%dT%H:%M"),
+        }
+        review = client.post(context_url, payload)
+        self.assertEqual(review.status_code, 200)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+        final_url = review.context["review_post_url"]
+        self.assertIn("cycle_status=CLOSED", final_url)
+        self.assertIn("section=questionnaire-releases", final_url)
+        self.assertContains(review, final_url.replace("&", "&amp;"), html=False)
+        payload.pop("review")
+        confirmed = client.post(final_url, payload)
+        self.assertEqual(confirmed.status_code, 302)
+        self.assertIn("cycle_status=CLOSED", confirmed["Location"])
+        self.assertIn("section=questionnaire-releases", confirmed["Location"])
+        self.assertEqual(QuestionnairePrintRelease.objects.count(), 1)
+        returned = client.get(confirmed["Location"])
+        self.assertEqual(returned.status_code, 200)
+        self.assertEqual(returned.context["current_cycle_status"], "CLOSED")
+        self.assertEqual(returned.context["initial_release_section"], "questionnaire-releases")
+
     def test_details_get_is_authorized_on_demand_and_main_get_skips_audit_history(self):
         client = Client()
         client.force_login(self.manager_user)

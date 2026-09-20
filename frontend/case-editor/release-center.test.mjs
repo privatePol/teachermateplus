@@ -457,3 +457,15 @@ test("late Answer Key refresh cannot restore an old campus or cycle context", as
   assert.equal(doc.getElementById("old-history-context"), null);
   assert.equal(doc.getElementById("answer-key-target-form").dataset.submitted, "true");
 });
+
+test("denied Answer Key details explain access denial without a retry loop", async () => {
+  const {doc, click, change, tick} = setup({fetch: () => Promise.resolve({ok: false, status: 403})});
+  change('input[value="21:201:31:1"]', true);
+  click('[data-answer-key-details-url="/key-details/a/"]');
+  await tick();
+  const body = doc.getElementById("answer-key-details-body");
+  assert.match(body.textContent, /Access to these details was denied/);
+  assert.match(body.textContent, /reload the authorized list/);
+  assert.equal(body.querySelector("button"), null);
+  assert.equal(doc.getElementById("bulk-answer-key-selected-count").textContent, "1");
+});

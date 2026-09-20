@@ -199,13 +199,18 @@
     detailState[kind].url = null;
     detailState[kind].open = false;
   }
-  function detailError(kind) {
+  function detailError(kind, error) {
     const body = detailBody(kind);
     if (!body) return;
     body.replaceChildren();
     const alert = document.createElement("div");
     alert.className = "alert alert-warning";
     alert.setAttribute("role", "alert");
+    if (error && error.status === 403) {
+      alert.textContent = "Access to these details was denied. Return to the Release Center and reload the authorized list.";
+      body.append(alert);
+      return;
+    }
     alert.append("Details could not be loaded. ");
     const retry = document.createElement("button");
     retry.type = "button";
@@ -239,13 +244,17 @@
       method: "GET", credentials: "same-origin", cache: "no-store",
       headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "text/html"}
     }).then(function (response) {
-      if (!response.ok) throw new Error("Details request failed.");
+      if (!response.ok) {
+        const error = new Error("Details request failed.");
+        error.status = response.status;
+        throw error;
+      }
       return response.text();
     }).then(function (html) {
       if (request !== detailRequest[kind]) return;
       body.innerHTML = html;
-    }).catch(function () {
-      if (request === detailRequest[kind]) detailError(kind);
+    }).catch(function (error) {
+      if (request === detailRequest[kind]) detailError(kind, error);
     });
   }
   function refresh(section) {

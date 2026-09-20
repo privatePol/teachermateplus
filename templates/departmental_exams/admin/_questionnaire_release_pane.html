@@ -24,7 +24,7 @@
         <button class="btn btn-sm btn-outline-success" type="button" data-release-clear="questionnaire">Clear filters</button>
       </div>
     </div>
-    <form method="post" novalidate id="bulk-print-release-form" data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="bulk_release">
+    <form method="post" action="{{ questionnaire_action_url }}" novalidate id="bulk-print-release-form" data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="bulk_release">
       {% csrf_token %}<input type="hidden" name="action" value="bulk_release">
       {{ bulk_form.non_field_errors }}{{ bulk_form.selections.errors }}
       <div class="table-responsive de-release-table-scroll mb-3">
@@ -38,7 +38,7 @@
               <td>{{ course.responsible_department|default:course.course.exam_department|default:"—" }}</td>
               <td>{% if course.bulk_selection %}R{{ course.bulk_selection.revision.revision_number }}{% else %}<span class="text-muted">Bulk-ineligible</span>{% endif %}</td>
               <td><span class="badge {% if course.print_window_status == 'Printable now' %}text-bg-success{% elif course.print_window_status == 'Scheduled' %}text-bg-info{% else %}text-bg-secondary{% endif %}">{{ course.print_window_status }}</span>{% if course.active_print_release %}<div class="small text-muted">{{ course.active_print_release.print_from|localtime|date:"M j, Y g:i A" }} – {{ course.active_print_release.print_until|localtime|date:"M j, Y g:i A" }}</div>{% endif %}</td>
-              <td><a class="btn btn-sm btn-outline-success" href="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}" data-questionnaire-details-url="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}">View details</a></td>
+              <td><a class="btn btn-sm btn-outline-success" href="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}?cycle_status={{ current_cycle_status|urlencode }}&amp;section=questionnaire-releases" data-questionnaire-details-url="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}?cycle_status={{ current_cycle_status|urlencode }}&amp;section=questionnaire-releases">View details</a></td>
             </tr>
             {% endfor %}
             <tr id="questionnaire-no-filter-results" hidden><td colspan="6" class="text-muted">No authorized questionnaire courses match these filters.</td></tr>
@@ -56,7 +56,7 @@
   </div>
 </section>
 {% else %}
-<section class="card de-exam-card de-release-card"><div class="card-body"><p class="text-muted">Bulk release requires generation-management authority. Open a course within your output authority to review its details.</p><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Course</th><th>Status</th><th>Details</th></tr></thead><tbody>{% for course in courses %}<tr><td><strong>{{ course.course.code }}</strong> — {{ course.course.title }}</td><td>{{ course.print_window_status }}</td><td><a class="btn btn-sm btn-outline-success" href="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}" data-questionnaire-details-url="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}">View details</a></td></tr>{% endfor %}</tbody></table></div></div></section>
+<section class="card de-exam-card de-release-card"><div class="card-body"><p class="text-muted">Bulk release requires generation-management authority. Open a course within your output authority to review its details.</p><div class="table-responsive"><table class="table table-sm"><thead><tr><th>Course</th><th>Status</th><th>Details</th></tr></thead><tbody>{% for course in courses %}<tr><td><strong>{{ course.course.code }}</strong> — {{ course.course.title }}</td><td>{{ course.print_window_status }}</td><td><a class="btn btn-sm btn-outline-success" href="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}?cycle_status={{ current_cycle_status|urlencode }}&amp;section=questionnaire-releases" data-questionnaire-details-url="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}?cycle_status={{ current_cycle_status|urlencode }}&amp;section=questionnaire-releases">View details</a></td></tr>{% endfor %}</tbody></table></div></div></section>
 {% endif %}
 <div class="modal fade" id="questionnaire-details-modal" tabindex="-1" aria-labelledby="questionnaire-details-title" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="questionnaire-details-title">Questionnaire release details</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body" id="questionnaire-details-body"><p class="text-muted">Select a course to load its details.</p></div></div></div>

@@ -29,10 +29,10 @@
         <div class="col-md-4"><div class="small text-muted">Released By / At</div><strong>{{ course.active_print_release.released_by.full_name|default:course.active_print_release.released_by.username }}</strong><div class="small">{{ course.active_print_release.released_at|localtime|date:"M j, Y g:i A" }}</div></div>
       </div>
       {% if course.newer_revision_exists %}<div class="alert alert-info py-2"><strong>A newer generated revision exists.</strong> It is not printable until it receives its own explicit release.</div>{% endif %}
-      <form method="post" action="{% url 'departmental_exams:questionnaire_print_release' %}" class="mb-4" data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="revoke" data-release-course-id="{{ course.id }}">{% csrf_token %}<input type="hidden" name="action" value="revoke"><input type="hidden" name="release_id" value="{{ course.active_print_release.id }}"><button class="btn btn-sm btn-outline-danger" type="submit" data-processing-label="Revoking...">Revoke Current Release</button></form>
+      <form method="post" action="{{ release_center_return_url }}" class="mb-4" data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="revoke" data-release-course-id="{{ course.id }}">{% csrf_token %}<input type="hidden" name="action" value="revoke"><input type="hidden" name="release_id" value="{{ course.active_print_release.id }}"><button class="btn btn-sm btn-outline-danger" type="submit" data-processing-label="Revoking...">Revoke Current Release</button></form>
     {% else %}<p class="text-muted">No revision is currently released for Faculty printing.</p>{% endif %}
     <h4 class="h6">{% if course.active_print_release %}Replace active release{% else %}Release an exact revision{% endif %}</h4>
-    <form method="post" action="{% url 'departmental_exams:questionnaire_print_release' %}" novalidate data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="release" data-release-course-id="{{ course.id }}">
+    <form method="post" action="{{ release_center_return_url }}" novalidate data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="release" data-release-course-id="{{ course.id }}">
       {% csrf_token %}<input type="hidden" name="action" value="release">{{ course.release_form.cycle_course_id }}
       {{ course.release_form.non_field_errors }}
       <div class="row g-3 align-items-start">

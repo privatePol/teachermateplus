@@ -1734,6 +1734,142 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         self.assertContains(full_page, "Back to Release Center")
         self.assertContains(full_page, "Release history for this exact campus and recipient")
 
+    def test_closed_cycle_details_and_review_confirmation_preserve_context(self):
+        cycle = self.parent.cycle
+        cycle.status = ExaminationCycle.Status.CLOSED
+        cycle.save(update_fields=["status", "updated_at"])
+        client = Client()
+        client.force_login(self.release_manager)
+        center = reverse("departmental_exams:questionnaire_print_release")
+        context_url = (
+            f"{center}?cycle_status=CLOSED&section=answer-key-releases"
+            f"&target_campus_id={self.campus.id}"
+        )
+        detail_url = reverse(
+            "departmental_exams:answer_key_release_details",
+            args=[self.parent.id, self.parent.id, self.campus.id],
+        )
+        page = client.get(context_url)
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, f'{detail_url}?cycle_status=CLOSED&amp;section=answer-key-releases', html=False)
+        self.assertContains(page, 'id="bulk-answer-key-release-form"', html=False)
+
+        for url, ajax in (
+            (detail_url, False), (detail_url, True),
+            (detail_url + "?cycle_status=CLOSED", True),
+        ):
+            with self.subTest(url=url, ajax=ajax):
+                before = AnswerKeyRelease.objects.count()
+                response = client.get(
+                    url, **({"HTTP_X_REQUESTED_WITH": "XMLHttpRequest"} if ajax else {})
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Exact current-final revision")
+                self.assertEqual(AnswerKeyRelease.objects.count(), before)
+                if not ajax:
+                    self.assertContains(response, "cycle_status=CLOSED")
+                    self.assertContains(
+                        response,
+                        f'action="{context_url.replace("&", "&amp;")}#answer-key-releases-pane"',
+                        html=False,
+                    )
+
+        denied = client.get(
+            reverse(
+                "departmental_exams:answer_key_release_details",
+                args=[self.parent.id, self.parent.id, self.other_campus.id],
+            ) + "?cycle_status=CLOSED&section=answer-key-releases"
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        now = timezone.localtime().replace(second=0, microsecond=0)
+        payload = {
+            "action": "bulk_answer_key_release",
+            "review": "1",
+            "target_campus_id": str(self.campus.id),
+            "selections": [f"{self.parent.id}:{self.r4.id}:{self.parent.id}:{self.campus.id}"],
+            "available_from": now.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": (now + timezone.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+            "sessions_concluded": "on",
+        }
+        review = client.post(context_url, payload)
+        self.assertEqual(review.status_code, 200)
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+        final_url = review.context["review_post_url"]
+        self.assertIn("cycle_status=CLOSED", final_url)
+        self.assertIn("section=answer-key-releases", final_url)
+        self.assertIn(f"target_campus_id={self.campus.id}", final_url)
+        self.assertContains(review, final_url.replace("&", "&amp;"), html=False)
+        payload.pop("review")
+        confirmed = client.post(final_url, payload)
+        self.assertEqual(confirmed.status_code, 302)
+        self.assertIn("cycle_status=CLOSED", confirmed["Location"])
+        self.assertIn("section=answer-key-releases", confirmed["Location"])
+        self.assertIn(f"target_campus_id={self.campus.id}", confirmed["Location"])
+        self.assertEqual(AnswerKeyRelease.objects.count(), 1)
+        returned = client.get(confirmed["Location"])
+        self.assertEqual(returned.status_code, 200)
+        self.assertEqual(returned.context["current_cycle_status"], "CLOSED")
+        self.assertEqual(returned.context["initial_release_section"], "answer-key-releases")
+        UserPermission.objects.create(
+            user=self.release_manager,
+            permission=Permission.objects.get(code="departmental_exams.release_answer_keys"),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        self.assertEqual(client.get(detail_url + "?cycle_status=CLOSED").status_code, 403)
+
+    def test_invalid_answer_key_review_keeps_only_an_authorized_campus_context(self):
+        cycle = self.parent.cycle
+        cycle.status = ExaminationCycle.Status.CLOSED
+        cycle.save(update_fields=["status", "updated_at"])
+        client = Client()
+        client.force_login(self.release_manager)
+        center = reverse("departmental_exams:questionnaire_print_release")
+        review_url = f"{center}?cycle_status=CLOSED&section=answer-key-releases"
+        now = timezone.localtime().replace(second=0, microsecond=0)
+        valid_selection = f"{self.parent.id}:{self.r4.id}:{self.parent.id}:{self.campus.id}"
+        payload = {
+            "action": "bulk_answer_key_release", "review": "1",
+            "target_campus_id": str(self.campus.id),
+            "selections": [valid_selection],
+            "available_from": now.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": (now + timezone.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+            "sessions_concluded": "on",
+        }
+
+        for invalid_fields in (
+            {"selections": ["999:999:999:999"]},
+            {"available_until": payload["available_from"]},
+        ):
+            with self.subTest(invalid_fields=invalid_fields):
+                response = client.post(review_url, {**payload, **invalid_fields})
+                self.assertEqual(response.status_code, 400)
+                back_url = response.context["release_center_return_url"]
+                self.assertIn("cycle_status=CLOSED", back_url)
+                self.assertIn("section=answer-key-releases", back_url)
+                self.assertIn(f"target_campus_id={self.campus.id}", back_url)
+                self.assertContains(response, back_url.replace("&", "&amp;"), status_code=400, html=False)
+                returned = client.get(back_url)
+                self.assertEqual(returned.status_code, 200)
+                self.assertEqual(returned.context["target_campus_id"], self.campus.id)
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
+        for bad_campus in (str(self.other_campus.id), "999999", "not-a-campus"):
+            with self.subTest(bad_campus=bad_campus):
+                response = client.post(review_url, {**payload, "target_campus_id": bad_campus})
+                self.assertEqual(response.status_code, 400)
+                back_url = response.context["release_center_return_url"]
+                self.assertIn("cycle_status=CLOSED", back_url)
+                self.assertIn("section=answer-key-releases", back_url)
+                self.assertNotIn("target_campus_id=", back_url)
+                returned = client.get(back_url)
+                self.assertEqual(returned.status_code, 200)
+                self.assertIsNone(returned.context["target_campus_id"])
+                self.assertEqual(returned.context["scoped_answer_key_history"], [])
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
     def test_answer_key_details_reject_direct_deny_and_wrong_target_without_writes(self):
         detail_url = reverse(
             "departmental_exams:answer_key_release_details",

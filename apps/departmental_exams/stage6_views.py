@@ -99,13 +99,33 @@ def _is_ajax_request(request):
     return request.headers.get("x-requested-with") == "XMLHttpRequest"
 
 
+def _release_center_url(*, cycle_status, section, campus_id=None):
+    from .cycle_visibility import selected_cycle_status
+
+    params = {
+        "cycle_status": selected_cycle_status({"cycle_status": cycle_status}),
+        "section": section,
+    }
+    if section == "answer-key-releases" and campus_id is not None:
+        try:
+            params["target_campus_id"] = int(campus_id)
+        except (TypeError, ValueError):
+            pass
+    return (
+        reverse("departmental_exams:questionnaire_print_release")
+        + "?" + urlencode(params)
+        + f"#{section}-pane"
+    )
+
+
 def _release_action_success(
     request, *, message, section, affected_course_ids
 ):
-    refresh_url = reverse("departmental_exams:questionnaire_print_release")
-    cycle_status = request.GET.get("cycle_status")
-    if cycle_status in ("OPEN", "CLOSED", "DRAFT"):
-        refresh_url += "?cycle_status=" + cycle_status
+    refresh_url = _release_center_url(
+        cycle_status=request.GET.get("cycle_status"),
+        section=section,
+        campus_id=(request.POST.get("target_campus_id") or request.GET.get("target_campus_id")),
+    )
     if _is_ajax_request(request):
         return JsonResponse(
             {
@@ -119,14 +139,6 @@ def _release_action_success(
             }
         )
     messages.success(request, message)
-    if section == "answer-key-releases":
-        campus = request.POST.get("target_campus_id", "")
-        if campus.isdigit():
-            separator = "&" if "?" in refresh_url else "?"
-            refresh_url += (
-                f"{separator}section=answer-key-releases"
-                f"&target_campus_id={int(campus)}#answer-key-releases-pane"
-            )
     return redirect(refresh_url)
 
 
@@ -1122,7 +1134,7 @@ def questionnaire_print_release_view(
         )
     # Filter the operational list only; exact-release POST/direct routes keep
     # their existing independent authority and lifecycle checks.
-    if request.method == "GET" and detail_course_id is None:
+    if request.method == "GET" and detail_course_id is None and answer_key_detail_target is None:
         from .cycle_visibility import filter_cycle_rows
         courses = filter_cycle_rows(courses, request.GET)
     for course in courses:
@@ -1299,6 +1311,11 @@ def questionnaire_print_release_view(
                 "answer_key_detail": answer_key_detail,
                 "now": now,
                 "answer_key_detail_mode": True,
+                "release_center_return_url": _release_center_url(
+                    cycle_status=course.cycle.status,
+                    section="answer-key-releases",
+                    campus_id=campus.id,
+                ),
             },
             status=answer_key_detail_status,
         )
@@ -1472,6 +1489,15 @@ def questionnaire_print_release_view(
                 else BulkAnswerKeyReleaseForm(request.POST, selection_choices=bulk_answer_key_choices)
             )
             if review_form.is_valid():
+                review_section = (
+                    "questionnaire-releases" if action == "bulk_release"
+                    else "answer-key-releases"
+                )
+                review_url = _release_center_url(
+                    cycle_status=current_cycle_status,
+                    section=review_section,
+                    campus_id=review_form.cleaned_data.get("target_campus_id"),
+                )
                 labels = dict(
                     bulk_selection_choices
                     if action == "bulk_release"
@@ -1482,6 +1508,8 @@ def questionnaire_print_release_view(
                     "departmental_exams/admin/_release_selection_review.html",
                     {
                         "review_section": "Questionnaire" if action == "bulk_release" else "Answer Key",
+                        "review_post_url": review_url,
+                        "release_center_return_url": review_url,
                         "final_action": action,
                         "review_values": request.POST.getlist("selections"),
                         "review_rows": tuple(
@@ -1521,12 +1549,23 @@ def questionnaire_print_release_view(
                         ),
                     },
                 )
+            review_campus_id = (
+                review_form.cleaned_data.get("target_campus_id")
+                if action == "bulk_answer_key_release" else None
+            )
+            if review_campus_id not in bulk_answer_key_campuses:
+                review_campus_id = None
             return render(
                 request,
                 "departmental_exams/admin/_release_selection_review.html",
                 {
                     "review_section": "Questionnaire" if action == "bulk_release" else "Answer Key",
                     "review_error": review_form.errors,
+                    "release_center_return_url": _release_center_url(
+                        cycle_status=current_cycle_status,
+                        section=("questionnaire-releases" if action == "bulk_release" else "answer-key-releases"),
+                        campus_id=review_campus_id,
+                    ),
                 },
                 status=400,
             )
@@ -1983,7 +2022,13 @@ def questionnaire_print_release_view(
         response = render(
             request,
             detail_template,
-            {"course": courses[0], "now": now, "detail_mode": True},
+            {
+                "course": courses[0], "now": now, "detail_mode": True,
+                "release_center_return_url": _release_center_url(
+                    cycle_status=courses[0].cycle.status,
+                    section="questionnaire-releases",
+                ),
+            },
         )
         response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
         return response
@@ -2000,6 +2045,15 @@ def questionnaire_print_release_view(
             "bulk_selection_row_count": len(bulk_selection_rows),
             "bulk_selected_values": set(bulk_form["selections"].value() or ()),
             "current_cycle_status": current_cycle_status,
+            "questionnaire_action_url": _release_center_url(
+                cycle_status=current_cycle_status,
+                section="questionnaire-releases",
+            ),
+            "answer_key_action_url": _release_center_url(
+                cycle_status=current_cycle_status,
+                section="answer-key-releases",
+                campus_id=target_campus_id,
+            ),
             "target_campus_id": target_campus_id,
             "scoped_answer_key_history": scoped_answer_key_history,
             "historical_answer_key_campus_options": historical_answer_key_campus_options,

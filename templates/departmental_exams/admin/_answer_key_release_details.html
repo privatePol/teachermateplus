@@ -16,7 +16,7 @@
   {% if answer_key_detail.form and answer_key_detail.can_manage_target or answer_key_detail.failed_post %}
     {% if answer_key_detail.failed_post %}<div class="alert alert-danger" role="alert">The release was not completed. Review the entered window, exact revision, and errors below.</div>{% endif %}
     <h4 class="h6">{% if answer_key_detail.active_release %}Replace active release{% else %}Release an exact revision{% endif %}</h4>
-    <form method="post" action="{% url 'departmental_exams:questionnaire_print_release' %}" novalidate data-release-ajax="true" data-release-section="answer-key-releases" data-release-action="answer_key_release" data-release-course-id="{{ answer_key_detail.course.id }}">
+    <form method="post" action="{{ release_center_return_url }}" novalidate data-release-ajax="true" data-release-section="answer-key-releases" data-release-action="answer_key_release" data-release-course-id="{{ answer_key_detail.course.id }}">
       {% csrf_token %}<input type="hidden" name="action" value="answer_key_release">
       {{ answer_key_detail.form.cycle_course_id }}{{ answer_key_detail.form.recipient_course_id }}{{ answer_key_detail.form.target_campus_id }}
       {{ answer_key_detail.form.non_field_errors }}{{ answer_key_detail.form.cycle_course_id.errors }}{{ answer_key_detail.form.target_campus_id.errors }}{{ answer_key_detail.form.recipient_course_id.errors }}
@@ -35,7 +35,7 @@
   {% endif %}
 
   {% if answer_key_detail.active_release and answer_key_detail.can_revoke_target %}
-    <form method="post" action="{% url 'departmental_exams:questionnaire_print_release' %}" class="mt-3" data-release-ajax="true" data-release-section="answer-key-releases" data-release-action="answer_key_revoke" data-release-course-id="{{ answer_key_detail.course.id }}">
+    <form method="post" action="{{ release_center_return_url }}" class="mt-3" data-release-ajax="true" data-release-section="answer-key-releases" data-release-action="answer_key_revoke" data-release-course-id="{{ answer_key_detail.course.id }}">
       {% csrf_token %}<input type="hidden" name="action" value="answer_key_revoke"><input type="hidden" name="release_id" value="{{ answer_key_detail.active_release.id }}"><input type="hidden" name="target_campus_id" value="{{ answer_key_detail.campus.id }}">
       <button type="submit" class="btn btn-sm btn-outline-danger" data-processing-label="Revoking...">Revoke current target release</button>
     </form>

@@ -48,7 +48,7 @@
 <div class="alert alert-warning"><strong>Confidential output control:</strong> Admin printing is independent of Faculty release windows. Confirm the exact revision before printing, auditing, releasing, replacing, or revoking.</div>
 
 {% if detail_mode or answer_key_detail_mode %}
-<p><a class="btn btn-outline-secondary btn-sm" href="{% url 'departmental_exams:questionnaire_print_release' %}">Back to Release Center</a></p>
+<p><a class="btn btn-outline-secondary btn-sm" href="{{ release_center_return_url }}">Back to Release Center</a></p>
 {% if answer_key_detail_mode %}
   {% include "departmental_exams/admin/_answer_key_release_details.html" %}
 {% else %}
