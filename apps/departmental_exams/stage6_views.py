@@ -136,6 +136,19 @@ def _release_form_errors(form):
     return [str(error) for errors in form.errors.values() for error in errors]
 
 
+def _answer_key_effective_status(*, release, expected_revision, campus, now):
+    status = AnswerKeyReleaseService.operational_status(
+        release=release,
+        expected_revision=expected_revision,
+        now=now,
+    )
+    if not campus.is_active and status in {
+        "Scheduled", "Currently Released / Available",
+    }:
+        return "Inactive campus / Not Faculty Accessible"
+    return status
+
+
 def _course(tenant_id, cycle_course_id):
     return get_object_or_404(
         CycleCourse.objects.select_related(
@@ -979,7 +992,10 @@ def automatic_generation_summary_entry_view(request):
 
 @portal_required("ADMIN")
 @require_http_methods(["GET", "POST"])
-def questionnaire_print_release_view(request, detail_course_id=None):
+def questionnaire_print_release_view(
+    request, detail_course_id=None, answer_key_detail_target=None,
+    answer_key_bound_form=None, answer_key_detail_status=200,
+):
     from .cycle_visibility import selected_cycle_status
 
     tenant_id = _tenant_id(request)
@@ -988,6 +1004,9 @@ def questionnaire_print_release_view(request, detail_course_id=None):
     print_release_queryset = QuestionnairePrintRelease.objects.select_related(
         "generation_revision", "released_by", "revoked_by"
     ).order_by("-released_at", "-id")
+    detail_course_filter_id = detail_course_id
+    if answer_key_detail_target is not None:
+        detail_course_filter_id = answer_key_detail_target[0]
     if detail_course_id is not None:
         revision_queryset = revision_queryset.prefetch_related(
             Prefetch(
@@ -1052,8 +1071,8 @@ def questionnaire_print_release_view(request, detail_course_id=None):
             "course__code",
         )
     )
-    if detail_course_id is not None:
-        course_queryset = course_queryset.filter(pk=detail_course_id)
+    if detail_course_filter_id is not None:
+        course_queryset = course_queryset.filter(pk=detail_course_filter_id)
     courses = list(course_queryset)
     management_map = DepartmentalExamAuthorizationService.automatic_permission_map(
         user=request.user,
@@ -1138,6 +1157,156 @@ def questionnaire_print_release_view(request, detail_course_id=None):
     for course in courses:
         course.answer_key_release_history = list(course.answer_key_releases.all())
 
+    if answer_key_detail_target is not None:
+        (
+            answer_key_course_id,
+            answer_key_recipient_id,
+            answer_key_campus_id,
+        ) = answer_key_detail_target
+        course = next(
+            (course for course in courses if course.id == answer_key_course_id),
+            None,
+        )
+        if course is None or not answer_key_release_map.get(answer_key_course_id):
+            raise PermissionDenied("The requested Answer Key release details are unavailable.")
+        request_campus_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
+        if (
+            request_campus_ids is not None
+            and answer_key_campus_id not in request_campus_ids
+        ):
+            raise PermissionDenied("The requested Answer Key release details are unavailable.")
+        unit = resolve_examination_unit(course)
+        if unit.primary.id != course.id:
+            raise PermissionDenied("The requested Answer Key release details are unavailable.")
+        recipient = next(
+            (member for member in unit.members if member.id == answer_key_recipient_id),
+            None,
+        )
+        if recipient is None:
+            raise PermissionDenied("The requested Answer Key release details are unavailable.")
+        DepartmentalExamAuthorizationService.require_answer_key_target(
+            user=request.user,
+            cycle_course=course,
+            recipient_course=recipient,
+            target_campus_id=answer_key_campus_id,
+            require_active_campus=False,
+        )
+        campus = next(
+            (
+                snapshot.campus
+                for snapshot in recipient.offering_snapshots.all()
+                if snapshot.campus_id == answer_key_campus_id
+            ),
+            None,
+        )
+        if campus is None:
+            raise PermissionDenied("The requested Answer Key release details are unavailable.")
+        eligible_revisions = [
+            revision
+            for revision in course.generation_revisions.all()
+            if AnswerKeyReleaseService.revision_is_eligible(revision)
+        ]
+        expected_revision = (
+            eligible_revisions[0] if len(eligible_revisions) == 1 else None
+        )
+        target_history = [
+            release
+            for release in course.answer_key_release_history
+            if (
+                release.scope_kind == AnswerKeyRelease.ScopeKind.SCOPED
+                and release.recipient_course_id == recipient.id
+                and release.target_campus_id == campus.id
+            )
+        ]
+        for release in target_history:
+            release.operational_status = _answer_key_effective_status(
+                release=release,
+                expected_revision=expected_revision,
+                campus=campus,
+                now=now,
+            )
+        target_active_release = next(
+            (
+                release
+                for release in target_history
+                if (
+                    release.status == AnswerKeyRelease.Status.ACTIVE
+                    and release.active_marker == 1
+                )
+            ),
+            None,
+        )
+        can_revoke_target = True
+        try:
+            DepartmentalExamAuthorizationService.require_answer_key_target(
+                user=request.user,
+                cycle_course=course,
+                recipient_course=recipient,
+                target_campus_id=campus.id,
+            )
+            can_manage_target = expected_revision is not None
+        except PermissionDenied:
+            can_manage_target = False
+        detail_form = answer_key_bound_form
+        if detail_form is None and can_manage_target:
+            detail_form = AnswerKeyReleaseForm(
+                cycle_course=course,
+                auto_id=f"id_answer_key_detail_{recipient.id}_{campus.id}_%s",
+                initial={
+                    "cycle_course_id": course.id,
+                    "generation_revision": expected_revision.id,
+                    "recipient_course_id": recipient.id,
+                    "target_campus_id": campus.id,
+                    "available_from": (
+                        target_active_release.available_from
+                        if target_active_release
+                        else local_now
+                    ),
+                    "available_until": (
+                        target_active_release.available_until
+                        if target_active_release
+                        else local_now + timezone.timedelta(days=1)
+                    ),
+                },
+            )
+        answer_key_detail = {
+            "course": course,
+            "recipient": recipient,
+            "campus": campus,
+            "expected_revision": expected_revision,
+            "history": target_history,
+            "active_release": target_active_release,
+            "status": _answer_key_effective_status(
+                release=target_active_release,
+                expected_revision=expected_revision,
+                campus=campus,
+                now=now,
+            ),
+            "can_manage_target": can_manage_target,
+            "can_revoke_target": can_revoke_target,
+            "form": detail_form,
+            "failed_post": answer_key_bound_form is not None,
+        }
+        detail_template = (
+            "departmental_exams/admin/_answer_key_release_details.html"
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            else "departmental_exams/admin/questionnaire_print_release.html"
+        )
+        response = render(
+            request,
+            detail_template,
+            {
+                "answer_key_detail": answer_key_detail,
+                "now": now,
+                "answer_key_detail_mode": True,
+            },
+            status=answer_key_detail_status,
+        )
+        response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+        response["Pragma"] = "no-cache"
+        response["Expires"] = "0"
+        return response
+
     can_bulk_release = any(
         DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
         in management_map[course.id]
@@ -1191,6 +1360,7 @@ def questionnaire_print_release_view(request, detail_course_id=None):
     bulk_answer_key_rows = []
     bulk_answer_key_departments = {}
     bulk_answer_key_campuses = {}
+    eligible_answer_key_revisions_by_course_id = {}
     request_campus_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
     for course in courses:
         if not answer_key_release_map[course.id]:
@@ -1202,6 +1372,7 @@ def questionnaire_print_release_view(request, detail_course_id=None):
             revision for revision in course.generation_revisions.all()
             if AnswerKeyReleaseService.revision_is_eligible(revision)
         ]
+        eligible_answer_key_revisions_by_course_id[course.id] = eligible_revisions
         for recipient in unit.members:
             for snapshot in recipient.offering_snapshots.select_related("campus").all():
                 campus = snapshot.campus
@@ -1239,18 +1410,9 @@ def questionnaire_print_release_view(request, detail_course_id=None):
                 department = recipient.responsible_department or recipient.course.exam_department
                 if department:
                     bulk_answer_key_departments[department.id] = department
-                form = AnswerKeyReleaseForm(
-                    cycle_course=course, auto_id=f"id_key_{recipient.id}_{campus.id}_%s",
-                    initial={
-                        "cycle_course_id": course.id, "generation_revision": revision.id,
-                        "recipient_course_id": recipient.id, "target_campus_id": campus.id,
-                        "available_from": active.available_from if active else local_now,
-                        "available_until": active.available_until if active else local_now + timezone.timedelta(days=1),
-                    },
-                )
                 bulk_answer_key_rows.append({
                     "value": value, "course": course, "recipient": recipient,
-                    "campus": campus, "revision": revision, "form": form, "history": history,
+                    "campus": campus, "revision": revision, "history": history,
                     "finalized_at": revision.locked_at or revision.generated_at,
                     "active_release": active if active and active.generation_revision_id == revision.id else None,
                     "target_active_release": active, "displayed_release": current_release,
@@ -1600,6 +1762,31 @@ def questionnaire_print_release_view(request, detail_course_id=None):
                     )
             else:
                 status = 400
+            if status >= 400 and not _is_ajax_request(request):
+                try:
+                    recipient_id = int(request.POST.get("recipient_course_id"))
+                    campus_id = int(request.POST.get("target_campus_id"))
+                except (TypeError, ValueError):
+                    raise PermissionDenied("The selected Answer Key target is unavailable.")
+                request_campus_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
+                if request_campus_ids is not None and campus_id not in request_campus_ids:
+                    raise PermissionDenied("The selected Answer Key target is unavailable.")
+                unit = resolve_examination_unit(course)
+                recipient = next(
+                    (member for member in unit.members if member.id == recipient_id), None
+                )
+                if unit.primary.id != course.id or recipient is None:
+                    raise PermissionDenied("The selected Answer Key target is unavailable.")
+                DepartmentalExamAuthorizationService.require_answer_key_target(
+                    user=request.user, cycle_course=course,
+                    recipient_course=recipient, target_campus_id=campus_id,
+                )
+                return questionnaire_print_release_view(
+                    request,
+                    answer_key_detail_target=(course.id, recipient_id, campus_id),
+                    answer_key_bound_form=bound_answer_key_form,
+                    answer_key_detail_status=status,
+                )
         elif action == "answer_key_revoke":
             try:
                 release = AnswerKeyReleaseService.revoke(
@@ -1723,26 +1910,47 @@ def questionnaire_print_release_view(request, detail_course_id=None):
                 },
             )
     scoped_answer_key_history = []
+    historical_answer_key_campuses = {}
+    authorized_history_targets = {}
     for course in courses:
         if not answer_key_release_map[course.id]:
             continue
+        history_eligible_revisions = eligible_answer_key_revisions_by_course_id.get(
+            course.id, ()
+        )
+        history_expected_revision = (
+            history_eligible_revisions[0] if len(history_eligible_revisions) == 1 else None
+        )
         for release in course.answer_key_release_history:
-            if release.scope_kind != AnswerKeyRelease.ScopeKind.SCOPED or release.target_campus_id != target_campus_id:
+            if release.scope_kind != AnswerKeyRelease.ScopeKind.SCOPED:
                 continue
             if request_campus_ids is not None and release.target_campus_id not in request_campus_ids:
                 continue
-            try:
-                DepartmentalExamAuthorizationService.require_answer_key_target(
-                    user=request.user, cycle_course=course, recipient_course=release.recipient_course,
-                    target_campus_id=release.target_campus_id, require_active_campus=False,
-                )
-            except PermissionDenied:
+            target_key = (course.id, release.recipient_course_id, release.target_campus_id)
+            if target_key not in authorized_history_targets:
+                try:
+                    DepartmentalExamAuthorizationService.require_answer_key_target(
+                        user=request.user, cycle_course=course, recipient_course=release.recipient_course,
+                        target_campus_id=release.target_campus_id, require_active_campus=False,
+                    )
+                except PermissionDenied:
+                    authorized_history_targets[target_key] = False
+                else:
+                    authorized_history_targets[target_key] = True
+            if not authorized_history_targets[target_key]:
                 continue
-            scoped_answer_key_history.append(release)
-    if bound_answer_key_form is not None:
-        for row in bulk_answer_key_rows:
-            if str(row["recipient"].id) == request.POST.get("recipient_course_id"):
-                row["form"] = bound_answer_key_form
+            historical_answer_key_campuses[release.target_campus_id] = release.target_campus
+            if release.target_campus_id == target_campus_id:
+                release.operational_status = _answer_key_effective_status(
+                    release=release,
+                    expected_revision=history_expected_revision,
+                    campus=release.target_campus,
+                    now=now,
+                )
+                scoped_answer_key_history.append(release)
+    historical_answer_key_campus_options = tuple(sorted(
+        historical_answer_key_campuses.values(), key=lambda campus: (campus.name, campus.id)
+    ))
     if request.method == "POST" and _is_ajax_request(request) and status >= 400:
         action_form = {
             "bulk_release": bulk_form,
@@ -1794,7 +2002,13 @@ def questionnaire_print_release_view(request, detail_course_id=None):
             "current_cycle_status": current_cycle_status,
             "target_campus_id": target_campus_id,
             "scoped_answer_key_history": scoped_answer_key_history,
+            "historical_answer_key_campus_options": historical_answer_key_campus_options,
+            "selected_historical_only_campus": (
+                target_campus_id in historical_answer_key_campuses
+                and target_campus_id not in bulk_answer_key_campuses
+            ),
             "bulk_answer_key_form": bulk_answer_key_form,
+            "answer_key_release": bound_answer_key_form,
             "can_bulk_answer_key_release": can_bulk_answer_key_release,
             "bulk_answer_key_rows": bulk_answer_key_rows,
             "bulk_answer_key_row_count": len(bulk_answer_key_rows),
@@ -1828,6 +2042,17 @@ def questionnaire_print_release_view(request, detail_course_id=None):
 @require_GET
 def questionnaire_print_release_details_view(request, cycle_course_id):
     return questionnaire_print_release_view(request, detail_course_id=cycle_course_id)
+
+
+@portal_required("ADMIN")
+@require_GET
+def answer_key_release_details_view(
+    request, cycle_course_id, recipient_course_id, campus_id
+):
+    return questionnaire_print_release_view(
+        request,
+        answer_key_detail_target=(cycle_course_id, recipient_course_id, campus_id),
+    )
 
 
 @portal_required("ADMIN")

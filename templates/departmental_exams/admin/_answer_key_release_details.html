@@ -1,0 +1,48 @@
+{% load tz %}
+<section id="answer-key-target-{{ answer_key_detail.course.id }}-{{ answer_key_detail.recipient.id }}-{{ answer_key_detail.campus.id }}">
+  <header class="de-release-course-header mb-3">
+    <span class="badge text-bg-danger mb-2">CONFIDENTIAL</span>
+    <h3 class="h5 mb-1">{{ answer_key_detail.campus.name }} / {{ answer_key_detail.recipient.course.code }} &mdash; {{ answer_key_detail.recipient.course.title }}</h3>
+    <div class="small text-muted">Revision owner: {{ answer_key_detail.course.course.code }} &middot; {{ answer_key_detail.course.cycle.academic_year }} / {{ answer_key_detail.course.cycle.term }} / {{ answer_key_detail.course.cycle.get_exam_period_display }}</div>
+    <span class="badge {% if answer_key_detail.status == 'Currently Released / Available' %}text-bg-success{% elif answer_key_detail.status == 'Scheduled' %}text-bg-info{% elif answer_key_detail.status == 'Superseded / No Longer Faculty Accessible' %}text-bg-danger{% else %}text-bg-secondary{% endif %}">{{ answer_key_detail.status }}</span>
+  </header>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-4"><div class="small text-muted">Exact current-final revision</div>{% if answer_key_detail.expected_revision %}<strong>R{{ answer_key_detail.expected_revision.revision_number }}</strong><div class="small">{{ answer_key_detail.expected_revision.get_status_display }}</div>{% else %}<span class="text-muted">No unique eligible current-final revision</span>{% endif %}</div>
+    <div class="col-md-4"><div class="small text-muted">Current availability window</div>{% if answer_key_detail.active_release %}<strong>{{ answer_key_detail.active_release.available_from|localtime|date:"M j, Y g:i A" }}</strong><div>to {{ answer_key_detail.active_release.available_until|localtime|date:"M j, Y g:i A" }}</div>{% else %}<span class="text-muted">No active release</span>{% endif %}</div>
+    <div class="col-md-4"><div class="small text-muted">Target identity</div><strong>{{ answer_key_detail.campus.code }} / {{ answer_key_detail.recipient.course.code }}</strong><div class="small">Primary {{ answer_key_detail.course.course.code }} &middot; exact revision remains explicit</div></div>
+  </div>
+
+  {% if answer_key_detail.form and answer_key_detail.can_manage_target or answer_key_detail.failed_post %}
+    {% if answer_key_detail.failed_post %}<div class="alert alert-danger" role="alert">The release was not completed. Review the entered window, exact revision, and errors below.</div>{% endif %}
+    <h4 class="h6">{% if answer_key_detail.active_release %}Replace active release{% else %}Release an exact revision{% endif %}</h4>
+    <form method="post" action="{% url 'departmental_exams:questionnaire_print_release' %}" novalidate data-release-ajax="true" data-release-section="answer-key-releases" data-release-action="answer_key_release" data-release-course-id="{{ answer_key_detail.course.id }}">
+      {% csrf_token %}<input type="hidden" name="action" value="answer_key_release">
+      {{ answer_key_detail.form.cycle_course_id }}{{ answer_key_detail.form.recipient_course_id }}{{ answer_key_detail.form.target_campus_id }}
+      {{ answer_key_detail.form.non_field_errors }}{{ answer_key_detail.form.cycle_course_id.errors }}{{ answer_key_detail.form.target_campus_id.errors }}{{ answer_key_detail.form.recipient_course_id.errors }}
+      <div class="row g-3">
+        <div class="col-md-4"><label class="form-label" for="{{ answer_key_detail.form.generation_revision.id_for_label }}">Exact current-final revision</label>{{ answer_key_detail.form.generation_revision }}{{ answer_key_detail.form.generation_revision.errors }}</div>
+        <div class="col-md-4"><label class="form-label" for="{{ answer_key_detail.form.available_from.id_for_label }}">Available From</label>{{ answer_key_detail.form.available_from }}{{ answer_key_detail.form.available_from.errors }}<div class="form-text">Asia/Manila</div></div>
+        <div class="col-md-4"><label class="form-label" for="{{ answer_key_detail.form.available_until.id_for_label }}">Available Until</label>{{ answer_key_detail.form.available_until }}{{ answer_key_detail.form.available_until.errors }}<div class="form-text">Asia/Manila</div></div>
+      </div>
+      <div class="form-check my-3">{{ answer_key_detail.form.sessions_concluded }}<label class="form-check-label fw-semibold" for="{{ answer_key_detail.form.sessions_concluded.id_for_label }}">{{ answer_key_detail.form.sessions_concluded.label }}</label>{{ answer_key_detail.form.sessions_concluded.errors }}</div>
+      <button type="submit" class="btn btn-danger" data-processing-label="Releasing..."{% if not answer_key_detail.can_manage_target %} disabled{% endif %}>{% if answer_key_detail.active_release %}Replace this target release{% else %}Release this target{% endif %}</button>
+    </form>
+  {% elif not answer_key_detail.expected_revision %}
+    <div class="alert alert-light border">A complete unique current-final Set A/B revision is required before this target can be released. Historical records remain available below.</div>
+  {% else %}
+    <div class="alert alert-light border">This historical target remains visible, but its current campus scope is not eligible for a new release.</div>
+  {% endif %}
+
+  {% if answer_key_detail.active_release and answer_key_detail.can_revoke_target %}
+    <form method="post" action="{% url 'departmental_exams:questionnaire_print_release' %}" class="mt-3" data-release-ajax="true" data-release-section="answer-key-releases" data-release-action="answer_key_revoke" data-release-course-id="{{ answer_key_detail.course.id }}">
+      {% csrf_token %}<input type="hidden" name="action" value="answer_key_revoke"><input type="hidden" name="release_id" value="{{ answer_key_detail.active_release.id }}"><input type="hidden" name="target_campus_id" value="{{ answer_key_detail.campus.id }}">
+      <button type="submit" class="btn btn-sm btn-outline-danger" data-processing-label="Revoking...">Revoke current target release</button>
+    </form>
+  {% endif %}
+
+  <h4 class="h6 mt-4">Release history for this exact campus and recipient</h4>
+  <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Revision</th><th>Status</th><th>Availability window</th><th>Attestation / actors</th><th>History</th></tr></thead><tbody>
+    {% for release in answer_key_detail.history %}<tr><td><strong>R{{ release.generation_revision.revision_number }}</strong></td><td>{{ release.operational_status }}</td><td>{{ release.available_from|localtime|date:"M j, Y g:i A" }}<br><span class="small text-muted">to {{ release.available_until|localtime|date:"M j, Y g:i A" }}</span></td><td><span class="small">Sessions concluded attested ({{ release.attestation_version }}).<br>Released by {{ release.released_by }} at {{ release.released_at|localtime|date:"M j, Y g:i A" }}{% if release.revoked_at %}<br>Revoked by {{ release.revoked_by }} at {{ release.revoked_at|localtime|date:"M j, Y g:i A" }}{% endif %}</span></td><td><a class="btn btn-sm btn-outline-secondary" href="{% url 'departmental_exams:answer_key_viewers' release.id %}">Who Viewed</a></td></tr>{% empty %}<tr><td colspan="5" class="text-muted">No scoped release history exists for this exact target.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>

@@ -33,6 +33,13 @@ class ReleaseCenterAjaxSourceContractTests(SimpleTestCase):
             / "admin"
             / "_answer_key_release_pane.html"
         ).read_text(encoding="utf-8")
+        cls.answer_key_details_template = (
+            repository_root
+            / "templates"
+            / "departmental_exams"
+            / "admin"
+            / "_answer_key_release_details.html"
+        ).read_text(encoding="utf-8")
 
     def test_named_action_control_cannot_shadow_ajax_request_url(self):
         self.assertIn(
@@ -57,9 +64,12 @@ class ReleaseCenterAjaxSourceContractTests(SimpleTestCase):
                 self.answer_key_template,
                 {
                     "bulk_answer_key_release",
-                    "answer_key_release",
                     "answer_key_revoke",
                 },
+            ),
+            (
+                self.answer_key_details_template,
+                {"answer_key_release", "answer_key_revoke"},
             ),
         )
 

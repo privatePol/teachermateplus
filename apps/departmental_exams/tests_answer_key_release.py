@@ -1704,6 +1704,225 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         self.assertContains(response, 'data-review-release="answer-key"', html=False)
         self.assertContains(response, 'name="sessions_concluded"', html=False)
 
+    def test_answer_key_details_are_target_scoped_read_only_and_have_full_page_fallback(self):
+        release = self._release()
+        client = Client()
+        client.force_login(self.release_manager)
+        detail_url = reverse(
+            "departmental_exams:answer_key_release_details",
+            args=[self.parent.id, self.parent.id, self.campus.id],
+        )
+        release_count = AnswerKeyRelease.objects.count()
+        audit_count = AuditLog.objects.count()
+
+        partial = client.get(detail_url, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(partial.status_code, 200)
+        self.assertContains(partial, "Exact current-final revision")
+        self.assertContains(partial, "all examination sessions")
+        self.assertContains(
+            partial,
+            reverse("departmental_exams:answer_key_viewers", args=[release.id]),
+            html=False,
+        )
+        self.assertContains(partial, "Sessions concluded attested")
+        self.assertIn("no-store", partial["Cache-Control"])
+        self.assertEqual(AnswerKeyRelease.objects.count(), release_count)
+        self.assertEqual(AuditLog.objects.count(), audit_count)
+
+        full_page = client.get(detail_url)
+        self.assertEqual(full_page.status_code, 200)
+        self.assertContains(full_page, "Back to Release Center")
+        self.assertContains(full_page, "Release history for this exact campus and recipient")
+
+    def test_answer_key_details_reject_direct_deny_and_wrong_target_without_writes(self):
+        detail_url = reverse(
+            "departmental_exams:answer_key_release_details",
+            args=[self.parent.id, self.parent.id, self.campus.id],
+        )
+        before = AnswerKeyRelease.objects.count()
+        UserPermission.objects.create(
+            user=self.release_manager,
+            permission=Permission.objects.get(code="departmental_exams.release_answer_keys"),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        client = Client()
+        client.force_login(self.release_manager)
+        self.assertEqual(client.get(detail_url).status_code, 403)
+        self.assertEqual(
+            client.get(
+                reverse(
+                    "departmental_exams:answer_key_release_details",
+                    args=[self.parent.id, self.parent.id, self.other_campus.id],
+                )
+            ).status_code,
+            403,
+        )
+        self.assertEqual(AnswerKeyRelease.objects.count(), before)
+
+    def test_answer_key_details_keep_historical_bulk_ineligible_target_accessible(self):
+        release = self._release()
+        current = self._replace_current_revision(item_count=2)
+        GeneratedExamItem.objects.filter(
+            generated_set__generation_revision=current
+        ).delete()
+        GeneratedExamSet.objects.filter(generation_revision=current).delete()
+        client = Client()
+        client.force_login(self.release_manager)
+        detail_url = reverse(
+            "departmental_exams:answer_key_release_details",
+            args=[self.parent.id, self.parent.id, self.campus.id],
+        )
+
+        response = client.get(detail_url, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No unique eligible current-final revision")
+        self.assertContains(response, f"R{release.generation_revision.revision_number}")
+        self.assertContains(response, "Superseded / No Longer Faculty Accessible")
+
+    def test_inactive_campus_scoped_history_is_discoverable_without_release_controls(self):
+        release = self._release()
+        client = Client()
+        client.force_login(self.release_manager)
+        index_url = reverse("departmental_exams:questionnaire_print_release")
+        detail_url = reverse(
+            "departmental_exams:answer_key_release_details",
+            args=[self.parent.id, self.parent.id, self.campus.id],
+        )
+        active_detail = client.get(detail_url)
+        self.assertEqual(active_detail.status_code, 200)
+        self.assertEqual(
+            active_detail.context["answer_key_detail"]["status"],
+            "Currently Released / Available",
+        )
+
+        self.campus.is_active = False
+        self.campus.save(update_fields=["is_active"])
+
+        index = client.get(index_url)
+        self.assertEqual(index.status_code, 200)
+        self.assertContains(index, "inactive, history only")
+        self.assertContains(index, f"target_campus_id={self.campus.id}", html=False)
+        history = client.get(index_url, {
+            "target_campus_id": self.campus.id,
+            "section": "answer-key-releases",
+        })
+        self.assertEqual(history.status_code, 200)
+        self.assertContains(history, detail_url, html=False)
+        self.assertContains(history, f"R{release.generation_revision.revision_number}")
+        self.assertContains(history, "Inactive campus / Not Faculty Accessible")
+        self.assertNotContains(history, 'id="bulk-answer-key-release-form"', html=False)
+        detail = client.get(detail_url)
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(
+            detail.context["answer_key_detail"]["status"],
+            "Inactive campus / Not Faculty Accessible",
+        )
+        self.assertEqual(
+            detail.context["answer_key_detail"]["history"][0].operational_status,
+            "Inactive campus / Not Faculty Accessible",
+        )
+        self.assertNotContains(detail, 'name="action" value="answer_key_release"', html=False)
+        self.assertContains(detail, "Revoke current target release")
+        self.assertContains(detail, "Inactive campus / Not Faculty Accessible")
+        self.assertNotContains(detail, "Currently Released / Available")
+        local_start = timezone.localtime().replace(second=0, microsecond=0)
+        blocked_release = client.post(index_url, {
+            "action": "answer_key_release",
+            "cycle_course_id": self.parent.id,
+            "recipient_course_id": self.parent.id,
+            "target_campus_id": self.campus.id,
+            "generation_revision": self.r4.id,
+            "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": (
+                local_start + timezone.timedelta(hours=1)
+            ).strftime("%Y-%m-%dT%H:%M"),
+            "sessions_concluded": "on",
+        })
+        self.assertEqual(blocked_release.status_code, 403)
+        self.assertEqual(AnswerKeyRelease.objects.count(), 1)
+        revoked = client.post(index_url, {
+            "action": "answer_key_revoke",
+            "release_id": release.id,
+            "target_campus_id": self.campus.id,
+        })
+        self.assertEqual(revoked.status_code, 302)
+        release.refresh_from_db()
+        self.assertEqual(release.status, AnswerKeyRelease.Status.REVOKED)
+
+        UserPermission.objects.create(
+            user=self.release_manager,
+            permission=Permission.objects.get(code="departmental_exams.release_answer_keys"),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        denied_index = client.get(index_url)
+        self.assertEqual(denied_index.status_code, 403)
+        self.assertEqual(client.get(detail_url).status_code, 403)
+
+    def test_failed_ordinary_answer_key_post_returns_bound_authorized_details(self):
+        client = Client()
+        client.force_login(self.release_manager)
+        url = reverse("departmental_exams:questionnaire_print_release")
+        start = timezone.localtime().replace(second=0, microsecond=0)
+        payload = {
+            "action": "answer_key_release",
+            "cycle_course_id": self.parent.id,
+            "recipient_course_id": self.parent.id,
+            "target_campus_id": self.campus.id,
+            "generation_revision": self.r4.id,
+            "available_from": start.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": (start + timezone.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+            "sessions_concluded": "on",
+        }
+
+        invalid_window = client.post(url, {
+            **payload, "available_until": payload["available_from"],
+        })
+        self.assertEqual(invalid_window.status_code, 400)
+        self.assertContains(invalid_window, "Available Until must be later", status_code=400)
+        self.assertContains(invalid_window, 'type="datetime-local"', status_code=400, html=False)
+        self.assertContains(invalid_window, payload["available_from"], status_code=400)
+        self.assertTrue(invalid_window.context["answer_key_detail"]["form"].is_bound)
+
+        missing_attestation = client.post(url, {
+            key: value for key, value in payload.items() if key != "sessions_concluded"
+        })
+        self.assertEqual(missing_attestation.status_code, 400)
+        self.assertContains(missing_attestation, "Confirm that all examination sessions", status_code=400)
+        self.assertTrue(missing_attestation.context["answer_key_detail"]["form"].is_bound)
+
+        with patch(
+            "apps.departmental_exams.stage6_views.AnswerKeyReleaseService.release",
+            side_effect=ValidationError("The target changed before release."),
+        ):
+            service_error = client.post(url, payload)
+        self.assertEqual(service_error.status_code, 400)
+        self.assertContains(service_error, "The target changed before release.", status_code=400)
+        self.assertTrue(service_error.context["answer_key_detail"]["form"].is_bound)
+
+        self._replace_current_revision(item_count=2)
+        stale = client.post(url, payload)
+        self.assertEqual(stale.status_code, 400)
+        self.assertContains(stale, "Select a valid choice", status_code=400)
+        self.assertContains(stale, "Exact current-final revision", status_code=400)
+        self.assertTrue(stale.context["answer_key_detail"]["form"].is_bound)
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
+        for hidden_field, wrong_value in (
+            ("cycle_course_id", 999999),
+            ("recipient_course_id", 999999),
+            ("target_campus_id", 999999),
+            ("target_campus_id", "invalid"),
+        ):
+            with self.subTest(hidden_field=hidden_field, wrong_value=wrong_value):
+                tampered = client.post(url, {**payload, hidden_field: wrong_value})
+                self.assertEqual(tampered.status_code, 403)
+                self.assertNotIn("Confidential key source", tampered.content.decode())
+        self.assertFalse(AnswerKeyRelease.objects.exists())
+
     def test_ajax_answer_key_release_is_safe_and_non_ajax_fallback_still_redirects(self):
         local_start = timezone.localtime().replace(second=0, microsecond=0)
         payload = {"target_campus_id": self.campus.id, "recipient_course_id": self.parent.id,

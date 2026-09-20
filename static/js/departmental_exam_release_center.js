@@ -6,10 +6,12 @@
   const feedback = document.getElementById("release-center-feedback");
   const selected = {questionnaire: new Set(), "answer-key": new Set()};
   const showingSelected = {questionnaire: false, "answer-key": false};
-  let detailRequest = 0;
+  const detailRequest = {questionnaire: 0, "answer-key": 0};
   const refreshRequest = {questionnaire: 0, "answer-key": 0};
-  let detailUrl = null;
-  let detailOpener = null;
+  const detailState = {
+    questionnaire: {url: null, opener: null, lifecycle: 0, open: false},
+    "answer-key": {url: null, opener: null, lifecycle: 0, open: false}
+  };
 
   const config = {
     questionnaire: {
@@ -188,10 +190,17 @@
     applyFilters(kind);
     if (message) announce("info", message);
   }
-  function detailBody() { return byId("questionnaire-details-body"); }
-  function detailsModal() { return byId("questionnaire-details-modal"); }
-  function detailError() {
-    const body = detailBody();
+  function detailBody(kind) { return byId(kind + "-details-body"); }
+  function detailsModal(kind) { return byId(kind + "-details-modal"); }
+  function invalidateRefresh(kind) { refreshRequest[kind] += 1; }
+  function invalidateDetails(kind) {
+    detailRequest[kind] += 1;
+    detailState[kind].lifecycle += 1;
+    detailState[kind].url = null;
+    detailState[kind].open = false;
+  }
+  function detailError(kind) {
+    const body = detailBody(kind);
     if (!body) return;
     body.replaceChildren();
     const alert = document.createElement("div");
@@ -202,22 +211,26 @@
     retry.type = "button";
     retry.className = "btn btn-sm btn-outline-secondary";
     retry.textContent = "Retry";
-    retry.addEventListener("click", function () { loadDetails(detailUrl, detailOpener, false); });
+    retry.addEventListener("click", function () {
+      loadDetails(kind, detailState[kind].url, detailState[kind].opener, false);
+    });
     alert.append(retry);
     body.append(alert);
   }
-  function loadDetails(url, opener, openModal) {
-    const body = detailBody();
-    const element = detailsModal();
+  function loadDetails(kind, url, opener, openModal, preserveLifecycle) {
+    const body = detailBody(kind);
+    const element = detailsModal(kind);
     if (!body || !element || !url) return;
-    detailUrl = url;
-    detailOpener = opener;
-    const request = ++detailRequest;
+    detailState[kind].url = url;
+    detailState[kind].opener = opener;
+    if (!preserveLifecycle) detailState[kind].lifecycle += 1;
+    if (openModal) detailState[kind].open = true;
+    const request = ++detailRequest[kind];
     body.replaceChildren();
     const loading = document.createElement("p");
     loading.className = "text-muted";
     loading.setAttribute("role", "status");
-    loading.textContent = "Loading questionnaire release details…";
+    loading.textContent = "Loading " + (kind === "answer-key" ? "Answer Key" : "questionnaire") + " release details…";
     body.append(loading);
     if (openModal && window.bootstrap && window.bootstrap.Modal) {
       window.bootstrap.Modal.getOrCreateInstance(element).show(opener);
@@ -229,10 +242,10 @@
       if (!response.ok) throw new Error("Details request failed.");
       return response.text();
     }).then(function (html) {
-      if (request !== detailRequest) return;
+      if (request !== detailRequest[kind]) return;
       body.innerHTML = html;
     }).catch(function () {
-      if (request === detailRequest) detailError();
+      if (request === detailRequest[kind]) detailError(kind);
     });
   }
   function refresh(section) {
@@ -241,10 +254,12 @@
     if (!pane) return Promise.resolve(false);
     const values = filterValues(kind);
     const selectedBefore = selected[kind].size;
-    const campus = byId("answer-key-campus-filter");
     const url = new URL(window.location.href);
     url.searchParams.set("section", section);
-    if (kind === "answer-key") url.searchParams.set("target_campus_id", campus ? campus.value : "");
+    if (kind === "answer-key" && !url.searchParams.get("target_campus_id")) {
+      const campus = byId("answer-key-campus-filter");
+      if (campus && campus.value) url.searchParams.set("target_campus_id", campus.value);
+    }
     const request = ++refreshRequest[kind];
     return window.fetch(url.pathname + url.search, {
       method: "GET", credentials: "same-origin", cache: "no-store",
@@ -257,12 +272,17 @@
       const parsed = new DOMParser().parseFromString(html, "text/html");
       const fresh = parsed.getElementById(config[kind].pane);
       if (!fresh) throw new Error("Updated release section is unavailable.");
-      const existingModal = kind === "questionnaire" ? detailsModal() : null;
-      const freshModal = fresh.querySelector("#questionnaire-details-modal");
+      const existingModal = detailsModal(kind);
+      const freshModal = fresh.querySelector("#" + kind + "-details-modal");
       if (existingModal && freshModal) freshModal.remove();
       pane.innerHTML = fresh.innerHTML;
       if (existingModal) pane.append(existingModal);
       restoreFilters(kind, values);
+      if (!byId(config[kind].form)) {
+        reconcile(kind);
+        showingSelected[kind] = false;
+        return {removed: selectedBefore - selected[kind].size};
+      }
       initialize(kind);
       return {removed: selectedBefore - selected[kind].size};
     });
@@ -287,22 +307,34 @@
     }
     const clear = event.target.closest("[data-release-clear-selection]");
     if (clear) { clearSelection(clear.dataset.releaseClearSelection, "Selection cleared."); return; }
-    const detail = event.target.closest("[data-questionnaire-details-url]");
+    const detail = event.target.closest("[data-questionnaire-details-url], [data-answer-key-details-url]");
     if (detail && window.fetch && window.bootstrap && window.bootstrap.Modal) {
       event.preventDefault();
-      loadDetails(detail.dataset.questionnaireDetailsUrl, detail, true);
+      const kind = detail.dataset.answerKeyDetailsUrl ? "answer-key" : "questionnaire";
+      loadDetails(
+        kind,
+        detail.dataset.answerKeyDetailsUrl || detail.dataset.questionnaireDetailsUrl,
+        detail,
+        true
+      );
     }
   });
-  const modal = detailsModal();
-  if (modal) modal.addEventListener("hidden.bs.modal", function () {
-    detailRequest += 1;
-    if (detailOpener && document.contains(detailOpener)) detailOpener.focus();
-    detailUrl = null;
+  ["questionnaire", "answer-key"].forEach(function (kind) {
+    const modal = detailsModal(kind);
+    if (!modal) return;
+    modal.addEventListener("hide.bs.modal", function () { invalidateDetails(kind); });
+    modal.addEventListener("hidden.bs.modal", function () {
+      invalidateDetails(kind);
+      const opener = detailState[kind].opener;
+      if (opener && document.contains(opener)) opener.focus();
+    });
   });
   const targetForm = byId("answer-key-target-form");
   if (targetForm) {
     const campus = byId("answer-key-campus-filter");
     if (campus) campus.addEventListener("change", function () {
+      invalidateDetails("answer-key");
+      invalidateRefresh("answer-key");
       if (selected["answer-key"].size) rememberNotice("Target campus changed; Answer Key selections were cleared.");
       clearSelection("answer-key");
       targetForm.requestSubmit();
@@ -310,6 +342,10 @@
   }
   const cycle = byId("exam-cycle-status");
   if (cycle) cycle.addEventListener("change", function () {
+    invalidateDetails("questionnaire");
+    invalidateDetails("answer-key");
+    invalidateRefresh("questionnaire");
+    invalidateRefresh("answer-key");
     if (selected.questionnaire.size || selected["answer-key"].size) {
       rememberNotice("Cycle changed; Release Center selections were cleared.");
     }
@@ -349,8 +385,11 @@
     if (form.dataset.releaseSubmitting === "true") return;
     form.dataset.releaseSubmitting = "true";
     const requestUrl = form.getAttribute("action") || window.location.href;
-    const detailAfter = detailUrl;
-    const openerAfter = detailOpener;
+    const detailKind = form.dataset.releaseSection === "answer-key-releases"
+      ? "answer-key" : "questionnaire";
+    const detailAfter = detailState[detailKind].url;
+    const openerAfter = detailState[detailKind].opener;
+    const detailLifecycleAfter = detailState[detailKind].lifecycle;
     const body = submitter ? new FormData(form, submitter) : new FormData(form);
     window.fetch(requestUrl, {
       method: "POST", body: body, credentials: "same-origin",
@@ -369,11 +408,18 @@
           ? " " + applied.removed + " stale or unavailable selection" +
             (applied.removed === 1 ? " was" : "s were") + " removed."
           : ""));
-        if (payload.section === "questionnaire-releases" && detailAfter) {
+        const refreshedKind = payload.section === "answer-key-releases"
+          ? "answer-key" : "questionnaire";
+        if (refreshedKind === detailKind && detailAfter &&
+            detailState[detailKind].open &&
+            detailState[detailKind].url === detailAfter &&
+            detailState[detailKind].lifecycle === detailLifecycleAfter) {
+          const attribute = refreshedKind === "answer-key"
+            ? "data-answer-key-details-url" : "data-questionnaire-details-url";
           const newOpener = root.querySelector(
-            '[data-questionnaire-details-url="' + detailAfter + '"]'
+            "[" + attribute + '=\"' + detailAfter + '\"]'
           );
-          loadDetails(detailAfter, newOpener || openerAfter, true);
+          loadDetails(refreshedKind, detailAfter, newOpener || openerAfter, true, true);
         }
       });
     }).catch(function (error) {

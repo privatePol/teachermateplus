@@ -275,6 +275,11 @@ urlpatterns = [
     path("admin-portal/departmental-exams/questionnaire-print-release/", stage6_views.questionnaire_print_release_view, name="questionnaire_print_release"),
     path("admin-portal/departmental-exams/questionnaire-print-release/<int:cycle_course_id>/details/", stage6_views.questionnaire_print_release_details_view, name="questionnaire_print_release_details"),
     path(
+        "admin-portal/departmental-exams/answer-key-releases/<int:cycle_course_id>/<int:recipient_course_id>/<int:campus_id>/details/",
+        stage6_views.answer_key_release_details_view,
+        name="answer_key_release_details",
+    ),
+    path(
         "admin-portal/departmental-exams/answer-key-releases/<int:release_id>/viewers/",
         stage6_views.answer_key_viewers_view,
         name="answer_key_viewers",
