@@ -83,12 +83,14 @@
     const params = new URL(window.location.href).searchParams;
     const cycle = byId("exam-cycle-status");
     const campus = byId("answer-key-campus-filter");
+    const questionnaireCampus = byId("questionnaire-campus-filter");
     return {
       generation: contextGeneration,
       cycleStatus: params.get("cycle_status") || "",
       campusId: params.get("target_campus_id") || "",
       selectedCycle: cycle ? cycle.value : null,
-      selectedCampus: campus ? campus.value : null
+      selectedCampus: campus ? campus.value : null,
+      selectedQuestionnaireCampus: questionnaireCampus ? questionnaireCampus.value : null
     };
   }
   function contextMatches(origin) {
@@ -97,7 +99,8 @@
       current.cycleStatus === origin.cycleStatus &&
       current.campusId === origin.campusId &&
       current.selectedCycle === origin.selectedCycle &&
-      current.selectedCampus === origin.selectedCampus;
+      current.selectedCampus === origin.selectedCampus &&
+      current.selectedQuestionnaireCampus === origin.selectedQuestionnaireCampus;
   }
   function rows(kind) {
     const form = byId(config[kind].form);
@@ -428,6 +431,18 @@
     });
   });
   const targetForm = byId("answer-key-target-form");
+  const questionnaireTargetForm = byId("questionnaire-target-form");
+  if (questionnaireTargetForm) {
+    const campus = byId("questionnaire-campus-filter");
+    if (campus) campus.addEventListener("change", function () {
+      contextGeneration += 1;
+      invalidateDetails("questionnaire");
+      invalidateRefresh("questionnaire");
+      if (selected.questionnaire.size) rememberNotice("Questionnaire target changed; selections were cleared.");
+      clearSelection("questionnaire");
+      questionnaireTargetForm.requestSubmit();
+    });
+  }
   if (targetForm) {
     const campus = byId("answer-key-campus-filter");
     if (campus) campus.addEventListener("change", function () {

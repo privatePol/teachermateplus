@@ -190,6 +190,7 @@ class AnswerKeyReleaseService:
         request=None,
         target_campus_id=None,
         recipient_course_id=None,
+        review_confirmation_id=None,
     ):
         try:
             target_campus_id = int(target_campus_id)
@@ -306,6 +307,7 @@ class AnswerKeyReleaseService:
             available_until=available_until,
             released_by=actor,
             released_at=now,
+            review_confirmation_id=review_confirmation_id,
             attestation_version=ANSWER_KEY_RELEASE_ATTESTATION_VERSION,
         )
         release.full_clean()
@@ -331,6 +333,8 @@ class AnswerKeyReleaseService:
         available_until,
         attestation_confirmed,
         request=None,
+        allow_multiple_campuses=False,
+        review_confirmation_id=None,
     ):
         cls._validate_window(
             available_from=available_from,
@@ -367,7 +371,7 @@ class AnswerKeyReleaseService:
             raise ValidationError(
                 {"selections": "Select at least one current final course revision."}
             )
-        if len(target_campus_ids) != 1:
+        if len(target_campus_ids) != 1 and not allow_multiple_campuses:
             raise ValidationError(
                 {"selections": "Select recipient courses from one target campus per submission."}
             )
@@ -399,6 +403,7 @@ class AnswerKeyReleaseService:
                     request=request,
                     recipient_course_id=recipient_id,
                     target_campus_id=campus_id,
+                    review_confirmation_id=review_confirmation_id,
                 )
             )
         return tuple(releases)

@@ -4,7 +4,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.exceptions import IrreversibleError
 from django.db.migrations.executor import MigrationExecutor
-from django.test import Client
+from django.test import Client, RequestFactory
 from django.http import Http404
 from django.urls import reverse
 from django.utils import timezone
@@ -15,6 +15,7 @@ from apps.rbac.models import Permission, UserPermission
 from apps.tenants.models import Campus, Department, Program
 
 from .answer_key_release import AnswerKeyReleaseService, FacultyAnswerKeyReleaseService, AnswerKeyViewerReportService
+from .release_review import make_review, confirm_review
 from .exam_units import ExamCourseEquivalencyService
 from .models import AnswerKeyRelease, CycleCourseOffering, ExamGenerationRevision, FacultyContribution, FacultyContributionEligibilitySource
 from .stage4_test_support import Stage4TransactionTestCase
@@ -91,6 +92,68 @@ class AnswerKeyScopeTests(AnswerKeyReleaseFixture):
                 if allowed:
                     self.assertIn("no-store", response["Cache-Control"])
         self.assertEqual(any(o["release_id"] == release.id for o in self.options(contribution)), allowed)
+
+    def test_all_campuses_expands_selected_recipient_only_and_retry_is_idempotent(self):
+        request = RequestFactory().post("/", {"target_campus_id": "0"})
+        request.scope = {"campus_ids": {campus.id for campus in self.campuses}}
+        token, payload = make_review(
+            kind="answer_key",
+            bases=((self.parent.id, self.r4.id, self.parent.id, 0),),
+            campus_id=0, tenant_id=self.tenant.id, actor=self.release_manager,
+            request=request, window_from=self.start, window_until=self.end,
+            attestation=True,
+        )
+        self.assertEqual({row[2] for row in payload["targets"]}, {self.parent.id})
+        self.assertEqual({row[3] for row in payload["targets"]},
+                         {campus.id for campus in self.campuses})
+        releases = confirm_review(
+            token=token, expected_kind="answer_key", tenant_id=self.tenant.id,
+            actor=self.release_manager, request=request,
+        )
+        audit_count = AuditLog.objects.count()
+        retry = confirm_review(
+            token=token, expected_kind="answer_key", tenant_id=self.tenant.id,
+            actor=self.release_manager, request=request,
+        )
+        self.assertEqual({row.id for row in releases}, {row.id for row in retry})
+        self.assertTrue(all(row.review_confirmation_id == payload["confirmation_id"] for row in releases))
+        self.assertEqual(AuditLog.objects.count(), audit_count)
+        self.assertFalse(AnswerKeyRelease.objects.filter(recipient_course=self.second).exists())
+        self.grant(self.release_manager, "departmental_exams.release_answer_keys", self.third, deny=True)
+        with self.assertRaises(PermissionDenied):
+            confirm_review(token=token, expected_kind="answer_key",
+                           tenant_id=self.tenant.id, actor=self.release_manager,
+                           request=request)
+
+    def test_matching_independent_answer_key_release_is_not_review_retry(self):
+        request = RequestFactory().post("/", {"target_campus_id": str(self.campus.id)})
+        request.scope = {"campus_ids": {self.campus.id}}
+        other_actor = self.make_user(
+            "second-answer-key-manager", self.department,
+            ("admin_portal.access", "departmental_exams.release_answer_keys"),
+        )
+        for campus in self.campuses[1:]:
+            self.grant(other_actor, "departmental_exams.release_answer_keys", campus)
+        for actor in (self.release_manager, other_actor):
+            with self.subTest(actor=actor.id):
+                token, _ = make_review(
+                    kind="answer_key",
+                    bases=((self.parent.id, self.r4.id, self.parent.id, self.campus.id),),
+                    campus_id=self.campus.id, tenant_id=self.tenant.id,
+                    actor=self.release_manager, request=request,
+                    window_from=self.start, window_until=self.end, attestation=True,
+                )
+                independent = self.release_target(actor=actor)
+                audit_count = AuditLog.objects.count()
+                with self.assertRaises(ValidationError):
+                    confirm_review(token=token, expected_kind="answer_key",
+                                   tenant_id=self.tenant.id, actor=self.release_manager,
+                                   request=request)
+                self.assertEqual(AuditLog.objects.count(), audit_count)
+                AnswerKeyReleaseService.revoke(
+                    release_id=independent.id, tenant_id=self.tenant.id,
+                    actor=self.release_manager,
+                )
 
     def test_three_campuses_two_courses_listing_and_all_direct_outputs(self):
         release = self.release_target()
@@ -200,9 +263,15 @@ class AnswerKeyScopeTests(AnswerKeyReleaseFixture):
                    "available_until": timezone.localtime(self.end).strftime("%Y-%m-%dT%H:%M"), "sessions_concluded": "on"}
         for bad in ({"target_campus_id": ""}, {"target_campus_id": self.other_campus.id},
                     {"selections": [f"{self.parent.id}:{self.r4.id}"]}):
-            self.assertEqual(client.post(url, {**payload, **bad}, HTTP_X_REQUESTED_WITH="XMLHttpRequest").status_code, 400)
+            self.assertEqual(client.post(url, {**payload, **bad, "review": "1"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest").status_code, 400)
             self.assertFalse(AnswerKeyRelease.objects.exists())
-        self.assertEqual(client.post(url, payload).status_code, 302)
+        review = client.post(url, {**payload, "review": "1"})
+        self.assertEqual(review.status_code, 200)
+        self.assertEqual(client.post(url, {
+            "action": "bulk_answer_key_release",
+            "target_campus_id": self.campus.id,
+            "review_token": review.context["review_token"],
+        }).status_code, 302)
         self.assertEqual(AnswerKeyRelease.objects.get().target_campus_id, self.campus.id)
 
     def test_closed_cycle_campus_loader_preserves_query_state_and_answer_key_pane(self):
@@ -430,10 +499,10 @@ class AnswerKeyScopeMigrationTests(Stage4TransactionTestCase):
                 target_campus=self.campus, available_from=now,
                 available_until=now + timezone.timedelta(hours=2), released_by=self.admin,
                 attestation_version="all-sessions-concluded-v1")
-            with self.assertRaises(IrreversibleError):
-                MigrationExecutor(connection).migrate(previous)
             self.assertEqual(AnswerKeyRelease.objects.get(pk=scoped.id).target_campus_id, self.campus.id)
             self.assertEqual(AnswerKeyRelease.objects.get(pk=revoked.id).status, "REVOKED")
+            with self.assertRaises(IrreversibleError):
+                MigrationExecutor(connection).migrate(previous)
         finally:
             executor = MigrationExecutor(connection)
             executor.migrate(executor.loader.graph.leaf_nodes())

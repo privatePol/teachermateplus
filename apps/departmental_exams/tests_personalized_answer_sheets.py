@@ -1,4 +1,4 @@
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.test import Client, skipUnlessDBFeature
 from django.urls import reverse
@@ -161,11 +161,75 @@ class PersonalizedAnswerSheetTests(Stage4TestCase):
         return QuestionnairePrintReleaseService.release(
             cycle_course_id=self.parent.id,
             revision_id=(revision or self.revision).id,
+            target_campus_id=self.campus.id,
             tenant_id=self.tenant.id,
             actor=self.manager_user,
             print_from=print_from or now - timezone.timedelta(minutes=5),
             print_until=print_until or now + timezone.timedelta(hours=2),
         )
+
+    def test_two_campus_releases_show_only_matching_authorized_offering(self):
+        program = Program.objects.create(
+            tenant=self.tenant, campus=self.other_campus,
+            department=self.other_department, code="PAS-OTHER", name="Other campus",
+        )
+        section = Section.objects.create(
+            tenant=self.tenant, campus=self.other_campus,
+            department=self.other_department, program=program,
+            code="PAS-OTHER", name="Other campus",
+        )
+        other_offering = CourseOffering.objects.create(
+            tenant=self.tenant, campus=self.other_campus,
+            department=self.other_department, program=program, section=section,
+            course=self.parent.course, academic_year=self.parent.cycle.academic_year,
+            term=self.parent.cycle.term,
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=self.parent, offering=other_offering, campus=self.other_campus,
+        )
+        other_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant, campus=self.other_campus, offering=other_offering,
+            faculty_user=self.faculty, accepted_by=self.faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            responded_at=timezone.now(), accepted_at=timezone.now(), is_primary=False,
+        )
+        FacultyContributionEligibilitySource.objects.create(
+            contribution=self.contribution, assignment=other_assignment,
+            assignment_id_snapshot=other_assignment.id,
+            offering_id_snapshot=other_offering.id,
+            tenant_id_snapshot=self.tenant.id, campus_id_snapshot=self.other_campus.id,
+        )
+        UserRole.objects.create(
+            user=self.manager_user, role=self.manager_user.user_roles.first().role,
+            tenant=self.tenant, campus=self.other_campus,
+            department=self.other_department,
+        )
+        UserRole.objects.create(
+            user=self.faculty, role=self.faculty.user_roles.first().role,
+            tenant=self.tenant, campus=self.other_campus,
+            department=self.other_department,
+        )
+        fairview = self._release()
+        now = timezone.now()
+        cubao = QuestionnairePrintReleaseService.release(
+            cycle_course_id=self.parent.id, revision_id=self.revision.id,
+            target_campus_id=self.other_campus.id, tenant_id=self.tenant.id,
+            actor=self.manager_user, print_from=now - timezone.timedelta(minutes=1),
+            print_until=now + timezone.timedelta(hours=1),
+        )
+        fairview_rows = PersonalizedAnswerSheetService.overview_context(
+            contribution=self.contribution, release_id=fairview.id,
+        )["offering_rows"]
+        cubao_rows = PersonalizedAnswerSheetService.overview_context(
+            contribution=self.contribution, release_id=cubao.id,
+        )["offering_rows"]
+        self.assertEqual([row["offering"].id for row in fairview_rows], [self.offering.id])
+        self.assertEqual([row["offering"].id for row in cubao_rows], [other_offering.id])
+        with self.assertRaises(PermissionDenied):
+            PersonalizedAnswerSheetService.prepare(
+                contribution=self.contribution, release_id=fairview.id,
+                offering_id=other_offering.id, actor=self.faculty,
+            )
 
     def _student(self, number, *, last_name=None, status=Student.Status.ACTIVE, is_active=True):
         student = Student.objects.create(
@@ -444,16 +508,13 @@ class PersonalizedAnswerSheetTests(Stage4TestCase):
         self.offering.save(update_fields=["program", "updated_at"])
         self.assertEqual(client.get(self._overview_url(release)).status_code, 403)
 
-    def test_active_r3_release_remains_exact_after_r4_generation(self):
+    def test_superseded_automatic_revision_cannot_print_prepared_sheets(self):
         self._student("REVISION")
         r3_release = self._release()
         self._prepare(r3_release)
         self._replace_revision(item_count=60, revision_number=2)
         response = self._client().get(self._print_url(r3_release))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["revision_number"], 1)
-        self.assertEqual(response.context["item_count"], 50)
-        self.assertContains(response, "UNUSED", count=25)
+        self.assertEqual(response.status_code, 403)
 
     def test_print_identity_order_filters_item_rows_and_private_paper_allowlist(self):
         first = self._student("9002", last_name="Zulu")

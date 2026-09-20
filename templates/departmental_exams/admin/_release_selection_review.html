@@ -10,11 +10,12 @@
     <p>Review all {{ review_rows|length }} selected exact target{{ review_rows|length|pluralize }} before release. The final submission checks authority, eligibility, revision, and release state again.</p>
     <ol>{% for value, label in review_rows %}<li>{{ label }}</li>{% endfor %}</ol>
     <p><strong>Common window:</strong> {{ review_from|localtime|date:"M j, Y g:i A" }} – {{ review_until|localtime|date:"M j, Y g:i A" }} (Asia/Manila)</p>
-    {% if final_action == 'bulk_answer_key_release' %}<p><strong>Target campus:</strong> {% if review_campus %}{{ review_campus.code }} / {{ review_campus.name }}{% else %}{{ review_form.cleaned_data.target_campus_id }}{% endif %}. All examination sessions for every selected course were attested as concluded.</p>{% endif %}
+    {% if review_all_campuses %}<p><strong>Selection:</strong> All active participating campuses for the selected examinations or recipients.</p>{% endif %}
+    {% if final_action == 'bulk_answer_key_release' %}<p>All examination sessions for every selected recipient course were attested as concluded.</p>{% endif %}
     <form method="post" action="{{ review_post_url }}">
       {% csrf_token %}<input type="hidden" name="action" value="{{ final_action }}">
-      {% for value in review_values %}<input type="hidden" name="selections" value="{{ value }}">{% endfor %}
-      {% for name, value in review_hidden_fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+      <input type="hidden" name="review_token" value="{{ review_token }}">
+      <input type="hidden" name="target_campus_id" value="{{ review_campus_id }}">
       <button class="btn btn-primary" type="submit">Confirm and release selected {{ review_section }} targets</button>
     </form>
   {% endif %}

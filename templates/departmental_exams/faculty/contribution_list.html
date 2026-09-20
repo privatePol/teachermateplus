@@ -103,11 +103,11 @@
                 <span class="qb-timezone">Times shown in {{ display_timezone }}</span>
               </div>
 
-              {% with material=contribution.questionnaire_print %}
-                <article class="qb-resource" aria-labelledby="qb-questionnaire-{{ contribution.id }}">
+              {% for material in contribution.questionnaire_print.campus_rows %}
+                <article class="qb-resource" aria-labelledby="qb-questionnaire-{{ contribution.id }}-{{ material.campus.id }}">
                   <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
                     <div>
-                      <div class="qb-resource-title" id="qb-questionnaire-{{ contribution.id }}">Questionnaire</div>
+                      <div class="qb-resource-title" id="qb-questionnaire-{{ contribution.id }}-{{ material.campus.id }}">{{ material.campus.name }} Questionnaire</div>
                       {% if material.revision_number %}<div class="qb-resource-meta">Released R{{ material.revision_number }}</div>{% endif %}
                     </div>
                     <span class="qb-status qb-status-{{ material.status|lower|cut:'_' }}">{{ material.status_label }}</span>
@@ -124,7 +124,7 @@
                     </div>
                   {% endif %}
                 </article>
-              {% endwith %}
+              {% empty %}<article class="qb-resource"><div class="qb-resource-title">Questionnaire</div><div class="qb-resource-meta">Not released for a current eligible campus.</div></article>{% endfor %}
 
               {% for material in contribution.answer_key_releases %}
                 <article class="qb-resource" aria-labelledby="qb-answer-key-{{ contribution.id }}-{{ forloop.counter }}">

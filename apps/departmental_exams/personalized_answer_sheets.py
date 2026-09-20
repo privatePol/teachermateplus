@@ -32,6 +32,7 @@ from .models import (
 from .questionnaire_printing import (
     MANILA_TIMEZONE,
     FacultyQuestionnairePrintService,
+    QuestionnairePrintReleaseService,
     _questionnaire_paper_context,
 )
 
@@ -120,6 +121,24 @@ class PersonalizedAnswerSheetService:
         if (
             offering.tenant_id != cycle.tenant_id
             or offering.campus_id is None
+            or (
+                release.scope_kind == QuestionnairePrintRelease.ScopeKind.SCOPED
+                and offering.campus_id != release.target_campus_id
+            )
+            or (
+                release.scope_kind == QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE
+                and not QuestionnairePrintReleaseService.active_legacy_coverage(
+                    course=cycle_course, campus_id=offering.campus_id,
+                )
+            )
+            or (
+                release.scope_kind == QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE
+                and QuestionnairePrintRelease.objects.filter(
+                    cycle_course=cycle_course,
+                    scope_kind=QuestionnairePrintRelease.ScopeKind.SCOPED,
+                    target_campus_id=offering.campus_id,
+                ).exists()
+            )
             or matching_member is None
             or offering.academic_year_id != cycle.academic_year_id
             or offering.term_id != cycle.term_id
@@ -210,6 +229,10 @@ class PersonalizedAnswerSheetService:
             .select_related("course", "section", "section__program", "program", "campus")
             .order_by("section__code", "id")
         )
+        matching_campus_ids = set(FacultyQuestionnairePrintService._matching_campuses(
+            contribution=contribution, release=release,
+        ))
+        offerings = [row for row in offerings if row.campus_id in matching_campus_ids]
         rows = []
         for offering in offerings:
             cls._validate_offering_scope(release=release, offering=offering)

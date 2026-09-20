@@ -293,6 +293,7 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(full, "not AI judgment")
         self.assertContains(full, "default to Letter paper and also support A4 and Legal")
         self.assertContains(full, "Supported scientific notation")
+        self.assertContains(full, "A campus-scoped operator sees only authorized campus coverage")
 
     def test_planning_readiness_help_is_read_only_and_view_permission_scoped(self):
         user = self._make_user(

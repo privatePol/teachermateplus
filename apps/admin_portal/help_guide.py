@@ -315,8 +315,10 @@ ADMIN_HELP_SECTIONS = [
                 "purpose": "Operates exact-revision Faculty releases and Admin-only confidential output, then reviews deterministic selection and integrity evidence without exposing raw fingerprints.",
                 "menu_path": "Admin Portal -> Departmental Exam Builder -> Exam Generation Status or Release Exam for Printing",
                 "steps": [
+                    "In Questionnaire Releases, choose one authorized participating campus or All Campuses, then select primary-owned current Generated examinations. All Campuses expands only to active campuses participating through included unit members. Review every exact primary/campus/revision, current release state, and the shared Faculty print window before confirming. Each campus keeps its own window and history; revoke one campus explicitly. Generation-management authority remains required for the complete examination unit. A later-added campus is not released automatically.",
+                    "In Answer Key Releases, the existing single-campus path remains available. All Campuses expands each selected recipient course only to its active participating campuses; it never selects other recipients. Review every primary/recipient/campus/revision and current release state with one common window and the required all-sessions-concluded attestation. The complete-unit release-answer-keys permission, direct DENY, superuser handling, and Manual Review gates remain authoritative. Revocation stays per campus.",
                     "On Release Exam for Printing, confirm the exact course and revision before setting Print From and Print Until. Faculty print buttons appear only for that released revision while the common Asia/Manila window is active; regeneration requires a separate release for the newer revision.",
-                    "For several courses, Bulk Print Release lists only each examination unit's current Generated revision. Select rows individually or use Select All, confirm the selected count and displayed-record badge, then apply one common window. The batch remains all-or-nothing, while each course keeps an independent exact-revision release record and history.",
+                    "For several courses, Bulk Print Release lists only each examination unit's current Generated revision. Choose one campus or All Campuses, select rows individually or use Select All Visible, confirm the selected count and displayed-record badge, and review every expanded target with one common window. The batch remains all-or-nothing, while each campus keeps an independent exact-revision release record and history.",
                     "Use Print Set A or Print Set B for Admin-only printing when Faculty release is unnecessary. Choose Letter (default), A4, or Legal before opening the browser print dialog. The heading follows the confirmed Standardized or Departmental course examination classification; an unconfirmed legacy classification uses the neutral EXAMINATIONS heading. Supported scientific notation in Question Text and Choices A-D renders from escaped immutable snapshots before printing. Admin Direct Print does not create, replace, or extend a Faculty release.",
                     "Open the confidential Set A or Set B Answer Key only for the intended exact revision. Answer keys are restricted to authorized users and are never provided to Faculty through questionnaire printing.",
                     "For a separate Faculty Answer Key release, choose Target Campus and load recipient courses. Review the recipient course and primary-owned exact current-final revision, set Available From and Available Until, and confirm that all examination sessions for the course have concluded. A superseded revision is immediately blocked and a newer revision requires its own explicit release.",
@@ -338,7 +340,7 @@ ADMIN_HELP_SECTIONS = [
                 "actions": [
                     {
                         "name": "Release Exact Revision",
-                        "does": "Creates or replaces one course's Faculty print release for the selected immutable revision and Print From/Until window.",
+                        "does": "Creates or replaces one primary-course and campus Faculty print release for the selected immutable revision and Print From/Until window.",
                         "when": "Use it when Faculty should print that exact revision during a bounded window.",
                         "avoid": "Do not assume regeneration transfers the release to a newer revision.",
                         "result": "Faculty Set A and Set B buttons are available only during the active window and only under current assignment authorization.",
@@ -349,7 +351,7 @@ ADMIN_HELP_SECTIONS = [
                         "does": "Applies one common window to selected primary-owned current Generated revisions in one all-or-nothing submission.",
                         "when": "Use it after verifying the displayed-record badge and selected count; Select All includes only selectable rows.",
                         "avoid": "Do not mix unauthorized, cross-tenant, incomplete, or multiple same-course revisions in one batch.",
-                        "result": "Each course receives its own independently governed revision-bound release record.",
+                        "result": "Each expanded campus target receives its own independently governed revision-bound release record.",
                         "editable": "Each resulting release may later be replaced or individually revoked through the existing controls.",
                     },
                     {
@@ -370,7 +372,7 @@ ADMIN_HELP_SECTIONS = [
                     },
                     {
                         "name": "Bulk Answer Key Release",
-                        "does": "Applies one common Answer Key availability window to selected recipient courses at one explicit target campus, using the primary-owned current Generated revision for Automatic processing or current Locked revision for Manual Review in one all-or-nothing submission.",
+                        "does": "Applies one common Answer Key availability window to selected recipient courses at one explicit campus or All Campuses where each selected recipient participates, using the primary-owned current Generated revision for Automatic processing or current Locked revision for Manual Review in one all-or-nothing submission.",
                         "when": "Filter the authorized list, review the visible eligible count, use Select All Visible or individual choices, and proceed only after all examination sessions for every selected course have concluded.",
                         "avoid": "Do not select an obsolete displayed pair or treat a historically active release on a superseded revision as Faculty-accessible.",
                         "result": "Each selected course retains its own exact release record; identical retries are safe no-ops, while real changes preserve replacement history.",

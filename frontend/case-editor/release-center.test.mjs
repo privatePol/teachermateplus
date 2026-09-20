@@ -43,6 +43,7 @@ function setup({
 } = {}) {
   const html = `<!doctype html><div id="departmental-exam-release-center">
     <div id="release-center-feedback"></div><select id="exam-cycle-status"><option value="1">One</option><option value="2">Two</option></select>
+    <form id="questionnaire-target-form"><select id="questionnaire-campus-filter"><option value="1">One</option><option value="0">All Campuses</option></select></form>
     <form id="answer-key-target-form"><select id="answer-key-campus-filter"><option value="1">One</option><option value="2">Two</option></select></form>
     ${pane("questionnaire", row("questionnaire", "Course A", "11:101") + row("questionnaire", "Course B", "12:102") + row("questionnaire", "Course C", "13:103", false))}
     ${pane("answer-key", row("answer-key", "Key A", "21:201:31:1") + row("answer-key", "Key B", "22:202:32:1"))}
@@ -58,6 +59,7 @@ function setup({
   window.fetch = fetch;
   window.bootstrap = {Modal: {getOrCreateInstance: element => ({show() {element.dataset.open = "true";}})}};
   window.document.getElementById("answer-key-target-form").requestSubmit = function () { this.dataset.submitted = "true"; };
+  window.document.getElementById("questionnaire-target-form").requestSubmit = function () { this.dataset.submitted = "true"; };
   window.eval(script);
   const doc = window.document;
   const click = selector => doc.querySelector(selector).click();
@@ -144,6 +146,17 @@ test("cycle and target-campus changes clear only affected selections with notice
   change("#exam-cycle-status", "2");
   assert.equal(doc.getElementById("bulk-selected-count").textContent, "0");
   assert.match(window.sessionStorage.getItem("tmp-release-center-notice"), /cycle changed/i);
+});
+
+test("Questionnaire All Campuses selection clears only Questionnaire rows and reloads targets", () => {
+  const {doc, change, window} = setup();
+  change('input[value="11:101"]', true);
+  change('input[value="21:201:31:1"]', true);
+  change("#questionnaire-campus-filter", "0");
+  assert.equal(doc.getElementById("bulk-selected-count").textContent, "0");
+  assert.equal(doc.getElementById("bulk-answer-key-selected-count").textContent, "1");
+  assert.equal(doc.getElementById("questionnaire-target-form").dataset.submitted, "true");
+  assert.match(window.sessionStorage.getItem("tmp-release-center-notice"), /Questionnaire target changed/i);
 });
 
 test("Answer Key visible-only select and unselect retain hidden exact targets for review", () => {

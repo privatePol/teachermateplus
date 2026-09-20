@@ -1,12 +1,16 @@
 from unittest.mock import patch
+from inspect import unwrap
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core import signing
 from django.http import Http404
-from django.test import Client
+from django.test import Client, RequestFactory
 from django.test.utils import CaptureQueriesContext
 from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.db.migrations.exceptions import IrreversibleError
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import escape
@@ -21,7 +25,7 @@ from apps.academics.models import (
 )
 from apps.auditlog.models import AuditLog
 from apps.core.services.settings import SystemSettingService
-from apps.rbac.models import Permission, UserPermission
+from apps.rbac.models import Permission, UserPermission, UserRole
 from apps.tenants.models import Program
 
 from .automatic_workflow import AutomaticGenerationSummaryService
@@ -39,12 +43,16 @@ from .models import (
     GeneratedExamSet,
     Question,
     QuestionnairePrintRelease,
+    QuestionnaireLegacyCampusCoverage,
 )
 from .questionnaire_printing import (
     QuestionnairePrintReleaseService,
+    FacultyQuestionnairePrintService,
     _questionnaire_exam_heading,
 )
-from .stage4_test_support import Stage4TestCase
+from .release_review import SIGNING_SALT, make_review, confirm_review
+from .stage6_views import questionnaire_print_release_view
+from .stage4_test_support import Stage4TestCase, Stage4TransactionTestCase
 from .setup_services import CourseSetupService
 
 
@@ -213,6 +221,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         return QuestionnairePrintReleaseService.release(
             cycle_course_id=self.parent.id,
             revision_id=(revision or self.r2).id,
+            target_campus_id=self.campus.id,
             tenant_id=self.tenant.id,
             actor=self.manager_user,
             print_from=print_from or now - timezone.timedelta(minutes=5),
@@ -241,10 +250,12 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         print_until = print_until or default_until
         client = Client()
         client.force_login(user or self.manager_user)
-        return client.post(
+        review = client.post(
             reverse("departmental_exams:questionnaire_print_release"),
             {
                 "action": "bulk_release",
+                "review": "1",
+                "target_campus_id": self.campus.id,
                 "selections": [
                     f"{course.id}:{revision.id}"
                     for course, revision in selections
@@ -253,11 +264,18 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                 "print_until": print_until.strftime("%Y-%m-%dT%H:%M"),
             },
         )
+        if review.status_code != 200 or not review.context or not review.context.get("review_token"):
+            return review
+        return client.post(review.context["review_post_url"], {
+            "action": "bulk_release", "target_campus_id": self.campus.id,
+            "review_token": review.context["review_token"],
+        })
 
     def _bulk_page(self):
         client = Client()
         client.force_login(self.manager_user)
-        return client.get(reverse("departmental_exams:questionnaire_print_release"))
+        return client.get(reverse("departmental_exams:questionnaire_print_release"),
+                          {"target_campus_id": self.campus.id})
 
     def _newer_revision(self, parent, revision):
         ExamGenerationRevision.objects.filter(pk=revision.pk).update(
@@ -896,7 +914,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             "primary-owned revision for an examination unit",
         ):
             QuestionnairePrintReleaseService.bulk_release(
-                selections=((secondary.id, secondary_revision.id),),
+                selections=((secondary.id, secondary_revision.id, self.campus.id),),
                 tenant_id=self.tenant.id,
                 actor=self.manager_user,
                 print_from=print_from,
@@ -913,7 +931,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         )
         with self.assertRaises(PermissionDenied):
             QuestionnairePrintReleaseService.bulk_release(
-                selections=((primary.id, revision.id),),
+                selections=((primary.id, revision.id, self.campus.id),),
                 tenant_id=self.tenant.id,
                 actor=self.manager_user,
                 print_from=print_from,
@@ -954,6 +972,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         payload = {
             "action": "bulk_release",
             "review": "1",
+            "target_campus_id": self.campus.id,
             "selections": [
                 f"{self.parent.id}:{self.r2.id}",
                 f"{second_parent.id}:{second_revision.id}",
@@ -967,12 +986,12 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         review = client.post(url, payload)
         self.assertEqual(review.status_code, 200)
         self.assertContains(review, "Review all 2 selected exact targets")
-        for value in payload["selections"]:
-            self.assertContains(review, f'value="{value}"', html=False)
+        self.assertEqual(len(review.context["review_rows"]), 2)
         self.assertFalse(QuestionnairePrintRelease.objects.exists())
         self.assertFalse(AuditLog.objects.filter(action="DE_QUESTIONNAIRE_PRINT_RELEASED").exists())
 
         payload.pop("review")
+        payload["review_token"] = review.context["review_token"]
         self._newer_revision(second_parent, second_revision)
         stale = client.post(url, payload)
         self.assertEqual(stale.status_code, 400)
@@ -1010,6 +1029,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         start, end = self._bulk_window()
         payload = {
             "action": "bulk_release", "review": "1",
+            "target_campus_id": self.campus.id,
             "selections": [f"{self.parent.id}:{self.r2.id}"],
             "print_from": start.strftime("%Y-%m-%dT%H:%M"),
             "print_until": end.strftime("%Y-%m-%dT%H:%M"),
@@ -1022,6 +1042,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         self.assertIn("section=questionnaire-releases", final_url)
         self.assertContains(review, final_url.replace("&", "&amp;"), html=False)
         payload.pop("review")
+        payload["review_token"] = review.context["review_token"]
         confirmed = client.post(final_url, payload)
         self.assertEqual(confirmed.status_code, 302)
         self.assertIn("cycle_status=CLOSED", confirmed["Location"])
@@ -1066,8 +1087,8 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         ):
             QuestionnairePrintReleaseService.bulk_release(
                 selections=(
-                    (self.parent.id, self.r2.id),
-                    (second_parent.id, superseded.id),
+                    (self.parent.id, self.r2.id, self.campus.id),
+                    (second_parent.id, superseded.id, self.campus.id),
                 ),
                 tenant_id=self.tenant.id,
                 actor=self.manager_user,
@@ -1161,8 +1182,8 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         with self.assertRaises(ValidationError):
             QuestionnairePrintReleaseService.bulk_release(
                 selections=(
-                    (self.parent.id, self.r2.id),
-                    (second_parent.id, self.r2.id),
+                    (self.parent.id, self.r2.id, self.campus.id),
+                    (second_parent.id, self.r2.id, self.campus.id),
                 ),
                 tenant_id=self.tenant.id,
                 actor=self.manager_user,
@@ -1250,8 +1271,8 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         with self.assertRaises(Http404):
             QuestionnairePrintReleaseService.bulk_release(
                 selections=(
-                    (self.parent.id, self.r2.id),
-                    (foreign_parent.id, foreign_revision.id),
+                    (self.parent.id, self.r2.id, self.campus.id),
+                    (foreign_parent.id, foreign_revision.id, self.campus.id),
                 ),
                 tenant_id=self.tenant.id,
                 actor=self.manager_user,
@@ -1275,7 +1296,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
 
         with self.assertRaises(PermissionDenied):
             QuestionnairePrintReleaseService.bulk_release(
-                selections=((self.parent.id, self.r2.id),),
+                selections=((self.parent.id, self.r2.id, self.campus.id),),
                 tenant_id=self.tenant.id,
                 actor=self.manager_user,
                 print_from=print_from,
@@ -1373,22 +1394,29 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         self.assertEqual(initial_page.status_code, 200)
         self.assertContains(initial_page, "Release Exam for Printing")
         now = timezone.localtime().replace(second=0, microsecond=0)
-        response = client.post(
+        review = client.post(
             release_url,
             {
                 "action": "release",
+                "review": "1",
                 "cycle_course_id": self.parent.id,
                 "generation_revision": self.r2.id,
+                "target_campus_id": self.campus.id,
                 "print_from": now.strftime("%Y-%m-%dT%H:%M"),
                 "print_until": (now + timezone.timedelta(hours=3)).strftime(
                     "%Y-%m-%dT%H:%M"
                 ),
             },
         )
-
+        self.assertEqual(review.status_code, 200)
+        response = client.post(review.context["review_post_url"], {
+            "action": "bulk_release",
+            "target_campus_id": self.campus.id,
+            "review_token": review.context["review_token"],
+        })
         self.assertRedirects(
             response,
-            release_url,
+            f"{release_url}?cycle_status=OPEN&section=questionnaire-releases&target_campus_id={self.campus.id}#questionnaire-releases-pane",
         )
         release = QuestionnairePrintRelease.objects.get()
         self.assertEqual(release.generation_revision, self.r2)
@@ -1411,6 +1439,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             QuestionnairePrintReleaseService.release(
                 cycle_course_id=self.parent.id,
                 revision_id=self.r2.id,
+                target_campus_id=self.campus.id,
                 tenant_id=self.other_tenant.id,
                 actor=self.manager_user,
                 print_from=now,
@@ -1420,6 +1449,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             QuestionnairePrintReleaseService.release(
                 cycle_course_id=self.parent.id,
                 revision_id=other_revision.id,
+                target_campus_id=self.campus.id,
                 tenant_id=self.tenant.id,
                 actor=self.manager_user,
                 print_from=now,
@@ -1451,16 +1481,15 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         )
         admin_client = Client()
         admin_client.force_login(self.manager_user)
-        admin_page = admin_client.get(
-            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
-        )
+        detail_url = reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
+        admin_page = admin_client.get(detail_url, {"target_campus_id": self.campus.id})
         self.assertContains(admin_page, "A newer generated revision exists.")
         self.assertContains(
             admin_page,
             "It is not printable until it receives its own explicit release.",
         )
         self.assertContains(admin_page, "Release history (1)")
-        self.assertContains(admin_page, "Revoke Current Release")
+        self.assertContains(admin_page, "Revoke this campus")
         self.assertContains(admin_page, "Run Automatic Audit")
         self.assertContains(admin_page, "Print Set A")
         self.assertContains(admin_page, "Print Set B")
@@ -1470,9 +1499,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         self.assertEqual(r2_release.status, QuestionnairePrintRelease.Status.REVOKED)
         self.assertIsNone(r2_release.active_marker)
         self.assertEqual(r3_release.generation_revision, r3)
-        refreshed_details = admin_client.get(
-            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id])
-        )
+        refreshed_details = admin_client.get(detail_url, {"target_campus_id": self.campus.id})
         self.assertContains(refreshed_details, "Release history (2)")
         self.assertTrue(
             AuditLog.objects.filter(
@@ -1539,6 +1566,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
 
         QuestionnairePrintReleaseService.revoke(
             release_id=expired.id,
+            target_campus_id=self.campus.id,
             tenant_id=self.tenant.id,
             actor=self.manager_user,
         )
@@ -1778,3 +1806,623 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             response,
             "Complete the course configuration and open contributions before automatic generation can proceed.",
         )
+
+    def _add_other_campus_to_questionnaire(self):
+        program = Program.objects.create(
+            tenant=self.tenant, campus=self.other_campus, department=self.other_department,
+            code=f"QP{self.parent.id}", name="Questionnaire program",
+        )
+        section = Section.objects.create(
+            tenant=self.tenant, campus=self.other_campus, department=self.other_department,
+            program=program, code=f"QS{self.parent.id}", name="Questionnaire section",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant, campus=self.other_campus, department=self.other_department,
+            program=program, section=section, course=self.parent.course,
+            academic_year=self.parent.cycle.academic_year, term=self.parent.cycle.term,
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=self.parent, offering=offering, campus=self.other_campus,
+        )
+        UserRole.objects.create(
+            user=self.manager_user, role=self.manager_user.user_roles.first().role,
+            tenant=self.tenant, campus=self.other_campus, department=self.other_department,
+        )
+        return offering
+
+    def test_campus_releases_are_independent_and_complete_unit_authority_remains(self):
+        self._add_other_campus_to_questionnaire()
+        now = timezone.now()
+        fairview = self._release(print_from=now - timezone.timedelta(minutes=1),
+                                 print_until=now + timezone.timedelta(hours=1))
+        cubao = QuestionnairePrintReleaseService.release(
+            cycle_course_id=self.parent.id, revision_id=self.r2.id,
+            target_campus_id=self.other_campus.id, tenant_id=self.tenant.id,
+            actor=self.manager_user, print_from=now - timezone.timedelta(minutes=1),
+            print_until=now + timezone.timedelta(hours=3),
+        )
+        self.assertNotEqual(fairview.id, cubao.id)
+        self.assertNotEqual(fairview.print_until, cubao.print_until)
+        with self.assertRaises(PermissionDenied):
+            FacultyQuestionnairePrintService._printable_release(
+                contribution=self.contribution, release_id=cubao.id, set_code="A",
+            )
+        QuestionnairePrintReleaseService.revoke(
+            release_id=fairview.id, target_campus_id=self.campus.id,
+            tenant_id=self.tenant.id, actor=self.manager_user,
+        )
+        cubao.refresh_from_db()
+        self.assertEqual(cubao.status, QuestionnairePrintRelease.Status.ACTIVE)
+        deny = UserPermission.objects.create(
+            user=self.manager_user,
+            permission=Permission.objects.get(code="departmental_exams.manage_exam_generation"),
+            tenant=self.tenant, campus=self.other_campus,
+            grant_type=UserPermission.GrantType.DENY,
+        )
+        client = Client()
+        client.force_login(self.manager_user)
+        self.assertEqual(client.get(reverse(
+            "departmental_exams:questionnaire_print_release_details",
+            args=[self.parent.id],
+        ), {"target_campus_id": self.campus.id}).status_code, 403)
+        self.assertEqual(client.post(reverse(
+            "departmental_exams:questionnaire_print_release"), {
+                "action": "release", "review": "1", "cycle_course_id": self.parent.id,
+                "generation_revision": self.r2.id,
+                "target_campus_id": self.campus.id,
+                "print_from": now.strftime("%Y-%m-%dT%H:%M"),
+                "print_until": (now + timezone.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"),
+            }).status_code, 403)
+        deny.delete()
+        UserRole.objects.filter(
+            user=self.manager_user, campus=self.other_campus,
+        ).delete()
+        with self.assertRaises(PermissionDenied):
+            QuestionnairePrintReleaseService.release(
+                cycle_course_id=self.parent.id, revision_id=self.r2.id,
+                target_campus_id=self.campus.id, tenant_id=self.tenant.id,
+                actor=self.manager_user, print_from=now,
+                print_until=now + timezone.timedelta(hours=1),
+            )
+
+    def test_multi_campus_faculty_sees_both_independent_questionnaire_windows(self):
+        other_offering = self._add_other_campus_to_questionnaire()
+        UserRole.objects.create(
+            user=self.faculty, role=self.faculty.user_roles.first().role,
+            tenant=self.tenant, campus=self.other_campus,
+            department=self.other_department,
+        )
+        other_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant, campus=self.other_campus, offering=other_offering,
+            faculty_user=self.faculty, accepted_by=self.faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            responded_at=timezone.now(), accepted_at=timezone.now(), is_primary=False,
+        )
+        FacultyContributionEligibilitySource.objects.create(
+            contribution=self.contribution, assignment=other_assignment,
+            assignment_id_snapshot=other_assignment.id,
+            offering_id_snapshot=other_offering.id,
+            tenant_id_snapshot=self.tenant.id,
+            campus_id_snapshot=self.other_campus.id,
+        )
+        fairview = self._release()
+        now = timezone.now()
+        cubao = QuestionnairePrintReleaseService.release(
+            cycle_course_id=self.parent.id, revision_id=self.r2.id,
+            target_campus_id=self.other_campus.id, tenant_id=self.tenant.id,
+            actor=self.manager_user, print_from=now - timezone.timedelta(minutes=1),
+            print_until=now + timezone.timedelta(hours=1),
+        )
+        page = self._faculty_client().get(reverse("departmental_exams:contribution_list"))
+        self.assertContains(page, self._print_url(fairview, "A"))
+        self.assertContains(page, self._print_url(cubao, "A"))
+        self.assertEqual(
+            FacultyQuestionnairePrintService._printable_release(
+                contribution=self.contribution, release_id=cubao.id, set_code="B",
+            )[0].id, cubao.id,
+        )
+        QuestionnairePrintReleaseService.revoke(
+            release_id=fairview.id, target_campus_id=self.campus.id,
+            tenant_id=self.tenant.id, actor=self.manager_user,
+        )
+        page = self._faculty_client().get(reverse("departmental_exams:contribution_list"))
+        self.assertNotContains(page, self._print_url(fairview, "A"))
+        self.assertContains(page, self._print_url(cubao, "A"))
+
+    def test_all_campuses_review_retry_and_revocation_staleness(self):
+        self._add_other_campus_to_questionnaire()
+        request = RequestFactory().post("/", {"target_campus_id": "0"})
+        request.scope = {"campus_ids": {self.campus.id, self.other_campus.id}}
+        start, end = self._bulk_window()
+        token, payload = make_review(
+            kind="questionnaire", bases=((self.parent.id, self.r2.id),),
+            campus_id=0, tenant_id=self.tenant.id, actor=self.manager_user,
+            request=request, window_from=start, window_until=end,
+        )
+        self.assertEqual({row[-1] for row in payload["targets"]},
+                         {self.campus.id, self.other_campus.id})
+        first = confirm_review(
+            token=token, expected_kind="questionnaire", tenant_id=self.tenant.id,
+            actor=self.manager_user, request=request,
+        )
+        audits_after = AuditLog.objects.count()
+        retry = confirm_review(
+            token=token, expected_kind="questionnaire", tenant_id=self.tenant.id,
+            actor=self.manager_user, request=request,
+        )
+        self.assertEqual({row.id for row in first}, {row.id for row in retry})
+        self.assertTrue(all(row.review_confirmation_id == payload["confirmation_id"] for row in first))
+        self.assertEqual(AuditLog.objects.count(), audits_after)
+        QuestionnairePrintReleaseService.revoke(
+            release_id=first[0].id, target_campus_id=first[0].target_campus_id,
+            tenant_id=self.tenant.id, actor=self.manager_user,
+        )
+        with self.assertRaises(ValidationError):
+            confirm_review(token=token, expected_kind="questionnaire",
+                           tenant_id=self.tenant.id, actor=self.manager_user,
+                           request=request)
+
+    def test_all_campuses_retry_preserves_identical_preexisting_campus(self):
+        self._add_other_campus_to_questionnaire()
+        start, end = self._bulk_window()
+        existing = QuestionnairePrintReleaseService.release(
+            cycle_course_id=self.parent.id, revision_id=self.r2.id,
+            target_campus_id=self.campus.id, tenant_id=self.tenant.id,
+            actor=self.manager_user, print_from=start, print_until=end,
+        )
+        request = RequestFactory().post("/", {"target_campus_id": "0"})
+        request.scope = {"campus_ids": {self.campus.id, self.other_campus.id}}
+        token, _payload = make_review(
+            kind="questionnaire", bases=((self.parent.id, self.r2.id),),
+            campus_id=0, tenant_id=self.tenant.id, actor=self.manager_user,
+            request=request, window_from=start, window_until=end,
+        )
+        first = confirm_review(
+            token=token, expected_kind="questionnaire", tenant_id=self.tenant.id,
+            actor=self.manager_user, request=request,
+        )
+        self.assertIn(existing.id, {row.id for row in first})
+        audits_after = AuditLog.objects.count()
+        second = confirm_review(
+            token=token, expected_kind="questionnaire", tenant_id=self.tenant.id,
+            actor=self.manager_user, request=request,
+        )
+        self.assertEqual({row.id for row in first}, {row.id for row in second})
+        self.assertEqual(AuditLog.objects.count(), audits_after)
+
+    def test_matching_intervening_release_is_not_a_retry_for_same_or_other_actor(self):
+        start, end = self._bulk_window()
+        request = RequestFactory().post("/", {"target_campus_id": str(self.campus.id)})
+        request.scope = {"campus_ids": {self.campus.id}}
+        other_actor = self.make_user(
+            "second-questionnaire-manager", self.department,
+            ("admin_portal.access", "departmental_exams.manage_exam_generation"),
+        )
+        for actor in (self.manager_user, other_actor):
+            with self.subTest(actor=actor.id):
+                token, _ = make_review(
+                    kind="questionnaire", bases=((self.parent.id, self.r2.id),),
+                    campus_id=self.campus.id, tenant_id=self.tenant.id, actor=self.manager_user,
+                    request=request, window_from=start, window_until=end,
+                )
+                intervening = QuestionnairePrintReleaseService.release(
+                    cycle_course_id=self.parent.id, revision_id=self.r2.id,
+                    target_campus_id=self.campus.id, tenant_id=self.tenant.id,
+                    actor=actor, print_from=start, print_until=end,
+                )
+                audits_before = AuditLog.objects.count()
+                with self.assertRaises(ValidationError):
+                    confirm_review(token=token, expected_kind="questionnaire",
+                                   tenant_id=self.tenant.id, actor=self.manager_user,
+                                   request=request)
+                self.assertEqual(AuditLog.objects.count(), audits_before)
+                QuestionnairePrintReleaseService.revoke(
+                    release_id=intervening.id, target_campus_id=self.campus.id,
+                    tenant_id=self.tenant.id, actor=self.manager_user,
+                )
+
+    def test_separate_same_actor_confirmations_with_identical_values_are_distinct(self):
+        start, end = self._bulk_window()
+        request = RequestFactory().post("/", {"target_campus_id": str(self.campus.id)})
+        request.scope = {"campus_ids": [self.campus.id]}
+        reviews = [make_review(
+            kind="questionnaire", bases=((self.parent.id, self.r2.id),),
+            campus_id=self.campus.id, tenant_id=self.tenant.id, actor=self.manager_user,
+            request=request, window_from=start, window_until=end,
+        ) for _ in range(2)]
+        self.assertNotEqual(reviews[0][1]["confirmation_id"], reviews[1][1]["confirmation_id"])
+        confirmed = confirm_review(
+            token=reviews[1][0], expected_kind="questionnaire",
+            tenant_id=self.tenant.id, actor=self.manager_user, request=request,
+        )[0]
+        audit_count = AuditLog.objects.count()
+        with self.assertRaises(ValidationError):
+            confirm_review(
+                token=reviews[0][0], expected_kind="questionnaire",
+                tenant_id=self.tenant.id, actor=self.manager_user, request=request,
+            )
+        self.assertEqual(QuestionnairePrintRelease.objects.count(), 1)
+        self.assertEqual(confirmed.review_confirmation_id, reviews[1][1]["confirmation_id"])
+        self.assertEqual(AuditLog.objects.count(), audit_count)
+
+    def test_confirmed_release_replaced_later_cannot_be_revived_by_retry(self):
+        start, end = self._bulk_window()
+        request = RequestFactory().post("/", {"target_campus_id": str(self.campus.id)})
+        request.scope = {"campus_ids": {self.campus.id}}
+        token, _ = make_review(
+            kind="questionnaire", bases=((self.parent.id, self.r2.id),),
+            campus_id=self.campus.id, tenant_id=self.tenant.id, actor=self.manager_user,
+            request=request, window_from=start, window_until=end,
+        )
+        first = confirm_review(token=token, expected_kind="questionnaire",
+                               tenant_id=self.tenant.id, actor=self.manager_user, request=request)[0]
+        replacement = QuestionnairePrintReleaseService.release(
+            cycle_course_id=self.parent.id, revision_id=self.r2.id,
+            target_campus_id=self.campus.id, tenant_id=self.tenant.id,
+            actor=self.manager_user, print_from=start,
+            print_until=end + timezone.timedelta(hours=1),
+        )
+        with self.assertRaises(ValidationError):
+            confirm_review(token=token, expected_kind="questionnaire",
+                           tenant_id=self.tenant.id, actor=self.manager_user, request=request)
+        first.refresh_from_db()
+        replacement.refresh_from_db()
+        self.assertEqual(first.status, "REVOKED")
+        self.assertEqual(replacement.status, "ACTIVE")
+
+    def test_pre_confirmation_id_review_token_requires_a_new_review(self):
+        start, end = self._bulk_window()
+        request = RequestFactory().post("/", {"target_campus_id": str(self.campus.id)})
+        request.scope = {"campus_ids": {self.campus.id}}
+        _, payload = make_review(
+            kind="questionnaire", bases=((self.parent.id, self.r2.id),),
+            campus_id=self.campus.id, tenant_id=self.tenant.id, actor=self.manager_user,
+            request=request, window_from=start, window_until=end,
+        )
+        payload.pop("confirmation_id")
+        old_token = signing.dumps(payload, salt=SIGNING_SALT, compress=True)
+        with self.assertRaises(ValidationError):
+            confirm_review(token=old_token, expected_kind="questionnaire",
+                           tenant_id=self.tenant.id, actor=self.manager_user,
+                           request=request)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+    def test_partial_request_scope_shows_only_its_legacy_campus_and_revoke(self):
+        self._add_other_campus_to_questionnaire()
+        now = timezone.now()
+        legacy = QuestionnairePrintRelease.objects.create(
+            cycle_course=self.parent, generation_revision=self.r2,
+            print_from=now - timezone.timedelta(minutes=1),
+            print_until=now + timezone.timedelta(hours=2),
+            released_by=self.manager_user,
+        )
+        for campus in (self.campus, self.other_campus):
+            QuestionnaireLegacyCampusCoverage.objects.create(release=legacy, campus=campus)
+        for details in (False, True):
+            with self.subTest(details=details):
+                path = (reverse("departmental_exams:questionnaire_print_release_details",
+                                args=[self.parent.id]) if details else
+                        reverse("departmental_exams:questionnaire_print_release"))
+                request = RequestFactory().get(path, {"target_campus_id": self.campus.id})
+                request.user = self.manager_user
+                request.scope = {"tenant_id": self.tenant.id, "campus_ids": [self.campus.id]}
+                response = unwrap(questionnaire_print_release_view)(
+                    request, detail_course_id=self.parent.id if details else None,
+                )
+                self.assertEqual(response.status_code, 200)
+                content = response.content.decode()
+                self.assertIn("Printable now", content)
+                self.assertIn(self.campus.name, content)
+                self.assertNotIn(self.other_campus.name, content)
+                if details:
+                    self.assertIn(f'value="{legacy.id}"', content)
+                    self.assertIn("Coverage retained", content)
+                    self.assertIn(f'name="target_campus_id" value="{self.campus.id}"', content)
+        restricted_post = RequestFactory().post("/", {"target_campus_id": self.campus.id})
+        restricted_post.scope = {"tenant_id": self.tenant.id, "campus_ids": [self.campus.id]}
+        with self.assertRaises(PermissionDenied):
+            QuestionnairePrintReleaseService.revoke(
+                release_id=legacy.id, target_campus_id=self.other_campus.id,
+                tenant_id=self.tenant.id, actor=self.manager_user,
+                request=restricted_post,
+            )
+        QuestionnairePrintReleaseService.revoke(
+            release_id=legacy.id, target_campus_id=self.campus.id,
+            tenant_id=self.tenant.id, actor=self.manager_user,
+            request=restricted_post,
+        )
+        self.assertIsNotNone(QuestionnaireLegacyCampusCoverage.objects.get(
+            release=legacy, campus=self.campus,
+        ).retired_at)
+        self.assertIsNone(QuestionnaireLegacyCampusCoverage.objects.get(
+            release=legacy, campus=self.other_campus,
+        ).retired_at)
+        restricted_get = RequestFactory().get(
+            reverse("departmental_exams:questionnaire_print_release_details", args=[self.parent.id]),
+            {"target_campus_id": self.campus.id},
+        )
+        restricted_get.user = self.manager_user
+        restricted_get.scope = restricted_post.scope
+        content = unwrap(questionnaire_print_release_view)(
+            restricted_get, detail_course_id=self.parent.id,
+        ).content.decode()
+        self.assertIn("Coverage retired for visible campuses", content)
+        self.assertIn("Not released", content)
+        self.assertNotIn(self.other_campus.name, content)
+
+    def test_legacy_coverage_identity_and_retirement_provenance_are_immutable(self):
+        self._add_other_campus_to_questionnaire()
+        now = timezone.now()
+        legacy = QuestionnairePrintRelease.objects.create(
+            cycle_course=self.parent, generation_revision=self.r2,
+            print_from=now, print_until=now + timezone.timedelta(hours=2),
+            released_by=self.manager_user,
+        )
+        coverage = QuestionnaireLegacyCampusCoverage.objects.create(
+            release=legacy, campus=self.campus,
+        )
+        coverage.campus = self.other_campus
+        with self.assertRaises(ValidationError):
+            coverage.save(update_fields=["campus"])
+        coverage.refresh_from_db()
+        scoped = QuestionnairePrintRelease.objects.create(
+            cycle_course=self.parent, generation_revision=self.r2,
+            scope_kind="SCOPED", target_campus=self.campus, scope_key=self.campus.id,
+            print_from=now, print_until=now + timezone.timedelta(hours=2),
+            released_by=self.manager_user,
+        )
+        coverage.release = scoped
+        with self.assertRaises(ValidationError):
+            coverage.save(update_fields=["release"])
+        coverage.refresh_from_db()
+        coverage.retired_at = now
+        coverage.retired_by = self.manager_user
+        with self.assertRaises(ValidationError):
+            coverage.save(update_fields=["retired_at"])
+        coverage.refresh_from_db()
+        retired = QuestionnairePrintReleaseService.retire_legacy_coverage(
+            course=self.parent, campus_id=self.campus.id, actor=self.manager_user,
+        )
+        self.assertEqual(retired.id, coverage.id)
+        coverage.refresh_from_db()
+        retired_at = coverage.retired_at
+        self.assertIsNotNone(retired_at)
+        coverage.retired_at = None
+        coverage.retired_by = None
+        with self.assertRaises(ValidationError):
+            coverage.save(update_fields=["retired_at", "retired_by"])
+        coverage.refresh_from_db()
+        coverage.retired_at = retired_at + timezone.timedelta(seconds=1)
+        with self.assertRaises(ValidationError):
+            coverage.save(update_fields=["retired_at"])
+        coverage.refresh_from_db()
+        coverage.retired_by = self.faculty
+        with self.assertRaises(ValidationError):
+            coverage.save(update_fields=["retired_by"])
+        coverage.refresh_from_db()
+        self.assertEqual(coverage.retired_at, retired_at)
+        self.assertEqual(coverage.retired_by_id, self.manager_user.id)
+        self.assertIsNone(QuestionnairePrintReleaseService.retire_legacy_coverage(
+            course=self.parent, campus_id=self.campus.id, actor=self.manager_user,
+        ))
+
+    def test_individual_review_labels_retired_legacy_coverage_not_released(self):
+        now = timezone.now()
+        legacy = QuestionnairePrintRelease.objects.create(
+            cycle_course=self.parent, generation_revision=self.r2,
+            print_from=now, print_until=now + timezone.timedelta(hours=2),
+            released_by=self.manager_user,
+        )
+        QuestionnaireLegacyCampusCoverage.objects.create(release=legacy, campus=self.campus)
+        QuestionnairePrintReleaseService.revoke(
+            release_id=legacy.id, target_campus_id=self.campus.id,
+            tenant_id=self.tenant.id, actor=self.manager_user,
+        )
+        start, end = self._bulk_window()
+        client = Client()
+        client.force_login(self.manager_user)
+        response = client.post(reverse("departmental_exams:questionnaire_print_release"), {
+            "action": "release", "review": "1", "cycle_course_id": self.parent.id,
+            "generation_revision": self.r2.id, "target_campus_id": self.campus.id,
+            "print_from": start.strftime("%Y-%m-%dT%H:%M"),
+            "print_until": end.strftime("%Y-%m-%dT%H:%M"),
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Not currently released")
+        self.assertNotContains(response, "Active R")
+
+    def test_legacy_coverage_retirement_never_falls_back(self):
+        self._add_other_campus_to_questionnaire()
+        now = timezone.now()
+        legacy = QuestionnairePrintRelease.objects.create(
+            cycle_course=self.parent, generation_revision=self.r2,
+            print_from=now - timezone.timedelta(minutes=1),
+            print_until=now + timezone.timedelta(hours=2),
+            released_by=self.manager_user,
+        )
+        for campus in (self.campus, self.other_campus):
+            QuestionnaireLegacyCampusCoverage.objects.create(release=legacy, campus=campus)
+        self.other_campus.is_active = False
+        self.other_campus.save(update_fields=["is_active"])
+        scoped = self._release()
+        coverage = QuestionnaireLegacyCampusCoverage.objects.get(
+            release=legacy, campus=self.campus,
+        )
+        self.assertIsNotNone(coverage.retired_at)
+        self.assertIsNone(QuestionnaireLegacyCampusCoverage.objects.get(
+            release=legacy, campus=self.other_campus,
+        ).retired_at)
+        QuestionnairePrintReleaseService.revoke(
+            release_id=scoped.id, target_campus_id=self.campus.id,
+            tenant_id=self.tenant.id, actor=self.manager_user,
+        )
+        with self.assertRaises(PermissionDenied):
+            FacultyQuestionnairePrintService._printable_release(
+                contribution=self.contribution, release_id=legacy.id, set_code="A",
+            )
+        self.other_campus.is_active = True
+        self.other_campus.save(update_fields=["is_active"])
+        coverage.refresh_from_db()
+        self.assertIsNotNone(coverage.retired_at)
+
+    def test_unretired_legacy_coverage_resumes_only_while_eligible_after_reactivation(self):
+        now = timezone.now()
+        legacy = QuestionnairePrintRelease.objects.create(
+            cycle_course=self.parent, generation_revision=self.r2,
+            print_from=now - timezone.timedelta(minutes=1),
+            print_until=now + timezone.timedelta(hours=1),
+            released_by=self.manager_user,
+        )
+        QuestionnaireLegacyCampusCoverage.objects.create(
+            release=legacy, campus=self.campus,
+        )
+        self.campus.is_active = False
+        self.campus.save(update_fields=["is_active"])
+        with self.assertRaises(PermissionDenied):
+            FacultyQuestionnairePrintService._printable_release(
+                contribution=self.contribution, release_id=legacy.id, set_code="A",
+            )
+        self.campus.is_active = True
+        self.campus.save(update_fields=["is_active"])
+        self.assertEqual(
+            FacultyQuestionnairePrintService._printable_release(
+                contribution=self.contribution, release_id=legacy.id, set_code="A",
+            )[0].id, legacy.id,
+        )
+        ExamGenerationRevision.objects.filter(pk=self.r2.id).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED, current_marker=None,
+        )
+        with self.assertRaises(PermissionDenied):
+            FacultyQuestionnairePrintService._printable_release(
+                contribution=self.contribution, release_id=legacy.id, set_code="A",
+            )
+
+    def test_all_campuses_rejects_a_new_participant_after_review(self):
+        request = RequestFactory().post("/", {"target_campus_id": "0"})
+        request.scope = {"campus_ids": {self.campus.id, self.other_campus.id}}
+        start, end = self._bulk_window()
+        token, original = make_review(
+            kind="questionnaire", bases=((self.parent.id, self.r2.id),),
+            campus_id=0, tenant_id=self.tenant.id, actor=self.manager_user,
+            request=request, window_from=start, window_until=end,
+        )
+        self.assertEqual(len(original["targets"]), 1)
+        self._add_other_campus_to_questionnaire()
+        audits_before = AuditLog.objects.count()
+        with self.assertRaises(ValidationError):
+            confirm_review(token=token, expected_kind="questionnaire",
+                           tenant_id=self.tenant.id, actor=self.manager_user,
+                           request=request)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+        self.assertEqual(AuditLog.objects.count(), audits_before)
+
+    def test_campus_batch_rolls_back_release_and_audit_on_late_invalid_revision(self):
+        self._add_other_campus_to_questionnaire()
+        start, end = self._bulk_window()
+        audits_before = AuditLog.objects.count()
+        with self.assertRaises(ValidationError):
+            QuestionnairePrintReleaseService.bulk_release(
+                selections=((self.parent.id, self.r2.id, self.campus.id),
+                            (self.parent.id, 999999, self.other_campus.id)),
+                tenant_id=self.tenant.id, actor=self.manager_user,
+                print_from=start, print_until=end,
+            )
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+        self.assertEqual(AuditLog.objects.count(), audits_before)
+
+    def test_manual_review_does_not_gain_generation_management_release_authority(self):
+        cycle = self.parent.cycle
+        cycle.processing_mode = ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        cycle.save(update_fields=["processing_mode", "updated_at"])
+        request = RequestFactory().post("/", {"target_campus_id": str(self.campus.id)})
+        request.scope = {"campus_ids": {self.campus.id}}
+        start, end = self._bulk_window()
+        with self.assertRaises(PermissionDenied):
+            make_review(
+                kind="questionnaire", bases=((self.parent.id, self.r2.id),),
+                campus_id=self.campus.id, tenant_id=self.tenant.id,
+                actor=self.manager_user, request=request,
+                window_from=start, window_until=end,
+            )
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+
+class QuestionnaireCampusMigrationTests(Stage4TransactionTestCase):
+    def test_active_legacy_snapshot_includes_inactive_campus_and_reverse_is_guarded(self):
+        previous = [("departmental_exams", "0032_contribution_correction_versions")]
+        executor = MigrationExecutor(connection)
+        executor.migrate(previous)
+        try:
+            historical = executor.loader.project_state(previous).apps
+            OldRelease = historical.get_model("departmental_exams", "QuestionnairePrintRelease")
+            course = self.make_course()
+            program = Program.objects.create(
+                tenant=self.tenant, campus=self.other_campus,
+                department=self.other_department, code="MIG-P", name="Migration",
+            )
+            section = Section.objects.create(
+                tenant=self.tenant, campus=self.other_campus,
+                department=self.other_department, program=program,
+                code="MIG-S", name="Migration",
+            )
+            offering = CourseOffering.objects.create(
+                tenant=self.tenant, campus=self.other_campus,
+                department=self.other_department, program=program, section=section,
+                course=course.course, academic_year=course.cycle.academic_year,
+                term=course.cycle.term,
+            )
+            CycleCourseOffering.objects.create(
+                cycle_course=course, offering=offering, campus=self.other_campus,
+            )
+            self.other_campus.is_active = False
+            self.other_campus.save(update_fields=["is_active"])
+            revision = ExamGenerationRevision.objects.create(
+                cycle_course=course, revision_number=1,
+                source_input_fingerprint="f" * 64, algorithm_version="migration-test",
+                generation_trigger="AUTOMATIC", configuration_revision_snapshot=1,
+                blueprint_revision_snapshot=1, roster_boundary_snapshot="r" * 64,
+                final_item_count_snapshot=2, request_token_digest="t" * 64,
+                minimum_overlap=0, proportional_score=0,
+                contributors_represented=1, squared_contributor_concentration=4,
+            )
+            now = timezone.now()
+            active = OldRelease.objects.create(
+                cycle_course_id=course.id, generation_revision_id=revision.id,
+                print_from=now, print_until=now + timezone.timedelta(hours=2),
+                released_by_id=self.admin.id, released_at=now,
+            )
+            historical_row = OldRelease.objects.create(
+                cycle_course_id=course.id, generation_revision_id=revision.id,
+                print_from=now, print_until=now + timezone.timedelta(hours=1),
+                released_by_id=self.admin.id, released_at=now,
+                status="REVOKED", active_marker=None,
+                revoked_by_id=self.admin.id, revoked_at=now,
+            )
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())
+            active_after = QuestionnairePrintRelease.objects.get(pk=active.id)
+            self.assertEqual(active_after.scope_kind, "LEGACY_COURSE_WIDE")
+            self.assertIsNone(active_after.review_confirmation_id)
+            self.assertEqual(active_after.print_until, active.print_until)
+            self.assertEqual(active_after.released_by_id, self.admin.id)
+            self.assertEqual(set(QuestionnaireLegacyCampusCoverage.objects.filter(
+                release_id=active.id,
+            ).values_list("campus_id", flat=True)),
+                             {self.campus.id, self.other_campus.id})
+            self.assertFalse(QuestionnaireLegacyCampusCoverage.objects.filter(
+                release_id=historical_row.id,
+            ).exists())
+            scoped = QuestionnairePrintRelease.objects.create(
+                scope_kind="SCOPED", target_campus=self.campus,
+                scope_key=self.campus.id, cycle_course=course,
+                generation_revision=revision, print_from=now,
+                print_until=now + timezone.timedelta(hours=2),
+                released_by=self.admin,
+            )
+            self.assertIsNotNone(scoped.id)
+            executor = MigrationExecutor(connection)
+            with self.assertRaises(IrreversibleError):
+                executor.migrate(previous)
+        finally:
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())

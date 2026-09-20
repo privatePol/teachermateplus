@@ -2490,6 +2490,10 @@ class ExamGenerationRevision(TimeStampedModel):
 
 class QuestionnairePrintRelease(TimeStampedModel):
     _IMMUTABLE_FIELDS = (
+        "review_confirmation_id",
+        "scope_kind",
+        "target_campus_id",
+        "scope_key",
         "cycle_course_id",
         "generation_revision_id",
         "print_from",
@@ -2501,6 +2505,21 @@ class QuestionnairePrintRelease(TimeStampedModel):
     class Status(models.TextChoices):
         ACTIVE = "ACTIVE", "Active"
         REVOKED = "REVOKED", "Revoked"
+
+    class ScopeKind(models.TextChoices):
+        SCOPED = "SCOPED", "Campus scoped"
+        LEGACY_COURSE_WIDE = "LEGACY_COURSE_WIDE", "Legacy course-wide"
+
+    scope_kind = models.CharField(max_length=20, choices=ScopeKind.choices, default=ScopeKind.LEGACY_COURSE_WIDE)
+    target_campus = models.ForeignKey(
+        "tenants.Campus", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="questionnaire_print_releases",
+    )
+    # Zero is reserved for pre-campus releases; positive values equal the campus ID.
+    # Unlike a nullable campus FK, this enforces active uniqueness on MariaDB.
+    scope_key = models.PositiveIntegerField(default=0)
+    # Shared by rows created by one signed release review; null for older/direct releases.
+    review_confirmation_id = models.CharField(max_length=32, null=True, blank=True)
 
     cycle_course = models.ForeignKey(
         CycleCourse,
@@ -2541,8 +2560,15 @@ class QuestionnairePrintRelease(TimeStampedModel):
         db_table = "departmental_exam_questionnaire_print_releases"
         constraints = [
             models.UniqueConstraint(
-                fields=["cycle_course", "active_marker"],
-                name="uq_de_print_release_active",
+                fields=["cycle_course", "scope_key", "active_marker"],
+                name="uq_de_print_scope_active",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(scope_kind="LEGACY_COURSE_WIDE", target_campus__isnull=True, scope_key=0)
+                    | models.Q(scope_kind="SCOPED", target_campus__isnull=False, scope_key=models.F("target_campus_id"))
+                ),
+                name="ck_de_print_scope",
             ),
             models.CheckConstraint(
                 condition=models.Q(print_until__gt=models.F("print_from")),
@@ -2578,6 +2604,14 @@ class QuestionnairePrintRelease(TimeStampedModel):
         ]
 
     def clean(self):
+        if self.scope_kind == self.ScopeKind.SCOPED:
+            if not self.target_campus_id or self.scope_key != self.target_campus_id:
+                raise ValidationError("An explicit matching Questionnaire campus is required.")
+            if self.cycle_course_id and self.target_campus.tenant_id != self.cycle_course.cycle.tenant_id:
+                raise ValidationError("Questionnaire campus is outside the examination tenant.")
+        elif (self.scope_kind != self.ScopeKind.LEGACY_COURSE_WIDE
+              or self.target_campus_id is not None or self.scope_key != 0):
+            raise ValidationError("Questionnaire release scope is invalid.")
         if self.print_from and self.print_until and self.print_until <= self.print_from:
             raise ValidationError(
                 {"print_until": "Print Until must be later than Print From."}
@@ -2634,6 +2668,67 @@ class QuestionnairePrintRelease(TimeStampedModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Questionnaire print releases are auditable historical records.")
+
+
+class QuestionnaireLegacyCampusCoverage(TimeStampedModel):
+    """Fixed campus entitlement from one pre-scope active release."""
+
+    release = models.ForeignKey(
+        QuestionnairePrintRelease, on_delete=models.PROTECT, related_name="legacy_campus_coverage",
+    )
+    campus = models.ForeignKey(
+        "tenants.Campus", on_delete=models.PROTECT, related_name="legacy_questionnaire_coverage",
+    )
+    retired_at = models.DateTimeField(null=True, blank=True)
+    retired_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="retired_questionnaire_coverage",
+    )
+
+    class Meta:
+        db_table = "departmental_exam_questionnaire_legacy_coverage"
+        constraints = [models.UniqueConstraint(
+            fields=["release", "campus"], name="uq_de_print_legacy_campus",
+        )]
+
+    def clean(self):
+        if self.release_id and self.release.scope_kind != QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE:
+            raise ValidationError("Coverage requires a legacy Questionnaire release.")
+        if self.release_id and self.campus_id and self.campus.tenant_id != self.release.cycle_course.cycle.tenant_id:
+            raise ValidationError("Coverage campus is outside the examination tenant.")
+        if bool(self.retired_at) != bool(self.retired_by_id):
+            raise ValidationError("Coverage retirement requires an actor and timestamp.")
+
+    def save(self, *args, **kwargs):
+        if bool(self.retired_at) != bool(self.retired_by_id):
+            raise ValidationError("Legacy coverage retirement requires an actor and timestamp.")
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "release_id", "campus_id", "retired_at", "retired_by_id",
+            ).first()
+            if previous is not None:
+                if (previous["release_id"] != self.release_id
+                        or previous["campus_id"] != self.campus_id):
+                    raise ValidationError("Legacy coverage release and campus are immutable.")
+                was_retired = previous["retired_at"] is not None
+                is_retired = self.retired_at is not None
+                update_fields = kwargs.get("update_fields")
+                if not was_retired and is_retired and update_fields is not None:
+                    fields = set(update_fields)
+                    if ("retired_at" not in fields
+                            or not ({"retired_by", "retired_by_id"} & fields)):
+                        raise ValidationError(
+                            "The first legacy coverage retirement must save its actor and timestamp together."
+                        )
+                if was_retired and (
+                    previous["retired_at"] != self.retired_at
+                    or previous["retired_by_id"] != self.retired_by_id
+                ):
+                    raise ValidationError("Legacy coverage retirement is permanent and immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Legacy campus coverage is auditable history.")
 
 
 class PersonalizedAnswerSheetAssignment(TimeStampedModel):
@@ -2783,6 +2878,7 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
 
 class AnswerKeyRelease(TimeStampedModel):
     _IMMUTABLE_FIELDS = (
+        "review_confirmation_id",
         "scope_kind",
         "target_campus_id",
         "recipient_course_id",
@@ -2830,6 +2926,7 @@ class AnswerKeyRelease(TimeStampedModel):
         related_name="released_departmental_exam_answer_keys",
     )
     released_at = models.DateTimeField(default=timezone.now)
+    review_confirmation_id = models.CharField(max_length=32, null=True, blank=True)
     attestation_version = models.CharField(max_length=64)
     status = models.CharField(
         max_length=8,

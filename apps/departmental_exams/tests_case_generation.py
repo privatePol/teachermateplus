@@ -193,7 +193,7 @@ class CaseGenerationTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertEqual(revision.algorithm_version, ALGORITHM_VERSION)
         from .questionnaire_printing import QuestionnairePrintReleaseService, FacultyQuestionnairePrintService
         release = QuestionnairePrintReleaseService.release(
-            cycle_course_id=self.parent.id, revision_id=revision.id, tenant_id=self.tenant.id,
+            cycle_course_id=self.parent.id, revision_id=revision.id, target_campus_id=self.campus.id, tenant_id=self.tenant.id,
             actor=self.admin, print_from=timezone.now() - timezone.timedelta(minutes=1),
             print_until=timezone.now() + timezone.timedelta(hours=1))
         for generated_set in revision.generated_sets.order_by('set_code'):
@@ -290,7 +290,7 @@ class CaseGenerationTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertEqual(before['items'], after['items'])
         from .questionnaire_printing import QuestionnairePrintReleaseService, FacultyQuestionnairePrintService
         release = QuestionnairePrintReleaseService.release(
-            cycle_course_id=self.parent.id, revision_id=revision.id, tenant_id=self.tenant.id,
+            cycle_course_id=self.parent.id, revision_id=revision.id, target_campus_id=self.campus.id, tenant_id=self.tenant.id,
             actor=self.admin, print_from=timezone.now() - timezone.timedelta(minutes=1),
             print_until=timezone.now() + timezone.timedelta(hours=1))
         item = generated_set.items.first()

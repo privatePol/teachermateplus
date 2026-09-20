@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from apps.core.services.audit import AuditService
 from apps.core.services.settings import SystemSettingService
+from apps.tenants.models import Campus
 
 from .contribution_authorization import ContributionAuthorizationService
 from .exam_units import resolve_examination_unit
@@ -20,6 +21,7 @@ from .models import (
     FacultyContribution,
     GeneratedExamSet,
     QuestionnairePrintRelease,
+    QuestionnaireLegacyCampusCoverage,
 )
 from .services import DepartmentalExamAuthorizationService
 
@@ -151,6 +153,89 @@ def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None
 
 class QuestionnairePrintReleaseService:
     @staticmethod
+    def participating_campuses(*, unit, active_only=True):
+        cycle = unit.primary.cycle
+        campus_ids = set()
+        for member in unit.members:
+            if member.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
+                continue
+            campus_ids.update(member.offering_snapshots.filter(
+                campus__tenant_id=cycle.tenant_id,
+                offering__tenant_id=cycle.tenant_id,
+                offering__campus_id=F("campus_id"),
+                offering__course_id=member.course_id,
+                offering__academic_year_id=cycle.academic_year_id,
+                offering__term_id=cycle.term_id,
+            ).values_list("campus_id", flat=True))
+        queryset = Campus.objects.filter(tenant_id=cycle.tenant_id, id__in=campus_ids)
+        if active_only:
+            queryset = queryset.filter(is_active=True)
+        return tuple(queryset.distinct().order_by("id"))
+
+    @classmethod
+    def require_target(cls, *, course, unit, campus_id, request=None, active=True):
+        if unit.primary.id != course.id:
+            raise ValidationError("Questionnaire releases require the primary-owned revision.")
+        if request is not None:
+            scope_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
+            if scope_ids is not None and campus_id not in scope_ids:
+                raise PermissionDenied("The Questionnaire campus is outside the request scope.")
+        if campus_id not in {campus.id for campus in cls.participating_campuses(
+            unit=unit, active_only=active,
+        )}:
+            raise PermissionDenied("The Questionnaire campus is outside the examination unit.")
+        if not any(member.offering_snapshots.filter(
+            campus_id=campus_id,
+            campus__tenant_id=course.cycle.tenant_id,
+            offering__tenant_id=course.cycle.tenant_id,
+            offering__campus_id=campus_id,
+            offering__course_id=member.course_id,
+            offering__academic_year_id=course.cycle.academic_year_id,
+            offering__term_id=course.cycle.term_id,
+        ).exists() for member in unit.members):
+            raise PermissionDenied("Questionnaire campus has no matching member offering.")
+
+    @staticmethod
+    def require_revoke_campus(*, course, campus_id, request=None):
+        campus = Campus.objects.filter(pk=campus_id, tenant_id=course.cycle.tenant_id).first()
+        if campus is None:
+            raise PermissionDenied("Questionnaire release campus is outside the tenant.")
+        if request is not None:
+            scope_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
+            if scope_ids is not None and campus_id not in scope_ids:
+                raise PermissionDenied("Questionnaire release campus is outside the request scope.")
+
+    @staticmethod
+    def active_legacy_coverage(*, course, campus_id, for_update=False):
+        rows = QuestionnaireLegacyCampusCoverage.objects.filter(
+            release__cycle_course=course,
+            release__scope_kind=QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE,
+            release__status=QuestionnairePrintRelease.Status.ACTIVE,
+            release__active_marker=1,
+            campus_id=campus_id, retired_at__isnull=True,
+        ).select_related("release")
+        if for_update:
+            rows = rows.select_for_update()
+        return rows.first()
+
+    @classmethod
+    def retire_legacy_coverage(cls, *, course, campus_id, actor, request=None):
+        coverage = cls.active_legacy_coverage(
+            course=course, campus_id=campus_id, for_update=True,
+        )
+        if coverage:
+            coverage.retired_at = timezone.now()
+            coverage.retired_by = actor
+            coverage.full_clean()
+            coverage.save(update_fields=["retired_at", "retired_by", "updated_at"])
+            cls._audit_release(
+                action="DE_QUESTIONNAIRE_LEGACY_CAMPUS_RETIRED",
+                release=coverage.release, actor=actor, request=request,
+                metadata={"target_campus_id": campus_id, "coverage_id": coverage.id},
+            )
+        return coverage
+
+    @staticmethod
     def _lock_course(*, cycle_course_id, tenant_id):
         cycle_id = (
             CycleCourse.objects.filter(
@@ -240,6 +325,8 @@ class QuestionnairePrintReleaseService:
                 "print_from": release.print_from,
                 "print_until": release.print_until,
                 "released_at": release.released_at,
+                "scope_kind": release.scope_kind,
+                "target_campus_id": release.target_campus_id,
                 **(metadata or {}),
             },
             request=request,
@@ -256,9 +343,17 @@ class QuestionnairePrintReleaseService:
         actor,
         print_from,
         print_until,
+        target_campus_id=None,
         request=None,
         require_current_generated=False,
+        review_confirmation_id=None,
     ):
+        try:
+            target_campus_id = int(target_campus_id)
+            if target_campus_id < 1:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("An explicit target campus is required.") from exc
         cls._validate_window(print_from=print_from, print_until=print_until)
         course = cls._lock_course(
             cycle_course_id=cycle_course_id,
@@ -268,15 +363,16 @@ class QuestionnairePrintReleaseService:
             user=actor,
             cycle_course=course,
         )
+        unit = resolve_examination_unit(course, for_update=True)
         if course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
             require_current_generated = True
-        if (
-            require_current_generated
-            and resolve_examination_unit(course).primary.id != course.id
-        ):
+        if unit.primary.id != course.id:
             raise ValidationError(
                 "Bulk print release accepts only the primary-owned revision for an examination unit."
             )
+        cls.require_target(
+            course=course, unit=unit, campus_id=target_campus_id, request=request,
+        )
         try:
             revision = (
                 ExamGenerationRevision.objects.select_for_update()
@@ -298,11 +394,19 @@ class QuestionnairePrintReleaseService:
             .select_related("cycle_course__cycle", "generation_revision")
             .filter(
                 cycle_course=course,
+                scope_kind=QuestionnairePrintRelease.ScopeKind.SCOPED,
+                target_campus_id=target_campus_id,
                 status=QuestionnairePrintRelease.Status.ACTIVE,
                 active_marker=1,
             )
             .first()
         )
+        cls.retire_legacy_coverage(
+            course=course, campus_id=target_campus_id, actor=actor, request=request,
+        )
+        if (previous and previous.generation_revision_id == revision.id
+                and previous.print_from == print_from and previous.print_until == print_until):
+            return previous
         if previous:
             previous.status = QuestionnairePrintRelease.Status.REVOKED
             previous.active_marker = None
@@ -328,11 +432,15 @@ class QuestionnairePrintReleaseService:
 
         release = QuestionnairePrintRelease(
             cycle_course=course,
+            scope_kind=QuestionnairePrintRelease.ScopeKind.SCOPED,
+            target_campus_id=target_campus_id,
+            scope_key=target_campus_id,
             generation_revision=revision,
             print_from=print_from,
             print_until=print_until,
             released_by=actor,
             released_at=now,
+            review_confirmation_id=review_confirmation_id,
         )
         release.full_clean()
         release.save()
@@ -358,51 +466,54 @@ class QuestionnairePrintReleaseService:
         print_from,
         print_until,
         request=None,
+        review_confirmation_id=None,
     ):
         cls._validate_window(print_from=print_from, print_until=print_until)
         normalized = []
         course_ids = set()
         for selection in selections:
             try:
-                cycle_course_id, revision_id = (int(value) for value in selection)
+                cycle_course_id, revision_id, campus_id = (int(value) for value in selection)
             except (TypeError, ValueError) as exc:
                 raise ValidationError(
                     {"selections": "One or more selected revisions are invalid."}
                 ) from exc
-            if cycle_course_id < 1 or revision_id < 1:
+            if min(cycle_course_id, revision_id, campus_id) < 1:
                 raise ValidationError(
                     {"selections": "One or more selected revisions are invalid."}
                 )
-            if cycle_course_id in course_ids:
+            if (cycle_course_id, campus_id) in course_ids:
                 raise ValidationError(
-                    {"selections": "Select only one revision for each course examination."}
+                    {"selections": "Select each Questionnaire campus only once."}
                 )
-            course_ids.add(cycle_course_id)
-            normalized.append((cycle_course_id, revision_id))
+            course_ids.add((cycle_course_id, campus_id))
+            normalized.append((cycle_course_id, revision_id, campus_id))
         if not normalized:
             raise ValidationError(
                 {"selections": "Select at least one generated course revision."}
             )
 
         releases = []
-        for cycle_course_id, revision_id in sorted(normalized):
+        for cycle_course_id, revision_id, campus_id in sorted(normalized):
             releases.append(
                 cls.release(
                     cycle_course_id=cycle_course_id,
                     revision_id=revision_id,
+                    target_campus_id=campus_id,
                     tenant_id=tenant_id,
                     actor=actor,
                     print_from=print_from,
                     print_until=print_until,
                     request=request,
                     require_current_generated=True,
+                    review_confirmation_id=review_confirmation_id,
                 )
             )
         return tuple(releases)
 
     @classmethod
     @transaction.atomic
-    def revoke(cls, *, release_id, tenant_id, actor, request=None):
+    def revoke(cls, *, release_id, tenant_id, actor, request=None, target_campus_id=None):
         course_id = (
             QuestionnairePrintRelease.objects.filter(
                 pk=release_id,
@@ -422,6 +533,30 @@ class QuestionnairePrintReleaseService:
             QuestionnairePrintRelease.objects.select_for_update()
             .select_related("cycle_course__cycle", "generation_revision")
             .get(pk=release_id, cycle_course=course)
+        )
+        if release.scope_kind == QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE:
+            try:
+                target_campus_id = int(target_campus_id or (
+                    request.POST.get("target_campus_id") if request else None
+                ))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("An explicit legacy coverage campus is required.") from exc
+            cls.require_revoke_campus(
+                course=course, campus_id=target_campus_id, request=request,
+            )
+            coverage = cls.retire_legacy_coverage(
+                course=course, campus_id=target_campus_id, actor=actor, request=request,
+            )
+            if coverage is None:
+                raise ValidationError("Legacy coverage is already retired for this campus.")
+            return release
+        expected = target_campus_id or (
+            request.POST.get("target_campus_id") if request is not None else None
+        )
+        if expected is None or str(release.target_campus_id) != str(expected):
+            raise PermissionDenied("Questionnaire revoke campus does not match the release.")
+        cls.require_revoke_campus(
+            course=course, campus_id=release.target_campus_id, request=request,
         )
         if release.status != QuestionnairePrintRelease.Status.ACTIVE:
             raise ValidationError("Only the active questionnaire print release may be revoked.")
@@ -450,7 +585,29 @@ class QuestionnairePrintReleaseService:
 
 class FacultyQuestionnairePrintService:
     @staticmethod
-    def available_options(*, contributions, now=None):
+    def _matching_campuses(*, contribution, release):
+        assignments = ContributionAuthorizationService.retained_current_print_assignments(
+            contribution=contribution,
+        )
+        campus_ids = {
+            assignment.offering.campus_id for assignment in assignments
+            if assignment.offering.campus.is_active
+        }
+        if release.scope_kind == QuestionnairePrintRelease.ScopeKind.SCOPED:
+            return (release.target_campus_id,) if release.target_campus_id in campus_ids else ()
+        covered_ids = set(QuestionnaireLegacyCampusCoverage.objects.filter(
+            release=release, retired_at__isnull=True, campus_id__in=campus_ids,
+        ).values_list("campus_id", flat=True))
+        # A scoped history entry permanently supersedes legacy access for that campus.
+        superseded_ids = set(QuestionnairePrintRelease.objects.filter(
+            cycle_course_id=release.cycle_course_id,
+            scope_kind=QuestionnairePrintRelease.ScopeKind.SCOPED,
+            target_campus_id__in=covered_ids,
+        ).values_list("target_campus_id", flat=True))
+        return tuple(sorted(covered_ids - superseded_ids))
+
+    @classmethod
+    def available_options(cls, *, contributions, now=None):
         contributions = tuple(contributions)
         now = now or timezone.now()
         primary_by_contribution = {
@@ -458,45 +615,49 @@ class FacultyQuestionnairePrintService:
             for row in contributions
         }
         course_ids = set(primary_by_contribution.values())
-        releases = {
-            row.cycle_course_id: row
-            for row in QuestionnairePrintRelease.objects.filter(
+        releases = list(QuestionnairePrintRelease.objects.filter(
                 cycle_course_id__in=course_ids,
                 status=QuestionnairePrintRelease.Status.ACTIVE,
                 active_marker=1,
                 print_from__lte=now,
                 print_until__gte=now,
                 generation_revision__cycle_course_id=F("cycle_course_id"),
-            ).select_related("generation_revision", "cycle_course__cycle")
-        }
+            ).select_related("generation_revision", "cycle_course__cycle", "target_campus")
+            .order_by("-released_at", "-id"))
         options = {}
         for contribution in contributions:
-            release = releases.get(primary_by_contribution[contribution.id])
-            if not release or not ContributionAuthorizationService.has_retained_current_print_eligibility(
-                contribution=contribution
-            ):
-                continue
-            if (
+            matches = []
+            for release in releases:
+                if release.cycle_course_id != primary_by_contribution[contribution.id]:
+                    continue
+                campus_ids = cls._matching_campuses(contribution=contribution, release=release)
+                if not campus_ids:
+                    continue
+                if (
                 release.cycle_course.cycle.processing_mode
                 == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
                 and (
                     release.generation_revision.current_marker != 1
                     or release.generation_revision.status != ExamGenerationRevision.Status.GENERATED
                 )
-            ):
-                continue
-            set_rows = GeneratedExamSet.objects.filter(
-                generation_revision=release.generation_revision,
-                set_code__in=(GeneratedExamSet.SetCode.A, GeneratedExamSet.SetCode.B),
-            ).annotate(actual_item_count=Count("items"))
-            if set(set_rows.values_list("set_code", flat=True)) != {"A", "B"} or any(
-                row.actual_item_count != row.item_count for row in set_rows
-            ):
-                continue
-            options[contribution.id] = {
-                "release_id": release.id,
-                "revision_number": release.generation_revision.revision_number,
-            }
+                ):
+                    continue
+                set_rows = GeneratedExamSet.objects.filter(
+                    generation_revision=release.generation_revision,
+                    set_code__in=(GeneratedExamSet.SetCode.A, GeneratedExamSet.SetCode.B),
+                ).annotate(actual_item_count=Count("items"))
+                if set(set_rows.values_list("set_code", flat=True)) != {"A", "B"} or any(
+                    row.actual_item_count != row.item_count for row in set_rows
+                ):
+                    continue
+                for campus_id in campus_ids:
+                    matches.append({
+                        "release_id": release.id,
+                        "revision_number": release.generation_revision.revision_number,
+                        "campus_id": campus_id,
+                    })
+            if matches:
+                options[contribution.id] = tuple(matches)
         return options
 
     @classmethod
@@ -517,16 +678,6 @@ class FacultyQuestionnairePrintService:
             .select_related("generation_revision")
             .order_by("-released_at", "-id")
         )
-        active_by_course = {}
-        latest_by_course = {}
-        for release in releases:
-            latest_by_course.setdefault(release.cycle_course_id, release)
-            if (
-                release.status == QuestionnairePrintRelease.Status.ACTIVE
-                and release.active_marker == 1
-            ):
-                active_by_course.setdefault(release.cycle_course_id, release)
-
         statuses = {}
         for contribution in contributions:
             summary = {
@@ -537,40 +688,55 @@ class FacultyQuestionnairePrintService:
                 "opens_at": None,
                 "expires_at": None,
                 "actions": None,
+                "campus_rows": (),
             }
-            if not ContributionAuthorizationService.has_retained_current_print_eligibility(
-                contribution=contribution
-            ):
+            assignments = ContributionAuthorizationService.retained_current_print_assignments(
+                contribution=contribution,
+            )
+            campuses = {
+                assignment.offering.campus_id: assignment.offering.campus
+                for assignment in assignments if assignment.offering.campus.is_active
+            }
+            if not campuses:
                 statuses[contribution.id] = summary
                 continue
             primary_id = primary_ids[contribution.id]
-            release = active_by_course.get(primary_id) or latest_by_course.get(primary_id)
-            if release is None:
-                statuses[contribution.id] = summary
-                continue
-            summary.update(
-                release_id=release.id,
-                revision_number=release.generation_revision.revision_number,
-                opens_at=release.print_from,
-                expires_at=release.print_until,
-            )
-            option = available.get(contribution.id)
-            if release.status == QuestionnairePrintRelease.Status.REVOKED:
-                summary.update(status="REVOKED", status_label="Revoked")
-            elif release.print_from is None or release.print_until is None:
-                summary.update(status="UNAVAILABLE", status_label="Unavailable")
-            elif now < release.print_from:
-                summary.update(status="NOT_YET_AVAILABLE", status_label="Not yet available")
-            elif now > release.print_until:
-                summary.update(status="EXPIRED", status_label="Expired")
-            elif option and option["release_id"] == release.id:
-                summary.update(
-                    status="AVAILABLE",
-                    status_label="Available",
-                    actions=option,
-                )
-            else:
-                summary.update(status="UNAVAILABLE", status_label="Unavailable")
+            campus_rows = []
+            for campus_id, campus in sorted(campuses.items()):
+                scoped = next((row for row in releases if
+                    row.cycle_course_id == primary_id
+                    and row.scope_kind == QuestionnairePrintRelease.ScopeKind.SCOPED
+                    and row.target_campus_id == campus_id), None)
+                legacy = next((row for row in releases if
+                    row.cycle_course_id == primary_id
+                    and row.scope_kind == QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE
+                    and campus_id in cls._matching_campuses(
+                        contribution=contribution, release=row,
+                    )), None)
+                release = scoped or legacy
+                row_status = dict(summary, campus=campus, campus_rows=())
+                if release:
+                    row_status.update(
+                        release_id=release.id,
+                        revision_number=release.generation_revision.revision_number,
+                        opens_at=release.print_from, expires_at=release.print_until,
+                    )
+                    option = next((item for item in available.get(contribution.id, ())
+                        if item["campus_id"] == campus_id and item["release_id"] == release.id), None)
+                    if release.status == QuestionnairePrintRelease.Status.REVOKED:
+                        row_status.update(status="REVOKED", status_label="Revoked")
+                    elif now < release.print_from:
+                        row_status.update(status="NOT_YET_AVAILABLE", status_label="Not yet available")
+                    elif now > release.print_until:
+                        row_status.update(status="EXPIRED", status_label="Expired")
+                    elif option:
+                        row_status.update(status="AVAILABLE", status_label="Available", actions=option)
+                    else:
+                        row_status.update(status="UNAVAILABLE", status_label="Unavailable")
+                campus_rows.append(row_status)
+            if campus_rows:
+                summary.update({key: value for key, value in campus_rows[0].items() if key != "campus_rows"})
+                summary["campus_rows"] = tuple(campus_rows)
             statuses[contribution.id] = summary
         return statuses
 
@@ -616,6 +782,10 @@ class FacultyQuestionnairePrintService:
             contribution=contribution
         ):
             raise PermissionDenied("No current qualifying teaching assignment remains.")
+        if not FacultyQuestionnairePrintService._matching_campuses(
+            contribution=contribution, release=release,
+        ):
+            raise PermissionDenied("No current assignment matches the released Questionnaire campus.")
         try:
             generated_set = GeneratedExamSet.objects.get(
                 generation_revision=release.generation_revision,

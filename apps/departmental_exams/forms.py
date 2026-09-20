@@ -454,6 +454,9 @@ class AutomaticContributionReopenForm(_ConfigurationActionForm):
 
 class QuestionnairePrintReleaseForm(forms.Form):
     cycle_course_id = forms.IntegerField(widget=forms.HiddenInput)
+    target_campus_id = forms.TypedChoiceField(
+        coerce=int, choices=(), widget=forms.Select(attrs={"class": "form-select"}),
+    )
     generation_revision = forms.ModelChoiceField(
         queryset=ExamGenerationRevision.objects.none(),
         empty_label=None,
@@ -474,8 +477,9 @@ class QuestionnairePrintReleaseForm(forms.Form):
         ),
     )
 
-    def __init__(self, *args, cycle_course=None, **kwargs):
+    def __init__(self, *args, cycle_course=None, campus_choices=(), **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["target_campus_id"].choices = (("", "Choose target campus"), *tuple(campus_choices))
         if cycle_course is not None:
             self.fields["generation_revision"].queryset = (
                 ExamGenerationRevision.objects.filter(cycle_course=cycle_course)
@@ -500,6 +504,7 @@ class QuestionnairePrintReleaseForm(forms.Form):
 
 
 class BulkQuestionnairePrintReleaseForm(forms.Form):
+    target_campus_id = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
     selections = forms.MultipleChoiceField(
         choices=(),
         error_messages={
@@ -546,6 +551,8 @@ class BulkQuestionnairePrintReleaseForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned.get("target_campus_id") is None:
+            self.add_error("target_campus_id", "Choose one campus or All Campuses.")
         print_from = cleaned.get("print_from")
         print_until = cleaned.get("print_until")
         if print_from and print_until and print_until <= print_from:
@@ -562,7 +569,7 @@ class BulkAnswerKeyReleaseForm(forms.Form):
         "have concluded."
     )
 
-    target_campus_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    target_campus_id = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
 
     selections = forms.MultipleChoiceField(
         choices=(),

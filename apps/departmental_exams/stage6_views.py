@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -55,6 +56,7 @@ from .models import (
     ExamGenerationRevision,
     ExaminationCycle,
     FacultyContribution,
+    QuestionnaireLegacyCampusCoverage,
     QuestionnairePrintRelease,
 )
 from .forms import (
@@ -66,6 +68,7 @@ from .forms import (
 )
 from .exam_units import resolve_examination_unit
 from .questionnaire_printing import QuestionnairePrintReleaseService
+from .release_review import make_review, confirm_review
 from .services import (
     CourseExamConfigurationService,
     CourseExamConfigurationConflict,
@@ -106,7 +109,7 @@ def _release_center_url(*, cycle_status, section, campus_id=None):
         "cycle_status": selected_cycle_status({"cycle_status": cycle_status}),
         "section": section,
     }
-    if section == "answer-key-releases" and campus_id is not None:
+    if campus_id is not None:
         try:
             params["target_campus_id"] = int(campus_id)
         except (TypeError, ValueError):
@@ -1011,6 +1014,7 @@ def questionnaire_print_release_view(
     from .cycle_visibility import selected_cycle_status
 
     tenant_id = _tenant_id(request)
+    request_campus_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
     current_cycle_status = selected_cycle_status(request.GET)
     revision_queryset = ExamGenerationRevision.objects.order_by("-revision_number")
     print_release_queryset = QuestionnairePrintRelease.objects.select_related(
@@ -1138,14 +1142,34 @@ def questionnaire_print_release_view(
         from .cycle_visibility import filter_cycle_rows
         courses = filter_cycle_rows(courses, request.GET)
     for course in courses:
-        seen_campus_ids = set()
-        print_release_campuses = []
-        for snapshot in course.offering_snapshots.all():
-            if snapshot.campus_id in seen_campus_ids:
-                continue
-            seen_campus_ids.add(snapshot.campus_id)
-            print_release_campuses.append(snapshot.campus)
-        course.print_release_campuses = tuple(print_release_campuses)
+        unit = resolve_examination_unit(course)
+        course.print_release_campuses = QuestionnairePrintReleaseService.participating_campuses(
+            unit=unit, active_only=False,
+        )
+        course.new_release_campuses = tuple(
+            campus for campus in course.print_release_campuses if campus.is_active
+        )
+        if detail_course_id == course.id:
+            from apps.tenants.models import Campus
+            history_ids = set(QuestionnairePrintRelease.objects.filter(
+                cycle_course=course, target_campus_id__isnull=False,
+            ).values_list("target_campus_id", flat=True))
+            history_ids.update(QuestionnaireLegacyCampusCoverage.objects.filter(
+                release__cycle_course=course,
+            ).values_list("campus_id", flat=True))
+            all_ids = {campus.id for campus in course.print_release_campuses} | history_ids
+            course.print_release_campuses = tuple(Campus.objects.filter(
+                tenant_id=tenant_id, pk__in=all_ids,
+            ).order_by("id"))
+        if request_campus_ids is not None:
+            course.print_release_campuses = tuple(
+                campus for campus in course.print_release_campuses
+                if campus.id in request_campus_ids
+            )
+            course.new_release_campuses = tuple(
+                campus for campus in course.new_release_campuses
+                if campus.id in request_campus_ids
+            )
 
     course_by_id = {course.id: course for course in courses}
     revision_by_id = {
@@ -1324,6 +1348,36 @@ def questionnaire_print_release_view(
         response["Expires"] = "0"
         return response
 
+    try:
+        target_campus_id = int(
+            request.POST.get("target_campus_id", "") if request.method == "POST"
+            else request.GET.get("target_campus_id", "")
+        )
+    except (TypeError, ValueError):
+        target_campus_id = None
+    request_campus_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
+    if detail_course_id is not None and target_campus_id not in (None, 0):
+        detail_course = course_by_id.get(detail_course_id)
+        if (detail_course is None
+                or (request_campus_ids is not None
+                    and target_campus_id not in request_campus_ids)
+                or target_campus_id not in {
+                    campus.id for campus in detail_course.print_release_campuses
+                }):
+            raise PermissionDenied("The requested Questionnaire campus details are unavailable.")
+    questionnaire_campuses = {}
+    for course in courses:
+        if (equivalency_primary_by_course_id.get(course.id, course.id) != course.id
+                or DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+                not in management_map[course.id]):
+            continue
+        unit = resolve_examination_unit(course)
+        for campus in QuestionnairePrintReleaseService.participating_campuses(unit=unit):
+            if request_campus_ids is None or campus.id in request_campus_ids:
+                questionnaire_campuses[campus.id] = campus
+    questionnaire_campus_options = tuple(sorted(
+        questionnaire_campuses.values(), key=lambda campus: (campus.name, campus.id),
+    ))
     can_bulk_release = any(
         DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
         in management_map[course.id]
@@ -1337,6 +1391,15 @@ def questionnaire_print_release_view(
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
             not in management_map[course.id]
         ):
+            continue
+        unit = resolve_examination_unit(course)
+        participating_ids = {
+            campus.id for campus in QuestionnairePrintReleaseService.participating_campuses(unit=unit)
+        }
+        if (target_campus_id is None or not participating_ids
+                or (target_campus_id != 0 and target_campus_id not in participating_ids)
+                or (request_campus_ids is not None and
+                    not ({target_campus_id} if target_campus_id else participating_ids).issubset(request_campus_ids))):
             continue
         for revision in course.generation_revisions.all():
             if not (
@@ -1367,18 +1430,10 @@ def questionnaire_print_release_view(
         and equivalency_primary_by_course_id.get(course.id, course.id) == course.id
         for course in courses
     )
-    try:
-        target_campus_id = int(
-            request.POST.get("target_campus_id", "") if request.method == "POST"
-            else request.GET.get("target_campus_id", "")
-        )
-    except (TypeError, ValueError):
-        target_campus_id = None
     bulk_answer_key_rows = []
     bulk_answer_key_departments = {}
     bulk_answer_key_campuses = {}
     eligible_answer_key_revisions_by_course_id = {}
-    request_campus_ids = (getattr(request, "scope", {}) or {}).get("campus_ids")
     for course in courses:
         if not answer_key_release_map[course.id]:
             continue
@@ -1391,6 +1446,43 @@ def questionnaire_print_release_view(
         ]
         eligible_answer_key_revisions_by_course_id[course.id] = eligible_revisions
         for recipient in unit.members:
+            recipient_campuses = {
+                snapshot.campus_id: snapshot.campus
+                for snapshot in recipient.offering_snapshots.select_related("campus").all()
+                if snapshot.campus.is_active
+            }
+            if target_campus_id == 0 and recipient_campuses and len(eligible_revisions) == 1:
+                all_allowed = request_campus_ids is None or set(recipient_campuses).issubset(request_campus_ids)
+                if all_allowed:
+                    for campus in recipient_campuses.values():
+                        try:
+                            DepartmentalExamAuthorizationService.require_answer_key_target(
+                                user=request.user, cycle_course=course,
+                                recipient_course=recipient, target_campus_id=campus.id,
+                            )
+                        except PermissionDenied:
+                            all_allowed = False
+                            break
+                if all_allowed:
+                    revision = eligible_revisions[0]
+                    department = recipient.responsible_department or recipient.course.exam_department
+                    if department:
+                        bulk_answer_key_departments[department.id] = department
+                    bulk_answer_key_rows.append({
+                        "value": f"{course.id}:{revision.id}:{recipient.id}:0",
+                        "course": course, "recipient": recipient,
+                        "campus": SimpleNamespace(id=0, name="All Campuses", code="ALL"),
+                        "detail_campus": next(iter(recipient_campuses.values())),
+                        "revision": revision, "history": (),
+                        "finalized_at": revision.locked_at or revision.generated_at,
+                        "active_release": None, "target_active_release": None,
+                        "displayed_release": None,
+                        "search_text": f"{recipient.course.code} {recipient.course.title}",
+                        "departments": (department,) if department else (),
+                        "campuses": tuple(recipient_campuses.values()),
+                        "release_status": "Review all campus states",
+                        "filter_release_status": "Review all campus states",
+                    })
             for snapshot in recipient.offering_snapshots.select_related("campus").all():
                 campus = snapshot.campus
                 if request_campus_ids is not None and campus.id not in request_campus_ids:
@@ -1429,7 +1521,8 @@ def questionnaire_print_release_view(
                     bulk_answer_key_departments[department.id] = department
                 bulk_answer_key_rows.append({
                     "value": value, "course": course, "recipient": recipient,
-                    "campus": campus, "revision": revision, "history": history,
+                    "campus": campus, "detail_campus": campus,
+                    "revision": revision, "history": history,
                     "finalized_at": revision.locked_at or revision.generated_at,
                     "active_release": active if active and active.generation_revision_id == revision.id else None,
                     "target_active_release": active, "displayed_release": current_release,
@@ -1456,6 +1549,7 @@ def questionnaire_print_release_view(
     bulk_form = BulkQuestionnairePrintReleaseForm(
         selection_choices=bulk_selection_choices,
         initial={
+            "target_campus_id": target_campus_id,
             "print_from": local_now,
             "print_until": local_now + timezone.timedelta(days=1),
         },
@@ -1498,61 +1592,73 @@ def questionnaire_print_release_view(
                     section=review_section,
                     campus_id=review_form.cleaned_data.get("target_campus_id"),
                 )
-                labels = dict(
-                    bulk_selection_choices
-                    if action == "bulk_release"
-                    else bulk_answer_key_choices
-                )
-                return render(
-                    request,
-                    "departmental_exams/admin/_release_selection_review.html",
-                    {
-                        "review_section": "Questionnaire" if action == "bulk_release" else "Answer Key",
+                kind = "questionnaire" if action == "bulk_release" else "answer_key"
+                try:
+                    review_token, payload = make_review(
+                        kind=kind, bases=review_form.cleaned_data["selections"],
+                        campus_id=review_form.cleaned_data["target_campus_id"],
+                        tenant_id=tenant_id, actor=request.user, request=request,
+                        window_from=review_form.cleaned_data[
+                            "print_from" if kind == "questionnaire" else "available_from"
+                        ],
+                        window_until=review_form.cleaned_data[
+                            "print_until" if kind == "questionnaire" else "available_until"
+                        ],
+                        attestation=review_form.cleaned_data.get("sessions_concluded", False),
+                    )
+                except (ValidationError, PermissionDenied) as exc:
+                    review_form.add_error(None, exc)
+                else:
+                    from apps.tenants.models import Campus
+                    campus_names = dict(Campus.objects.filter(
+                        pk__in=[row[-1] for row in payload["targets"]],
+                    ).values_list("id", "name"))
+                    course_codes = dict(CycleCourse.objects.filter(
+                        pk__in={row[0] for row in payload["targets"]}
+                        | {row[2] for row in payload["targets"] if kind == "answer_key"}
+                    ).values_list("id", "course__code"))
+                    review_rows = []
+                    model = (QuestionnairePrintRelease if kind == "questionnaire"
+                             else AnswerKeyRelease)
+                    for row, state in zip(payload["targets"], payload["states"]):
+                        current = model.objects.filter(pk=state["active_id"]).first() if state["active_id"] else None
+                        legacy = None
+                        if (kind == "questionnaire" and not current
+                                and state.get("coverage_id") and not state.get("coverage_retired")):
+                            legacy = QuestionnaireLegacyCampusCoverage.objects.select_related(
+                                "release__generation_revision",
+                            ).filter(pk=state["coverage_id"]).first()
+                        existing = (
+                            f"Active R{current.generation_revision.revision_number}, "
+                            f"{timezone.localtime(current.print_from if kind == 'questionnaire' else current.available_from):%b %d %Y %I:%M %p} to "
+                            f"{timezone.localtime(current.print_until if kind == 'questionnaire' else current.available_until):%b %d %Y %I:%M %p}"
+                            if current else (
+                                f"Legacy coverage R{legacy.release.generation_revision.revision_number}, "
+                                f"{timezone.localtime(legacy.release.print_from):%b %d %Y %I:%M %p} to "
+                                f"{timezone.localtime(legacy.release.print_until):%b %d %Y %I:%M %p}"
+                                if legacy else "Not currently released"
+                            )
+                        )
+                        identity = (f"{course_codes[row[0]]} / {campus_names[row[-1]]}"
+                                    if kind == "questionnaire" else
+                                    f"{course_codes[row[0]]} / recipient {course_codes[row[2]]} / {campus_names[row[-1]]}")
+                        revision = ExamGenerationRevision.objects.get(pk=row[1])
+                        review_rows.append((str(row), f"{identity} / R{revision.revision_number} / {existing}"))
+                    return render(request, "departmental_exams/admin/_release_selection_review.html", {
+                        "review_section": "Questionnaire" if kind == "questionnaire" else "Answer Key",
                         "review_post_url": review_url,
                         "release_center_return_url": review_url,
                         "final_action": action,
-                        "review_values": request.POST.getlist("selections"),
-                        "review_rows": tuple(
-                            (value, labels.get(value, value))
-                            for value in request.POST.getlist("selections")
-                        ),
-                        "review_form": review_form,
-                        "review_campus": next(
-                            (
-                                campus for campus in bulk_answer_key_campus_options
-                                if campus.id == review_form.cleaned_data.get("target_campus_id")
-                            ),
-                            None,
-                        ),
-                        "review_hidden_fields": tuple(
-                            (name, request.POST.get(name, ""))
-                            for name in (
-                                ("print_from", "print_until")
-                                if action == "bulk_release"
-                                else (
-                                    "target_campus_id",
-                                    "available_from",
-                                    "available_until",
-                                    "sessions_concluded",
-                                )
-                            )
-                        ),
-                        "review_from": (
-                            review_form.cleaned_data["print_from"]
-                            if action == "bulk_release"
-                            else review_form.cleaned_data["available_from"]
-                        ),
-                        "review_until": (
-                            review_form.cleaned_data["print_until"]
-                            if action == "bulk_release"
-                            else review_form.cleaned_data["available_until"]
-                        ),
-                    },
-                )
-            review_campus_id = (
-                review_form.cleaned_data.get("target_campus_id")
-                if action == "bulk_answer_key_release" else None
-            )
+                        "review_token": review_token,
+                        "review_campus_id": payload["campus_id"],
+                        "review_rows": tuple(review_rows),
+                        "review_from": review_form.cleaned_data[
+                            "print_from" if kind == "questionnaire" else "available_from"],
+                        "review_until": review_form.cleaned_data[
+                            "print_until" if kind == "questionnaire" else "available_until"],
+                        "review_all_campuses": review_form.cleaned_data["target_campus_id"] == 0,
+                    })
+            review_campus_id = review_form.cleaned_data.get("target_campus_id")
             if review_campus_id not in bulk_answer_key_campuses:
                 review_campus_id = None
             return render(
@@ -1569,91 +1675,44 @@ def questionnaire_print_release_view(
                 },
                 status=400,
             )
-        if action == "bulk_answer_key_release":
-            bulk_answer_key_form = BulkAnswerKeyReleaseForm(
-                request.POST,
-                selection_choices=bulk_answer_key_choices,
+        if action in {"bulk_release", "bulk_answer_key_release"}:
+            if not request.POST.get("review_token"):
+                return render(request, "departmental_exams/admin/_release_selection_review.html", {
+                    "review_section": "Questionnaire" if action == "bulk_release" else "Answer Key",
+                    "review_error": "Review the exact campus targets before confirming release.",
+                    "release_center_return_url": _release_center_url(
+                        cycle_status=current_cycle_status,
+                        section=("questionnaire-releases" if action == "bulk_release" else "answer-key-releases"),
+                        campus_id=target_campus_id,
+                    ),
+                }, status=400)
+            try:
+                releases = confirm_review(
+                    token=request.POST["review_token"],
+                    expected_kind="questionnaire" if action == "bulk_release" else "answer_key",
+                    tenant_id=tenant_id, actor=request.user, request=request,
+                )
+            except (ValidationError, PermissionDenied) as exc:
+                return render(request, "departmental_exams/admin/_release_selection_review.html", {
+                    "review_section": "Questionnaire" if action == "bulk_release" else "Answer Key",
+                    "review_error": " ".join(getattr(exc, "messages", (str(exc),))),
+                    "release_center_return_url": _release_center_url(
+                        cycle_status=current_cycle_status,
+                        section=("questionnaire-releases" if action == "bulk_release" else "answer-key-releases"),
+                        campus_id=target_campus_id,
+                    ),
+                }, status=400)
+            return _release_action_success(
+                request,
+                message=f"Processed {len(releases)} exact campus releases with the reviewed common window.",
+                section="questionnaire-releases" if action == "bulk_release" else "answer-key-releases",
+                affected_course_ids=(release.cycle_course_id for release in releases),
             )
-            if bulk_answer_key_form.is_valid():
-                try:
-                    releases = AnswerKeyReleaseService.bulk_release(
-                        selections=bulk_answer_key_form.cleaned_data["selections"],
-                        tenant_id=tenant_id,
-                        actor=request.user,
-                        available_from=bulk_answer_key_form.cleaned_data[
-                            "available_from"
-                        ],
-                        available_until=bulk_answer_key_form.cleaned_data[
-                            "available_until"
-                        ],
-                        attestation_confirmed=bulk_answer_key_form.cleaned_data[
-                            "sessions_concluded"
-                        ],
-                        request=request,
-                    )
-                except ValidationError as exc:
-                    if hasattr(exc, "message_dict"):
-                        for field, errors in exc.message_dict.items():
-                            target = (
-                                field
-                                if field in bulk_answer_key_form.fields
-                                else None
-                            )
-                            for error in errors:
-                                bulk_answer_key_form.add_error(target, error)
-                    else:
-                        bulk_answer_key_form.add_error(None, exc)
-                    status = 400
-                else:
-                    return _release_action_success(
-                        request,
-                        message=f"Processed {len(releases)} exact Answer Key revisions with the common Faculty availability window.",
-                        section="answer-key-releases",
-                        affected_course_ids=(
-                            release.cycle_course_id for release in releases
-                        ),
-                    )
-            else:
-                status = 400
-        elif action == "bulk_release":
-            bulk_form = BulkQuestionnairePrintReleaseForm(
-                request.POST,
-                selection_choices=bulk_selection_choices,
-            )
-            if bulk_form.is_valid():
-                try:
-                    releases = QuestionnairePrintReleaseService.bulk_release(
-                        selections=bulk_form.cleaned_data["selections"],
-                        tenant_id=tenant_id,
-                        actor=request.user,
-                        print_from=bulk_form.cleaned_data["print_from"],
-                        print_until=bulk_form.cleaned_data["print_until"],
-                        request=request,
-                    )
-                except ValidationError as exc:
-                    if hasattr(exc, "message_dict"):
-                        for field, errors in exc.message_dict.items():
-                            target = field if field in bulk_form.fields else None
-                            for error in errors:
-                                bulk_form.add_error(target, error)
-                    else:
-                        bulk_form.add_error(None, exc)
-                    status = 400
-                else:
-                    return _release_action_success(
-                        request,
-                        message=f"Released {len(releases)} exact questionnaire revisions with the common faculty print window.",
-                        section="questionnaire-releases",
-                        affected_course_ids=(
-                            release.cycle_course_id for release in releases
-                        ),
-                    )
-            else:
-                status = 400
-        elif action == "revoke":
+        if action == "revoke":
             try:
                 release = QuestionnairePrintReleaseService.revoke(
                     release_id=int(request.POST.get("release_id") or 0),
+                    target_campus_id=request.POST.get("target_campus_id"),
                     tenant_id=tenant_id,
                     actor=request.user,
                     request=request,
@@ -1668,7 +1727,7 @@ def questionnaire_print_release_view(
             else:
                 return _release_action_success(
                     request,
-                    message="Questionnaire print release revoked.",
+                    message="Questionnaire access revoked for the selected campus.",
                     section="questionnaire-releases",
                     affected_course_ids=(release.cycle_course_id,),
                 )
@@ -1709,35 +1768,68 @@ def questionnaire_print_release_view(
             bound_form = QuestionnairePrintReleaseForm(
                 request.POST,
                 cycle_course=course,
+                campus_choices=(
+                    (campus.id, f"{campus.code} / {campus.name}")
+                    for campus in course.new_release_campuses
+                    if campus.is_active and (
+                        request_campus_ids is None or campus.id in request_campus_ids
+                    )
+                ),
                 auto_id=f"id_course_{course.id}_%s",
             )
             if bound_form.is_valid():
-                try:
-                    QuestionnairePrintReleaseService.release(
-                        cycle_course_id=course.id,
-                        revision_id=bound_form.cleaned_data["generation_revision"].id,
-                        tenant_id=tenant_id,
-                        actor=request.user,
-                        print_from=bound_form.cleaned_data["print_from"],
-                        print_until=bound_form.cleaned_data["print_until"],
-                        request=request,
-                    )
-                except ValidationError as exc:
-                    if hasattr(exc, "message_dict"):
-                        for field, errors in exc.message_dict.items():
-                            target = field if field in bound_form.fields else None
-                            for error in errors:
-                                bound_form.add_error(target, error)
-                    else:
-                        bound_form.add_error(None, exc)
+                if request.POST.get("review") != "1":
+                    bound_form.add_error(None, "Review this exact campus target before release.")
                     status = 400
                 else:
-                    return _release_action_success(
-                        request,
-                        message="Exact questionnaire revision released for faculty printing.",
-                        section="questionnaire-releases",
-                        affected_course_ids=(course.id,),
-                    )
+                    try:
+                        token, payload = make_review(
+                            kind="questionnaire",
+                            bases=((course.id, bound_form.cleaned_data["generation_revision"].id),),
+                            campus_id=bound_form.cleaned_data["target_campus_id"],
+                            tenant_id=tenant_id, actor=request.user, request=request,
+                            window_from=bound_form.cleaned_data["print_from"],
+                            window_until=bound_form.cleaned_data["print_until"],
+                        )
+                    except (ValidationError, PermissionDenied) as exc:
+                        bound_form.add_error(None, exc)
+                        status = 400
+                    else:
+                        target = payload["targets"][0]
+                        existing = payload["states"][0]
+                        campus = next(c for c in course.print_release_campuses if c.id == target[2])
+                        current = QuestionnairePrintRelease.objects.filter(
+                            pk=existing["active_id"] or (
+                                existing["coverage_id"] and not existing["coverage_retired"] and
+                                QuestionnaireLegacyCampusCoverage.objects.filter(
+                                    pk=existing["coverage_id"],
+                                ).values_list("release_id", flat=True).first()
+                            ),
+                        ).first()
+                        existing_text = (
+                            f"Active R{current.generation_revision.revision_number}, "
+                            f"{timezone.localtime(current.print_from):%b %d %Y %I:%M %p} to "
+                            f"{timezone.localtime(current.print_until):%b %d %Y %I:%M %p}"
+                            if current else "Not currently released"
+                        )
+                        return render(request, "departmental_exams/admin/_release_selection_review.html", {
+                            "review_section": "Questionnaire",
+                            "review_post_url": _release_center_url(
+                                cycle_status=current_cycle_status,
+                                section="questionnaire-releases", campus_id=campus.id,
+                            ),
+                            "release_center_return_url": _release_center_url(
+                                cycle_status=current_cycle_status,
+                                section="questionnaire-releases", campus_id=campus.id,
+                            ),
+                            "final_action": "bulk_release", "review_token": token,
+                            "review_campus_id": campus.id,
+                            "review_rows": ((str(target),
+                                f"{course.course.code} / {campus.name} / R{bound_form.cleaned_data['generation_revision'].revision_number} / "
+                                f"{existing_text}"),),
+                            "review_from": bound_form.cleaned_data["print_from"],
+                            "review_until": bound_form.cleaned_data["print_until"],
+                        })
             else:
                 status = 400
         elif action == "answer_key_release":
@@ -1886,25 +1978,78 @@ def questionnaire_print_release_view(
             revision.latest_automatic_audit = (
                 revision.audit_history[0] if revision.audit_history else None
             )
-        course.release_history = list(course.questionnaire_print_releases.all())
-        course.active_print_release = next(
-            (
-                release
-                for release in course.release_history
-                if release.status == QuestionnairePrintRelease.Status.ACTIVE
-                and release.active_marker == 1
-            ),
-            None,
-        )
+        course.release_history = [
+            release for release in course.questionnaire_print_releases.all()
+            if request_campus_ids is None
+            or (release.scope_kind == QuestionnairePrintRelease.ScopeKind.SCOPED
+                and release.target_campus_id in request_campus_ids)
+            or (release.scope_kind == QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE
+                and bool(set(release.legacy_campus_coverage.values_list(
+                    "campus_id", flat=True,
+                )).intersection(request_campus_ids)))
+        ]
+        for release in course.release_history:
+            if release.scope_kind == QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE:
+                release.visible_legacy_coverage = [
+                    coverage for coverage in release.legacy_campus_coverage.select_related(
+                        "campus", "retired_by",
+                    ).all()
+                    if request_campus_ids is None or coverage.campus_id in request_campus_ids
+                ]
+                if release.status == QuestionnairePrintRelease.Status.REVOKED:
+                    release.visible_status_label = "Revoked legacy record"
+                elif not release.visible_legacy_coverage:
+                    release.visible_status_label = "No visible campus coverage"
+                elif all(coverage.retired_at for coverage in release.visible_legacy_coverage):
+                    release.visible_status_label = "Coverage retired for visible campuses"
+                elif any(coverage.retired_at for coverage in release.visible_legacy_coverage):
+                    release.visible_status_label = "Mixed visible campus coverage"
+                else:
+                    release.visible_status_label = "Coverage retained for visible campuses"
+        course.selected_print_campus = next((
+            campus for campus in course.print_release_campuses
+            if campus.id == target_campus_id and (
+                request_campus_ids is None or campus.id in request_campus_ids
+            )
+        ), None)
+        course.campus_release_rows = []
+        for campus in course.print_release_campuses:
+            if request_campus_ids is not None and campus.id not in request_campus_ids:
+                continue
+            scoped_history = [release for release in course.release_history
+                              if release.scope_kind == QuestionnairePrintRelease.ScopeKind.SCOPED
+                              and release.target_campus_id == campus.id]
+            scoped_active = next((release for release in scoped_history
+                                  if release.status == QuestionnairePrintRelease.Status.ACTIVE
+                                  and release.active_marker == 1), None)
+            legacy = next((release for release in course.release_history
+                           if release.scope_kind == QuestionnairePrintRelease.ScopeKind.LEGACY_COURSE_WIDE
+                           and release.status == QuestionnairePrintRelease.Status.ACTIVE
+                           and release.active_marker == 1 and not scoped_history
+                           and release.legacy_campus_coverage.filter(
+                               campus_id=campus.id, retired_at__isnull=True,
+                           ).exists()), None)
+            active_release = scoped_active or legacy
+            status_label = (
+                "Campus inactive" if not campus.is_active else
+                "Not released" if active_release is None else
+                "Scheduled" if now < active_release.print_from else
+                "Window ended" if now > active_release.print_until else
+                "Printable now"
+            )
+            course.campus_release_rows.append({
+                "campus": campus, "active": active_release,
+                "history": scoped_history, "status": status_label,
+                "legacy": legacy is not None,
+            })
+        selected_row = next((row for row in course.campus_release_rows
+                             if row["campus"].id == target_campus_id), None)
+        course.active_print_release = selected_row["active"] if selected_row else None
         active = course.active_print_release
-        if active is None:
-            course.print_window_status = "Not released"
-        elif now < active.print_from:
-            course.print_window_status = "Scheduled"
-        elif now > active.print_until:
-            course.print_window_status = "Window ended"
-        else:
-            course.print_window_status = "Printable now"
+        course.print_window_status = (
+            selected_row["status"] if selected_row else
+            "Review per campus" if target_campus_id == 0 else "Select a campus"
+        )
         course.newer_revision_exists = bool(
             active
             and any(
@@ -1932,9 +2077,18 @@ def questionnaire_print_release_view(
         else:
             course.release_form = QuestionnairePrintReleaseForm(
                 cycle_course=course,
+                campus_choices=((campus.id, f"{campus.code} / {campus.name}")
+                    for campus in course.new_release_campuses
+                    if campus.is_active and (
+                        request_campus_ids is None or campus.id in request_campus_ids
+                    )),
                 auto_id=f"id_course_{course.id}_%s",
                 initial={
                     "cycle_course_id": course.id,
+                    "target_campus_id": (
+                        target_campus_id if course.selected_print_campus
+                        and course.selected_print_campus.is_active else None
+                    ),
                     "generation_revision": (
                         course.available_revisions[0]
                         if course.available_revisions
@@ -2027,6 +2181,7 @@ def questionnaire_print_release_view(
                 "release_center_return_url": _release_center_url(
                     cycle_status=courses[0].cycle.status,
                     section="questionnaire-releases",
+                    campus_id=target_campus_id,
                 ),
             },
         )
@@ -2048,6 +2203,7 @@ def questionnaire_print_release_view(
             "questionnaire_action_url": _release_center_url(
                 cycle_status=current_cycle_status,
                 section="questionnaire-releases",
+                campus_id=target_campus_id,
             ),
             "answer_key_action_url": _release_center_url(
                 cycle_status=current_cycle_status,
@@ -2055,6 +2211,7 @@ def questionnaire_print_release_view(
                 campus_id=target_campus_id,
             ),
             "target_campus_id": target_campus_id,
+            "questionnaire_campus_options": questionnaire_campus_options,
             "scoped_answer_key_history": scoped_answer_key_history,
             "historical_answer_key_campus_options": historical_answer_key_campus_options,
             "selected_historical_only_campus": (

@@ -507,6 +507,9 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         QuestionnairePrintRelease.objects.create(
             cycle_course=self.parent,
             generation_revision=self.r4,
+            scope_kind=QuestionnairePrintRelease.ScopeKind.SCOPED,
+            target_campus=self.campus,
+            scope_key=self.campus.id,
             print_from=now - timezone.timedelta(minutes=5),
             print_until=questionnaire_until,
             released_by=self.generation_manager,
@@ -1209,7 +1212,7 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         client = Client()
         client.force_login(self.release_manager)
         url = (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
-        denied = client.post(url, payload)
+        denied = client.post(url, {**payload, "review": "1"})
         self.assertEqual(denied.status_code, 400)
         self.assertContains(
             denied,
@@ -1219,7 +1222,13 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         self.assertFalse(AnswerKeyRelease.objects.exists())
 
         payload["sessions_concluded"] = "on"
-        allowed = client.post(url, payload)
+        review = client.post(url, {**payload, "review": "1"})
+        self.assertEqual(review.status_code, 200)
+        allowed = client.post(review.context["review_post_url"], {
+            "action": "bulk_answer_key_release",
+            "target_campus_id": self.campus.id,
+            "review_token": review.context["review_token"],
+        })
         self.assertEqual(allowed.status_code, 302)
         releases = list(AnswerKeyRelease.objects.order_by("cycle_course_id"))
         self.assertEqual(len(releases), 2)
@@ -1247,7 +1256,7 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         review = client.post(url, payload)
         self.assertEqual(review.status_code, 200)
         self.assertContains(review, "Review all 1 selected exact target")
-        self.assertContains(review, f'value="{payload["selections"][0]}"', html=False)
+        self.assertEqual(len(review.context["review_rows"]), 1)
         self.assertContains(review, f'value="{self.campus.id}"', html=False)
         self.assertFalse(AnswerKeyRelease.objects.exists())
         self.assertFalse(AuditLog.objects.filter(action="DE_ANSWER_KEY_RELEASED").exists())
@@ -1257,7 +1266,7 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         unattested = client.post(url, payload)
         self.assertEqual(unattested.status_code, 400)
         self.assertFalse(AnswerKeyRelease.objects.exists())
-        payload["sessions_concluded"] = "on"
+        payload["review_token"] = review.context["review_token"]
         ExamGenerationRevision.objects.filter(pk=self.r4.pk).update(
             status=ExamGenerationRevision.Status.SUPERSEDED,
             current_marker=None,
@@ -1832,6 +1841,7 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         self.assertIn(f"target_campus_id={self.campus.id}", final_url)
         self.assertContains(review, final_url.replace("&", "&amp;"), html=False)
         payload.pop("review")
+        payload["review_token"] = review.context["review_token"]
         confirmed = client.post(final_url, payload)
         self.assertEqual(confirmed.status_code, 302)
         self.assertIn("cycle_status=CLOSED", confirmed["Location"])
@@ -2118,7 +2128,8 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         self.assertTrue(body["success"])
         self.assertEqual(body["section"], "answer-key-releases")
         self.assertEqual(body["affected_course_ids"], [self.parent.id])
-        self.assertEqual(body["refresh_url"], url.split("?")[0])
+        self.assertIn("section=answer-key-releases", body["refresh_url"])
+        self.assertIn(f"target_campus_id={self.campus.id}", body["refresh_url"])
         self.assertEqual(AnswerKeyRelease.objects.count(), 1)
         serialized = str(body).lower()
         for confidential in (
@@ -2142,17 +2153,21 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         local_start = timezone.localtime().replace(second=0, microsecond=0)
         client = Client()
         client.force_login(self.release_manager)
+        url = (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}")
+        review = client.post(url, {
+            "target_campus_id": self.campus.id,
+            "action": "bulk_answer_key_release", "review": "1",
+            "selections": (f"{self.parent.id}:{self.r4.id}:{self.parent.id}:{self.campus.id}",),
+            "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+            "available_until": (local_start + timezone.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+            "sessions_concluded": "on",
+        })
+        self.assertEqual(review.status_code, 200)
         response = client.post(
-            (reverse("departmental_exams:questionnaire_print_release") + f"?target_campus_id={self.campus.id}"),
+            review.context["review_post_url"],
             {"target_campus_id": self.campus.id,
-                "action": "bulk_answer_key_release",
-                "selections": (f"{self.parent.id}:{self.r4.id}:{self.parent.id}:{self.campus.id}",),
-                "available_from": local_start.strftime("%Y-%m-%dT%H:%M"),
-                "available_until": (
-                    local_start + timezone.timedelta(hours=2)
-                ).strftime("%Y-%m-%dT%H:%M"),
-                "sessions_concluded": "on",
-            },
+             "action": "bulk_answer_key_release",
+             "review_token": review.context["review_token"]},
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
             HTTP_ACCEPT="application/json",
         )
@@ -2300,7 +2315,7 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
             ).exists()
         )
 
-    def test_questionnaire_release_and_revoke_support_ajax_without_new_logic(self):
+    def test_questionnaire_review_confirmation_and_revoke_support_ajax(self):
         local_start = timezone.localtime().replace(second=0, microsecond=0)
         client = Client()
         client.force_login(self.generation_manager)
@@ -2309,26 +2324,27 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
             "HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
             "HTTP_ACCEPT": "application/json",
         }
-        released = client.post(
-            url,
-            {
-                "action": "release",
-                "cycle_course_id": self.parent.id,
-                "generation_revision": self.r4.id,
-                "print_from": local_start.strftime("%Y-%m-%dT%H:%M"),
-                "print_until": (
-                    local_start + timezone.timedelta(hours=2)
-                ).strftime("%Y-%m-%dT%H:%M"),
-            },
-            **headers,
-        )
+        review = client.post(url, {
+            "action": "release", "review": "1",
+            "cycle_course_id": self.parent.id,
+            "generation_revision": self.r4.id,
+            "target_campus_id": self.campus.id,
+            "print_from": local_start.strftime("%Y-%m-%dT%H:%M"),
+            "print_until": (local_start + timezone.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M"),
+        })
+        self.assertEqual(review.status_code, 200)
+        released = client.post(review.context["review_post_url"], {
+            "action": "bulk_release", "target_campus_id": self.campus.id,
+            "review_token": review.context["review_token"],
+        }, **headers)
         self.assertEqual(released.status_code, 200)
         self.assertEqual(released.json()["section"], "questionnaire-releases")
         questionnaire_release = QuestionnairePrintRelease.objects.get()
 
         revoked = client.post(
             url,
-            {"action": "revoke", "release_id": questionnaire_release.id},
+            {"action": "revoke", "release_id": questionnaire_release.id,
+             "target_campus_id": self.campus.id},
             **headers,
         )
         self.assertEqual(revoked.status_code, 200)

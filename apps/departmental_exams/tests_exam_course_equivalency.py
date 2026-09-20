@@ -34,6 +34,7 @@ from .models import (
     PersonalizedAnswerSheetAssignment,
     Question,
     QuestionnairePrintRelease,
+    QuestionnaireLegacyCampusCoverage,
 )
 from .personalized_answer_sheets import PersonalizedAnswerSheetService
 from .questionnaire_printing import FacultyQuestionnairePrintService
@@ -389,11 +390,11 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
         contribution = fixture["contributions"][1]
         Question.objects.create(
             contribution=contribution,
-            question_text=f"  {source.question_text.upper()}  ",
-            choice_a="Duplicate A",
-            choice_b="Duplicate B",
-            choice_c="Duplicate C",
-            choice_d="Duplicate D",
+            question_text=f"  {source.question_text}  ",
+            choice_a=source.choice_a,
+            choice_b=source.choice_b,
+            choice_c=source.choice_c,
+            choice_d=source.choice_d,
             correct_answer="A",
             difficulty=source.difficulty,
             position=99,
@@ -537,6 +538,9 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
         release = QuestionnairePrintRelease(
             cycle_course=fixture["primary"],
             generation_revision=revision,
+            scope_kind=QuestionnairePrintRelease.ScopeKind.SCOPED,
+            target_campus=fixture["third_campus"],
+            scope_key=fixture["third_campus"].id,
         )
         PersonalizedAnswerSheetService._validate_offering_scope(
             release=release,
@@ -571,14 +575,19 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             print_until=now + timezone.timedelta(minutes=1),
             released_by=self.admin,
         )
+        QuestionnaireLegacyCampusCoverage.objects.create(
+            release=release, campus=fixture["contributions"][1].source_campus,
+        )
         with patch.object(
             FacultyQuestionnairePrintService,
             "_printable_release",
             wraps=FacultyQuestionnairePrintService._printable_release,
         ), patch(
             "apps.departmental_exams.questionnaire_printing."
-            "ContributionAuthorizationService.has_retained_current_print_eligibility",
-            return_value=True,
+            "ContributionAuthorizationService.retained_current_print_assignments",
+            return_value=(SimpleNamespace(offering=SimpleNamespace(
+                campus_id=self.other_campus.id, campus=self.other_campus,
+            )),),
         ):
             resolved, _generated_set, _set_code = (
                 FacultyQuestionnairePrintService._printable_release(
@@ -901,6 +910,7 @@ class ExamCourseEquivalencyTests(Stage4TestCase):
             QuestionnairePrintReleaseService.release(
                 cycle_course_id=primary.id,
                 revision_id=999999,
+                target_campus_id=self.campus.id,
                 tenant_id=self.tenant.id,
                 actor=actor,
                 print_from=now,

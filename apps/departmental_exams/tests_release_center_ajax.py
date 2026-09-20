@@ -58,7 +58,7 @@ class ReleaseCenterAjaxSourceContractTests(SimpleTestCase):
             ),
             (
                 self.questionnaire_details_template,
-                {"release", "revoke"},
+                {"revoke"},
             ),
             (
                 self.answer_key_template,

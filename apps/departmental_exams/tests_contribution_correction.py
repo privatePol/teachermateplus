@@ -347,6 +347,7 @@ class ContributionCorrectionTests(Stage6BGenerationFixtureMixin, Stage4TestCase)
         now = timezone.now()
         print_release = QuestionnairePrintReleaseService.release(
             cycle_course_id=parent.id, revision_id=r2.id,
+            target_campus_id=self.campus.id,
             tenant_id=self.tenant.id, actor=self.generation_manager,
             print_from=now, print_until=now + timezone.timedelta(days=1),
         )
@@ -443,6 +444,7 @@ class AdminCaseCorrectionTests(FacultyCaseFixtureMixin, Stage4TestCase):
         now = timezone.now()
         QuestionnairePrintReleaseService.release(
             cycle_course_id=self.parent.id, revision_id=r1.id,
+            target_campus_id=self.campus.id,
             tenant_id=self.tenant.id, actor=self.admin,
             print_from=now, print_until=now + timezone.timedelta(days=2),
         )
@@ -893,6 +895,7 @@ class AdminCaseCorrectionTests(FacultyCaseFixtureMixin, Stage4TestCase):
         now = timezone.now()
         questionnaire = QuestionnairePrintReleaseService.release(
             cycle_course_id=self.parent.id, revision_id=r2.id,
+            target_campus_id=self.campus.id,
             tenant_id=self.tenant.id, actor=self.admin,
             print_from=now, print_until=now + timezone.timedelta(days=1),
         )
@@ -1259,6 +1262,7 @@ class AdminCaseCorrectionTests(FacultyCaseFixtureMixin, Stage4TestCase):
         now = timezone.now()
         print_release = QuestionnairePrintReleaseService.release(
             cycle_course_id=self.parent.id, revision_id=r2.id,
+            target_campus_id=self.campus.id,
             tenant_id=self.tenant.id, actor=self.admin,
             print_from=now, print_until=now + timezone.timedelta(days=1),
         )

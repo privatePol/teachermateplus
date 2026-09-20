@@ -3,6 +3,17 @@
   <h2 class="h5 mb-1">Questionnaire Releases</h2>
   <p class="small mb-0">Check the course status, then open View details for exact revisions, Admin printing, audits, Faculty release controls, and history.</p>
 </div>
+<form method="get" action="{% url 'departmental_exams:questionnaire_print_release' %}#questionnaire-releases-pane" id="questionnaire-target-form" class="card card-body mb-3">
+  <input type="hidden" name="cycle_status" value="{{ current_cycle_status }}"><input type="hidden" name="section" value="questionnaire-releases">
+  <label class="form-label fw-semibold" for="questionnaire-campus-filter">Target Campus (required)</label>
+  <select class="form-select" id="questionnaire-campus-filter" name="target_campus_id" required>
+    <option value="">Choose a campus or All Campuses</option>
+    <option value="0"{% if target_campus_id == 0 %} selected{% endif %}>All Campuses: active participating campuses of each selected examination</option>
+    {% for campus in questionnaire_campus_options %}<option value="{{ campus.id }}"{% if target_campus_id == campus.id %} selected{% endif %}>{{ campus.code }} &middot; {{ campus.name }}</option>{% endfor %}
+  </select>
+  <div class="form-text">Review expands every exact campus target and its current release state. A campus added later requires a new release.</div>
+  <button class="btn btn-outline-success mt-2" type="submit">Load Questionnaire targets</button>
+</form>
 {% if can_bulk_release %}
 <section class="card de-exam-card de-release-card" id="bulk-print-release">
   <div class="card-header de-release-major-header d-flex flex-wrap justify-content-between align-items-start gap-3">
@@ -16,7 +27,7 @@
         <div class="row g-3">
           <div class="col-lg-4"><label class="form-label" for="questionnaire-course-search">Search Course</label><input class="form-control" type="search" id="questionnaire-course-search" placeholder="Course code or name" autocomplete="off"></div>
           <div class="col-lg-4"><label class="form-label" for="questionnaire-department-filter">Department</label><select class="form-select" id="questionnaire-department-filter"><option value="">All authorized departments</option>{% for department in questionnaire_department_options %}<option value="{{ department.id }}">{{ department.campus.code }} / {{ department.code }} — {{ department.name }}</option>{% endfor %}<option value="__none__">No responsible/exam department</option></select></div>
-          <div class="col-lg-4"><label class="form-label" for="questionnaire-status-filter">Release Status</label><select class="form-select" id="questionnaire-status-filter"><option value="">All</option><option>Not released</option><option>Scheduled</option><option>Printable now</option><option>Window ended</option></select></div>
+          <div class="col-lg-4"><label class="form-label" for="questionnaire-status-filter">Release Status</label><select class="form-select" id="questionnaire-status-filter"><option value="">All</option><option>Not released</option><option>Scheduled</option><option>Printable now</option><option>Window ended</option><option>Review per campus</option></select></div>
         </div>
       </div>
       <div class="de-release-filter-summary d-flex flex-wrap justify-content-between align-items-center gap-2">
@@ -25,7 +36,7 @@
       </div>
     </div>
     <form method="post" action="{{ questionnaire_action_url }}" novalidate id="bulk-print-release-form" data-release-ajax="true" data-release-section="questionnaire-releases" data-release-action="bulk_release">
-      {% csrf_token %}<input type="hidden" name="action" value="bulk_release">
+      {% csrf_token %}<input type="hidden" name="action" value="bulk_release">{{ bulk_form.target_campus_id }}{{ bulk_form.target_campus_id.errors }}
       {{ bulk_form.non_field_errors }}{{ bulk_form.selections.errors }}
       <div class="table-responsive de-release-table-scroll mb-3">
         <table class="table table-sm align-middle de-release-table">
@@ -38,7 +49,7 @@
               <td>{{ course.responsible_department|default:course.course.exam_department|default:"—" }}</td>
               <td>{% if course.bulk_selection %}R{{ course.bulk_selection.revision.revision_number }}{% else %}<span class="text-muted">Bulk-ineligible</span>{% endif %}</td>
               <td><span class="badge {% if course.print_window_status == 'Printable now' %}text-bg-success{% elif course.print_window_status == 'Scheduled' %}text-bg-info{% else %}text-bg-secondary{% endif %}">{{ course.print_window_status }}</span>{% if course.active_print_release %}<div class="small text-muted">{{ course.active_print_release.print_from|localtime|date:"M j, Y g:i A" }} – {{ course.active_print_release.print_until|localtime|date:"M j, Y g:i A" }}</div>{% endif %}</td>
-              <td><a class="btn btn-sm btn-outline-success" href="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}?cycle_status={{ current_cycle_status|urlencode }}&amp;section=questionnaire-releases" data-questionnaire-details-url="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}?cycle_status={{ current_cycle_status|urlencode }}&amp;section=questionnaire-releases">View details</a></td>
+              <td><a class="btn btn-sm btn-outline-success" href="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}?cycle_status={{ current_cycle_status|urlencode }}&amp;section=questionnaire-releases&amp;target_campus_id={{ target_campus_id }}" data-questionnaire-details-url="{% url 'departmental_exams:questionnaire_print_release_details' course.id %}?cycle_status={{ current_cycle_status|urlencode }}&amp;section=questionnaire-releases&amp;target_campus_id={{ target_campus_id }}">View details</a></td>
             </tr>
             {% endfor %}
             <tr id="questionnaire-no-filter-results" hidden><td colspan="6" class="text-muted">No authorized questionnaire courses match these filters.</td></tr>
