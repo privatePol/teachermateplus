@@ -1,13 +1,45 @@
 (function () {
   "use strict";
 
+  function revokePrompt(form) {
+    const campus = form.dataset.revokeCampus;
+    const recipient = form.dataset.revokeRecipient;
+    const revision = form.dataset.revokeRevision;
+    return campus && recipient && revision
+      ? "Revoke Answer Key release for " + campus + " / " + recipient + " / " + revision + "?"
+      : null;
+  }
   const root = document.getElementById("departmental-exam-release-center");
-  if (!root) return;
+  if (!root) {
+    const standalone = document.querySelector('form[data-release-action="answer_key_revoke"]');
+    if (standalone) standalone.addEventListener("submit", function (event) {
+      if (standalone.dataset.releaseSubmitting === "true") { event.preventDefault(); return; }
+      const prompt = revokePrompt(standalone);
+      if (!prompt || !window.confirm(prompt)) {
+        event.preventDefault();
+        if (!prompt) {
+          const warning = document.createElement("p");
+          warning.setAttribute("role", "alert");
+          warning.textContent = "The release identity is unavailable. Reload before revoking.";
+          standalone.prepend(warning);
+        }
+        return;
+      }
+      standalone.dataset.releaseSubmitting = "true";
+      standalone.querySelectorAll('[type="submit"]').forEach(function (button) {
+        button.disabled = true;
+        button.textContent = button.dataset.processingLabel || "Revoking...";
+      });
+      // Keep the ordinary authorized POST/redirect when the full details page is used.
+    });
+    return;
+  }
   const feedback = document.getElementById("release-center-feedback");
   const selected = {questionnaire: new Set(), "answer-key": new Set()};
   const showingSelected = {questionnaire: false, "answer-key": false};
   const detailRequest = {questionnaire: 0, "answer-key": 0};
   const refreshRequest = {questionnaire: 0, "answer-key": 0};
+  let contextGeneration = 0;
   const detailState = {
     questionnaire: {url: null, opener: null, lifecycle: 0, open: false},
     "answer-key": {url: null, opener: null, lifecycle: 0, open: false}
@@ -47,6 +79,26 @@
   };
 
   function byId(id) { return document.getElementById(id); }
+  function releaseContext() {
+    const params = new URL(window.location.href).searchParams;
+    const cycle = byId("exam-cycle-status");
+    const campus = byId("answer-key-campus-filter");
+    return {
+      generation: contextGeneration,
+      cycleStatus: params.get("cycle_status") || "",
+      campusId: params.get("target_campus_id") || "",
+      selectedCycle: cycle ? cycle.value : null,
+      selectedCampus: campus ? campus.value : null
+    };
+  }
+  function contextMatches(origin) {
+    const current = releaseContext();
+    return current.generation === origin.generation &&
+      current.cycleStatus === origin.cycleStatus &&
+      current.campusId === origin.campusId &&
+      current.selectedCycle === origin.selectedCycle &&
+      current.selectedCampus === origin.selectedCampus;
+  }
   function rows(kind) {
     const form = byId(config[kind].form);
     return form ? Array.from(form.querySelectorAll(config[kind].row)) : [];
@@ -60,6 +112,28 @@
     if (!feedback) return;
     feedback.className = "alert alert-" + type;
     feedback.textContent = message;
+  }
+  function announceRefreshRetry(message, section, onRefreshed, origin, onContextChanged) {
+    if (!contextMatches(origin)) { onContextChanged(); return; }
+    announce("warning", message + " Retry the display refresh; the action will not be submitted again.");
+    if (!feedback) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn btn-sm btn-outline-warning ms-2";
+    button.textContent = "Retry refresh";
+    button.addEventListener("click", function () {
+      if (!contextMatches(origin)) { onContextChanged(); return; }
+      button.disabled = true;
+      button.textContent = "Refreshing...";
+      refresh(section, origin).then(function (applied) {
+        if (!contextMatches(origin)) { onContextChanged(); return; }
+        if (!applied) throw new Error("The release view changed before refresh completed.");
+        onRefreshed(applied);
+      }).catch(function () {
+        announceRefreshRetry(message, section, onRefreshed, origin, onContextChanged);
+      });
+    });
+    feedback.append(" ", button);
   }
   function rememberNotice(message) {
     try { window.sessionStorage.setItem("tmp-release-center-notice", message); }
@@ -257,7 +331,8 @@
       if (request === detailRequest[kind]) detailError(kind, error);
     });
   }
-  function refresh(section) {
+  function refresh(section, origin) {
+    if (!contextMatches(origin)) return Promise.resolve(false);
     const kind = section === "answer-key-releases" ? "answer-key" : "questionnaire";
     const pane = byId(config[kind].pane);
     if (!pane) return Promise.resolve(false);
@@ -277,22 +352,36 @@
       if (!response.ok) throw new Error("Updated release status could not be loaded.");
       return response.text();
     }).then(function (html) {
-      if (request !== refreshRequest[kind]) return false;
+      if (request !== refreshRequest[kind] || !contextMatches(origin)) return false;
       const parsed = new DOMParser().parseFromString(html, "text/html");
       const fresh = parsed.getElementById(config[kind].pane);
       if (!fresh) throw new Error("Updated release section is unavailable.");
+      const historyOpen = Array.from(pane.querySelectorAll("details[data-release-history]"))
+        .filter(function (item) { return item.open; })
+        .map(function (item) { return item.dataset.releaseHistory; });
+      const tableScroll = pane.querySelector(".de-release-table-scroll");
+      const tableScrollTop = tableScroll ? tableScroll.scrollTop : 0;
+      const pageX = window.scrollX;
+      const pageY = window.scrollY;
       const existingModal = detailsModal(kind);
       const freshModal = fresh.querySelector("#" + kind + "-details-modal");
       if (existingModal && freshModal) freshModal.remove();
       pane.innerHTML = fresh.innerHTML;
       if (existingModal) pane.append(existingModal);
+      pane.querySelectorAll("details[data-release-history]").forEach(function (item) {
+        item.open = historyOpen.includes(item.dataset.releaseHistory);
+      });
+      const freshScroll = pane.querySelector(".de-release-table-scroll");
+      if (freshScroll) freshScroll.scrollTop = tableScrollTop;
       restoreFilters(kind, values);
       if (!byId(config[kind].form)) {
         reconcile(kind);
         showingSelected[kind] = false;
+        if ((pageX || pageY) && window.scrollTo) window.scrollTo(pageX, pageY);
         return {removed: selectedBefore - selected[kind].size};
       }
       initialize(kind);
+      if ((pageX || pageY) && window.scrollTo) window.scrollTo(pageX, pageY);
       return {removed: selectedBefore - selected[kind].size};
     });
   }
@@ -342,6 +431,7 @@
   if (targetForm) {
     const campus = byId("answer-key-campus-filter");
     if (campus) campus.addEventListener("change", function () {
+      contextGeneration += 1;
       invalidateDetails("answer-key");
       invalidateRefresh("answer-key");
       if (selected["answer-key"].size) rememberNotice("Target campus changed; Answer Key selections were cleared.");
@@ -351,6 +441,7 @@
   }
   const cycle = byId("exam-cycle-status");
   if (cycle) cycle.addEventListener("change", function () {
+    contextGeneration += 1;
     invalidateDetails("questionnaire");
     invalidateDetails("answer-key");
     invalidateRefresh("questionnaire");
@@ -392,27 +483,56 @@
     }
     event.preventDefault();
     if (form.dataset.releaseSubmitting === "true") return;
+    const revoke = form.dataset.releaseAction === "answer_key_revoke";
+    if (revoke) {
+      const prompt = revokePrompt(form);
+      if (!prompt) {
+        announce("danger", "The release identity is unavailable. Reload the page before revoking.");
+        return;
+      }
+      if (!window.confirm(prompt)) return;
+    }
     form.dataset.releaseSubmitting = "true";
+    const controls = Array.from(form.querySelectorAll('[type="submit"]'));
+    if (form.id) controls.push(...root.querySelectorAll('[form="' + form.id + '"]'));
+    const controlState = controls.map(function (button) {
+      const state = {button: button, disabled: button.disabled, text: button.textContent};
+      button.disabled = true;
+      if (button.dataset.processingLabel) button.textContent = button.dataset.processingLabel;
+      else if (revoke) button.textContent = "Revoking...";
+      return state;
+    });
+    announce("info", revoke ? "Revoking the exact Answer Key release..." : "Updating release...");
     const requestUrl = form.getAttribute("action") || window.location.href;
     const detailKind = form.dataset.releaseSection === "answer-key-releases"
       ? "answer-key" : "questionnaire";
     const detailAfter = detailState[detailKind].url;
     const openerAfter = detailState[detailKind].opener;
     const detailLifecycleAfter = detailState[detailKind].lifecycle;
+    const submitContext = releaseContext();
     const body = submitter ? new FormData(form, submitter) : new FormData(form);
+    let confirmedSuccess = false;
     window.fetch(requestUrl, {
       method: "POST", body: body, credentials: "same-origin",
       headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
     }).then(function (response) {
-      return response.json().then(function (payload) {
+      return response.json().catch(function () {
+        throw new Error(response.status === 403
+          ? "Access denied. Reload the authorized release list before trying again."
+          : "The action result could not be read. Review current status before retrying.");
+      }).then(function (payload) {
         if (!response.ok || payload.success !== true) {
           throw new Error(payload.message || "The release could not be completed.");
         }
+        confirmedSuccess = true;
         return payload;
       });
     }).then(function (payload) {
-      return refresh(payload.section).then(function (applied) {
-        if (!applied) return;
+      const contextChanged = function () {
+        announce("success", payload.message + " The view changed before its summary could refresh.");
+      };
+      const afterRefresh = function (applied) {
+        if (!contextMatches(submitContext)) { contextChanged(); return; }
         announce("success", payload.message + (applied.removed
           ? " " + applied.removed + " stale or unavailable selection" +
             (applied.removed === 1 ? " was" : "s were") + " removed."
@@ -430,11 +550,27 @@
           );
           loadDetails(refreshedKind, detailAfter, newOpener || openerAfter, true, true);
         }
+      };
+      if (!contextMatches(submitContext)) { contextChanged(); return; }
+      return refresh(payload.section, submitContext).then(function (applied) {
+        if (applied) afterRefresh(applied);
+        else contextChanged();
+      }).catch(function () {
+        announceRefreshRetry(payload.message + " The action succeeded, but the updated list could not be loaded.",
+          payload.section, afterRefresh, submitContext, contextChanged);
       });
     }).catch(function (error) {
-      announce("warning", error.message ||
-        "The action may have completed. Review current status before retrying.");
-    }).finally(function () { delete form.dataset.releaseSubmitting; });
+      announce("danger", error.message ||
+        "The action result could not be confirmed. Review current status before retrying.");
+    }).finally(function () {
+      // A confirmed revoke cannot be submitted again from an obsolete pane.
+      if (revoke && confirmedSuccess) return;
+      delete form.dataset.releaseSubmitting;
+      controlState.forEach(function (state) {
+        state.button.disabled = state.disabled;
+        state.button.textContent = state.text;
+      });
+    });
   });
 
   initialize("questionnaire");

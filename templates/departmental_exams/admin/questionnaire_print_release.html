@@ -51,6 +51,7 @@
 <p><a class="btn btn-outline-secondary btn-sm" href="{{ release_center_return_url }}">Back to Release Center</a></p>
 {% if answer_key_detail_mode %}
   {% include "departmental_exams/admin/_answer_key_release_details.html" %}
+  <script src="{% static 'js/departmental_exam_release_center.js' %}"></script>
 {% else %}
   {% include "departmental_exams/admin/_questionnaire_release_details.html" %}
 {% endif %}

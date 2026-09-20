@@ -1725,6 +1725,14 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
             html=False,
         )
         self.assertContains(partial, "Sessions concluded attested")
+        self.assertContains(partial, 'data-release-action="answer_key_revoke"', html=False)
+        self.assertContains(partial, f'data-revoke-campus="{self.campus.name}"', html=False)
+        self.assertContains(partial, f'data-revoke-recipient="{self.parent.course.code}"', html=False)
+        self.assertContains(
+            partial,
+            f'data-revoke-revision="R{release.generation_revision.revision_number}"',
+            html=False,
+        )
         self.assertIn("no-store", partial["Cache-Control"])
         self.assertEqual(AnswerKeyRelease.objects.count(), release_count)
         self.assertEqual(AuditLog.objects.count(), audit_count)
@@ -1733,6 +1741,29 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
         self.assertEqual(full_page.status_code, 200)
         self.assertContains(full_page, "Back to Release Center")
         self.assertContains(full_page, "Release history for this exact campus and recipient")
+        self.assertContains(full_page, 'data-release-action="answer_key_revoke"', html=False)
+        self.assertContains(full_page, "js/departmental_exam_release_center.js", html=False)
+        self.assertEqual(AnswerKeyRelease.objects.count(), release_count)
+        self.assertEqual(AuditLog.objects.count(), audit_count)
+
+        index = client.get(
+            reverse("departmental_exams:questionnaire_print_release")
+            + f"?target_campus_id={self.campus.id}&section=answer-key-releases"
+        )
+        self.assertEqual(index.status_code, 200)
+        self.assertContains(index, f'form="bulk-answer-key-revoke-{release.id}"', html=False)
+        self.assertContains(index, f'id="bulk-answer-key-revoke-{release.id}"', html=False)
+        self.assertContains(index, 'data-release-history="scoped"', html=False)
+        self.assertContains(index, 'data-release-history="legacy"', html=False)
+        self.assertContains(index, f'data-revoke-campus="{self.campus.name}"', html=False)
+        self.assertContains(index, f'data-revoke-recipient="{self.parent.course.code}"', html=False)
+        self.assertContains(
+            index,
+            f'data-revoke-revision="R{release.generation_revision.revision_number}"',
+            html=False,
+        )
+        self.assertEqual(AnswerKeyRelease.objects.count(), release_count)
+        self.assertEqual(AuditLog.objects.count(), audit_count)
 
     def test_closed_cycle_details_and_review_confirmation_preserve_context(self):
         cycle = self.parent.cycle

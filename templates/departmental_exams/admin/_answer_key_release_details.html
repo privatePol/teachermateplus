@@ -35,7 +35,7 @@
   {% endif %}
 
   {% if answer_key_detail.active_release and answer_key_detail.can_revoke_target %}
-    <form method="post" action="{{ release_center_return_url }}" class="mt-3" data-release-ajax="true" data-release-section="answer-key-releases" data-release-action="answer_key_revoke" data-release-course-id="{{ answer_key_detail.course.id }}">
+    <form method="post" action="{{ release_center_return_url }}" class="mt-3" data-release-ajax="true" data-release-section="answer-key-releases" data-release-action="answer_key_revoke" data-release-course-id="{{ answer_key_detail.course.id }}" data-revoke-campus="{{ answer_key_detail.campus.name }}" data-revoke-recipient="{{ answer_key_detail.recipient.course.code }}" data-revoke-revision="R{{ answer_key_detail.active_release.generation_revision.revision_number }}">
       {% csrf_token %}<input type="hidden" name="action" value="answer_key_revoke"><input type="hidden" name="release_id" value="{{ answer_key_detail.active_release.id }}"><input type="hidden" name="target_campus_id" value="{{ answer_key_detail.campus.id }}">
       <button type="submit" class="btn btn-sm btn-outline-danger" data-processing-label="Revoking...">Revoke current target release</button>
     </form>
