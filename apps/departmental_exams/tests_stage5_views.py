@@ -489,16 +489,12 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(workspace, "0 / 10")
         self.assertContains(
             workspace,
-            "Difficulty distribution differs from the preferred target. Reclassify "
-            "your draft questions&#x27; difficulty levels to meet the preferred Easy, "
-            "Moderate, and Difficult counts if practical.",
+            "Preferred difficulty target: advisory. You may Final Submit with a different mix "
+            "once the required valid question count and other submission checks are satisfied.",
         )
         self.assertNotContains(workspace, "Needs 25 more Moderate questions")
         self.assertContains(workspace, f'href="{submit_url}"')
-        self.assertContains(
-            workspace,
-            "Your mix differs from the preferred target; Final Submission is still allowed.",
-        )
+        self.assertContains(workspace, "Final Submission will still check Case, section, eligibility, and deadline rules.")
 
         response = self.client.post(
             submit_url,
@@ -577,7 +573,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertNotContains(workspace, ">Upload CSV<")
         self.assertNotContains(workspace, ">Edit<")
         self.assertNotContains(workspace, ">Delete<")
-        self.assertNotContains(workspace, "Quota reached.")
+        self.assertNotContains(workspace, "Required question count reached.")
         self.assertNotContains(workspace, "Final submission")
         self.assertNotContains(workspace, "Save displayed order")
         self.assertNotContains(workspace, "Move up")
@@ -652,7 +648,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertNotContains(workspace, ">Upload CSV<")
         self.assertNotContains(workspace, ">Edit<")
         self.assertNotContains(workspace, ">Delete<")
-        self.assertNotContains(workspace, "Quota reached.")
+        self.assertNotContains(workspace, "Required question count reached.")
         self.assertNotContains(workspace, "required quota of 50 questions")
         self.assertNotContains(workspace, "Final submission")
         self.assertNotContains(workspace, "Save displayed order")
@@ -715,7 +711,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(workspace, "49 / 50")
         self.assertContains(workspace, f'href="{create_url}"')
         self.assertContains(workspace, f'href="{upload_url}"')
-        self.assertNotContains(workspace, "Quota reached.")
+        self.assertNotContains(workspace, "Required question count reached.")
         self.assertNotContains(workspace, f'href="{submit_url}"')
 
         last_question = Question.objects.create(
@@ -737,8 +733,8 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         )
         self.assertContains(workspace, "50 / 50")
         self.assertContains(workspace, "100% complete")
-        self.assertContains(workspace, "Quota reached.")
-        self.assertContains(workspace, "required quota of 50 questions")
+        self.assertContains(workspace, "Required question count reached.")
+        self.assertContains(workspace, "Final Submission will still check Case, section, eligibility, and deadline rules.")
         self.assertNotContains(workspace, f'href="{create_url}"')
         self.assertNotContains(workspace, f'href="{upload_url}"')
         self.assertContains(workspace, f'href="{submit_url}"')
@@ -767,7 +763,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(workspace, "49 / 50")
         self.assertContains(workspace, f'href="{create_url}"')
         self.assertContains(workspace, f'href="{upload_url}"')
-        self.assertNotContains(workspace, "Quota reached.")
+        self.assertNotContains(workspace, "Required question count reached.")
         self.assertNotContains(workspace, f'href="{submit_url}"')
         self.assertEqual(questions[0].position, 1)
 
@@ -1043,7 +1039,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             reverse("departmental_exams:contribution_workspace", args=[self.contribution.id])
         )
         self.assertEqual(workspace.status_code, 200)
-        self.assertContains(workspace, "currently read-only")
+        self.assertContains(workspace, "Draft — deadline passed; read-only.")
         self.assertNotContains(workspace, "Add question")
         self.assertEqual(
             self.client.get(

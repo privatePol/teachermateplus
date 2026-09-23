@@ -17,8 +17,8 @@
       <div class="qb-contribution-summary">
         <div class="qb-summary-count"><strong>{{ saved_count }} / {{ quota }}</strong> saved / configured</div>
         <div class="small">{{ remaining }} remaining &middot; {{ progress_percent }}% complete</div>
-        <div class="small"><strong>Status:</strong> {% if contribution.status == 'SUBMITTED' %}Submitted / read-only{% elif is_mutable %}Draft / editing available{% else %}Read-only Draft{% endif %}</div>
-        <div class="small"><strong>Deadline:</strong> {% if configuration.active_contribution_deadline %}{{ configuration.active_contribution_deadline|date:"M j, Y g:i A" }}{% else %}Not configured{% endif %}</div>
+        <div class="small"><strong>Status:</strong> {% if contribution.status == 'SUBMITTED' %}Submitted / read-only{% elif contribution.supersedes_id and contribution_deadline_passed %}Returned Draft / read-only{% elif contribution.supersedes_id %}Returned Draft / editing available{% elif reopened_draft and contribution_deadline_passed %}Reopened Draft / read-only{% elif reopened_draft %}Reopened Draft / editing available{% elif is_mutable %}Draft / editing available{% elif contribution_deadline_passed %}Draft / deadline passed; read-only{% else %}Read-only Draft{% endif %}</div>
+        <div class="small"><strong>Deadline:</strong> {% if effective_contribution_deadline %}{{ effective_contribution_deadline|date:"M j, Y g:i A" }}{% else %}Not configured{% endif %}</div>
         <div class="small text-muted">{% if configuration.reopened_contribution_deadline %}Authorized reopened deadline{% else %}{{ configuration.get_contribution_deadline_source_display|default:"No deadline provenance" }}{% endif %}</div>
       </div>
     </div>
@@ -55,18 +55,18 @@
 {% elif contribution.status == 'SUBMITTED' %}
   <div class="alert alert-success"><strong>Submitted and read-only.</strong> Submitted {{ contribution.submitted_at|date:"M j, Y g:i A" }}. Your questions remain visible to you, but no further changes are allowed.</div>
 {% elif contribution.supersedes_id %}
-  <div class="alert {% if is_mutable %}alert-info{% else %}alert-warning{% endif %}"><strong>Returned Draft{% if not is_mutable %} — read-only{% endif %}.</strong> Your questions and Cases were copied for correction until the deadline shown above. Your prior submission remains preserved in the exam history.</div>
+  <div class="alert {% if is_mutable %}alert-info{% else %}alert-warning{% endif %}"><strong>{% if contribution_deadline_passed %}Returned Draft — correction deadline passed; read-only.{% else %}Returned Draft — editing available until the deadline shown above.{% endif %}</strong> Your questions and Cases were copied for correction. Your prior submission remains preserved in the exam history.</div>
 {% elif reopened_draft %}
-  <div class="alert alert-info"><strong>Reopened Draft.</strong> An authorized administrator reopened this Draft until the deadline shown above. Historical assignment and roster status remain unchanged.</div>
+  <div class="alert {% if is_mutable %}alert-info{% else %}alert-warning{% endif %}"><strong>{% if contribution_deadline_passed %}Reopened Draft — deadline passed; read-only.{% else %}Reopened Draft — editing available until the deadline shown above.{% endif %}</strong> Historical assignment and roster status remain unchanged.</div>
 {% elif contribution.roster_status == 'BLOCKED' %}
   <div class="alert alert-warning"><strong>This Draft is blocked and read-only.</strong> Your current teaching-assignment eligibility is no longer valid. Your saved content remains private and visible here; contact an authorized administrator.</div>
 {% elif live_eligibility_read_only %}
   <div class="alert alert-warning"><strong>Your current contributor eligibility could not be verified.</strong> This contribution is temporarily read-only until the roster is synchronized.</div>
 {% elif not is_mutable %}
-  <div class="alert alert-warning"><strong>This Draft is currently read-only.</strong> Its cycle, Included course state, contribution window, deadline, quota, or current assignment eligibility no longer permits changes. Contact an authorized administrator.</div>
+  <div class="alert alert-warning"><strong>{% if contribution_deadline_passed %}Draft — deadline passed; read-only.{% else %}This Draft is currently read-only.{% endif %}</strong> Its cycle, Included course state, contribution window, deadline, quota, or current assignment eligibility no longer permits changes. Contact an authorized administrator.</div>
 {% endif %}
 {% if quota_reached %}
-  <div class="alert {% if difficulty_distribution.compliant %}alert-success{% else %}alert-warning{% endif %}" role="status"><strong>Quota reached.</strong> You have reached the required quota of {{ quota }} questions. {% if difficulty_distribution.compliant %}You may now submit your contribution.{% else %}Your mix differs from the preferred target; Final Submission is still allowed.{% endif %}</div>
+  <div class="alert {% if difficulty_distribution.compliant %}alert-success{% else %}alert-warning{% endif %}" role="status"><strong>Required question count reached.</strong> Final Submission will still check Case, section, eligibility, and deadline rules.</div>
 {% endif %}
 {% if is_mutable %}
   <div class="qb-action-toolbar d-flex flex-wrap align-items-center gap-2 mb-3" data-qb-action-toolbar>

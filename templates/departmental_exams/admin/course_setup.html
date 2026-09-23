@@ -10,12 +10,12 @@
 <p><strong>Cycle contributor instructions:</strong> {{ cycle.contributor_instructions|default:"None configured" }}</p>
 <p><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Cycle defaults</a> · <a href="{% url 'departmental_exams:assigned_course_examinations' %}">Manage Course Exams</a></p>
 {% if setup_error %}<div class="alert alert-warning" role="alert">{{ setup_error }}</div>{% endif %}
-{% if completed %}<div class="alert alert-success">The confirmed selection was processed. Existing open courses and history were preserved.</div>{% endif %}
+{% if completed %}<div class="alert alert-success">{% if replayed_confirmation %}This confirmed selection was already processed. Current statuses are shown below.{% else %}{{ opened_unit_count }} examination unit{{ opened_unit_count|pluralize }} opened. Their current status is shown below.{% endif %}</div>{% endif %}
 <form method="post">{% csrf_token %}
 {% if confirmation %}<input type="hidden" name="confirmation" value="{{ confirmation }}"><div class="alert alert-info"><strong>Review {{ selected_unit_count }} course examination unit{{ selected_unit_count|pluralize }}</strong> covering {{ selected_member_count }} course record{{ selected_member_count|pluralize }}. Confirm this exact selection. If any selected course changes, expires, or becomes blocked, no course will open.</div>{% endif %}
-{% if not confirmation and not completed %}<div class="row g-2 align-items-end mb-3"><div class="col-md-6"><label class="form-label" for="course-ready-filter">Filter courses</label><input class="form-control" id="course-ready-filter" type="search" placeholder="Course code or title"></div><div class="col-md-3"><label class="form-label" for="readiness-filter">Readiness</label><select class="form-select" id="readiness-filter"><option value="">All readiness states</option><option>Ready</option><option>Blocked</option><option>Already open</option><option>Preserved history</option><option>Exempt</option></select></div><div class="col-md-3"><button class="btn btn-outline-primary w-100" type="button" id="select-all-ready">Select all ready courses</button></div></div><p class="small" id="selected-course-count" role="status" aria-live="polite">0 ready courses selected</p>{% endif %}
+{% if not confirmation and not completed %}<div class="row g-2 align-items-end mb-3"><div class="col-md-6"><label class="form-label" for="course-ready-filter">Filter courses</label><input class="form-control" id="course-ready-filter" type="search" placeholder="Course code or title"></div><div class="col-md-3"><label class="form-label" for="readiness-filter">Readiness</label><select class="form-select" id="readiness-filter"><option value="">All readiness states</option><option>Ready</option><option>Blocked</option><option>Already open</option><option>Preserved history</option><option>Exempt</option></select></div><div class="col-md-3"><button class="btn btn-outline-primary w-100" type="button" id="select-all-visible-standardized-ready">Select all visible ready Standardized examination units</button></div></div><p class="small" id="selected-course-count" role="status" aria-live="polite">0 examination units selected</p>{% endif %}
 <div class="table-responsive"><table class="table"><thead><tr><th>Select</th><th>Course examination unit</th><th>Effective settings</th><th>Readiness</th><th>Configuration</th></tr></thead><tbody>
-{% for row in rows %}<tr data-course-row data-course-search="{{ row.course.course.code|lower }} {{ row.course.course.title|lower }}" data-readiness="{{ row.status }}"><td>{% if not confirmation and not completed %}<input class="ready-course-selector" type="checkbox" name="courses" value="{{ row.course.id }}" aria-label="Select ready course {{ row.course.course.code }}"{% if row.status != 'Ready' %} disabled aria-disabled="true"{% endif %}>{% endif %}</td>
+{% for row in rows %}<tr data-course-row data-course-search="{{ row.course.course.code|lower }} {{ row.course.course.title|lower }}" data-readiness="{{ row.status }}"><td>{% if not confirmation and not completed %}<input class="ready-course-selector" type="checkbox" name="courses" value="{{ row.course.id }}" aria-label="Select ready examination unit {{ row.course.course.code }}" data-standardized-bulk-eligible="{% if row.standardized_bulk_eligible %}true{% else %}false{% endif %}"{% if row.status != 'Ready' %} disabled aria-disabled="true"{% endif %}>{% endif %}</td>
 <td>{{ row.course.course.code }} — {{ row.course.course.title }}<br>{% include "departmental_exams/_classification_badge.html" with course=row.course %}<div class="small text-muted">{{ row.member_ids|length }} course record{{ row.member_ids|length|pluralize }} in this examination unit</div>{% if confirmation %}<div>Member course records: {{ row.member_ids|join:", " }}</div><div>General instructions: {{ row.configuration.general_instructions|default:"None" }}</div><div>Additional instructions: {{ row.configuration.additional_instructions|default:"None" }}</div>{% for section in row.sections %}<div>Section {{ section.display_order }}: {{ section.title }} — {{ section.item_quota }} items. {{ section.instructions }}</div>{% endfor %}{% endif %}</td>
 <td>Faculty quota: {{ row.configuration.questions_required_per_faculty|default_if_none:"Not configured" }} ({{ row.configuration.questions_required_per_faculty_source|default:"NOT CONFIGURED" }})<br>Final items: {{ row.configuration.final_item_count|default_if_none:"Not configured" }} ({{ row.configuration.final_item_count_source|default:"NOT CONFIGURED" }})<br>Deadline: {{ row.configuration.contribution_deadline|default:"Not configured" }} ({{ row.configuration.contribution_deadline_source|default:"NOT CONFIGURED" }})<br>Coverage: {{ row.configuration.coverage|default:"Not configured" }} ({{ row.configuration.coverage_source|default:"NOT CONFIGURED" }})<br><strong>Exam structure:</strong> {{ row.structure_display }}</td>
 <td>{% include "departmental_exams/admin/_setup_readiness_badge.html" with status=row.status %}{% for reason in row.reasons %}<div class="small mt-1">{{ reason }}</div>{% endfor %}</td>
@@ -30,13 +30,13 @@
   const rows = [...document.querySelectorAll('[data-course-row]')];
   const search = document.getElementById('course-ready-filter');
   const readiness = document.getElementById('readiness-filter');
-  const selectAll = document.getElementById('select-all-ready');
+  const selectAll = document.getElementById('select-all-visible-standardized-ready');
   const count = document.getElementById('selected-course-count');
   const review = document.getElementById('review-ready-courses');
   const selectors = rows.map(row => row.querySelector('.ready-course-selector')).filter(Boolean);
   const sync = () => {
     const selected = selectors.filter(box => box.checked).length;
-    count.textContent = `${selected} ready course${selected === 1 ? '' : 's'} selected`;
+    count.textContent = `${selected} examination unit${selected === 1 ? '' : 's'} selected`;
     review.disabled = selected === 0;
   };
   const applyFilters = () => {
@@ -52,7 +52,7 @@
   };
   selectAll.addEventListener('click', () => {
     selectors.forEach(box => {
-      if (!box.disabled && !box.closest('[data-course-row]').hidden) box.checked = true;
+      if (!box.disabled && box.dataset.standardizedBulkEligible === 'true' && !box.closest('[data-course-row]').hidden) box.checked = true;
     });
     sync();
   });

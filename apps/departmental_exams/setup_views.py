@@ -27,12 +27,15 @@ def setup_view(request, cycle_id):
             user=request.user, tenant_id=cycle.tenant_id,
             permission=DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION)
     rows = CourseSetupService.preview(cycle=cycle, actor=request.user)
-    error, token, status, completed = "", "", 200, False
+    error, token, status, completed, replayed_confirmation, opened_unit_count = "", "", 200, False, False, 0
     if request.method == "POST":
         try:
             if request.POST.get("confirmation"):
                 rows, reused = CourseSetupService.open_selection(cycle=cycle, actor=request.user, token=request.POST["confirmation"], request=request)
                 completed = True
+                replayed_confirmation = reused
+                opened_unit_count = 0 if reused else len(rows)
+                rows = CourseSetupService.preview(cycle=cycle, actor=request.user)
             else:
                 try:
                     selected = {int(value) for value in request.POST.getlist("courses")}
@@ -55,6 +58,8 @@ def setup_view(request, cycle_id):
         "confirmation": token,
         "setup_error": error,
         "completed": completed,
+        "replayed_confirmation": replayed_confirmation,
+        "opened_unit_count": opened_unit_count,
         "selected_unit_count": len(rows) if token else 0,
         "selected_member_count": sum(len(row["member_ids"]) for row in rows) if token else 0,
         "structured_exam_lifecycle_enabled": (

@@ -512,7 +512,8 @@ class UnifiedSetupTests(Stage4TestCase):
     def test_ready_selection_controls_exclude_blocked_and_clear_hidden_rows(self):
         self.enable_structured_lifecycle()
         cycle = self.make_automatic_cycle()
-        ready = self.new_default_departmental_course(cycle, "READY-DEPTAL")
+        ready = self.new_course(cycle, "READY-STANDARDIZED")
+        departmental = self.new_default_departmental_course(cycle, "READY-DEPTAL")
         blocked = self.make_course(cycle=cycle, department=None, code="BLOCKED-DEPTAL")
         CourseSetupService.classify(
             course_id=blocked.id,
@@ -525,11 +526,16 @@ class UnifiedSetupTests(Stage4TestCase):
         self.client.force_login(self.bulk_manager)
 
         page = self.client.get(reverse("departmental_exams:course_setup", args=[cycle.id]))
-        self.assertContains(page, "Select all ready courses")
+        self.assertContains(page, "Select all visible ready Standardized examination units")
         self.assertContains(page, 'id="selected-course-count" role="status" aria-live="polite"')
         self.assertContains(page, "if (!visible && box) box.checked = false")
-        self.assertContains(page, f'value="{blocked.id}" aria-label="Select ready course')
+        self.assertContains(page, "box.dataset.standardizedBulkEligible === 'true'")
+        self.assertContains(page, f'value="{blocked.id}" aria-label="Select ready examination unit')
         self.assertContains(page, 'disabled aria-disabled="true"')
+        rows = {row["course"].id: row for row in page.context["rows"]}
+        self.assertTrue(rows[ready.id]["standardized_bulk_eligible"])
+        self.assertFalse(rows[departmental.id]["standardized_bulk_eligible"])
+        self.assertFalse(rows[blocked.id]["standardized_bulk_eligible"])
 
         rejected = self.client.post(
             reverse("departmental_exams:course_setup", args=[cycle.id]),
@@ -543,6 +549,52 @@ class UnifiedSetupTests(Stage4TestCase):
         )
         self.assertContains(reviewed, "Review 1 course examination unit")
         self.assertContains(reviewed, "covering 1 course record")
+
+        # Departmental opening remains an individually reviewed, authorized path;
+        # it is not selected by the Standardized bulk control.
+        departmental_review = self.client.post(
+            reverse("departmental_exams:course_setup", args=[cycle.id]),
+            {"courses": [departmental.id]},
+        )
+        self.assertEqual(departmental_review.status_code, 200)
+        self.assertContains(departmental_review, "Review 1 course examination unit")
+
+    def test_standardized_bulk_contract_fails_closed_for_unclassified_or_unknown_structure(self):
+        cycle = self.make_automatic_cycle()
+        legacy = self.make_course(cycle=cycle, department=None, code="LEGACY")
+        self.make_faculty_assignment(legacy, username="faculty-legacy")
+        rows = CourseSetupService.preview(cycle=cycle, actor=self.bulk_manager)
+        legacy_row = next(row for row in rows if row["course"].id == legacy.id)
+        self.assertEqual(legacy_row["status"], "Blocked")
+        self.assertFalse(legacy_row["standardized_bulk_eligible"])
+        with self.assertRaisesMessage(ValidationError, "explicit Standardized or Departmental"):
+            CourseSetupService.prepare_structure(legacy, actor=self.bulk_manager)
+        with self.assertRaisesMessage(ValidationError, "Select an explicit exam classification"):
+            CourseSetupService.classify(
+                course_id=legacy.id,
+                tenant_id=self.tenant.id,
+                actor=self.bulk_manager,
+                classification="UNEXPECTED",
+                expected_state=CourseSetupService.fingerprint(legacy),
+            )
+
+    def test_bulk_open_refreshes_statuses_and_replay_is_truthful(self):
+        cycle = self.make_automatic_cycle()
+        course = self.new_course(cycle, "RESULT")
+        self.client.force_login(self.bulk_manager)
+        url = reverse("departmental_exams:course_setup", args=[cycle.id])
+        review = self.client.post(url, {"courses": [course.id]})
+        token = review.context["confirmation"]
+        opened = self.client.post(url, {"confirmation": token})
+        self.assertEqual(opened.status_code, 200)
+        self.assertContains(opened, "1 examination unit opened. Their current status is shown below.")
+        self.assertEqual(
+            next(row for row in opened.context["rows"] if row["course"].id == course.id)["status"],
+            "Already open",
+        )
+        replayed = self.client.post(url, {"confirmation": token})
+        self.assertEqual(replayed.status_code, 200)
+        self.assertContains(replayed, "This confirmed selection was already processed. Current statuses are shown below.")
 
     def test_departmental_default_rejects_alias_conflict_and_history_without_mutation(self):
         from .exam_units import ExamCourseEquivalencyService

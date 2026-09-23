@@ -1378,3 +1378,7 @@ For every merged change:
 - A campus-scoped request now shows only its own legacy Questionnaire coverage, effective status, history, and revoke control even when the old release snapshot includes other campuses. Individual review labels retired coverage as not currently released.
 - Signed Questionnaire and Answer Key confirmations now stamp newly created releases with a distinct confirmation ID. A genuine retry returns the original active rows without new audit writes; an intervening independent release with the same revision and window is rejected, including one by the same operator. Revoked or replaced rows cannot be revived by an old review.
 - Legacy Questionnaire coverage keeps immutable release/campus identity and permanent, immutable retirement provenance through ordinary model saves. The existing 0033 migration now adds nullable confirmation IDs to both release tables; existing rows retain their data.
+## Contribution opening status and guidance - 2026-09-23
+
+- Added visible-only Standardized ready-unit bulk selection while retaining authorized individual Departmental opening. Signed review confirmation continues to revalidate the whole shared unit under locks and atomically opens all selected units or none.
+- Opening results now refresh authoritative statuses and distinguish a completed confirmation replay. Faculty workspace wording now exposes the authoritative effective deadline state for Draft, Returned Draft, Reopened Draft, and Submitted contributions. Difficulty targets remain advisory; actual submission checks are unchanged.

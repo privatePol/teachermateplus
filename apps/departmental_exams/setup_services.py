@@ -465,6 +465,11 @@ class CourseSetupService:
                         reasons.append("No qualifying accepted Faculty teaching assignments.")
                 if course.exam_classification == "UNCLASSIFIED_LEGACY":
                     reasons.append("Explicit classification is required for this legacy course before using unified setup.")
+                elif course.exam_classification not in {
+                    CycleCourse.ExamClassification.STANDARDIZED,
+                    CycleCourse.ExamClassification.DEPARTMENTAL,
+                }:
+                    reasons.append("An explicit Standardized or Departmental classification is required before using unified setup.")
                 status = "Blocked" if reasons else "Ready"
                 if status == "Ready":
                     reasons = ["All opening requirements are satisfied."]
@@ -529,13 +534,32 @@ class CourseSetupService:
                     | Q(recipient_course_id__in=unit.member_ids)
                 ).exists()
             )
+            standardized_bulk_eligible = False
+            if (
+                status == "Ready"
+                and all(
+                    member.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+                    and member.exam_classification == CycleCourse.ExamClassification.STANDARDIZED
+                    for member in unit.members
+                )
+            ):
+                try:
+                    for member in unit.members:
+                        DepartmentalExamAuthorizationService.require_cycle_course_inclusion_management(
+                            user=actor, cycle_course=member
+                        )
+                except PermissionDenied:
+                    pass
+                else:
+                    standardized_bulk_eligible = True
             rows.append({"course": course, "configuration": config, "status": status,
                          "reasons": list(dict.fromkeys(reasons)),
                          "fingerprint": review_fingerprint,
                          "member_ids": list(unit.member_ids),
                          "structure_display": structure_display,
                          "sections": list(blueprint.sections.order_by("display_order", "id")) if blueprint else [],
-                         "can_configure_structure": can_configure_structure})
+                         "can_configure_structure": can_configure_structure,
+                         "standardized_bulk_eligible": standardized_bulk_eligible})
         return rows
 
     @classmethod
@@ -627,8 +651,13 @@ class CourseSetupService:
         reasons = automatic_structure_blockers(course)
         if reasons:
             raise ValidationError(reasons)
-        if course.exam_classification == "UNCLASSIFIED_LEGACY":
-            return
+        if course.exam_classification not in {
+            CycleCourse.ExamClassification.STANDARDIZED,
+            CycleCourse.ExamClassification.DEPARTMENTAL,
+        }:
+            raise ValidationError(
+                "An explicit Standardized or Departmental classification is required before creating an examination structure."
+            )
         unit = resolve_examination_unit(course, for_update=True, validate=False)
         for member in unit.members:
             if member.exam_classification != course.exam_classification:
@@ -636,7 +665,7 @@ class CourseSetupService:
             cls.materialize(member, actor=actor, request=request)
         blueprints = ExamBlueprint.objects.filter(cycle_course_id__in=unit.member_ids)
         if not blueprints.exists():
-            if course.exam_classification == "DEPARTMENTAL":
+            if course.exam_classification == CycleCourse.ExamClassification.DEPARTMENTAL:
                 default = departmental_no_sections_default_eligibility(
                     unit.primary, actor=actor
                 )
@@ -645,10 +674,12 @@ class CourseSetupService:
                 action = "DE_EXAM_DEPARTMENTAL_DEFAULT_STRUCTURE_CREATED"
                 origin = "DEPTAL_NO_SECTIONS_DEFAULT"
                 final_item_count = default["effective_final_item_count"]
-            else:
+            elif course.exam_classification == CycleCourse.ExamClassification.STANDARDIZED:
                 action = "DE_EXAM_STANDARD_STRUCTURE_CREATED"
                 origin = "STANDARDIZED_NO_SECTIONS_DEFAULT"
                 final_item_count = cls.effective(unit.primary).final_item_count
+            else:
+                raise ValidationError("An explicit Standardized or Departmental classification is required before creating an examination structure.")
             blueprint = ExamBlueprint.objects.create(
                 cycle_course=unit.primary, mode="NO_SECTIONS", revision=1,
                 created_by=actor, updated_by=actor)

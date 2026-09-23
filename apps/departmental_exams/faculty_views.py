@@ -286,6 +286,15 @@ def _workspace_context(request, contribution):
         .first()
     )
     is_mutable = authority is not None and active_import is None
+    effective_contribution_deadline = configuration.active_contribution_deadline
+    contribution_deadline_passed = bool(
+        effective_contribution_deadline
+        and timezone.now() >= effective_contribution_deadline
+    )
+    reopened_draft = bool(
+        configuration.reopened_contribution_deadline
+        and not contribution.supersedes_id
+    )
     quota_reached = is_mutable and saved_count >= quota
     difficulty_distribution = ContributionDifficultyDistributionService.evaluate(
         questions=questions,
@@ -317,10 +326,9 @@ def _workspace_context(request, contribution):
         "configuration": configuration,
         "offering_snapshots": contribution.cycle_course.offering_snapshots.all(),
         "is_mutable": is_mutable,
-        "reopened_draft": (
-            authority
-            == ContributionAuthorizationService.REOPENED_DRAFT_AUTHORITY
-        ),
+        "reopened_draft": reopened_draft,
+        "effective_contribution_deadline": effective_contribution_deadline,
+        "contribution_deadline_passed": contribution_deadline_passed,
         "live_eligibility_read_only": live_eligibility_read_only,
         "quota_reached": quota_reached,
         "difficulty_distribution": difficulty_distribution,
