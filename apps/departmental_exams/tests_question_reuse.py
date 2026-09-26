@@ -4,9 +4,11 @@ import io
 from django.urls import reverse
 from django.utils import timezone
 from django.db import transaction
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from apps.academics.models import AcademicYear, CourseOffering, Term
+from apps.academics.models import AcademicYear, CourseOffering, FacultyAssignment, Term
+from apps.auditlog.models import AuditLog
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, UserPermission, UserRole
@@ -16,6 +18,7 @@ from .csv_import import CSV_HEADERS, QuestionCSVImportService
 from .models import (CycleCourse, CycleCourseOffering, ExaminationCycle,
                      FacultyContribution, FacultyContributionEligibilitySource, Question,
                      ExamBlueprint, ExamSection, ExamScenario, ExamScenarioMember,
+                     QuestionBankCaseMember, QuestionBankItem, QuestionBankRevision,
                      QuestionBlueprintPlacement, _exam_structure_lifecycle_service_scope)
 from .stage4_test_support import Stage4TestCase
 from .tests_stage5_contributions import Stage5FixtureMixin
@@ -24,6 +27,16 @@ from .tests_question_rich_editor import rich_payload
 from .duplicate_contract import case_member_identity, pool_claims, reconcile
 from .faculty_case_services import FacultyCaseMutationService
 from .scenario_content import canonicalize_scenario_content
+from .my_questions import (
+    authoring_scopes,
+    create_case as create_bank_case,
+    create_question as create_bank_question,
+    require_owner as require_bank_owner,
+    revise_case as revise_bank_case,
+    revise_historical_case,
+    revise_question as revise_bank_question,
+)
+from django.http import Http404
 
 
 class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
@@ -96,10 +109,10 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
 
     def test_feature_gate_and_authenticated_workspace_to_copy(self):
         self._source_question("Previous unique stem")
-        self.assertNotContains(self.client.get(self.workspace_url), "Reuse My Previous Questions")
+        self.assertNotContains(self.client.get(self.workspace_url), "Use My Questions in Draft")
         self.assertEqual(self.client.get(self.url).status_code, 403)
         self._enable()
-        self.assertContains(self.client.get(self.workspace_url), "Reuse My Previous Questions")
+        self.assertContains(self.client.get(self.workspace_url), "Use My Questions in Draft")
         page = self.client.get(self.url)
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, "Previous unique stem")
@@ -116,6 +129,290 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(self.client.get(self.workspace_url), "Previous unique stem")
         self.assertEqual(self._copy(page, token).status_code, 409)
         self.assertEqual(self.destination.questions.count(), 1)
+
+    def test_my_questions_revision_is_owner_only_and_does_not_rewrite_draft_copy(self):
+        self._enable()
+        item = create_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            course_id=self.destination_course.course_id,
+            payload=self.payload("Bank wording one"),
+        )
+        page = self.client.get(self.url)
+        bank_entry = next(row for row in page.context["eligible_items"] if row.get("bank_item") == item)
+        response = self._copy(page, bank_entry["token"])
+        self.assertRedirects(response, self.workspace_url, fetch_redirect_response=False)
+        copied = self.destination.questions.get()
+        self.assertEqual(copied.question_text, "Bank wording one")
+        self.assertEqual(copied.source_bank_revision.item_id, item.id)
+
+        revise_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            item_id=item.id,
+            expected_revision=1,
+            payload=self.payload("Bank wording two"),
+        )
+        copied.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(item.current_revision, 2)
+        self.assertEqual(copied.question_text, "Bank wording one")
+        self.assertEqual(copied.source_bank_revision.revision, 1)
+        with self.assertRaises(ValidationError):
+            revise_bank_question(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                item_id=item.id,
+                expected_revision=1,
+                payload=self.payload("Stale overwrite attempt"),
+            )
+        with self.assertRaises(Http404):
+            require_bank_owner(
+                user=self.admin,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                item_id=item.id,
+            )
+        self.client.force_login(self.other)
+        self.assertEqual(
+            self.client.get(
+                reverse("departmental_exams:my_question_edit", args=[item.id])
+            ).status_code,
+            404,
+        )
+        self.client.force_login(self.faculty)
+
+    def test_retained_accepted_assignment_allows_authoring_between_terms(self):
+        assignments = self.faculty.faculty_assignments.filter(
+            offering__course=self.destination_course.course
+        ).select_related("offering")
+        for assignment in assignments:
+            assignment.is_active = False
+            assignment.save(update_fields=["is_active"])
+            assignment.offering.status = CourseOffering.Status.ARCHIVED
+            assignment.offering.is_active = False
+            assignment.offering.save(update_fields=["status", "is_active"])
+        scopes = authoring_scopes(
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        self.assertEqual([scope.course_id for scope in scopes], [self.destination_course.course_id])
+
+    def test_direct_deny_prevents_between_term_authoring(self):
+        UserPermission.objects.create(
+            user=self.faculty,
+            permission=Permission.objects.get(code="faculty_portal.access"),
+            tenant=self.tenant,
+            campus=self.campus,
+            grant_type=UserPermission.GrantType.DENY,
+        )
+        self.assertEqual(
+            authoring_scopes(
+                user=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+            ),
+            [],
+        )
+
+    def test_my_questions_add_route_works_after_exam_cycle_closes(self):
+        self.destination_course.cycle.status = ExaminationCycle.Status.CLOSED
+        self.destination_course.cycle.save(update_fields=["status", "updated_at"])
+        page = self.client.get(reverse("departmental_exams:my_questions"))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Add question")
+        self.assertNotContains(page, "Create whole Case")
+        response = self.client.post(
+            reverse(
+                "departmental_exams:my_question_create",
+                args=[self.campus.id, self.destination_course.course_id],
+            ),
+            {
+                **self.payload("Created between cycles"),
+                "correct_answer": "D",
+                "difficulty": "EASY",
+                "content_format": "PLAIN_TEXT",
+                "expected_item_revision": 0,
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse("departmental_exams:my_questions"),
+            fetch_redirect_response=False,
+        )
+        self.assertTrue(
+            QuestionBankItem.objects.filter(
+                owner=self.faculty,
+                origin_question__isnull=True,
+                kind=QuestionBankItem.Kind.QUESTION,
+            ).exists()
+        )
+
+    def test_my_questions_navigation_remains_available_without_cycle_or_contribution(self):
+        between_terms = self.make_faculty("between-terms")
+        self.make_assignment(self.destination_course, between_terms)
+        self.destination_course.cycle.status = ExaminationCycle.Status.CLOSED
+        self.destination_course.cycle.save(update_fields=["status", "updated_at"])
+        self.client.force_login(between_terms)
+
+        response = self.client.get(reverse("departmental_exams:my_questions"))
+
+        self.assertEqual(response.status_code, 200)
+        codes = [
+            node["item"].code
+            for group in response.context["portal_menu"]
+            for node in group["items"]
+        ]
+        self.assertIn("DE_EXAM_MY_QUESTIONS", codes)
+        self.assertContains(
+            response,
+            f'href="{reverse("departmental_exams:my_questions")}"',
+        )
+        self.assertFalse(
+            FacultyContribution.objects.filter(faculty_user=between_terms).exists()
+        )
+
+    def test_edit_and_catalogue_recheck_exact_course_assignment_on_get_and_post(self):
+        item = create_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            course_id=self.destination_course.course_id,
+            payload=self.payload("Course A bank wording"),
+        )
+        historical = self._source_question("Course A historical wording")
+        course_b = self.make_course(cycle=self.destination_course.cycle, code="S5-B")
+        self.make_assignment(course_b, self.faculty)
+        FacultyAssignment.objects.filter(
+            faculty_user=self.faculty,
+            offering__course=self.destination_course.course,
+        ).update(
+            response_status=FacultyAssignment.ResponseStatus.DECLINED,
+            accepted_at=None,
+        )
+
+        catalogue = self.client.get(reverse("departmental_exams:my_questions"))
+        self.assertEqual(catalogue.status_code, 200)
+        self.assertNotContains(catalogue, "Course A bank wording")
+        self.assertNotContains(catalogue, "Course A historical wording")
+
+        edit_url = reverse("departmental_exams:my_question_edit", args=[item.id])
+        historical_url = reverse(
+            "departmental_exams:my_historical_question_edit", args=[historical.id]
+        )
+        edit_payload = {
+            **self.payload("Unauthorized revision"),
+            "content_format": Question.ContentFormat.PLAIN_TEXT,
+            "expected_item_revision": 1,
+        }
+        self.assertEqual(self.client.get(edit_url).status_code, 403)
+        self.assertEqual(self.client.post(edit_url, edit_payload).status_code, 403)
+        self.assertEqual(self.client.get(historical_url).status_code, 403)
+        edit_payload["expected_item_revision"] = 0
+        self.assertEqual(self.client.post(historical_url, edit_payload).status_code, 403)
+        item.refresh_from_db()
+        self.assertEqual(item.current_revision, 1)
+        self.assertFalse(QuestionBankItem.objects.filter(origin_question=historical).exists())
+    def test_corrected_submitted_question_replaces_source_card_without_rewriting_history(self):
+        self._enable()
+        source = self._source_question("Original submitted wording")
+        revision = revise_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            historical_question_id=source.id,
+            expected_revision=0,
+            payload=self.payload("Corrected future wording"),
+        )
+        source.refresh_from_db()
+        self.assertEqual(source.question_text, "Original submitted wording")
+        page = self.client.get(self.url)
+        matching = [
+            entry for entry in page.context["eligible_items"]
+            if entry.get("bank_revision") == revision
+        ]
+        self.assertEqual(len(matching), 1)
+        self.assertNotContains(page, "Original submitted wording")
+        self.assertContains(page, "Corrected future wording")
+
+    def test_bank_revision_change_rejects_stale_use_selection(self):
+        self._enable()
+        item = create_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            course_id=self.destination_course.course_id,
+            payload=self.payload("Before stale Use"),
+        )
+        page = self.client.get(self.url)
+        old_entry = next(
+            entry for entry in page.context["eligible_items"]
+            if entry.get("bank_item") == item
+        )
+        revise_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            item_id=item.id,
+            expected_revision=1,
+            payload=self.payload("After stale Use"),
+        )
+        self.assertEqual(self._copy(page, old_entry["token"]).status_code, 409)
+        self.assertFalse(self.destination.questions.exists())
+
+    def test_whole_case_bank_revisions_are_atomic(self):
+        SystemSettingService.set(
+            FeatureSettingsService.DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        item = create_bank_case(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            course_id=self.destination_course.course_id,
+            case={"title": "Bank Case", "stimulus": "Case narrative"},
+            first_member=self.payload("First linked MCQ"),
+        )
+        revise_bank_case(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            item_id=item.id,
+            expected_revision=1,
+            member_payload=self.payload("Second linked MCQ"),
+            append_member=True,
+        )
+        self.assertEqual(QuestionBankRevision.objects.get(item=item, revision=1).members.count(), 1)
+        self.assertEqual(QuestionBankRevision.objects.get(item=item, revision=2).members.count(), 2)
+        with self.assertRaises(ValidationError):
+            revise_bank_case(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                item_id=item.id,
+                expected_revision=2,
+                member_payload={**self.payload("Invalid linked MCQ"), "correct_answer": "Z"},
+                append_member=True,
+            )
+        item.refresh_from_db()
+        self.assertEqual(item.current_revision, 2)
+        self.assertEqual(QuestionBankRevision.objects.filter(item=item).count(), 2)
+
+    def test_authoring_scope_cannot_cross_course(self):
+        with self.assertRaises(PermissionDenied):
+            create_bank_question(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                course_id=self.destination_course.course_id + 100000,
+                payload=self.payload("Wrong course"),
+            )
 
     def test_exact_source_and_filters(self):
         self._enable()
@@ -236,17 +533,67 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
         UserRole.objects.create(user=self.faculty, role=other_role, tenant=self.tenant,
                                 campus=self.other_campus, department=self.other_department)
         source = self._previous_source(campus=self.other_campus)
-        self._source_question("Other-campus owned history", source=source)
+        historical = self._source_question("Other-campus owned history", source=source)
+        bank_only = create_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.other_campus.id,
+            course_id=self.destination_course.course_id,
+            payload=self.payload("Other-campus bank-only question"),
+        )
         page = self.client.get(self.url)
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, "Other-campus owned history")
+        self.assertContains(page, "Other-campus bank-only question")
+        revision = revise_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.other_campus.id,
+            historical_question_id=historical.id,
+            expected_revision=0,
+            payload=self.payload("Other-campus corrected revision"),
+        )
+        source.source_assignment.response_status = FacultyAssignment.ResponseStatus.DECLINED
+        source.source_assignment.accepted_at = None
+        source.source_assignment.save(
+            update_fields=["response_status", "accepted_at", "updated_at"]
+        )
+        adopted = self.client.get(self.url)
+        self.assertEqual(adopted.status_code, 200)
+        self.assertContains(adopted, "Other-campus corrected revision")
+        self.assertNotContains(adopted, "Other-campus owned history")
+        self.assertNotContains(adopted, "Other-campus bank-only question")
+        self.assertEqual(
+            [
+                entry["bank_revision"].id
+                for entry in adopted.context["eligible_items"]
+                if entry.get("bank_revision") == revision
+            ],
+            [revision.id],
+        )
+        adopted_entry = next(
+            entry
+            for entry in adopted.context["eligible_items"]
+            if entry.get("bank_revision") == revision
+        )
+        copied = self._copy(adopted, adopted_entry["token"])
+        self.assertEqual(copied.status_code, 302)
+        self.assertEqual(
+            list(
+                self.destination.questions.values_list("question_text", flat=True)
+            ),
+            ["Other-campus corrected revision"],
+        )
         UserPermission.objects.create(
             user=self.faculty, permission=Permission.objects.get(code="faculty_portal.access"),
             tenant=self.tenant, campus=self.other_campus,
             grant_type=UserPermission.GrantType.DENY)
         denied = self.client.get(self.url)
         self.assertEqual(denied.status_code, 200)
-        self.assertNotContains(denied, "Other-campus owned history")
+        self.assertNotContains(denied, "Other-campus corrected revision")
+        self.destination.refresh_from_db()
+        self.assertEqual(self._copy(None, adopted_entry["token"]).status_code, 409)
+        self.assertEqual(bank_only.current_revision, 1)
 
     def test_exact_course_id_excludes_other_course_and_destination_deny_blocks_route(self):
         self._enable()
@@ -455,6 +802,276 @@ class QuestionReuseCaseHTTPTests(FacultyCaseFixtureMixin, Stage4TestCase):
             "selected_items": [token], **extra,
         })
 
+    def test_current_bank_case_revision_copies_as_one_provenanced_graph(self):
+        item = create_bank_case(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            course_id=self.destination_course.course_id,
+            case={"title": "Bank Case", "stimulus": "Case narrative"},
+            first_member=self.payload("First bank member"),
+        )
+        revise_bank_case(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            item_id=item.id,
+            expected_revision=1,
+            member_payload=self.payload("Second bank member"),
+            append_member=True,
+        )
+        page = self.client.get(self.url)
+        entry = next(row for row in page.context["eligible_items"] if row.get("bank_item") == item)
+        response = self._post(entry["token"], target_section_id=str(self.section_a.id))
+        self.assertEqual(response.status_code, 302)
+        scenario = ExamScenario.objects.get(contribution=self.destination)
+        self.assertEqual(scenario.members.count(), 2)
+        self.assertEqual(scenario.source_bank_revision.revision, 2)
+        self.assertEqual(
+            set(self.destination.questions.values_list("source_bank_revision__revision", flat=True)),
+            {2},
+        )
+
+    def test_bank_case_id_collision_does_not_enter_historical_locks_or_audit_ids(self):
+        item = create_bank_case(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            course_id=self.destination_course.course_id,
+            case={"title": "Collision bank Case", "stimulus": "Bank narrative"},
+            first_member=self.payload("Collision bank member"),
+        )
+        revision = QuestionBankRevision.objects.get(item=item, revision=1)
+        historical_case, _first, _second = self._source_case(
+            title="Unselected colliding historical Case"
+        )
+        self.assertEqual(revision.id, historical_case.id)
+        page = self.client.get(self.url)
+        entry = next(
+            row for row in page.context["eligible_items"] if row.get("bank_item") == item
+        )
+
+        response = self._post(entry["token"], target_section_id=str(self.section_a.id))
+
+        self.assertEqual(response.status_code, 302)
+        audit = AuditLog.objects.filter(
+            action="DE_EXAM_QUESTIONS_REUSED",
+            entity_id=str(self.destination.id),
+        ).latest("id")
+        self.assertEqual(audit.metadata_json["source_case_ids"], [])
+        self.assertEqual(audit.metadata_json["source_bank_item_ids"], [item.id])
+        self.assertEqual(audit.metadata_json["source_bank_revision_ids"], [revision.id])
+
+    def test_bank_case_members_are_position_ordered_for_catalogue_edit_and_copy(self):
+        item = QuestionBankItem.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            course=self.destination_course.course,
+            owner=self.faculty,
+            kind=QuestionBankItem.Kind.CASE,
+        )
+        revision = QuestionBankRevision.objects.create(
+            item=item,
+            revision=1,
+            title="Reverse insertion Case",
+            stimulus=canonicalize_scenario_content("Ordering narrative").html,
+            scenario_content_format=ExamScenario.ContentFormat.RICH_HTML_V1,
+            created_by=self.faculty,
+        )
+        second_payload = QuestionPayloadService.validate(self.payload("Position two"))
+        first_payload = QuestionPayloadService.validate(self.payload("Position one"))
+        QuestionBankCaseMember.objects.create(
+            revision=revision, position=2, **second_payload
+        )
+        QuestionBankCaseMember.objects.create(
+            revision=revision, position=1, **first_payload
+        )
+
+        my_questions = self.client.get(reverse("departmental_exams:my_questions"))
+        my_entry = next(
+            row for row in my_questions.context["page"].object_list
+            if row.get("item") == item
+        )
+        self.assertEqual(
+            [member.position for member in my_entry["revision"].members.all()],
+            [1, 2],
+        )
+        edit = self.client.get(
+            reverse("departmental_exams:my_case_member_edit", args=[item.id, 1])
+        )
+        self.assertEqual(edit.status_code, 200)
+        self.assertEqual(edit.context["form"].initial["question_text"], "Position one")
+
+        page = self.client.get(self.url)
+        entry = next(
+            row for row in page.context["eligible_items"] if row.get("bank_item") == item
+        )
+        self.assertEqual([member.position for member in entry["members"]], [1, 2])
+        response = self._post(entry["token"], target_section_id=str(self.section_a.id))
+        self.assertEqual(response.status_code, 302)
+        copied_case = ExamScenario.objects.get(
+            contribution=self.destination, source_bank_revision=revision
+        )
+        self.assertEqual(
+            list(
+                copied_case.members.order_by("position").values_list(
+                    "question__question_text", flat=True
+                )
+            ),
+            ["Position one", "Position two"],
+        )
+
+    def test_adopted_cross_campus_case_retains_historical_reuse_after_assignment_decline(self):
+        other_role = UserRole.objects.get(user=self.faculty, campus=self.campus).role
+        UserRole.objects.create(
+            user=self.faculty,
+            role=other_role,
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+        )
+        source = QuestionReuseHTTPTests._previous_source(
+            self, campus=self.other_campus
+        )
+        self.previous = source
+        historical_case, _first, _second = self._source_case(
+            title="Other-campus historical Case"
+        )
+        historical_case.members.update(active_marker=1)
+        before = self.client.get(self.url)
+        self.assertContains(before, "Other-campus historical Case")
+
+        revision = revise_historical_case(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.other_campus.id,
+            scenario_id=historical_case.id,
+            title="Other-campus corrected Case",
+            stimulus="Corrected Case narrative",
+        )
+        source.source_assignment.response_status = FacultyAssignment.ResponseStatus.DECLINED
+        source.source_assignment.accepted_at = None
+        source.source_assignment.save(
+            update_fields=["response_status", "accepted_at", "updated_at"]
+        )
+
+        adopted = self.client.get(self.url)
+        self.assertEqual(adopted.status_code, 200)
+        self.assertContains(adopted, "Other-campus corrected Case")
+        self.assertNotContains(adopted, "Other-campus historical Case")
+        entry = next(
+            row
+            for row in adopted.context["eligible_items"]
+            if row.get("bank_revision") == revision
+        )
+        response = self._post(
+            entry["token"], target_section_id=str(self.section_a.id)
+        )
+        self.assertEqual(response.status_code, 302)
+        copied = ExamScenario.objects.get(
+            contribution=self.destination,
+            source_bank_revision=revision,
+        )
+        self.assertEqual(copied.title, "Other-campus corrected Case")
+        self.assertEqual(
+            list(
+                copied.members.order_by("position").values_list(
+                    "question__question_text", flat=True
+                )
+            ),
+            ["Case first", "Case second"],
+        )
+
+        UserPermission.objects.create(
+            user=self.faculty,
+            permission=Permission.objects.get(code="faculty_portal.access"),
+            tenant=self.tenant,
+            campus=self.other_campus,
+            grant_type=UserPermission.GrantType.DENY,
+        )
+        denied = self.client.get(self.url)
+        self.assertEqual(denied.status_code, 200)
+        self.assertNotContains(denied, "Other-campus corrected Case")
+        self.assertEqual(
+            self._post(
+                entry["token"], target_section_id=str(self.section_a.id)
+            ).status_code,
+            409,
+        )
+
+    def test_linked_historical_mcq_cannot_be_adopted_outside_whole_case(self):
+        historical_case, linked, _second = self._source_case(
+            title="Protected historical Case"
+        )
+        historical_case.members.update(active_marker=1)
+        standalone = QuestionReuseHTTPTests._source_question(
+            self, "Independent historical MCQ"
+        )
+        direct_url = reverse(
+            "departmental_exams:my_historical_question_edit", args=[linked.id]
+        )
+        payload = {
+            **self.payload("Improper standalone correction"),
+            "content_format": Question.ContentFormat.PLAIN_TEXT,
+            "expected_item_revision": 0,
+        }
+        before = self.client.get(self.url)
+        self.assertContains(before, "Protected historical Case")
+        self.assertEqual(self.client.get(direct_url).status_code, 404)
+        self.assertEqual(self.client.post(direct_url, payload).status_code, 404)
+        with self.assertRaises(Http404):
+            revise_bank_question(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                historical_question_id=linked.id,
+                expected_revision=0,
+                payload=self.payload("Improper service correction"),
+            )
+        self.assertFalse(QuestionBankItem.objects.filter(origin_question=linked).exists())
+        self.assertFalse(QuestionBankRevision.objects.exists())
+        self.assertFalse(
+            AuditLog.objects.filter(action="DE_MY_QUESTION_REVISED").exists()
+        )
+
+        still_available = self.client.get(self.url)
+        case_entry = next(
+            entry for entry in still_available.context["eligible_items"]
+            if entry["kind"] == "case" and entry["object"].id == historical_case.id
+        )
+        self.assertEqual(
+            self._post(case_entry["token"], target_section_id=str(self.section_a.id)).status_code,
+            302,
+        )
+        case_url = reverse(
+            "departmental_exams:my_historical_case_edit", args=[historical_case.id]
+        )
+        self.assertEqual(self.client.get(case_url).status_code, 200)
+        self.assertEqual(
+            self.client.post(case_url, {
+                "expected_item_revision": 0,
+                "title": "Corrected whole Case",
+                "stimulus": "Corrected whole Case narrative",
+            }).status_code,
+            302,
+        )
+        self.assertTrue(QuestionBankItem.objects.filter(origin_scenario=historical_case).exists())
+
+        standalone_url = reverse(
+            "departmental_exams:my_historical_question_edit", args=[standalone.id]
+        )
+        self.assertEqual(self.client.get(standalone_url).status_code, 200)
+        self.assertEqual(
+            self.client.post(standalone_url, {
+                **QuestionPayloadService.validate(
+                    self.payload("Corrected independent MCQ")
+                ),
+                "expected_item_revision": 0,
+            }).status_code,
+            302,
+        )
+        self.assertTrue(QuestionBankItem.objects.filter(origin_question=standalone).exists())
+
     def test_submitted_one_member_faculty_case_reuses_as_one_whole_case(self):
         year = AcademicYear.objects.create(
             tenant=self.tenant, code="ONE-MEMBER-OLD", name="Earlier Case year",
@@ -548,7 +1165,7 @@ class QuestionReuseCaseHTTPTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertContains(page, "One linked question case")
         self.assertContains(page, "Single linked question")
         self.assertContains(page, "reuse-question-stem")
-        self.assertContains(page, f'id="reuse-card-case-{items[0]["object"].id}"')
+        self.assertContains(page, f'id="reuse-card-case-{items[0]["dom_id"]}"')
         self.assertContains(page, f'id="reuse-member-{linked.id}" data-reuse-member')
         self.assertContains(page, f"Correct answer:</strong> {linked.correct_answer}")
         token = items[0]["token"]

@@ -1,0 +1,11 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}{{ heading }} | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<h1 class="h3">{{ heading }}</h1>
+<p class="alert alert-info">Changes will apply to future exams only. Existing Drafts, Submitted contributions, generated questionnaires, Answer Keys, and exam history will not be changed.</p>
+<form method="post" class="card shadow-sm" novalidate><div class="card-body">
+  {% csrf_token %}{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}{% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+  {% for field in form.visible_fields %}<div class="mb-3"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>{% endfor %}
+  <button class="btn btn-primary" type="submit">Save revision</button> <a class="btn btn-outline-secondary" href="{{ cancel_url }}">Cancel</a>
+</div></form>
+{% endblock %}

@@ -899,8 +899,8 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         )
         list_response = self.client.get(reverse("departmental_exams:contribution_list"))
         self.assertEqual(list_response.status_code, 200)
-        self.assertContains(list_response, "<title>Question Bank | TeacherMate+</title>", html=True)
-        self.assertContains(list_response, '<h1 class="h3 mb-1">Question Bank</h1>', html=True)
+        self.assertContains(list_response, "<title>My Questions | TeacherMate+</title>", html=True)
+        self.assertContains(list_response, '<h1 class="h3 mb-1">My Questions</h1>', html=True)
         menu_item = next(
             node["item"]
             for group in list_response.context["portal_menu"]
@@ -914,7 +914,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(workspace_response.status_code, 200)
         self.assertContains(
             workspace_response,
-            f'<li class="breadcrumb-item"><a href="{reverse("departmental_exams:contribution_list")}">Question Bank</a></li>',
+            f'<li class="breadcrumb-item"><a href="{reverse("departmental_exams:contribution_list")}?cycle_status={self.contribution.cycle_course.cycle.status}">Question Bank</a></li>',
             html=True,
         )
         self.assertContains(workspace_response, "<strong>Deadline:</strong>", html=True)
@@ -1196,7 +1196,10 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             reverse("departmental_exams:contribution_list")
         )
         self.assertEqual(eligible_without_roster.status_code, 200)
-        self.assertContains(eligible_without_roster, "No contribution roster record is available yet")
+        self.assertContains(
+            eligible_without_roster,
+            "No contribution roster record matches this cycle status in your authorized scope.",
+        )
         self.assertIn(
             "DE_EXAM_FACULTY_CONTRIBUTIONS",
             [

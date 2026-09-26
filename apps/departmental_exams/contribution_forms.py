@@ -175,6 +175,48 @@ class QuestionForm(ContributionRevisionForm):
         return cleaned
 
 
+class MyQuestionForm(QuestionForm):
+    """Question content without an exam-cycle or contribution dependency."""
+
+    expected_contribution_revision = None
+    expected_question_revision = None
+    expected_scenario_revision = None
+    expected_item_revision = forms.IntegerField(
+        min_value=0, required=False, initial=0, widget=forms.HiddenInput
+    )
+
+
+class MyCaseForm(BootstrapFormMixin, forms.Form):
+    expected_item_revision = forms.IntegerField(
+        min_value=0, required=False, initial=0, widget=forms.HiddenInput
+    )
+    title = forms.CharField(max_length=200, required=False)
+    stimulus = forms.CharField(
+        max_length=100000,
+        widget=forms.Textarea(attrs={"rows": 8}),
+        label="Case / Scenario content",
+    )
+
+
+class MyCaseBundleForm(MyCaseForm):
+    question_text = forms.CharField(
+        max_length=MAX_RAW_BY_FIELD["question_text"],
+        widget=forms.Textarea(attrs={"rows": 5}),
+        label="First linked question",
+    )
+    choice_a = forms.CharField(max_length=MAX_RAW_BY_FIELD["choice_a"], label="Choice A")
+    choice_b = forms.CharField(max_length=MAX_RAW_BY_FIELD["choice_b"], label="Choice B")
+    choice_c = forms.CharField(max_length=MAX_RAW_BY_FIELD["choice_c"], label="Choice C")
+    choice_d = forms.CharField(max_length=MAX_RAW_BY_FIELD["choice_d"], label="Choice D")
+    content_format = forms.ChoiceField(
+        choices=Question.ContentFormat.choices,
+        initial=Question.ContentFormat.PLAIN_TEXT,
+        widget=forms.HiddenInput,
+    )
+    correct_answer = forms.ChoiceField(choices=((value, value) for value in "ABCD"))
+    difficulty = forms.ChoiceField(choices=Question.Difficulty.choices)
+
+
 class QuestionDeleteForm(ContributionRevisionForm):
     expected_question_revision = forms.IntegerField(
         min_value=1, widget=forms.HiddenInput

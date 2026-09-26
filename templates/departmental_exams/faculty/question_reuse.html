@@ -1,16 +1,16 @@
 {% extends "faculty_portal/base.html" %}
 {% load static %}
-{% block title %}Reuse My Previous Questions | TeacherMate+{% endblock %}
+{% block title %}Use My Questions in Draft | TeacherMate+{% endblock %}
 {% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_question_reuse.css' %}">{% endblock %}
 {% block faculty_content %}
 <div class="reuse-layout index-collapsed" data-reuse-layout>
 <div class="reuse-primary">
-<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}">Question Bank</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_workspace' destination.id %}">Current Draft</a></li><li class="breadcrumb-item active">Reuse My Previous Questions</li></ol></nav>
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:my_questions' %}">My Questions</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_workspace' destination.id %}">Current Draft</a></li><li class="breadcrumb-item active">Use in Draft</li></ol></nav>
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
-  <div><h1 class="h3">Reuse My Previous Questions</h1><p class="text-muted mb-0">{{ destination.cycle_course.course.code }} · {{ destination.cycle_course.course.title }}</p></div>
+  <div><h1 class="h3">Use My Questions in Draft</h1><p class="text-muted mb-0">{{ destination.cycle_course.course.code }} · {{ destination.cycle_course.course.title }}</p></div>
   <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' destination.id %}">Back to Current Draft</a>
 </div>
-<p class="alert alert-info">Choose your own earlier Submitted questions for this course. A Case copies as one group with all its Linked Questions. You can edit copies before Final Submission.</p>
+<p class="alert alert-info">Choose your current My Questions revisions or your own earlier Submitted questions. A whole Case copies atomically with all linked MCQs. Existing Drafts and exam history never change when a bank item is corrected.</p>
 {% if excluded_context_count %}<p class="small text-muted">Some historical questions are unavailable because their Case context is shared or incomplete. They are not offered as standalone questions.</p>{% endif %}
 <form method="get" class="card card-body mb-3" id="reuse-filters">
   <div class="row g-2">

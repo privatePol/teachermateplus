@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
+from types import SimpleNamespace
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import Http404
 from django.utils.html import strip_tags
 
@@ -24,7 +25,9 @@ from .duplicate_contract import (case_member_identity, pool_claims, require_clea
 from .faculty_case_services import FacultyCasePolicy
 from .import_sections import resolve_import_section
 from .models import (ExamScenario, ExamScenarioMember, ExaminationCycle, FacultyContribution,
-                     Question, QuestionBlueprintPlacement)
+                     Question, QuestionBankCaseMember, QuestionBankItem, QuestionBankRevision,
+                     QuestionBlueprintPlacement)
+from .my_questions import authoring_scopes
 from .question_content import visible_text
 from .scenario_content import canonicalize_scenario_content
 
@@ -117,9 +120,11 @@ def _source_items(sources):
     if not sources:
         return [], 0
     source_by_id = {source.id: source for source in sources}
-    questions = list(Question.objects.filter(contribution_id__in=source_by_id)
+    questions = list(Question.objects.filter(
+        contribution_id__in=source_by_id, adopted_bank_item__isnull=True)
                      .select_related("contribution").order_by("contribution_id", "position", "id"))
-    cases = list(ExamScenario.objects.filter(contribution_id__in=source_by_id)
+    cases = list(ExamScenario.objects.filter(
+        contribution_id__in=source_by_id, adopted_bank_item__isnull=True)
                  .order_by("contribution_id", "created_at", "id"))
     question_by_id = {question.id: question for question in questions}
     memberships = list(ExamScenarioMember.objects.filter(
@@ -150,6 +155,7 @@ def _source_items(sources):
                 continue
             entries.append({"kind": "case", "source": source, "object": case,
                             "members": rows, "size": len(rows),
+                            "dom_id": f"history-{case.id}",
                             "token": _token("c", source, case.id, case.revision, rows, case.active_marker)})
         for question in questions_by_source[source.id]:
             if by_question[question.id]:
@@ -158,8 +164,87 @@ def _source_items(sources):
                 continue
             entries.append({"kind": "question", "source": source, "object": question,
                             "members": (), "size": 1,
+                            "dom_id": f"history-{question.id}",
                             "token": _token("q", source, question.id, question.revision)})
     return entries, excluded
+
+
+def _bank_items(*, request, destination, historical_sources):
+    tenant_id = destination.cycle_course.cycle.tenant_id
+    course_id = destination.cycle_course.course_id
+    permitted_campuses = _campus_ids(request)
+    assignment_campus_ids = {
+        scope.campus_id
+        for scope in authoring_scopes(user=request.user, tenant_id=tenant_id)
+        if scope.course_id == course_id and scope.campus_id in permitted_campuses
+    }
+    historical_sources_by_id = {source.id: source for source in historical_sources}
+    candidate_campus_ids = assignment_campus_ids | {
+        source.source_campus_id for source in historical_sources
+    }
+    if not candidate_campus_ids:
+        return []
+    items = list(
+        QuestionBankItem.objects.filter(
+            owner=request.user,
+            tenant_id=tenant_id,
+            campus_id__in=candidate_campus_ids,
+            course_id=course_id,
+        ).select_related(
+            "course",
+            "origin_question__contribution__cycle_course",
+            "origin_scenario__contribution__cycle_course",
+        )
+    )
+    revisions = {
+        (row.item_id, row.revision): row
+        for row in QuestionBankRevision.objects.filter(item__in=items).prefetch_related(
+            Prefetch(
+                "members",
+                queryset=QuestionBankCaseMember.objects.order_by("position", "id"),
+            )
+        )
+    }
+    entries = []
+    for item in items:
+        origin_contribution = None
+        if item.kind == QuestionBankItem.Kind.QUESTION and item.origin_question_id:
+            origin_contribution = item.origin_question.contribution
+        elif item.kind == QuestionBankItem.Kind.CASE and item.origin_scenario_id:
+            origin_contribution = item.origin_scenario.contribution
+        if origin_contribution is None:
+            if item.campus_id not in assignment_campus_ids:
+                continue
+        else:
+            authorized_source = historical_sources_by_id.get(origin_contribution.id)
+            if authorized_source is None or (
+                item.owner_id != authorized_source.faculty_user_id
+                or item.tenant_id != authorized_source.cycle_course.cycle.tenant_id
+                or item.campus_id != authorized_source.source_campus_id
+                or item.course_id != authorized_source.cycle_course.course_id
+            ):
+                continue
+        revision = revisions.get((item.id, item.current_revision))
+        if revision is None:
+            continue
+        members = tuple(revision.members.all()) if item.kind == QuestionBankItem.Kind.CASE else ()
+        if item.kind == QuestionBankItem.Kind.CASE and not members:
+            continue
+        marker = hashlib.sha256(
+            f"{item.id}:{item.current_revision}:{revision.id}".encode()
+        ).hexdigest()[:24]
+        entries.append({
+            "kind": "case" if item.kind == QuestionBankItem.Kind.CASE else "question",
+            "source": None,
+            "object": revision,
+            "members": members,
+            "size": len(members) if members else 1,
+            "token": f"b:{item.id}:{marker}",
+            "dom_id": f"bank-{item.id}",
+            "bank_item": item,
+            "bank_revision": revision,
+        })
+    return entries
 
 
 def catalogue(*, request, destination, filters):
@@ -168,6 +253,11 @@ def catalogue(*, request, destination, filters):
              for source in sources}
     terms = {str(source.cycle_course.cycle.term_id): source.cycle_course.cycle.term for source in sources}
     entries, excluded = _source_items(sources)
+    entries = _bank_items(
+        request=request,
+        destination=destination,
+        historical_sources=sources,
+    ) + entries
     case_available = FacultyCasePolicy.context(
         contribution=destination,
         tenant_id=destination.cycle_course.cycle.tenant_id,
@@ -190,13 +280,14 @@ def catalogue(*, request, destination, filters):
     for entry in entries:
         if entry["kind"] == "case" and not case_available:
             continue
-        source_cycle = entry["source"].cycle_course.cycle
-        if (year and str(source_cycle.academic_year_id) != year
-                or term and str(source_cycle.term_id) != term
-                or period and source_cycle.exam_period != period
+        source_cycle = entry["source"].cycle_course.cycle if entry["source"] else None
+        if ((year or term or period) and source_cycle is None
+                or source_cycle is not None and year and str(source_cycle.academic_year_id) != year
+                or source_cycle is not None and term and str(source_cycle.term_id) != term
+                or source_cycle is not None and period and source_cycle.exam_period != period
                 or kind and entry["kind"] != kind):
             continue
-        member_questions = ([row.question for row in entry["members"]] if entry["kind"] == "case"
+        member_questions = ([getattr(row, "question", row) for row in entry["members"]] if entry["kind"] == "case"
                             else [entry["object"]])
         if difficulty and not any(question.difficulty == difficulty for question in member_questions):
             continue
@@ -265,7 +356,10 @@ def copy_selected(*, request, destination_id, expected_revision, filters, select
     available = {entry["token"]: entry for entry in initial_catalog["eligible_items"]}
     if any(token not in available for token in selected_tokens):
         raise ContributionConflict("The visible selection changed. Reload the reuse page and select again.")
-    source_cycle_ids = {available[token]["source"].cycle_course.cycle_id for token in selected_tokens}
+    source_cycle_ids = {
+        available[token]["source"].cycle_course.cycle_id
+        for token in selected_tokens if available[token]["source"] is not None
+    }
     with transaction.atomic():
         locked_cycles = list(ExaminationCycle.objects.select_for_update().filter(
             pk__in=source_cycle_ids | {initial.cycle_course.cycle_id}, tenant_id=tenant_id
@@ -282,6 +376,16 @@ def copy_selected(*, request, destination_id, expected_revision, filters, select
         ContributionAuthorizationService.require_revision(
             contribution=destination, expected_revision=expected_revision)
         ContributionAuthorizationService.require_no_active_import(contribution=destination)
+        selected_bank_item_ids = {
+            available[token]["bank_item"].id
+            for token in selected_tokens if available[token].get("bank_item")
+        }
+        # Serialize current-revision selection before rebuilding the locked
+        # catalogue. A concurrent owner edit must either finish first and
+        # invalidate the token, or wait until this exact revision is copied.
+        list(QuestionBankItem.objects.select_for_update().filter(
+            pk__in=selected_bank_item_ids
+        ).order_by("pk"))
         current_catalog = catalogue(request=request, destination=destination, filters=filters)
         current = {entry["token"]: entry for entry in current_catalog["eligible_items"]}
         if any(token not in current for token in selected_tokens):
@@ -289,12 +393,26 @@ def copy_selected(*, request, destination_id, expected_revision, filters, select
         requested = set(selected_tokens)
         entries = [entry for entry in current_catalog["eligible_items"]
                    if entry["token"] in requested]
-        source_ids = {entry["source"].id for entry in entries}
+        source_ids = {entry["source"].id for entry in entries if entry["source"] is not None}
         list(FacultyContribution.objects.select_for_update().filter(pk__in=source_ids).order_by("pk"))
-        question_ids = {row.question_id for entry in entries for row in entry["members"]}
-        question_ids.update(entry["object"].id for entry in entries if entry["kind"] == "question")
+        bank_item_ids = {entry["bank_item"].id for entry in entries if entry.get("bank_item")}
+        bank_revision_ids = {entry["bank_revision"].id for entry in entries if entry.get("bank_revision")}
+        list(QuestionBankItem.objects.select_for_update().filter(pk__in=bank_item_ids).order_by("pk"))
+        list(QuestionBankRevision.objects.select_for_update().filter(pk__in=bank_revision_ids).order_by("pk"))
+        question_ids = {
+            row.question_id for entry in entries if not entry.get("bank_revision")
+            for row in entry["members"]
+        }
+        question_ids.update(
+            entry["object"].id for entry in entries
+            if entry["kind"] == "question" and not entry.get("bank_revision")
+        )
         list(Question.objects.select_for_update().filter(pk__in=question_ids).order_by("pk"))
-        case_ids = {entry["object"].id for entry in entries if entry["kind"] == "case"}
+        case_ids = {
+            entry["object"].id
+            for entry in entries
+            if entry["kind"] == "case" and not entry.get("bank_revision")
+        }
         list(ExamScenario.objects.select_for_update().filter(pk__in=case_ids).order_by("pk"))
         list(ExamScenarioMember.objects.select_for_update().filter(scenario_id__in=case_ids).order_by("pk"))
         questions = list(Question.objects.select_for_update().filter(contribution=destination).order_by("pk"))
@@ -320,16 +438,23 @@ def copy_selected(*, request, destination_id, expected_revision, filters, select
         seen = set(claims)
         accepted, skipped = [], []
         for entry in entries:
-            member_questions = ([row.question for row in entry["members"]] if entry["kind"] == "case"
+            member_questions = ([getattr(row, "question", row) for row in entry["members"]] if entry["kind"] == "case"
                                 else [entry["object"]])
             for question in member_questions:
                 _validated_payload(question)
             if entry["kind"] == "case":
                 case = entry["object"]
-                if case.content_format == ExamScenario.ContentFormat.RICH_HTML_V1:
+                case_format = (
+                    case.scenario_content_format
+                    if entry.get("bank_revision") else case.content_format
+                )
+                if case_format == ExamScenario.ContentFormat.RICH_HTML_V1:
                     if canonicalize_scenario_content(case.stimulus).html != case.stimulus:
                         raise ValidationError("A selected historical Case cannot be copied safely.")
-                keys = [case_member_identity(question, case) for question in member_questions]
+                identity_case = SimpleNamespace(
+                    stimulus=case.stimulus, content_format=case_format
+                )
+                keys = [case_member_identity(question, identity_case) for question in member_questions]
             else:
                 keys = [standalone_identity(member_questions[0])]
             if len(keys) != len(set(keys)) or any(key in seen for key in keys):
@@ -347,16 +472,22 @@ def copy_selected(*, request, destination_id, expected_revision, filters, select
                         contribution=destination, tenant_id=tenant_id, for_update=True)[0]),
                     section=target, contribution=destination,
                     title=source_case.title, stimulus=source_case.stimulus,
-                    content_format=source_case.content_format,
+                    content_format=(
+                        source_case.scenario_content_format
+                        if entry.get("bank_revision") else source_case.content_format
+                    ),
+                    source_bank_revision=entry.get("bank_revision"),
                     created_by=request.user, updated_by=request.user,
                 )
                 new_case.full_clean()
                 new_case.save()
-            members = ([row.question for row in entry["members"]] if source_case else [entry["object"]])
+            members = ([getattr(row, "question", row) for row in entry["members"]]
+                       if source_case else [entry["object"]])
             for index, source_question in enumerate(members, start=1):
                 copy = Question(
                     contribution=destination, position=len(questions) + 1,
                     entry_method=Question.EntryMethod.MANUAL,
+                    source_bank_revision=entry.get("bank_revision"),
                     **_validated_payload(source_question),
                 )
                 copy.full_clean()
@@ -386,6 +517,8 @@ def copy_selected(*, request, destination_id, expected_revision, filters, select
                 metadata={
                     "destination_cycle_course_id": destination.cycle_course_id,
                     "source_contribution_ids": sorted(source_ids),
+                    "source_bank_item_ids": sorted(bank_item_ids),
+                    "source_bank_revision_ids": sorted(bank_revision_ids),
                     "source_question_ids": sorted(question_ids),
                     "source_case_ids": sorted(case_ids),
                     "copied_question_ids": copied_question_ids,

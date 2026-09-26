@@ -1,0 +1,43 @@
+{% extends "faculty_portal/base.html" %}
+{% load departmental_exam_content %}
+{% block title %}My Questions | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+  <div><h1 class="h3 mb-1">My Questions</h1><p class="text-muted mb-0">Add and correct your questions at any time. Changes apply to future exams only.</p></div>
+  <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_list' %}">Contribution workspaces</a>
+</div>
+
+<div class="card shadow-sm mb-3"><div class="card-body">
+  <h2 class="h5">Add</h2>
+  {% for scope in scopes %}<div class="d-flex align-items-center justify-content-between gap-2 flex-wrap py-2{% if not forloop.last %} border-bottom{% endif %}"><span><strong>{{ scope.course_code }}</strong> &mdash; {{ scope.course_title }}</span><span class="d-flex gap-2"><a class="btn btn-sm btn-primary" href="{% url 'departmental_exams:my_question_create' scope.campus_id scope.course_id %}">Add question</a>{% if case_authoring_enabled %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:my_case_create' scope.campus_id scope.course_id %}">Create whole Case</a>{% endif %}</span></div>{% endfor %}
+</div></div>
+
+<form method="get" class="card shadow-sm mb-3"><div class="card-body row g-2 align-items-end">
+  <div class="col-12 col-md-4"><label class="form-label" for="myq-search">Search</label><input class="form-control" id="myq-search" name="search" value="{{ filters.search }}" maxlength="200"></div>
+  <div class="col-6 col-md-3"><label class="form-label" for="myq-course">Course</label><select class="form-select" id="myq-course" name="course"><option value="">All courses</option>{% for scope in scopes %}<option value="{{ scope.course_id }}"{% if filters.course == scope.course_id|stringformat:'s' %} selected{% endif %}>{{ scope.course_code }}</option>{% endfor %}</select></div>
+  <div class="col-6 col-md-3"><label class="form-label" for="myq-kind">Type</label><select class="form-select" id="myq-kind" name="content_type"><option value="">Questions and Cases</option><option value="question"{% if filters.content_type == 'question' %} selected{% endif %}>Questions</option><option value="case"{% if filters.content_type == 'case' %} selected{% endif %}>Whole Cases</option></select></div>
+  <div class="col-12 col-md-2"><button class="btn btn-outline-primary w-100">Apply</button></div>
+</div></form>
+
+{% for entry in page.object_list %}
+<article class="card shadow-sm mb-3">
+  <div class="card-header d-flex justify-content-between gap-3 flex-wrap">
+    <strong>{% if entry.kind == 'case' %}Whole Case{% else %}Question{% endif %}</strong>
+    <span class="small text-muted">{% if entry.item %}{{ entry.item.course.code }} &middot; Current revision {{ entry.item.current_revision }}{% elif entry.historical_case %}{{ entry.historical_case.contribution.cycle_course.course.code }} &middot; Submitted history{% else %}{{ entry.historical_question.contribution.cycle_course.course.code }} &middot; Submitted history{% endif %}</span>
+  </div>
+  <div class="card-body">
+    {% if entry.revision %}
+      {% if entry.kind == 'case' %}<h2 class="h5">{{ entry.revision.title|default:"Case / Scenario" }}</h2><div class="mb-3">{{ entry.revision.stimulus|scenario_content:entry.revision.scenario_content_format }}</div>{% for member in entry.revision.members.all %}<div class="border rounded p-2 mb-2"><strong>Question {{ member.position }}.</strong> {{ member.question_text|question_content:member.content_format }}{% if case_authoring_enabled %} <a class="btn btn-sm btn-link" href="{% url 'departmental_exams:my_case_member_edit' entry.item.id member.position %}">Edit</a>{% endif %}</div>{% endfor %}{% if case_authoring_enabled %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:my_case_edit' entry.item.id %}">Edit Case</a> <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:my_case_member_add' entry.item.id %}">Add linked MCQ</a>{% endif %}
+      {% else %}<div>{{ entry.revision.question_text|question_content:entry.revision.content_format }}</div><a class="btn btn-sm btn-outline-primary mt-2" href="{% url 'departmental_exams:my_question_edit' entry.item.id %}">Edit</a>{% endif %}
+    {% elif entry.historical_case %}
+      <h2 class="h5">{{ entry.historical_case.title|default:"Case / Scenario" }}</h2><div class="mb-3">{{ entry.historical_case.stimulus|scenario_content:entry.historical_case.content_format }}</div>{% for member in entry.historical_case.members.all %}<div class="border rounded p-2 mb-2"><strong>Question {{ member.position }}.</strong> {{ member.question.question_text|question_content:member.question.content_format }}</div>{% endfor %}{% if case_authoring_enabled %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:my_historical_case_edit' entry.historical_case.id %}">Edit for future use</a>{% endif %}
+    {% else %}
+      <div>{{ entry.historical_question.question_text|question_content:entry.historical_question.content_format }}</div><a class="btn btn-sm btn-outline-primary mt-2" href="{% url 'departmental_exams:my_historical_question_edit' entry.historical_question.id %}">Edit for future use</a>
+    {% endif %}
+    {% if drafts %}<div class="mt-3 small"><span class="text-muted">Use in an open Draft:</span>{% for draft in drafts %}{% if entry.item and draft.cycle_course.course_id == entry.item.course_id or entry.historical_case and draft.cycle_course.course_id == entry.historical_case.contribution.cycle_course.course_id or entry.historical_question and draft.cycle_course.course_id == entry.historical_question.contribution.cycle_course.course_id %} <a href="{% url 'departmental_exams:question_reuse' draft.id %}">{{ draft.cycle_course.course.code }} Draft</a>{% endif %}{% endfor %}</div>{% endif %}
+  </div>
+</article>
+{% empty %}<div class="alert alert-info">No questions match the current filters.</div>{% endfor %}
+
+{% if page.paginator.num_pages > 1 %}<nav aria-label="My Questions pages"><ul class="pagination">{% if page.has_previous %}<li class="page-item"><a class="page-link" href="?page={{ page.previous_page_number }}&amp;course={{ filters.course }}&amp;content_type={{ filters.content_type }}&amp;search={{ filters.search|urlencode }}">Previous</a></li>{% endif %}<li class="page-item disabled"><span class="page-link">Page {{ page.number }} of {{ page.paginator.num_pages }}</span></li>{% if page.has_next %}<li class="page-item"><a class="page-link" href="?page={{ page.next_page_number }}&amp;course={{ filters.course }}&amp;content_type={{ filters.content_type }}&amp;search={{ filters.search|urlencode }}">Next</a></li>{% endif %}</ul></nav>{% endif %}
+{% endblock %}

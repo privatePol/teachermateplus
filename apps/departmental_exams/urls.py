@@ -32,6 +32,51 @@ urlpatterns = [
         name="contribution_list",
     ),
     path(
+        "faculty/departmental-exams/my-questions/",
+        faculty_views.my_questions_view,
+        name="my_questions",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/campuses/<int:campus_id>/courses/<int:course_id>/questions/add/",
+        faculty_views.my_question_create_view,
+        name="my_question_create",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/questions/<int:item_id>/edit/",
+        faculty_views.my_question_edit_view,
+        name="my_question_edit",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/history/questions/<int:historical_question_id>/edit/",
+        faculty_views.my_question_edit_view,
+        name="my_historical_question_edit",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/campuses/<int:campus_id>/courses/<int:course_id>/cases/add/",
+        faculty_views.my_case_create_view,
+        name="my_case_create",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/cases/<int:item_id>/edit/",
+        faculty_views.my_case_edit_view,
+        name="my_case_edit",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/history/cases/<int:historical_scenario_id>/edit/",
+        faculty_views.my_case_edit_view,
+        name="my_historical_case_edit",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/cases/<int:item_id>/questions/add/",
+        faculty_views.my_case_member_view,
+        name="my_case_member_add",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/cases/<int:item_id>/questions/<int:position>/edit/",
+        faculty_views.my_case_member_view,
+        name="my_case_member_edit",
+    ),
+    path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/",
         faculty_views.contribution_workspace_view,
         name="contribution_workspace",

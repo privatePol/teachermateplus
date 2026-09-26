@@ -1186,6 +1186,13 @@ class Question(TimeStampedModel):
         blank=True,
     )
     import_row_number = models.PositiveSmallIntegerField(null=True, blank=True)
+    source_bank_revision = models.ForeignKey(
+        "QuestionBankRevision",
+        on_delete=models.PROTECT,
+        related_name="draft_copies",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = "departmental_exam_questions"
@@ -2149,6 +2156,13 @@ class ExamScenario(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="updated_exam_scenarios",
     )
+    source_bank_revision = models.ForeignKey(
+        "QuestionBankRevision",
+        on_delete=models.PROTECT,
+        related_name="draft_case_copies",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = "departmental_exam_scenarios"
@@ -2270,6 +2284,185 @@ class ExamScenarioMember(TimeStampedModel):
                     raise ValidationError(
                         "Only Submitted questions or their correction Draft copies may belong to reviewer scenarios."
                     ) from exc
+
+
+class QuestionBankItem(TimeStampedModel):
+    """Stable faculty-owned identity for the My Questions workflow."""
+
+    class Kind(models.TextChoices):
+        QUESTION = "QUESTION", "Standalone question"
+        CASE = "CASE", "Whole Case"
+
+    tenant = models.ForeignKey(
+        "tenants.Tenant", on_delete=models.PROTECT, related_name="question_bank_items"
+    )
+    campus = models.ForeignKey(
+        "tenants.Campus", on_delete=models.PROTECT, related_name="question_bank_items"
+    )
+    course = models.ForeignKey(
+        "academics.Course", on_delete=models.PROTECT, related_name="question_bank_items"
+    )
+    owner = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="owned_question_bank_items"
+    )
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    current_revision = models.PositiveIntegerField(default=1)
+    origin_question = models.OneToOneField(
+        Question,
+        on_delete=models.PROTECT,
+        related_name="adopted_bank_item",
+        null=True,
+        blank=True,
+    )
+    origin_scenario = models.OneToOneField(
+        ExamScenario,
+        on_delete=models.PROTECT,
+        related_name="adopted_bank_item",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "departmental_exam_question_bank_items"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(current_revision__gte=1),
+                name="ck_de_bank_item_revision",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind="QUESTION", origin_scenario__isnull=True)
+                    | models.Q(kind="CASE", origin_question__isnull=True)
+                ),
+                name="ck_de_bank_item_origin_kind",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["owner", "tenant", "campus", "course", "kind"],
+                name="idx_de_bank_owner_scope",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "tenant_id", "campus_id", "course_id", "owner_id", "kind",
+                "origin_question_id", "origin_scenario_id",
+            ).first()
+            immutable = (
+                "tenant_id", "campus_id", "course_id", "owner_id", "kind",
+                "origin_question_id", "origin_scenario_id",
+            )
+            if previous and any(previous[field] != getattr(self, field) for field in immutable):
+                raise ValidationError("Question Bank ownership and scope are immutable.")
+        return super().save(*args, **kwargs)
+
+
+class QuestionBankRevision(TimeStampedModel):
+    """Immutable content revision; Case member rows form the same atomic revision."""
+
+    item = models.ForeignKey(
+        QuestionBankItem, on_delete=models.PROTECT, related_name="revisions"
+    )
+    revision = models.PositiveIntegerField()
+    title = models.CharField(max_length=200, blank=True)
+    stimulus = models.TextField(max_length=50000, blank=True)
+    scenario_content_format = models.CharField(
+        max_length=16,
+        choices=ExamScenario.ContentFormat.choices,
+        default=ExamScenario.ContentFormat.PLAIN_TEXT,
+    )
+    content_format = models.CharField(
+        max_length=20,
+        choices=Question.ContentFormat.choices,
+        default=Question.ContentFormat.PLAIN_TEXT,
+    )
+    question_text = models.TextField(max_length=25000, blank=True)
+    choice_a = models.TextField(max_length=12000, blank=True)
+    choice_b = models.TextField(max_length=12000, blank=True)
+    choice_c = models.TextField(max_length=12000, blank=True)
+    choice_d = models.TextField(max_length=12000, blank=True)
+    correct_answer = models.CharField(
+        max_length=1,
+        choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")],
+        blank=True,
+    )
+    difficulty = models.CharField(
+        max_length=10, choices=Question.Difficulty.choices, blank=True
+    )
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="question_bank_revisions"
+    )
+
+    class Meta:
+        db_table = "departmental_exam_question_bank_revisions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "revision"], name="uq_de_bank_item_revision"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1), name="ck_de_bank_revision_number"
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["item", "revision"], name="idx_de_bank_revision")
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Question Bank revisions are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Question Bank revisions are immutable.")
+
+
+class QuestionBankCaseMember(TimeStampedModel):
+    """Immutable MCQ snapshot belonging to exactly one whole-Case revision."""
+
+    revision = models.ForeignKey(
+        QuestionBankRevision, on_delete=models.PROTECT, related_name="members"
+    )
+    position = models.PositiveSmallIntegerField()
+    content_format = models.CharField(
+        max_length=20,
+        choices=Question.ContentFormat.choices,
+        default=Question.ContentFormat.PLAIN_TEXT,
+    )
+    question_text = models.TextField(max_length=25000)
+    choice_a = models.TextField(max_length=12000)
+    choice_b = models.TextField(max_length=12000)
+    choice_c = models.TextField(max_length=12000)
+    choice_d = models.TextField(max_length=12000)
+    correct_answer = models.CharField(
+        max_length=1, choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")]
+    )
+    difficulty = models.CharField(max_length=10, choices=Question.Difficulty.choices)
+
+    class Meta:
+        db_table = "departmental_exam_question_bank_case_members"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["revision", "position"], name="uq_de_bank_case_position"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(position__gte=1), name="ck_de_bank_case_position"
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["revision", "position"], name="idx_de_bank_case_order"
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Question Bank Case members are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Question Bank Case members are immutable.")
 
 
 class ExamGenerationRevision(TimeStampedModel):

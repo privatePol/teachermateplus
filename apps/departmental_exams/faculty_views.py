@@ -7,6 +7,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
+from django.core.paginator import Paginator
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -31,6 +32,9 @@ from .contribution_forms import (
     FacultyCaseDeleteForm,
     FacultyCaseForm,
     FacultyCaseMemberReorderForm,
+    MyCaseBundleForm,
+    MyCaseForm,
+    MyQuestionForm,
     QuestionCSVConfirmForm,
     QuestionCSVUploadForm,
     QuestionDOCXRowForm,
@@ -57,6 +61,7 @@ from .models import (
     Question,
     QuestionBlueprintPlacement,
     QuestionImportBatch,
+    QuestionBankItem,
 )
 from .scenario_content import (
     canonicalize_scenario_content,
@@ -76,6 +81,22 @@ from .questionnaire_printing import (
     _questionnaire_paper_context,
 )
 from .personalized_answer_sheets import PersonalizedAnswerSheetService
+from .my_questions import (
+    QUESTION_FIELDS as BANK_QUESTION_FIELDS,
+    authoring_scopes,
+    create_case as create_bank_case,
+    create_question as create_bank_question,
+    current_revision as current_bank_revision,
+    historical_question_owner as historical_bank_question_owner,
+    historical_items as historical_bank_items,
+    owned_items as owned_bank_items,
+    require_owner as require_bank_owner,
+    require_case_enabled,
+    require_scope as require_bank_scope,
+    revise_case as revise_bank_case,
+    revise_historical_case,
+    revise_question as revise_bank_question,
+)
 
 
 def _scope(request):
@@ -444,6 +465,382 @@ def answer_sheet_view(request):
             ),
             **_questionnaire_paper_context(request.GET.get("paper")),
         },
+    )
+
+
+def _bank_question_initial(source=None, *, expected_revision=0):
+    initial = {"expected_item_revision": expected_revision}
+    if source is not None:
+        initial.update({field: getattr(source, field) for field in BANK_QUESTION_FIELDS})
+    return initial
+
+
+def _bank_question_payload(form):
+    return {field: form.cleaned_data[field] for field in BANK_QUESTION_FIELDS}
+
+
+def _bank_scope_ids(request):
+    tenant_id, campus_id = _scope(request)
+    if not tenant_id or not campus_id:
+        raise PermissionDenied("Select an exact campus before opening My Questions.")
+    return tenant_id, campus_id
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_GET
+def my_questions_view(request):
+    tenant_id, campus_id = _bank_scope_ids(request)
+    scopes = authoring_scopes(
+        user=request.user, tenant_id=tenant_id, campus_id=campus_id
+    )
+    if not scopes:
+        raise PermissionDenied("No retained accepted course assignment is available.")
+    course_filter = request.GET.get("course", "")
+    kind_filter = request.GET.get("content_type", "")
+    query = (request.GET.get("search", "") or "").strip().casefold()
+    if len(query) > 200:
+        raise ValidationError("Search may not exceed 200 characters.")
+    if kind_filter not in ("", "question", "case"):
+        raise ValidationError("Select a valid content type.")
+    valid_courses = {str(scope.course_id) for scope in scopes}
+    if course_filter and course_filter not in valid_courses:
+        raise ValidationError("Select an available course.")
+    course_id = int(course_filter) if course_filter else None
+    entries = []
+    for item, revision in owned_bank_items(
+        actor=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+        course_id=course_id,
+    ):
+        if revision is None:
+            continue
+        kind = "case" if item.kind == QuestionBankItem.Kind.CASE else "question"
+        if kind_filter and kind_filter != kind:
+            continue
+        haystack = " ".join(
+            [revision.title, revision.stimulus, revision.question_text]
+            + [member.question_text for member in revision.members.all()]
+        ).casefold()
+        if query and query not in haystack:
+            continue
+        entries.append({"kind": kind, "item": item, "revision": revision})
+    historical_cases, historical_questions = historical_bank_items(
+        actor=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+        course_id=course_id,
+    )
+    if kind_filter != "question":
+        for scenario in historical_cases:
+            text = " ".join(
+                [scenario.title, scenario.stimulus]
+                + [row.question.question_text for row in scenario.members.all()]
+            ).casefold()
+            if not query or query in text:
+                entries.append({"kind": "case", "historical_case": scenario})
+    if kind_filter != "case":
+        for question in historical_questions:
+            if not query or query in question.question_text.casefold():
+                entries.append({"kind": "question", "historical_question": question})
+    page = Paginator(entries, 12).get_page(request.GET.get("page") or 1)
+    drafts = []
+    if FeatureSettingsService.is_departmental_exam_question_reuse_enabled(
+        tenant_id=tenant_id
+    ):
+        drafts = list(
+            ContributionSelector.owner_queryset(user=request.user, tenant_id=tenant_id)
+            .filter(
+                status=FacultyContribution.Status.DRAFT,
+                active_marker=1,
+                source_campus_id=campus_id,
+                cycle_course__cycle__status="OPEN",
+                cycle_course__configuration__workflow_status="OPEN",
+            )
+            .order_by("cycle_course__course__code", "id")
+        )
+    return render(
+        request,
+        "departmental_exams/faculty/my_questions.html",
+        {
+            "page": page,
+            "scopes": scopes,
+            "filters": {
+                "course": course_filter,
+                "content_type": kind_filter,
+                "search": request.GET.get("search", ""),
+            },
+            "drafts": drafts,
+            "case_authoring_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+                tenant_id=tenant_id
+            ),
+        },
+    )
+
+
+def _render_my_question_form(request, *, form, heading, cancel_url, status=200):
+    return render(
+        request,
+        "departmental_exams/faculty/my_question_form.html",
+        {
+            "form": form,
+            "heading": heading,
+            "cancel_url": cancel_url,
+        },
+        status=status,
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def my_question_create_view(request, campus_id, course_id):
+    tenant_id, selected_campus_id = _bank_scope_ids(request)
+    if campus_id != selected_campus_id:
+        raise PermissionDenied("The selected campus changed.")
+    require_bank_scope(
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+        course_id=course_id,
+    )
+    form = MyQuestionForm(
+        request.POST or None,
+        initial={"expected_item_revision": 0},
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            create_bank_question(
+                actor=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                course_id=course_id,
+                payload=_bank_question_payload(form),
+            )
+        except ValidationError as exc:
+            _bind_question_validation_errors(form, exc)
+        else:
+            messages.success(request, "Question added to My Questions.")
+            return redirect("departmental_exams:my_questions")
+    return _render_my_question_form(
+        request,
+        form=form,
+        heading="Add question",
+        cancel_url=reverse("departmental_exams:my_questions"),
+        status=400 if request.method == "POST" else 200,
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def my_question_edit_view(request, item_id=None, historical_question_id=None):
+    tenant_id, campus_id = _bank_scope_ids(request)
+    item = None
+    if item_id is not None:
+        item = require_bank_owner(
+            user=request.user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+            item_id=item_id,
+        )
+        if item.kind != QuestionBankItem.Kind.QUESTION:
+            raise Http404
+        source = current_bank_revision(item)
+        expected_revision = item.current_revision
+    else:
+        source = historical_bank_question_owner(
+            actor=request.user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+            question_id=historical_question_id,
+        )
+        expected_revision = 0
+    form = MyQuestionForm(
+        request.POST or None,
+        initial=_bank_question_initial(source, expected_revision=expected_revision),
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            revise_bank_question(
+                actor=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                item_id=item_id,
+                historical_question_id=historical_question_id,
+                expected_revision=form.cleaned_data.get("expected_item_revision") or 0,
+                payload=_bank_question_payload(form),
+            )
+        except ValidationError as exc:
+            _bind_question_validation_errors(form, exc)
+        else:
+            messages.success(
+                request,
+                "A new revision is available for future Drafts. Existing exam records were not changed.",
+            )
+            return redirect("departmental_exams:my_questions")
+    return _render_my_question_form(
+        request,
+        form=form,
+        heading="Edit question",
+        cancel_url=reverse("departmental_exams:my_questions"),
+        status=400 if request.method == "POST" else 200,
+    )
+
+
+def _member_payload(form):
+    return _bank_question_payload(form)
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def my_case_create_view(request, campus_id, course_id):
+    tenant_id, selected_campus_id = _bank_scope_ids(request)
+    require_case_enabled(tenant_id=tenant_id)
+    if campus_id != selected_campus_id:
+        raise PermissionDenied("The selected campus changed.")
+    require_bank_scope(
+        user=request.user, tenant_id=tenant_id, campus_id=campus_id, course_id=course_id
+    )
+    form = MyCaseBundleForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            create_bank_case(
+                actor=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                course_id=course_id,
+                case={"title": form.cleaned_data["title"], "stimulus": form.cleaned_data["stimulus"]},
+                first_member=_member_payload(form),
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            messages.success(request, "Whole Case added to My Questions.")
+            return redirect("departmental_exams:my_questions")
+    return render(
+        request,
+        "departmental_exams/faculty/my_case_bundle_form.html",
+        {"form": form, "heading": "Create whole Case"},
+        status=400 if request.method == "POST" else 200,
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def my_case_edit_view(request, item_id=None, historical_scenario_id=None):
+    tenant_id, campus_id = _bank_scope_ids(request)
+    require_case_enabled(tenant_id=tenant_id)
+    item = None
+    if item_id is not None:
+        item = require_bank_owner(
+            user=request.user, tenant_id=tenant_id, campus_id=campus_id, item_id=item_id
+        )
+        if item.kind != QuestionBankItem.Kind.CASE:
+            raise Http404
+        revision = current_bank_revision(item)
+        initial = {"expected_item_revision": item.current_revision, "title": revision.title, "stimulus": revision.stimulus}
+    else:
+        scenario = get_object_or_404(
+            ExamScenario,
+            pk=historical_scenario_id,
+            contribution__faculty_user=request.user,
+            contribution__status=FacultyContribution.Status.SUBMITTED,
+            contribution__cycle_course__cycle__tenant_id=tenant_id,
+            contribution__source_campus_id=campus_id,
+        )
+        require_bank_scope(
+            user=request.user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+            course_id=scenario.contribution.cycle_course.course_id,
+        )
+        initial = {"expected_item_revision": 0, "title": scenario.title, "stimulus": scenario.stimulus}
+    form = MyCaseForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        try:
+            if item is None:
+                revise_historical_case(
+                    actor=request.user,
+                    tenant_id=tenant_id,
+                    campus_id=campus_id,
+                    scenario_id=historical_scenario_id,
+                    title=form.cleaned_data["title"],
+                    stimulus=form.cleaned_data["stimulus"],
+                )
+            else:
+                revise_bank_case(
+                    actor=request.user,
+                    tenant_id=tenant_id,
+                    campus_id=campus_id,
+                    item_id=item.id,
+                    expected_revision=form.cleaned_data["expected_item_revision"],
+                    case={"title": form.cleaned_data["title"], "stimulus": form.cleaned_data["stimulus"]},
+                )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            messages.success(request, "The whole Case has a new revision for future Drafts only.")
+            return redirect("departmental_exams:my_questions")
+    return render(
+        request,
+        "departmental_exams/faculty/my_case_form.html",
+        {"form": form, "heading": "Edit whole Case"},
+        status=400 if request.method == "POST" else 200,
+    )
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_http_methods(["GET", "POST"])
+def my_case_member_view(request, item_id, position=None):
+    tenant_id, campus_id = _bank_scope_ids(request)
+    require_case_enabled(tenant_id=tenant_id)
+    item = require_bank_owner(
+        user=request.user, tenant_id=tenant_id, campus_id=campus_id, item_id=item_id
+    )
+    if item.kind != QuestionBankItem.Kind.CASE:
+        raise Http404
+    revision = current_bank_revision(item)
+    source = None
+    if position is not None:
+        source = get_object_or_404(revision.members.all(), position=position)
+    form = MyQuestionForm(
+        request.POST or None,
+        initial=_bank_question_initial(source, expected_revision=item.current_revision),
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            revise_bank_case(
+                actor=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                item_id=item.id,
+                expected_revision=form.cleaned_data["expected_item_revision"],
+                member_position=position,
+                member_payload=_member_payload(form),
+                append_member=position is None,
+            )
+        except ValidationError as exc:
+            _bind_question_validation_errors(form, exc)
+        else:
+            messages.success(request, "The whole Case has a new revision for future Drafts only.")
+            return redirect("departmental_exams:my_questions")
+    return _render_my_question_form(
+        request,
+        form=form,
+        heading="Add linked MCQ" if position is None else f"Edit linked MCQ {position}",
+        cancel_url=reverse("departmental_exams:my_questions"),
+        status=400 if request.method == "POST" else 200,
     )
 
 
