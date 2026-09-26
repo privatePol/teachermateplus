@@ -1,3 +1,8 @@
+## My Questions rich authoring follow-up - 2026-09-26
+
+- My Questions now uses the existing rich question and Case editors for standalone stems, choices, Case narratives, and linked MCQs. Preview uses the same server sanitizers without requiring an open contribution cycle. Untouched plain-text questions retain their stored text and format; revisions and Draft copies remain format-aware. No model or migration change is required.
+- Whole-Case creation now shows a distinct-choice validation error on the bound form while retaining the entered Case and linked MCQ content. Preview rejects requests outside the contributor's exact course/campus scope or under direct DENY.
+
 ## Release Center closed-cycle context follow-up - 2026-09-20
 
 - Restored authorized Answer Key View details for Past / Closed cycles: exact target lookup now skips the operational Open-cycle list filter while retaining every target permission and scope check. Details and review links keep the validated cycle, tab, and campus navigation context. Confirming a bulk release in either tab returns to the selected cycle. An invalid Answer Key review also keeps the posted campus in Back navigation when that campus is an authorized release target; unknown or unauthorized campuses are omitted. Access-denied detail modals now explain the denial instead of offering only Retry. No model or migration change is required.

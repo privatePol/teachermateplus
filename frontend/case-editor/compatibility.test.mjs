@@ -598,6 +598,62 @@ test('question advanced tools keep the selected table cell when expanded', () =>
   } finally {editor.destroy();form.remove();}
 });
 
+test('untouched plain question remains plain after rich preview and submit', async () => {
+  const form=document.createElement('form');
+  form.dataset.questionEditorForm=''; form.dataset.previewUrl='/preview/';
+  form.innerHTML=`<input name="content_format" value="PLAIN_TEXT"><input name="csrfmiddlewaretoken" value="test">
+    <textarea name="question_text">Literal &lt;mark&gt; text</textarea>
+    <section data-question-rich-field="question_text" data-question-field-label="Question stem" data-question-editor-help="help">
+      <div data-question-toolbar></div><div data-question-rich-editor><p>Literal &lt;mark&gt; text</p></div>
+      <div data-question-field-errors hidden></div><section data-question-paste-recovery hidden><textarea data-question-clipboard-html></textarea><textarea data-question-clipboard-text></textarea><span data-question-paste-note></span><button type="button" data-question-paste-dismiss></button><button type="button" data-question-paste-retry></button></section>
+      <details data-question-original-source hidden><textarea></textarea></details><div data-question-preview-field="question_text"></div>
+    </section><div data-question-editor-errors hidden></div><p data-question-editor-status></p>
+    <button type="button" data-question-preview-button disabled></button><button type="submit" data-question-save disabled></button>`;
+  document.body.append(form);
+  const {states}=mountQuestionEditors(form);
+  const originalFetch=globalThis.fetch, originalFormData=globalThis.FormData;
+  try {
+    assert.equal(states[0].unchanged(),true);
+    globalThis.FormData=dom.window.FormData;
+    globalThis.fetch=async()=>({ok:true,json:async()=>({fields:{question_text:'<p>Literal &lt;mark&gt; text</p>'}})});
+    form.querySelector('[data-question-preview-button]').click();
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(states[0].unchanged(),true);
+    assert.match(form.querySelector('[data-question-editor-status]').textContent,/Server-authoritative Preview updated/);
+    assert.equal(form.querySelector('[name=content_format]').value,'RICH_HTML_V1');
+    assert.equal(form.querySelector('[data-question-save]').disabled,false);
+    const submit=new dom.window.Event('submit',{bubbles:true,cancelable:true});
+    form.dispatchEvent(submit);
+    assert.equal(submit.defaultPrevented,false);
+    assert.equal(form.querySelector('[name=content_format]').value,'PLAIN_TEXT');
+    assert.equal(form.querySelector('[name=question_text]').value,'Literal <mark> text');
+  } finally {globalThis.fetch=originalFetch;globalThis.FormData=originalFormData;states[0].editor.destroy();form.remove();}
+});
+
+test('one whole Case form serializes its narrative and linked rich question together', () => {
+  const form=formFor('<p>Case narrative</p>');
+  form.dataset.questionEditorForm='';
+  form.querySelector('[data-case-save]').dataset.questionSave='';
+  form.insertAdjacentHTML('beforeend',`<input name="content_format" value="PLAIN_TEXT"><input name="csrfmiddlewaretoken" value="test">
+    <textarea name="question_text">Linked stem</textarea>
+    <section data-question-rich-field="question_text" data-question-field-label="Question stem" data-question-editor-help="help">
+      <div data-question-toolbar></div><div data-question-rich-editor><p>Linked stem</p></div>
+      <div data-question-field-errors hidden></div><section data-question-paste-recovery hidden><textarea data-question-clipboard-html></textarea><textarea data-question-clipboard-text></textarea><span data-question-paste-note></span><button type="button" data-question-paste-dismiss></button><button type="button" data-question-paste-retry></button></section>
+      <details data-question-original-source hidden><textarea></textarea></details>
+    </section><div data-question-editor-errors hidden></div><p data-question-editor-status></p>
+    <button type="button" data-question-preview-button disabled></button>`);
+  const mountedCase=mountCaseEditor(form), mountedQuestion=mountQuestionEditors(form);
+  try {
+    assert.equal(form.querySelector('[data-case-save]').disabled,false);
+    mountedCase.editor.commands.insertContent(' revised');
+    mountedQuestion.states[0].editor.commands.insertContent(' revised');
+    form.dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    assert.match(form.querySelector('[data-case-source]').value,/revised/);
+    assert.match(form.querySelector('[name=question_text]').value,/revised/);
+    assert.equal(form.querySelector('[name=content_format]').value,'RICH_HTML_V1');
+  } finally {mountedCase.editor.destroy();mountedQuestion.states[0].editor.destroy();form.remove();}
+});
+
 test('editor output round trips through the actual Python canonicalizer repeatedly', t => {
   const canonicalize = html => JSON.parse(execFileSync('python', ['-B','-c',
     'import json,sys; from apps.departmental_exams.scenario_content import canonicalize_scenario_content; print(json.dumps(canonicalize_scenario_content(json.load(sys.stdin)).html))'], {

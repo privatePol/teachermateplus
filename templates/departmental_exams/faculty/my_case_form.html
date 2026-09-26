@@ -1,6 +1,15 @@
 {% extends "faculty_portal/base.html" %}
+{% load static %}
 {% block title %}{{ heading }} | TeacherMate+{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-review-20260910">{% endblock %}
 {% block faculty_content %}
 <h1 class="h3">{{ heading }}</h1><p class="alert alert-info">The whole Case is revisioned atomically. Changes will apply to future exams only.</p>
-<form method="post" class="card shadow-sm"><div class="card-body">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Save Case revision</button> <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:my_questions' %}">Cancel</a></div></form>
+<p class="text-muted">Paste from Microsoft Word with Ctrl+V. Supported formatting includes paragraphs, tables, alignment, symbols, and TMP LaTeX delimiters. Native Word equations and images are not supported.</p>
+<form method="post" class="card shadow-sm" data-case-editor-form data-preview-url="{{ preview_url }}" data-case-editor-display-unavailable="{{ editor_display_unavailable|yesno:'true,false' }}" novalidate><div class="card-body">
+  {% csrf_token %}{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}{% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+  {% include "departmental_exams/faculty/_my_case_editor.html" %}
+  <div class="d-flex flex-wrap gap-2 mt-3"><button class="btn btn-primary" type="submit" data-case-save disabled>Save Case revision</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:my_questions' %}">Cancel</a></div>
+  <noscript><p class="alert alert-warning mt-3 mb-0">JavaScript is required to edit this Case safely.</p></noscript>
+</div></form>
 {% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js' %}?v=my-questions-rich-20260926" defer></script>{% endblock %}

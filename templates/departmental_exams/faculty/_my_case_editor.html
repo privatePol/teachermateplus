@@ -1,0 +1,15 @@
+<div class="mb-3"><label class="form-label" for="{{ form.title.id_for_label }}">Title</label>{{ form.title }}{% for error in form.title.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+<div class="mb-3">
+  <div class="form-label" id="case-editor-label">Case / Scenario content <span class="text-danger">*</span></div>
+  <div class="tmp-case-toolbar" role="toolbar" aria-label="Case formatting and tables" data-case-toolbar></div>
+  <div id="case-rich-editor" class="tmp-case-editor form-control" data-case-rich-editor>{{ editor_display_html }}</div>
+  <div class="form-text" id="case-editor-help">Paste from Word with Ctrl+V. Enter creates a paragraph; Shift+Enter inserts a line break. Tab / Shift+Tab moves between table cells.</div>
+  <p class="small" role="status" aria-live="polite" data-case-editor-status>Loading editor. Save remains disabled if the editor cannot load safely.</p>
+  <details data-case-original-source hidden><summary>Recover original source (Save disabled)</summary><textarea class="form-control font-monospace" aria-label="Original Case source" rows="8" readonly></textarea></details>
+  {% for error in form.stimulus.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+  {% if editor_display_unavailable %}<div class="alert alert-warning mt-3 mb-0" data-case-editor-recovery><p>TeacherMate+ could not safely format the submitted source. The original source is preserved below for recovery. Save is disabled.</p><details><summary>Show preserved source</summary><textarea class="form-control font-monospace mt-2" rows="8" readonly>{{ editor_recovery_source }}</textarea></details></div>{% endif %}
+</div>
+<div class="alert alert-danger" role="alert" data-case-editor-errors hidden></div>
+<div class="alert alert-warning" role="status" data-case-editor-warnings hidden></div>
+<button type="button" class="btn btn-outline-primary" data-case-preview-button disabled>Preview sanitized Case</button>
+<section class="mt-3" aria-labelledby="case-preview-heading"><h2 class="h5" id="case-preview-heading">Server-authoritative preview</h2><div class="tmp-case-preview" data-case-preview data-scientific-content><p class="text-muted mb-0">Choose Preview to review the exact canonical content that can be saved.</p></div></section>

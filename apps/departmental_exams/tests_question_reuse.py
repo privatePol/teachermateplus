@@ -252,6 +252,88 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
             ).exists()
         )
 
+    def test_my_questions_rich_question_save_redisplay_edit_and_draft_copy(self):
+        self._enable()
+        create_url = reverse("departmental_exams:my_question_create", args=[
+            self.campus.id, self.destination_course.course_id,
+        ])
+        page = self.client.get(create_url)
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, 'data-question-rich-field="question_text"')
+        self.assertContains(page, 'data-question-rich-field="choice_a"')
+        self.assertContains(page, 'data-question-preview-button disabled')
+        preview_url = reverse("departmental_exams:my_content_preview", args=[
+            self.campus.id, self.destination_course.course_id,
+        ])
+        payload = rich_payload(question_text="<p><strong>Original bank stem</strong></p>")
+        preview = self.client.post(preview_url, payload)
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn("<strong>Original bank stem</strong>", preview.json()["fields"]["question_text"])
+        self.assertEqual(self.client.post(create_url, {
+            **payload, "expected_item_revision": 0,
+        }).status_code, 302)
+        item = QuestionBankItem.objects.get(
+            owner=self.faculty, kind=QuestionBankItem.Kind.QUESTION,
+            origin_question__isnull=True,
+        )
+        original = QuestionBankRevision.objects.get(item=item, revision=1)
+        self.assertEqual(original.content_format, Question.ContentFormat.RICH_HTML_V1)
+        edit_url = reverse("departmental_exams:my_question_edit", args=[item.id])
+        edit_page = self.client.get(edit_url)
+        self.assertContains(edit_page, "Original bank stem")
+        self.assertContains(edit_page, 'data-question-rich-field="choice_a"')
+        revised = {**payload, "question_text": "<p><em>Revised bank stem</em></p>"}
+        self.assertEqual(self.client.post(edit_url, {
+            **revised, "expected_item_revision": 1,
+        }).status_code, 302)
+        current = QuestionBankRevision.objects.get(item=item, revision=2)
+        self.assertIn("<em>Revised bank stem</em>", current.question_text)
+        original.refresh_from_db()
+        self.assertIn("<strong>Original bank stem</strong>", original.question_text)
+        page = self.client.get(self.url)
+        entry = next(row for row in page.context["eligible_items"] if row.get("bank_item") == item)
+        self.assertEqual(self._copy(page, entry["token"]).status_code, 302)
+        copied = self.destination.questions.get(source_bank_revision=current)
+        self.assertEqual(copied.content_format, Question.ContentFormat.RICH_HTML_V1)
+        self.assertEqual(copied.question_text, current.question_text)
+        self.assertEqual(copied.choice_a, current.choice_a)
+
+    def test_my_content_preview_rejects_wrong_course_campus_and_direct_deny(self):
+        other_course = self.make_course(
+            cycle=self.destination_course.cycle, code="PREVIEW-UNASSIGNED"
+        )
+        payloads = (
+            rich_payload(question_text="<p>Private question preview</p>"),
+            {"input_format": "html", "stimulus": "<p>Private Case preview</p>"},
+        )
+        for payload in payloads:
+            with self.subTest(input_format=payload.get("input_format", "question")):
+                wrong_course = reverse(
+                    "departmental_exams:my_content_preview",
+                    args=[self.campus.id, other_course.course_id],
+                )
+                wrong_campus = reverse(
+                    "departmental_exams:my_content_preview",
+                    args=[self.other_campus.id, self.destination_course.course_id],
+                )
+                self.assertEqual(self.client.post(wrong_course, payload).status_code, 403)
+                self.assertEqual(self.client.post(wrong_campus, payload).status_code, 403)
+
+        UserPermission.objects.create(
+            user=self.faculty,
+            permission=Permission.objects.get(code="faculty_portal.access"),
+            tenant=self.tenant,
+            campus=self.campus,
+            grant_type=UserPermission.GrantType.DENY,
+        )
+        permitted_url = reverse(
+            "departmental_exams:my_content_preview",
+            args=[self.campus.id, self.destination_course.course_id],
+        )
+        for payload in payloads:
+            with self.subTest(denied_format=payload.get("input_format", "question")):
+                self.assertEqual(self.client.post(permitted_url, payload).status_code, 403)
+
     def test_my_questions_navigation_remains_available_without_cycle_or_contribution(self):
         between_terms = self.make_faculty("between-terms")
         self.make_assignment(self.destination_course, between_terms)
@@ -801,6 +883,97 @@ class QuestionReuseCaseHTTPTests(FacultyCaseFixtureMixin, Stage4TestCase):
             "expected_contribution_revision": self.destination.revision,
             "selected_items": [token], **extra,
         })
+
+    def test_whole_case_duplicate_linked_choices_show_bound_error_without_write(self):
+        create_url = reverse(
+            "departmental_exams:my_case_create",
+            args=[self.campus.id, self.destination_course.course_id],
+        )
+        linked = rich_payload(question_text="<p>Which entry is correct?</p>")
+        linked["choice_a"] = linked["choice_b"]
+        posted = {
+            "expected_item_revision": 0,
+            "title": "Retained Case title",
+            "stimulus": "<p>Retained Case narrative</p>",
+            **linked,
+        }
+        before_items = QuestionBankItem.objects.count()
+        before_revisions = QuestionBankRevision.objects.count()
+
+        response = self.client.post(create_url, posted)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response, "Choices must be distinct after text normalization.", status_code=400
+        )
+        form = response.context["form"]
+        self.assertTrue(form.is_bound)
+        self.assertIn(
+            "Choices must be distinct after text normalization.", form.non_field_errors()
+        )
+        for field in ("title", "stimulus", "question_text", "choice_a", "choice_b"):
+            self.assertEqual(form[field].value(), posted[field])
+        self.assertContains(response, "Retained Case title", status_code=400)
+        self.assertContains(response, "Retained Case narrative", status_code=400)
+        self.assertContains(response, "Which entry is correct?", status_code=400)
+        self.assertEqual(QuestionBankItem.objects.count(), before_items)
+        self.assertEqual(QuestionBankRevision.objects.count(), before_revisions)
+
+    def test_rich_whole_case_and_linked_mcq_save_edit_redisplay_and_copy(self):
+        create_url = reverse("departmental_exams:my_case_create", args=[
+            self.campus.id, self.destination_course.course_id,
+        ])
+        create_page = self.client.get(create_url)
+        self.assertEqual(create_page.status_code, 200)
+        self.assertContains(create_page, "data-case-editor-form")
+        self.assertContains(create_page, 'data-question-rich-field="question_text"')
+        preview_url = reverse("departmental_exams:my_content_preview", args=[
+            self.campus.id, self.destination_course.course_id,
+        ])
+        case_html = "<p><strong>Original Case narrative</strong></p>"
+        preview = self.client.post(preview_url, {
+            "input_format": "html", "stimulus": case_html,
+        })
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn("<strong>Original Case narrative</strong>", preview.json()["html"])
+        payload = rich_payload(question_text="<p><em>Original linked stem</em></p>")
+        self.assertEqual(self.client.post(create_url, {
+            "expected_item_revision": 0, "title": "Rich bank Case",
+            "stimulus": case_html, **payload,
+        }).status_code, 302)
+        item = QuestionBankItem.objects.get(
+            owner=self.faculty, kind=QuestionBankItem.Kind.CASE,
+            origin_scenario__isnull=True,
+        )
+        first = QuestionBankRevision.objects.get(item=item, revision=1)
+        self.assertIn("<strong>Original Case narrative</strong>", first.stimulus)
+        self.assertEqual(first.members.get(position=1).content_format, Question.ContentFormat.RICH_HTML_V1)
+        case_url = reverse("departmental_exams:my_case_edit", args=[item.id])
+        self.assertContains(self.client.get(case_url), "Original Case narrative")
+        self.assertEqual(self.client.post(case_url, {
+            "expected_item_revision": 1, "title": "Rich bank Case",
+            "stimulus": "<p><u>Revised Case narrative</u></p>",
+        }).status_code, 302)
+        member_url = reverse("departmental_exams:my_case_member_edit", args=[item.id, 1])
+        self.assertContains(self.client.get(member_url), "Original linked stem")
+        self.assertEqual(self.client.post(member_url, {
+            **payload, "question_text": "<p><strong>Revised linked stem</strong></p>",
+            "expected_item_revision": 2,
+        }).status_code, 302)
+        current = QuestionBankRevision.objects.get(item=item, revision=3)
+        self.assertIn("<u>Revised Case narrative</u>", current.stimulus)
+        self.assertIn("<strong>Revised linked stem</strong>", current.members.get(position=1).question_text)
+        first.refresh_from_db()
+        self.assertIn("Original Case narrative", first.stimulus)
+        self.assertIn("Original linked stem", first.members.get(position=1).question_text)
+        page = self.client.get(self.url)
+        entry = next(row for row in page.context["eligible_items"] if row.get("bank_item") == item)
+        self.assertEqual(self._post(entry["token"], target_section_id=str(self.section_a.id)).status_code, 302)
+        copied = ExamScenario.objects.get(contribution=self.destination, source_bank_revision=current)
+        self.assertEqual(copied.stimulus, current.stimulus)
+        linked = copied.members.get(position=1).question
+        self.assertEqual(linked.question_text, current.members.get(position=1).question_text)
+        self.assertEqual(linked.choice_a, current.members.get(position=1).choice_a)
 
     def test_current_bank_case_revision_copies_as_one_provenanced_graph(self):
         item = create_bank_case(

@@ -580,7 +580,8 @@ def my_questions_view(request):
     )
 
 
-def _render_my_question_form(request, *, form, heading, cancel_url, status=200):
+def _render_my_question_form(request, *, form, heading, cancel_url, course_id, status=200):
+    tenant_id, campus_id = _bank_scope_ids(request)
     return render(
         request,
         "departmental_exams/faculty/my_question_form.html",
@@ -588,9 +589,88 @@ def _render_my_question_form(request, *, form, heading, cancel_url, status=200):
             "form": form,
             "heading": heading,
             "cancel_url": cancel_url,
+            "editor_fields": _bank_editor_fields(form),
+            "preview_url": reverse(
+                "departmental_exams:my_content_preview", args=[campus_id, course_id]
+            ),
         },
         status=status,
     )
+
+
+def _bank_editor_fields(form):
+    content_format = (form["content_format"].value() or Question.ContentFormat.PLAIN_TEXT).strip().upper()
+    labels = {"question_text": "Question stem", **{
+        f"choice_{letter}": f"Choice {letter.upper()}" for letter in "abcd"
+    }}
+    fields = []
+    for name in QUESTION_CONTENT_FIELDS:
+        source = form[name].value() or ""
+        unavailable = False
+        try:
+            display_html = render_question_content_for_editor(
+                source, content_format=content_format, field=name
+            )
+        except ValidationError:
+            display_html = ""
+            unavailable = bool(source)
+        fields.append({
+            "name": name, "label": labels[name], "bound": form[name],
+            "display_html": display_html,
+            "source": source if unavailable else "", "unavailable": unavailable,
+        })
+    return fields
+
+
+def _bank_case_editor_context(form):
+    source = form["stimulus"].value() or ""
+    unavailable = False
+    try:
+        display_html = render_scenario_content_for_editor(source)
+    except ValidationError:
+        display_html = ""
+        unavailable = bool(source)
+    return {
+        "editor_display_html": display_html,
+        "editor_display_unavailable": unavailable,
+        "editor_recovery_source": source if unavailable else "",
+    }
+
+
+@_faculty_error_page
+@never_cache
+@portal_required("FACULTY")
+@require_POST
+def my_content_preview_view(request, campus_id, course_id):
+    tenant_id, selected_campus_id = _bank_scope_ids(request)
+    if campus_id != selected_campus_id:
+        raise PermissionDenied("The selected campus changed.")
+    require_bank_scope(
+        user=request.user, tenant_id=tenant_id,
+        campus_id=campus_id, course_id=course_id,
+    )
+    if request.POST.get("input_format") == "html":
+        require_case_enabled(tenant_id=tenant_id)
+        try:
+            canonical = canonicalize_scenario_content(
+                request.POST.get("stimulus", ""), input_format="html"
+            )
+        except ValidationError as exc:
+            return _no_store_json({"errors": exc.messages}, status=400)
+        return _no_store_json({"html": canonical.html, "warnings": list(canonical.warnings)})
+    payload = {field: request.POST.get(field, "") for field in QUESTION_CONTENT_FIELDS}
+    payload.update({
+        "correct_answer": request.POST.get("correct_answer", ""),
+        "difficulty": request.POST.get("difficulty", ""),
+        "content_format": RICH_HTML_V1,
+    })
+    try:
+        cleaned = QuestionMutationService.validate_payload_for_preview(payload)
+    except ValidationError as exc:
+        return _no_store_json({"errors": _question_preview_error_payload(exc)}, status=400)
+    return _no_store_json({"fields": {
+        field: cleaned[field] for field in QUESTION_CONTENT_FIELDS
+    }})
 
 
 @_faculty_error_page
@@ -610,6 +690,7 @@ def my_question_create_view(request, campus_id, course_id):
     form = MyQuestionForm(
         request.POST or None,
         initial={"expected_item_revision": 0},
+        rich_editor=True,
     )
     if request.method == "POST" and form.is_valid():
         try:
@@ -630,6 +711,7 @@ def my_question_create_view(request, campus_id, course_id):
         form=form,
         heading="Add question",
         cancel_url=reverse("departmental_exams:my_questions"),
+        course_id=course_id,
         status=400 if request.method == "POST" else 200,
     )
 
@@ -663,6 +745,7 @@ def my_question_edit_view(request, item_id=None, historical_question_id=None):
     form = MyQuestionForm(
         request.POST or None,
         initial=_bank_question_initial(source, expected_revision=expected_revision),
+        rich_editor=True,
     )
     if request.method == "POST" and form.is_valid():
         try:
@@ -688,6 +771,7 @@ def my_question_edit_view(request, item_id=None, historical_question_id=None):
         form=form,
         heading="Edit question",
         cancel_url=reverse("departmental_exams:my_questions"),
+        course_id=item.course_id if item else source.contribution.cycle_course.course_id,
         status=400 if request.method == "POST" else 200,
     )
 
@@ -720,14 +804,21 @@ def my_case_create_view(request, campus_id, course_id):
                 first_member=_member_payload(form),
             )
         except ValidationError as exc:
-            form.add_error(None, exc)
+            _bind_question_validation_errors(form, exc)
         else:
             messages.success(request, "Whole Case added to My Questions.")
             return redirect("departmental_exams:my_questions")
     return render(
         request,
         "departmental_exams/faculty/my_case_bundle_form.html",
-        {"form": form, "heading": "Create whole Case"},
+        {
+            "form": form, "heading": "Create whole Case",
+            "editor_fields": _bank_editor_fields(form),
+            **_bank_case_editor_context(form),
+            "preview_url": reverse(
+                "departmental_exams:my_content_preview", args=[campus_id, course_id]
+            ),
+        },
         status=400 if request.method == "POST" else 200,
     )
 
@@ -793,7 +884,14 @@ def my_case_edit_view(request, item_id=None, historical_scenario_id=None):
     return render(
         request,
         "departmental_exams/faculty/my_case_form.html",
-        {"form": form, "heading": "Edit whole Case"},
+        {
+            "form": form, "heading": "Edit whole Case",
+            **_bank_case_editor_context(form),
+            "preview_url": reverse(
+                "departmental_exams:my_content_preview",
+                args=[campus_id, item.course_id if item else scenario.contribution.cycle_course.course_id],
+            ),
+        },
         status=400 if request.method == "POST" else 200,
     )
 
@@ -817,6 +915,7 @@ def my_case_member_view(request, item_id, position=None):
     form = MyQuestionForm(
         request.POST or None,
         initial=_bank_question_initial(source, expected_revision=item.current_revision),
+        rich_editor=True,
     )
     if request.method == "POST" and form.is_valid():
         try:
@@ -840,6 +939,7 @@ def my_case_member_view(request, item_id, position=None):
         form=form,
         heading="Add linked MCQ" if position is None else f"Edit linked MCQ {position}",
         cancel_url=reverse("departmental_exams:my_questions"),
+        course_id=item.course_id,
         status=400 if request.method == "POST" else 200,
     )
 

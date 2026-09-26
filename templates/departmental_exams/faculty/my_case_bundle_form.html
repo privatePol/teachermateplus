@@ -1,6 +1,15 @@
 {% extends "faculty_portal/base.html" %}
+{% load static %}
 {% block title %}{{ heading }} | TeacherMate+{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-review-20260910"><link rel="stylesheet" href="{% static 'css/departmental_exam_question_authoring.css' %}?v=20260918">{% endblock %}
 {% block faculty_content %}
 <h1 class="h3">{{ heading }}</h1><p class="text-muted">Create the Case and its first linked MCQ together. Future changes create one complete Case revision.</p>
-<form method="post" class="card shadow-sm"><div class="card-body">{% csrf_token %}{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}{{ form.as_p }}<button class="btn btn-primary">Create whole Case</button> <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:my_questions' %}">Cancel</a></div></form>
+<form method="post" class="card shadow-sm" data-case-editor-form data-question-editor-form data-scientific-question-editor data-preview-url="{{ preview_url }}" data-case-editor-display-unavailable="{{ editor_display_unavailable|yesno:'true,false' }}" novalidate><div class="card-body">
+  {% csrf_token %}{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}{% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+  {% include "departmental_exams/faculty/_my_case_editor.html" %}
+  {% include "departmental_exams/faculty/_my_question_editors.html" %}
+  <div class="d-flex flex-wrap gap-2 mt-3"><button class="btn btn-primary" type="submit" data-case-save data-question-save disabled>Create whole Case</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:my_questions' %}">Cancel</a></div>
+  <noscript><p class="alert alert-warning mt-3 mb-0">JavaScript is required to edit rich Case and linked question content safely.</p></noscript>
+</div></form>
 {% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'vendor/tiptap/3.31.3/tmp-case-editor.bundle.js' %}?v=my-questions-rich-20260926" defer></script><script src="{% static 'js/departmental_exam_question_authoring.js' %}?v=20260918" defer></script>{% endblock %}

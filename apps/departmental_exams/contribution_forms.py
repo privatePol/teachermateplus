@@ -193,7 +193,7 @@ class MyCaseForm(BootstrapFormMixin, forms.Form):
     title = forms.CharField(max_length=200, required=False)
     stimulus = forms.CharField(
         max_length=100000,
-        widget=forms.Textarea(attrs={"rows": 8}),
+        widget=forms.HiddenInput(attrs={"data-case-source": True}),
         label="Case / Scenario content",
     )
 
@@ -215,6 +215,14 @@ class MyCaseBundleForm(MyCaseForm):
     )
     correct_answer = forms.ChoiceField(choices=((value, value) for value in "ABCD"))
     difficulty = forms.ChoiceField(choices=Question.Difficulty.choices)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in ("question_text", "choice_a", "choice_b", "choice_c", "choice_d"):
+            self.fields[name].widget = forms.HiddenInput(attrs={
+                "class": "form-control",
+                "data-question-source": name,
+            })
 
 
 class QuestionDeleteForm(ContributionRevisionForm):
