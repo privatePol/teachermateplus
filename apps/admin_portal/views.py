@@ -106,6 +106,7 @@ from apps.academics.services import (
 )
 from apps.admin_portal.data_reset import ActualDataResetService
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
+from apps.admin_portal.midterm_exam_performance import MidtermExamPerformanceReportService
 from apps.interventions.models import AcademicInterventionCase
 from apps.interventions.services import (
     AcademicInterventionAuthorizationService,
@@ -3034,6 +3035,30 @@ def _require_academic_performance_insights(request):
         default=False,
     ):
         raise Http404("Academic Performance Insights is not enabled.")
+
+
+@portal_required("ADMIN")
+@permission_required("grading_analytics.read")
+@require_GET
+def midterm_exam_performance_view(request):
+    _require_academic_performance_insights(request)
+    cycle_options = MidtermExamPerformanceReportService.cycle_options(request)
+    selected_cycle = MidtermExamPerformanceReportService.selected_cycle(
+        request,
+        cycle_options=cycle_options,
+    )
+    report = MidtermExamPerformanceReportService.build_report(request, selected_cycle)
+    response = render(
+        request,
+        "admin_portal/grading/midterm_exam_performance.html",
+        {
+            "cycle_options": cycle_options,
+            "selected_cycle": selected_cycle,
+            **report,
+        },
+    )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @portal_required("ADMIN")

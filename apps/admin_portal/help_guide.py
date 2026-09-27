@@ -776,6 +776,7 @@ ADMIN_HELP_SECTIONS = [
                 ],
                 "purpose": "Supports academic review, submission follow-up, clearance, audit, and printing.",
                 "menu_path": (
+                    "Admin Portal -> Grading -> Academic Performance Insights -> Midterm Exam Performance; "
                     "Admin Portal -> Grading -> Grading Analytics or Grade Distribution Monitor; "
                     "Admin Portal -> Academics -> Faculty Final Clearance; Admin Portal -> Audit"
                 ),
@@ -792,6 +793,16 @@ ADMIN_HELP_SECTIONS = [
                     ),
                     "Set the campus, academic year, term, period, course, or status filters before reviewing results.",
                     (
+                        "For Midterm Exam Performance, select the Midterm examination cycle and move through "
+                        "unit and offering pages. An exact Course code filter includes its full authorized "
+                        "examination unit. Exempt courses are omitted."
+                    ),
+                    (
+                        "A Midterm row receives statistics only after the exact gradebook submission is "
+                        "Submitted and every eligible student has a finalized official exam grade. "
+                        "Ranking also requires compatible grading configurations within the examination unit."
+                    ),
+                    (
                         "On Grading Analytics, choose one Course code to show every authorized section or "
                         "offering for that code. The rows stay separate; the filter does not combine sections."
                     ),
@@ -805,6 +816,7 @@ ADMIN_HELP_SECTIONS = [
                 "check_first": [
                     "Confirm campus, academic year, term, period, and report date.",
                     "Confirm whether the source gradebook is Draft, Submitted, or Reopened.",
+                    "Treat blank Midterm statistics as unavailable or incomplete data, never as zero scores.",
                     "Check that student and faculty scope is correct before export or printing.",
                 ],
                 "actions": [

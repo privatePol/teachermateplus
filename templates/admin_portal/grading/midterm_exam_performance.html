@@ -1,0 +1,108 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+  <div>
+    <h1 class="h4 mb-1">Midterm Examination Class Performance</h1>
+    <p class="text-muted mb-0">Aggregate official Midterm results for included Standardized and Departmental examination courses.</p>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:academic_performance_insights' %}">Back to Performance Insights</a>
+</div>
+
+<form method="get" class="card border-0 shadow-sm mb-3">
+  <div class="card-body row g-3 align-items-end">
+    <div class="col-lg-7">
+      <label class="form-label" for="cycle_id">Midterm examination cycle</label>
+      <select class="form-select" id="cycle_id" name="cycle_id">
+        {% for cycle in cycle_options %}
+        <option value="{{ cycle.id }}"{% if selected_cycle and selected_cycle.id == cycle.id %} selected{% endif %}>
+          {{ cycle.academic_year.code }} / {{ cycle.term.code }} - {{ cycle.get_status_display }}
+        </option>
+        {% empty %}
+        <option value="">No authorized Midterm examination cycle</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-lg-4">
+      <label class="form-label" for="course_code">Course code</label>
+      <input class="form-control" id="course_code" name="course_code" value="{{ selected_course_code }}" maxlength="64" placeholder="Optional exact code">
+    </div>
+    <div class="col-lg-1 d-flex gap-2">
+      <button class="btn btn-success" type="submit"{% if not cycle_options %} disabled{% endif %}>View report</button>
+    </div>
+  </div>
+</form>
+
+{% if selected_cycle %}
+<div class="alert alert-light border mb-3">
+  <strong>Ranking rule:</strong> Complete rows rank within their resolved examination unit only when grading configurations are compatible, by the displayed two-decimal class average. Equal averages use competition ranking (1, 1, 3). Exempt courses are omitted. Missing results are never treated as zero.
+</div>
+
+{% if unit_page and unit_page.paginator.num_pages > 1 %}
+<nav class="d-flex align-items-center gap-3 mb-3" aria-label="Examination unit pages">
+  <span>Examination units: page {{ unit_page.number }} of {{ unit_page.paginator.num_pages }}</span>
+  {% if unit_page.has_previous %}<a href="?cycle_id={{ selected_cycle.id }}&amp;course_code={{ selected_course_code|urlencode }}&amp;unit_page={{ unit_page.previous_page_number }}">Previous units</a>{% endif %}
+  {% if unit_page.has_next %}<a href="?cycle_id={{ selected_cycle.id }}&amp;course_code={{ selected_course_code|urlencode }}&amp;unit_page={{ unit_page.next_page_number }}">Next units</a>{% endif %}
+</nav>
+{% endif %}
+<div class="row g-3 mb-3">
+  <div class="col-md-4"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Offerings in selected units</div><div class="h4 mb-0">{{ total_offerings }}</div></div></div></div>
+  <div class="col-md-4"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Complete and ranked</div><div class="h4 mb-0">{{ complete_count }}</div></div></div></div>
+  <div class="col-md-4"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Not ranked</div><div class="h4 mb-0">{{ incomplete_count }}</div></div></div></div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Rank</th>
+          <th>Course group</th>
+          <th>Campus</th>
+          <th>Faculty</th>
+          <th>Section</th>
+          <th class="text-end">Eligible students</th>
+          <th class="text-end">Highest</th>
+          <th class="text-end">Lowest</th>
+          <th class="text-end">Class average</th>
+          <th>Data status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{% if row.rank is not None %}{{ row.rank }}{% endif %}</td>
+          <td>
+            <strong>{{ row.course_group }}</strong>
+            <div class="small text-muted">{{ row.member_codes|join:", " }} - {{ row.classification_label }}</div>
+          </td>
+          <td>{{ row.campus_code }}<div class="small text-muted">{{ row.campus_name }}</div></td>
+          <td>{{ row.faculty_name }}</td>
+          <td>{{ row.course_code }} / {{ row.section_code }}</td>
+          <td class="text-end">{{ row.student_count }}</td>
+          <td class="text-end">{% if row.highest_score is not None %}{{ row.highest_score|floatformat:2 }}{% endif %}</td>
+          <td class="text-end">{% if row.lowest_score is not None %}{{ row.lowest_score|floatformat:2 }}{% endif %}</td>
+          <td class="text-end">{% if row.class_average is not None %}{{ row.class_average|floatformat:2 }}{% endif %}</td>
+          <td>
+            <span class="badge {% if row.data_status == 'Complete' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ row.data_status }}</span>
+            {% if row.status_detail %}<div class="small text-muted mt-1">{{ row.status_detail }}</div>{% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="10" class="text-center text-muted py-4">No included examination offerings are available in your authorized scope for this cycle.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% if row_page and row_page.paginator.num_pages > 1 %}
+<nav class="d-flex align-items-center gap-3 mt-3" aria-label="Offering row pages">
+  <span>Offerings: page {{ row_page.number }} of {{ row_page.paginator.num_pages }}</span>
+  {% if row_page.has_previous %}<a href="?cycle_id={{ selected_cycle.id }}&amp;course_code={{ selected_course_code|urlencode }}&amp;unit_page={{ unit_page.number }}&amp;row_page={{ row_page.previous_page_number }}">Previous offerings</a>{% endif %}
+  {% if row_page.has_next %}<a href="?cycle_id={{ selected_cycle.id }}&amp;course_code={{ selected_course_code|urlencode }}&amp;unit_page={{ unit_page.number }}&amp;row_page={{ row_page.next_page_number }}">Next offerings</a>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<div class="alert alert-info border">No authorized Midterm examination cycle is available.</div>
+{% endif %}
+{% endblock %}
