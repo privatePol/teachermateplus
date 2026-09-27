@@ -1,5 +1,8 @@
 from datetime import date
 from decimal import Decimal
+import re
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -686,15 +689,15 @@ class MidtermExamPerformanceReportTests(TestCase):
         baseline, baseline_queries = count_queries()
         add_courses(12, 24)
         expanded, expanded_queries = count_queries()
-        self.assertEqual(len(baseline["rows"]), 10)
-        self.assertEqual(len(expanded["rows"]), 10)
-        self.assertEqual(expanded["unit_page"].paginator.num_pages, 3)
+        self.assertEqual(len(baseline["rows"]), 5)
+        self.assertEqual(len(expanded["rows"]), 5)
+        self.assertEqual(expanded["unit_page"].paginator.num_pages, 5)
         self.assertLessEqual(
             expanded_queries - baseline_queries, 2,
             "Adding courses beyond the current unit page must not add per-course queries",
         )
         self.client.force_login(self.admin)
-        last_page = self.client.get(self.url, {"cycle_id": self.cycle.id, "unit_page": 3})
+        last_page = self.client.get(self.url, {"cycle_id": self.cycle.id, "unit_page": 5})
         self.assertEqual(last_page.status_code, 200)
         self.assertEqual(len(last_page.context["rows"]), 4)
 
@@ -776,9 +779,9 @@ class MidtermExamPerformanceReportTests(TestCase):
                 response = self.client.get(self.url, {"cycle_id": self.cycle.id})
             self.assertEqual(response.status_code, 200)
             rows = response.context["rows"]
-            self.assertEqual(len(rows), size)
-            self.assertEqual(response.context["unit_page"].paginator.count, 1)
-            self.assertEqual(len({row["context_signature"] for row in rows}), size)
+            self.assertEqual(len(rows), 5)
+            self.assertEqual(response.context["unit_page"].paginator.count, size)
+            self.assertEqual(len({row["context_signature"] for row in rows}), 5)
             self.assertEqual({row["class_average"] for row in rows}, {Decimal("80.00")})
             self.assertEqual({row["data_status"] for row in rows}, {"Not comparable"})
             self.assertTrue(all(row["rank"] is None for row in rows))
@@ -801,6 +804,163 @@ class MidtermExamPerformanceReportTests(TestCase):
             large_queries - small_queries, 2,
             "One equivalency unit must bulk-load configuration inputs across distinct courses",
         )
+
+    def test_course_heading_nine_columns_and_numeric_rank_order(self):
+        for index, value in enumerate(("70", "90", "80", "85", None)):
+            offering = self._offering(self.cycle_course, self.fairview, self.faculty_fv, f"ORDER-{index}")
+            student = self._student(offering, f"ORDER-ST-{index}")
+            if value is not None:
+                self._submitted_results(offering, ((student, Decimal(value)),))
+        self.client.force_login(self.admin)
+        response = self.client.get(self.url, {"cycle_id": self.cycle.pk})
+        self.assertEqual([row["rank"] for row in response.context["rows"]], [1, 2, 3, 4, None])
+        self.assertEqual(len(response.context["course_groups"]), 1)
+        course = self.cycle_course.course
+        self.assertContains(response, f"{course.code} | {course.title}", count=1)
+        html = response.content.decode()
+        self.assertEqual(re.findall(r'<th\b[^>]*>(.*?)</th>', html), [
+            "Rank", "Campus", "Faculty", "Section", "Eligible Students", "Highest", "Lowest", "Class Ave", "Data Status",
+        ])
+        self.assertNotIn(course.code, re.search(r'<tbody>(.*?)</tbody>', html, re.S).group(1))
+
+    def test_progressive_pages_are_bounded_complete_and_keep_full_unit_ranks(self):
+        course = Course.objects.create(tenant=self.tenant, code="ZZ-EQUIV", title="Second Course Title")
+        member = self._cycle_course(course, CycleCourse.ExamClassification.STANDARDIZED)
+        self._configuration(member)
+        expected = set()
+        for number in range(7):
+            offering = self._offering(
+                member if number == 6 else self.cycle_course,
+                self.fairview, self.faculty_fv, f"PROG-{number}",
+            )
+            expected.add(offering.pk)
+            student = self._student(offering, f"PROG-ST-{number}")
+            self._submitted_results(offering, ((student, Decimal(80 + number)),))
+        ExamCourseEquivalencyService.create_group(
+            cycle_id=self.cycle.pk, name="Shared progressive unit", primary_cycle_course_id=self.cycle_course.pk,
+            member_ids=(self.cycle_course.pk, member.pk), actor=self.admin,
+        )
+        self.client.force_login(self.admin)
+        with patch.object(MidtermExamPerformanceReportService, "COURSES_PER_PAGE", 1), \
+                patch.object(MidtermExamPerformanceReportService, "ROWS_PER_PAGE", 2):
+            with patch.object(CourseOffering, "from_db", wraps=CourseOffering.from_db) as hydrated:
+                response = self.client.get(self.url, {"cycle_id": self.cycle.pk, "course_code": self.cycle_course.course.code})
+            self.assertEqual(response.status_code, 200)
+            self.assertLessEqual(hydrated.call_count, 2)
+            self.assertEqual([row["rank"] for row in response.context["rows"]], [2, 3])
+            seen = [row["offering_id"] for row in response.context["rows"]]
+            next_url = response.context["next_url"]
+            pages = 1
+            while next_url:
+                pages += 1
+                self.assertLess(pages, 8)
+                params = parse_qs(urlsplit(next_url).query)
+                self.assertEqual(params["cycle_id"], [str(self.cycle.pk)])
+                self.assertEqual(params["course_code"], [self.cycle_course.course.code])
+                response = self.client.get(self.url + next_url, HTTP_X_MIDTERM_FRAGMENT="1")
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertIn("no-store", response["Cache-Control"])
+                data = response.json()
+                ids = [int(value) for value in re.findall(r'data-offering-id="(\d+)"', data["html"])]
+                self.assertLessEqual(len(ids), 2)
+                self.assertLessEqual(data["html"].count("data-course-id="), 1)
+                self.assertFalse(set(ids) & set(seen))
+                seen.extend(ids)
+                next_url = data["next_url"]
+            self.assertEqual(set(seen), expected)
+            self.assertEqual(len(seen), 7)
+            self.assertIn("ZZ-EQUIV | Second Course Title", data["html"])
+            self.assertIn("<td>1</td>", data["html"])
+
+    def test_continuation_rechecks_filter_scope_and_changed_results(self):
+        for number, scope, faculty in ((0, self.fairview, self.faculty_fv), (1, self.cubao, self.faculty_cub)):
+            offering = self._offering(self.cycle_course, scope, faculty, f"CONT-{number}")
+            student = self._student(offering, f"CONT-ST-{number}")
+            self._submitted_results(offering, ((student, Decimal(90 - number)),))
+        self.client.force_login(self.admin)
+        with patch.object(MidtermExamPerformanceReportService, "ROWS_PER_PAGE", 1):
+            first = self.client.get(self.url, {"cycle_id": self.cycle.pk})
+            next_url = first.context["next_url"]
+            altered = parse_qs(urlsplit(next_url).query)
+            altered["course_code"] = ["NOT-A-COURSE"]
+            wrong_filter = self.client.get(self.url + "?" + urlencode(altered, doseq=True), HTTP_X_MIDTERM_FRAGMENT="1")
+            self.assertEqual(wrong_filter.status_code, 409)
+            StudentPeriodGrade.objects.filter(offering=offering).update(exam_grade=Decimal("99"))
+            stale = self.client.get(self.url + next_url, HTTP_X_MIDTERM_FRAGMENT="1")
+            self.assertEqual(stale.status_code, 409)
+            fresh = self.client.get(self.url, {"cycle_id": self.cycle.pk})
+            UserPermission.objects.create(
+                user=self.admin, permission=Permission.objects.get(code="grading_analytics.read"),
+                grant_type=UserPermission.GrantType.DENY, tenant=self.tenant, campus=self.cubao[0],
+            )
+            denied = self.client.get(self.url + fresh.context["next_url"], HTTP_X_MIDTERM_FRAGMENT="1")
+            self.assertEqual(denied.status_code, 409)
+            self.assertNotIn("CONT-1", denied.json()["html"])
+
+    def test_three_decimal_grades_have_complete_rank(self):
+        offering = self._offering(self.cycle_course, self.fairview, self.faculty_fv, "DECIMAL-THREE")
+        students = [self._student(offering, f"DECIMAL-{number}") for number in range(3)]
+        self._submitted_results(offering, [(student, Decimal("80.10")) for student in students])
+        row, = self._get_rows()
+        self.assertEqual(row["data_status"], "Complete")
+        self.assertEqual(row["class_average"], Decimal("80.10"))
+        self.assertEqual(row["rank"], 1)
+
+    def test_decimal_competition_ties_keep_rank_order_across_loading_boundaries(self):
+        expected_ids = []
+        for number, values in enumerate((("80.10",) * 3, ("80.09", "80.10"), ("79.99",))):
+            offering = self._offering(self.cycle_course, self.fairview, self.faculty_fv, f"DEC-TIE-{number}")
+            expected_ids.append(offering.pk)
+            self._submitted_results(offering, [
+                (self._student(offering, f"DEC-TIE-{number}-{index}"), Decimal(value))
+                for index, value in enumerate(values)
+            ])
+        self.client.force_login(self.admin)
+        rows = []
+        with patch.object(MidtermExamPerformanceReportService, "ROWS_PER_PAGE", 1):
+            next_url = "?" + urlencode({"cycle_id": self.cycle.pk, "course_code": self.course.code})
+            while next_url:
+                self.assertLess(len(rows), 3)
+                response = self.client.get(self.url + next_url, HTTP_X_MIDTERM_FRAGMENT="1")
+                self.assertEqual(response.status_code, 200, response.content)
+                rows.extend(response.context["rows"])
+                next_url = response.json()["next_url"]
+        self.assertEqual([row["offering_id"] for row in rows], expected_ids)
+        self.assertEqual([row["class_average"] for row in rows], [Decimal("80.10"), Decimal("80.10"), Decimal("79.99")])
+        self.assertEqual([row["rank"] for row in rows], [1, 1, 3])
+
+    def test_aggregate_rounding_preserves_two_decimal_half_even_ties(self):
+        first = self._offering(self.cycle_course, self.fairview, self.faculty_fv, "ROUND-1")
+        students = [self._student(first, "ROUND-A"), self._student(first, "ROUND-B")]
+        self._submitted_results(first, zip(students, (Decimal("80"), Decimal("80.01"))))
+        second = self._offering(self.cycle_course, self.fairview, self.faculty_fv, "ROUND-2")
+        student = self._student(second, "ROUND-C")
+        self._submitted_results(second, ((student, Decimal("80")),))
+        rows = self._get_rows()
+        self.assertEqual([row["class_average"] for row in rows], [Decimal("80.00"), Decimal("80.00")])
+        self.assertEqual([row["rank"] for row in rows], [1, 1])
+
+    def test_sql_aggregates_use_exact_period_active_roster_and_finalized_non_null_grades(self):
+        offering = self._offering(self.cycle_course, self.fairview, self.faculty_fv, "AGG-1")
+        first = self._student(offering, "AGG-A")
+        second = self._student(offering, "AGG-B")
+        withdrawn = self._student(offering, "AGG-W")
+        Enrollment.objects.filter(student=withdrawn).update(enrollment_status=Enrollment.Status.W)
+        self._submitted_results(offering, ((first, Decimal("0")), (second, Decimal("80")), (withdrawn, Decimal("100"))))
+        final = GradingTemplatePeriod.objects.create(template=self.template, code="FINAL", name="Final", sequence_no=2)
+        self._submitted_results(offering, ((first, Decimal("100")), (second, Decimal("100"))), period=final)
+        row = self._get_rows()[0]
+        self.assertEqual(row["student_count"], 2)
+        self.assertEqual(row["class_average"], Decimal("40.00"))
+        self.assertEqual(row["lowest_score"], Decimal("0.00"))
+        grade = StudentPeriodGrade.objects.filter(offering=offering, student=second, template_period=self.period)
+        for changes in ({"is_finalized": False}, {"is_finalized": True, "exam_grade": None}):
+            with self.subTest(changes=changes):
+                grade.update(**changes)
+                row = self._get_rows()[0]
+                self.assertEqual(row["data_status"], MidtermExamPerformanceReportService.STATUS_INCOMPLETE)
+                for field in ("highest_score", "lowest_score", "class_average", "rank"):
+                    self.assertIsNone(row[field])
 
     def test_endpoint_is_get_only_and_disables_storage(self):
         self.client.force_login(self.admin)

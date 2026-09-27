@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
-from decimal import Decimal
+from types import SimpleNamespace
+from urllib.parse import urlencode
+
+from django.core import signing
+from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import (
+    BigIntegerField, Case, CharField, Count, F, IntegerField, Max, Min, OuterRef,
+    Q, Subquery, Sum, Value, When,
+)
+from django.db.models.functions import Cast, Coalesce, Lower, Round
 
 from apps.academics.models import FacultyAssignment
 from apps.admin_portal.services import AdminScopeService
@@ -207,7 +217,7 @@ class MidtermExamPerformanceReportService:
 
     PERMISSION_CODE = "grading_analytics.read"
     PERIOD_CODE = "MIDTERM"
-    UNITS_PER_PAGE = 10
+    COURSES_PER_PAGE = 5
     ROWS_PER_PAGE = 50
 
     STATUS_COMPLETE = "Complete"
@@ -399,283 +409,312 @@ class MidtermExamPerformanceReportService:
         campus_ids = [campus.id for campus in campuses]
         course_code = request.GET.get("course_code", "").strip()[:64]
         report = {
-            "rows": [], "complete_count": 0, "incomplete_count": 0,
+            "rows": [], "course_groups": [], "complete_count": 0, "incomplete_count": 0,
             "selected_course_code": course_code, "unit_page": None,
-            "row_page": None, "total_offerings": 0,
+            "row_page": None, "total_offerings": 0, "next_url": "", "restart_required": False,
         }
         if cycle is None or not campus_ids:
+            report["restart_required"] = bool(request.GET.get("cursor"))
             return report
-
-        scoped_offering_ids = cls._scoped_offering_ids(request, cycle, campus_ids)
-        snapshots_scope = (
-            CycleCourseOffering.objects.filter(
-                cycle_course__cycle=cycle,
-                cycle_course__inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
-                offering_id__in=scoped_offering_ids,
-                campus_id__in=campus_ids,
-            )
+        snapshots_scope = CycleCourseOffering.objects.filter(
+            cycle_course__cycle=cycle,
+            cycle_course__inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+            offering_id__in=cls._scoped_offering_ids(request, cycle, campus_ids),
+            campus_id__in=campus_ids,
         )
-        visible_courses = list(
-            snapshots_scope.order_by().values_list(
-                "cycle_course_id", "cycle_course__course__code",
-            ).distinct()
-        )
-        if not visible_courses:
-            return report
-        memberships_by_member = defaultdict(list)
+        visible_courses = sorted(snapshots_scope.order_by().values_list(
+            "cycle_course_id", "cycle_course__course__code", "cycle_course__course__title",
+        ).distinct())
+        memberships = defaultdict(list)
         for member_id, group_id in ExamCourseEquivalencyMembership.objects.filter(
-            cycle_course_id__in=[member_id for member_id, _code in visible_courses],
-            active_marker=1,
-            group__is_active=True,
+            cycle_course_id__in=[item[0] for item in visible_courses],
+            active_marker=1, group__is_active=True,
         ).values_list("cycle_course_id", "group_id"):
-            memberships_by_member[member_id].append(group_id)
-
-        units = {}
-        for member_id, code in visible_courses:
-            memberships = memberships_by_member[member_id]
-            unit_key = ("group", memberships[0]) if len(memberships) == 1 else ("course", member_id)
-            unit = units.setdefault(unit_key, {"member_ids": set(), "codes": set()})
-            unit["member_ids"].add(member_id)
-            unit["codes"].add(code)
-        unit_list = sorted(
-            (unit for unit in units.values()
-             if not course_code or any(code.casefold() == course_code.casefold() for code in unit["codes"])),
-            key=lambda unit: (min(code.casefold() for code in unit["codes"]), min(unit["member_ids"])),
-        )
-        unit_page = Paginator(unit_list, cls.UNITS_PER_PAGE).get_page(request.GET.get("unit_page"))
-        report["unit_page"] = unit_page
-        selected_member_ids = {
-            member_id for unit in unit_page.object_list for member_id in unit["member_ids"]
+            memberships[member_id].append(group_id)
+        units = defaultdict(set)
+        unit_keys = {}
+        for member_id, code, title in visible_courses:
+            groups = memberships[member_id]
+            key = ("group", groups[0]) if len(groups) == 1 else ("course", member_id)
+            units[key].add(member_id)
+            unit_keys[member_id] = key
+        matching_units = {
+            unit_keys[member_id] for member_id, code, title in visible_courses
+            if not course_code or code.casefold() == course_code.casefold()
         }
-        if not selected_member_ids:
-            return report
-
-        snapshots = list(
-            snapshots_scope.filter(cycle_course_id__in=selected_member_ids)
-            .select_related(
-                "cycle_course__course", "cycle_course__cycle",
-                "offering__campus", "offering__course", "offering__department",
-                "offering__program", "offering__section", "offering__term",
-            )
-            .order_by("offering__campus__code", "offering__course__code", "offering__section__code", "offering_id")
+        courses = sorted(
+            [item for item in visible_courses if unit_keys[item[0]] in matching_units],
+            key=lambda item: (item[1].casefold(), item[0]),
         )
-        if not snapshots:
+        course_page = Paginator(courses, cls.COURSES_PER_PAGE).get_page(request.GET.get("unit_page"))
+        report["unit_page"] = course_page
+        selected_ids = {item[0] for item in course_page.object_list}
+        if not selected_ids:
+            report["restart_required"] = bool(request.GET.get("cursor"))
             return report
+        ranking_ids = set().union(*(units[unit_keys[item]] for item in selected_ids))
+        ranking_scope = snapshots_scope.filter(cycle_course_id__in=ranking_ids)
+        summaries, signatures, unit_details = cls._summaries(ranking_scope, cycle)
 
-        offering_ids = [snapshot.offering_id for snapshot in snapshots]
+        # Fetch only a histogram of aggregate results for full-unit ranks. No
+        # student results or off-page offering models are materialized.
+        histogram = list(summaries.filter(_status=cls.STATUS_COMPLETE).order_by().values(
+            "_unit", "_context", "_sum_hundredths", "_roster",
+        ).annotate(frequency=Count("pk"), identities=Sum("pk")))
+        histogram.sort(key=lambda item: (item["_unit"], item["_context"], item["_sum_hundredths"], item["_roster"]))
+        by_unit = defaultdict(list)
+        for item in histogram:
+            item["average"] = cls._average(item["_sum_hundredths"], item["_roster"])
+            by_unit[item["_unit"]].append(item)
+        incompatible = set()
+        rank_conditions = []
+        for unit_id, items in by_unit.items():
+            if len({signatures[item["_context"]] for item in items}) > 1:
+                incompatible.add(unit_id)
+            frequency = defaultdict(int)
+            for item in items:
+                frequency[item["average"]] += item["frequency"]
+            ranks = {}
+            position = 1
+            for average in sorted(frequency, reverse=True):
+                ranks[average] = position
+                position += frequency[average]
+            for item in items:
+                # Match exact integer totals, never a round-tripped floating SUM.
+                # The rank itself is derived from the displayed Decimal average.
+                match = Q(_unit=unit_id, _context=item["_context"], _sum_hundredths=item["_sum_hundredths"],
+                          _roster=item["_roster"])
+                if unit_id not in incompatible:
+                    rank_conditions.append(When(match, then=Value(ranks[item["average"]])))
+        summaries = summaries.annotate(
+            _rank=Case(When(_status=cls.STATUS_COMPLETE, then=Case(
+                *rank_conditions, default=Value(None), output_field=IntegerField(),
+            )), default=Value(None), output_field=IntegerField()),
+        )
+
+        # A signed continuation is bound to the actor, filters and current batch.
+        # Changes to scope/rosters/results within a course batch require a fresh
+        # page rather than appending rows whose rank/order may have changed.
+        version = snapshots_scope.aggregate(
+            count=Count("pk"), identities=Sum("pk"), updated=Max("updated_at"),
+            offering_updated=Max("offering__updated_at"),
+            section_updated=Max("offering__section__updated_at"),
+            campus_updated=Max("offering__campus__updated_at"),
+        )
+        catalog = hashlib.sha256(json.dumps(
+            [visible_courses, sorted((key, value) for key, value in unit_keys.items()), version],
+            sort_keys=True, default=str,
+        ).encode()).hexdigest()
+        fingerprint = hashlib.sha256(json.dumps(
+            [visible_courses, histogram, signatures, version], sort_keys=True, default=str,
+        ).encode()).hexdigest()
+        binding = [request.user.pk, cycle.pk, course_code, course_page.number]
+        token = request.GET.get("cursor")
+        if token:
+            try:
+                state = signing.loads(token, salt="midterm-report", max_age=3600)
+                if (state["binding"] != binding
+                        or state["catalog"] != catalog
+                        or state["row"] != cls._safe_int(request.GET.get("row_page", "1"))
+                        or (state["version"] is not None and state["version"] != fingerprint)):
+                    raise signing.BadSignature("Report changed")
+            except (signing.BadSignature, KeyError, TypeError):
+                report["restart_required"] = True
+                return report
+
+        display = summaries.filter(cycle_course_id__in=selected_ids).order_by(
+            Lower("cycle_course__course__code"), "cycle_course_id",
+            F("_rank").asc(nulls_last=True), Lower("offering__campus__code"),
+            Lower("offering__section__code"), "offering_id",
+        )
+        columns = ("pk", "_context", "_unit", "_roster", "_status",
+                   "_highest", "_lowest", "_sum_hundredths", "_rank")
+        row_page = Paginator(display.values(*columns), cls.ROWS_PER_PAGE).get_page(
+            request.GET.get("row_page")
+        )
+        page_values = list(row_page.object_list)
+        snapshots = {
+            snapshot.pk: snapshot for snapshot in ranking_scope.filter(
+                pk__in=[item["pk"] for item in page_values],
+            ).select_related("offering__campus", "offering__course", "offering__section")
+        }
+        if len(snapshots) != len(page_values):
+            report["restart_required"] = True
+            return report
         faculty_by_offering = {}
-        for assignment in (
-            FacultyAssignment.objects.filter(
-                offering_id__in=offering_ids,
-                is_active=True,
-                response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
-            )
-            .select_related("faculty_user")
-            .order_by("offering_id", "-is_primary", "-accepted_at", "-assigned_at")
+        for assignment in FacultyAssignment.objects.filter(
+            offering_id__in=[snapshot.offering_id for snapshot in snapshots.values()],
+            is_active=True, response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        ).select_related("faculty_user").order_by(
+            "offering_id", "-is_primary", "-accepted_at", "-assigned_at", "pk",
         ):
             faculty_by_offering.setdefault(assignment.offering_id, assignment.faculty_user)
-
-        eligible_by_offering = defaultdict(set)
-        for offering_id, student_id in (
-            Enrollment.objects.filter(
-                course_offering_id__in=offering_ids,
-                is_active=True,
-                student__is_active=True,
-                student__department__is_active=True,
-            )
-            .filter(Q(student__program__isnull=True) | Q(student__program__is_active=True))
-            .exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
-            .values_list("course_offering_id", "student_id")
-        ):
-            eligible_by_offering[offering_id].add(student_id)
-
-        period_by_context = {}
-        signature_by_context = {}
-        configuration = _BulkGradingConfiguration(
-            [snapshot.offering for snapshot in snapshots], tenant_id=cycle.tenant_id,
-            term_id=cycle.term_id, period_code=cls.PERIOD_CODE,
-        )
-        for snapshot in snapshots:
-            offering = snapshot.offering
-            context_key = (
-                offering.course_id, offering.campus_id, offering.department_id,
-                offering.program_id or offering.section.program_id, offering.term_id,
-            )
-            if context_key in period_by_context:
-                continue
-            period_by_context[context_key], signature_by_context[context_key] = configuration.resolve(offering)
-
-        period_ids = {period.id for period in period_by_context.values() if period is not None}
-        submission_by_key = {
-            (offering_id, period_id): status
-            for offering_id, period_id, status in GradeSubmission.objects.filter(
-                offering_id__in=offering_ids,
-                template_period_id__in=period_ids,
-            ).values_list("offering_id", "template_period_id", "status")
-        }
-        grades_by_key = defaultdict(dict)
-        for offering_id, period_id, student_id, grade, finalized in (
-            StudentPeriodGrade.objects.filter(
-                offering_id__in=offering_ids,
-                template_period_id__in=period_ids,
-            ).values_list("offering_id", "template_period_id", "student_id", "exam_grade", "is_finalized")
-        ):
-            if student_id in eligible_by_offering[offering_id]:
-                grades_by_key[(offering_id, period_id)][student_id] = (grade, finalized)
-
-        visible_member_ids = {snapshot.cycle_course_id for snapshot in snapshots}
-        units_by_member = {}
         rows = []
-        for snapshot in snapshots:
-            cycle_course = snapshot.cycle_course
-            if cycle_course.id not in units_by_member:
-                try:
-                    unit = _resolve_report_unit(cycle_course)
-                    unit_error = False
-                except ValidationError:
-                    unit = ExaminationUnit(primary=cycle_course, members=(cycle_course,))
-                    unit_error = True
-                for member in unit.members:
-                    units_by_member[member.id] = (unit, unit_error)
-            unit, unit_error = units_by_member[cycle_course.id]
+        course_groups = {}
+        for summary in page_values:
+            snapshot = snapshots[summary["pk"]]
             offering = snapshot.offering
-            context_key = (
-                offering.course_id, offering.campus_id, offering.department_id,
-                offering.program_id or offering.section.program_id, offering.term_id,
-            )
-            rows.append(cls._build_row(
-                snapshot=snapshot, unit=unit, unit_error=unit_error,
-                visible_member_ids=visible_member_ids,
-                faculty=faculty_by_offering.get(offering.id),
-                eligible_student_ids=eligible_by_offering[offering.id],
-                period=period_by_context[context_key],
-                context_signature=signature_by_context[context_key],
-                submission_by_key=submission_by_key,
-                grades_by_key=grades_by_key,
+            faculty = faculty_by_offering.get(offering.id)
+            unit, unit_error = unit_details[snapshot.cycle_course_id]
+            member_codes = tuple(sorted(
+                member.course.code for member in unit.members if member.id in ranking_ids
             ))
-
-        cls._apply_ranks(rows)
-        rows.sort(key=lambda row: (
-            row["course_group"].casefold(), row["campus_code"].casefold(),
-            row["course_code"].casefold(), row["section_code"].casefold(), row["offering_id"],
-        ))
-        row_page = Paginator(rows, cls.ROWS_PER_PAGE).get_page(request.GET.get("row_page"))
-        report.update({
-            "rows": list(row_page.object_list),
-            "row_page": row_page,
-            "total_offerings": len(rows),
-            "complete_count": sum(row["rank"] is not None for row in rows),
-            "incomplete_count": sum(row["rank"] is None for row in rows),
-        })
+            status = summary["_status"]
+            complete = status == cls.STATUS_COMPLETE
+            if complete and summary["_unit"] in incompatible:
+                status = cls.STATUS_NOT_COMPARABLE
+            row = {
+                "offering_id": offering.id, "course_id": offering.course_id,
+                "course_code": offering.course.code, "course_title": offering.course.title,
+                "course_group": (unit.group.name if len(member_codes) == len(unit.members)
+                                 else "Scoped examination unit") if unit.group else unit.primary.course.code,
+                "member_codes": member_codes, "unit_key": unit_keys[snapshot.cycle_course_id],
+                "campus_code": offering.campus.code, "campus_name": offering.campus.name,
+                "faculty_name": ((faculty.full_name or "").strip() or faculty.username) if faculty else "Unassigned",
+                "section_code": offering.section.code, "student_count": summary["_roster"],
+                "highest_score": cls._round(summary["_highest"]) if complete else None,
+                "lowest_score": cls._round(summary["_lowest"]) if complete else None,
+                "class_average": cls._average(summary["_sum_hundredths"], summary["_roster"]) if complete else None,
+                "rank": summary["_rank"],
+                "data_status": status, "context_signature": signatures[summary["_context"]],
+                "status_detail": ("Different grading configurations within this examination unit."
+                                  if status == cls.STATUS_NOT_COMPARABLE else ""),
+            }
+            rows.append(row)
+            group = course_groups.setdefault(offering.course_id, {
+                "id": offering.course_id, "code": offering.course.code,
+                "title": offering.course.title, "rows": [],
+            })
+            group["rows"].append(row)
+        next_course = course_page.number
+        next_row = None
+        if row_page.has_next():
+            next_row = row_page.next_page_number()
+        elif course_page.has_next():
+            next_course = course_page.next_page_number()
+            next_row = 1
+        if next_row:
+            cursor = signing.dumps({
+                "binding": [request.user.pk, cycle.pk, course_code, next_course],
+                "row": next_row,
+                "catalog": catalog,
+                "version": fingerprint if next_course == course_page.number else None,
+            }, salt="midterm-report", compress=True)
+            report["next_url"] = "?" + urlencode({
+                "cycle_id": cycle.pk, "course_code": course_code,
+                "unit_page": next_course, "row_page": next_row, "cursor": cursor,
+            })
+        report.update(
+            rows=rows, course_groups=list(course_groups.values()), row_page=row_page,
+            total_offerings=row_page.paginator.count,
+            complete_count=sum(row["rank"] is not None for row in rows),
+            incomplete_count=sum(row["rank"] is None for row in rows),
+        )
         return report
 
     @classmethod
-    def _build_row(cls, *, snapshot, unit, unit_error, visible_member_ids, faculty,
-                   eligible_student_ids, period, context_signature, submission_by_key,
-                   grades_by_key):
-        offering = snapshot.offering
-        member_codes = tuple(sorted(
-            member.course.code for member in unit.members if member.id in visible_member_ids
-        ))
-        all_members_visible = len(member_codes) == len(unit.members)
-        course_group = (
-            unit.group.name if all_members_visible else "Scoped examination unit"
-        ) if unit.group is not None else unit.primary.course.code
-        unit_key = ("group", unit.group.id) if unit.group is not None else ("course", unit.primary.id)
-        faculty_name = ((faculty.full_name or "").strip() or faculty.username) if faculty else "Unassigned"
-        row = {
-            "unit_key": unit_key,
-            "course_group": course_group,
-            "member_codes": member_codes,
-            "campus_code": offering.campus.code,
-            "campus_name": offering.campus.name,
-            "course_code": offering.course.code,
-            "faculty_name": faculty_name,
-            "section_code": offering.section.code,
-            "student_count": len(eligible_student_ids),
-            "highest_score": None,
-            "lowest_score": None,
-            "class_average": None,
-            "rank": None,
-            "data_status": "",
-            "status_detail": "",
-            "offering_id": offering.id,
-            "context_signature": context_signature,
-        }
-
-        if unit_error:
-            row["data_status"] = cls.STATUS_INVALID_UNIT
-            return row
-        if not eligible_student_ids:
-            row["data_status"] = cls.STATUS_NO_ROSTER
-            return row
-
-        if period is None:
-            row["data_status"] = cls.STATUS_NO_PERIOD
-            return row
-
-        submission_status = submission_by_key.get((offering.id, period.id))
-        if submission_status is None or submission_status == GradeSubmission.Status.DRAFT:
-            row["data_status"] = cls.STATUS_NOT_SUBMITTED
-            return row
-        if submission_status == GradeSubmission.Status.REOPENED:
-            row["data_status"] = cls.STATUS_REOPENED
-            return row
-
-        result_rows = list(grades_by_key[(offering.id, period.id)].values())
-        if len(result_rows) != len(eligible_student_ids) or any(
-            exam_grade is None or not is_finalized
-            for exam_grade, is_finalized in result_rows
-        ):
-            row["data_status"] = cls.STATUS_INCOMPLETE
-            return row
-
-        values = [Decimal(exam_grade) for exam_grade, _is_finalized in result_rows]
-        if any(value < Decimal("0") or value > Decimal("100") for value in values):
-            row["data_status"] = cls.STATUS_INVALID_SCALE
-            return row
-
-        row.update(
-            {
-                "highest_score": cls._round(max(values)),
-                "lowest_score": cls._round(min(values)),
-                "class_average": cls._round(sum(values) / Decimal(len(values))),
-                "data_status": cls.STATUS_COMPLETE,
-            }
+    def _summaries(cls, snapshots, cycle):
+        """SQL aggregates across authorized units; hydrate only the display page."""
+        contexts = list(snapshots.order_by().annotate(
+            program=Coalesce("offering__program_id", "offering__section__program_id"),
+        ).values_list(
+            "offering__course_id", "offering__campus_id", "offering__department_id", "program",
+            "offering__course__course_type", "offering__course__default_base_value",
+        ).distinct())
+        contexts.sort(key=lambda item: tuple(str(value) for value in item))
+        inputs = [
+            SimpleNamespace(
+                course_id=course_id, campus_id=campus_id, department_id=department_id,
+                program_id=program_id, section=SimpleNamespace(program_id=program_id),
+                term_id=cycle.term_id, term=cycle.term,
+                course=SimpleNamespace(course_type=course_type, default_base_value=base),
+            ) for course_id, campus_id, department_id, program_id, course_type, base in contexts
+        ]
+        configuration = _BulkGradingConfiguration(
+            inputs, tenant_id=cycle.tenant_id, term_id=cycle.term_id, period_code=cls.PERIOD_CODE,
         )
-        return row
+        signatures, periods = {}, {}
+        context_cases = []
+        period_cases = []
+        for number, offering in enumerate(inputs):
+            period, signatures[number] = configuration.resolve(offering)
+            periods[number] = period.pk if period else None
+            match = Q(
+                offering__course_id=offering.course_id, offering__campus_id=offering.campus_id,
+                offering__department_id=offering.department_id, _program=offering.program_id,
+            )
+            context_cases.append(When(match, then=Value(number)))
+            period_cases.append(When(match, then=Value(periods[number])))
+        unit_details = {}
+        for member in CycleCourse.objects.filter(
+            pk__in=snapshots.values("cycle_course_id"),
+        ).select_related("course", "cycle"):
+            if member.pk in unit_details:
+                continue
+            try:
+                unit, invalid = _resolve_report_unit(member), False
+            except ValidationError:
+                unit, invalid = ExaminationUnit(primary=member, members=(member,)), True
+            for item in unit.members:
+                unit_details[item.pk] = (unit, invalid)
+        snapshots = snapshots.annotate(
+            _program=Coalesce("offering__program_id", "offering__section__program_id"),
+        ).annotate(
+            _context=Case(*context_cases, output_field=IntegerField()),
+            _unit=Case(*[
+                When(cycle_course_id=member_id, then=Value(unit.primary.pk))
+                for member_id, (unit, invalid) in unit_details.items()
+            ], output_field=IntegerField()),
+        ).annotate(_period=Case(*period_cases, output_field=IntegerField()))
+        eligible = Enrollment.objects.filter(
+            course_offering_id=OuterRef("offering_id"), is_active=True,
+            student__is_active=True, student__department__is_active=True,
+        ).filter(
+            Q(student__program__isnull=True) | Q(student__program__is_active=True),
+        ).exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
+        roster = eligible.order_by().values("course_offering_id").annotate(n=Count("student_id", distinct=True))
+        grades = StudentPeriodGrade.objects.filter(
+            offering_id=OuterRef("offering_id"), template_period_id=OuterRef("_period"),
+            student_id__in=eligible.values("student_id"),
+        ).order_by().values("offering_id").annotate(
+            finalized=Count("pk", filter=Q(is_finalized=True, exam_grade__isnull=False)),
+            highest=Max("exam_grade"), lowest=Min("exam_grade"),
+            # Official grades have two decimal places. Normalize each value to
+            # integer hundredths before summing: SQLite stores decimal values as
+            # floats, so summing first would make equality and ties unreliable.
+            # Round only removes binary representation noise before the cast;
+            # displayed-average rounding is performed with Decimal below.
+            total_hundredths=Sum(Cast(Round(F("exam_grade") * 100), BigIntegerField())),
+        )
+        submissions = GradeSubmission.objects.filter(
+            offering_id=OuterRef("offering_id"), template_period_id=OuterRef("_period"),
+        ).order_by().values("status")[:1]
+        snapshots = snapshots.annotate(
+            _roster=Coalesce(Subquery(roster.values("n")), 0),
+            _finalized=Coalesce(Subquery(grades.values("finalized")), 0),
+            _highest=Subquery(grades.values("highest")), _lowest=Subquery(grades.values("lowest")),
+            _sum_hundredths=Subquery(grades.values("total_hundredths")), _submission=Subquery(submissions),
+        ).annotate(_status=Case(
+            When(cycle_course_id__in=[key for key, (_, invalid) in unit_details.items() if invalid],
+                 then=Value(cls.STATUS_INVALID_UNIT)),
+            When(_roster=0, then=Value(cls.STATUS_NO_ROSTER)),
+            When(_period__isnull=True, then=Value(cls.STATUS_NO_PERIOD)),
+            When(_submission=GradeSubmission.Status.REOPENED, then=Value(cls.STATUS_REOPENED)),
+            When(~Q(_submission=GradeSubmission.Status.SUBMITTED) | Q(_submission__isnull=True),
+                 then=Value(cls.STATUS_NOT_SUBMITTED)),
+            When(~Q(_finalized=F("_roster")), then=Value(cls.STATUS_INCOMPLETE)),
+            When(Q(_lowest__lt=0) | Q(_highest__gt=100), then=Value(cls.STATUS_INVALID_SCALE)),
+            default=Value(cls.STATUS_COMPLETE), output_field=CharField(),
+        ))
+        return snapshots, signatures, unit_details
 
     @staticmethod
     def _round(value):
-        return Decimal(value).quantize(Decimal("0.01"))
+        return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
 
     @classmethod
-    def _apply_ranks(cls, rows):
-        complete_by_unit = defaultdict(list)
-        for row in rows:
-            if row["data_status"] == cls.STATUS_COMPLETE:
-                complete_by_unit[row["unit_key"]].append(row)
-        for unit_rows in complete_by_unit.values():
-            if len({row["context_signature"] for row in unit_rows}) > 1:
-                for row in unit_rows:
-                    row["data_status"] = cls.STATUS_NOT_COMPARABLE
-                    row["status_detail"] = "Different grading configurations within this examination unit."
-                continue
-            unit_rows.sort(
-                key=lambda row: (
-                    -row["class_average"],
-                    row["campus_code"].casefold(),
-                    row["course_code"].casefold(),
-                    row["section_code"].casefold(),
-                    row["offering_id"],
-                )
-            )
-            prior_average = None
-            prior_rank = None
-            for position, row in enumerate(unit_rows, start=1):
-                if row["class_average"] == prior_average:
-                    row["rank"] = prior_rank
-                else:
-                    row["rank"] = position
-                    prior_rank = position
-                    prior_average = row["class_average"]
+    def _average(cls, total_hundredths, student_count):
+        with localcontext() as context:
+            context.prec = 28
+            context.rounding = ROUND_HALF_EVEN
+            return cls._round(Decimal(total_hundredths) / Decimal(student_count * 100))

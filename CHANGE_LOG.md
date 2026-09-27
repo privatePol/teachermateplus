@@ -1,3 +1,10 @@
+## Midterm course tables and progressive loading - 2026-09-27
+
+- Decimal-rank remediation: aggregate official two-decimal grades as integer hundredths, then calculate displayed averages with explicit Decimal HALF_EVEN rounding. Full-unit competition ranks use those displayed values and exact integer aggregate keys, never floating-point sum equality. Regression coverage includes three `80.10` grades and tied averages across progressive page boundaries.
+- Show each authorized course as `COURSE CODE | COURSE TITLE` above its nine-column table. Rows sort by numeric rank within each course, with unranked sections last and no repeated course code in the section cells.
+- Load at most five courses and fifty offering rows per response. Load more appends sections beneath an existing heading or adds the next course, preserving cycle/exact-course filters and a normal link fallback. Signed continuations recheck authorization and detect changed catalogue/batch state; stale results offer a filtered reload.
+- Compute full-unit rank frequencies with SQL roster/official-grade aggregates and existing grading-context signatures before slicing the offering query. Only displayed offering models and faculty details are hydrated. Preserve legacy inclusion, EXEMPT exclusion, zeroes, incomplete blanks, full-unit competition ties, and grading comparability. No schema or application-data change.
+
 ## Midterm examination class performance report - 2026-09-27
 
 - Legacy reporting correction: Included offerings now calculate official Midterm results regardless of historical classification, with classification labels removed from the report. EXEMPT exclusion, incomplete-result blanks, zeroes, scope, grading comparability, ranks, and pagination remain unchanged. Report-only unit validation omits classification consistency while retaining other validity checks; shared exam-builder validation is unchanged. No historical classifications or schema are changed.

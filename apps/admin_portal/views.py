@@ -3048,14 +3048,27 @@ def midterm_exam_performance_view(request):
         cycle_options=cycle_options,
     )
     report = MidtermExamPerformanceReportService.build_report(request, selected_cycle)
+    restart_url = request.path + "?" + urlencode({
+        "cycle_id": selected_cycle.pk if selected_cycle else "",
+        "course_code": report["selected_course_code"],
+    })
+    if request.headers.get("X-Midterm-Fragment") == "1":
+        response = JsonResponse({
+            "html": render_to_string("admin_portal/grading/_midterm_course_groups.html", report, request=request),
+            "next_url": report["next_url"], "restart_url": restart_url,
+        }, status=409 if report["restart_required"] else 200)
+        response["Cache-Control"] = "no-store"
+        return response
     response = render(
         request,
         "admin_portal/grading/midterm_exam_performance.html",
         {
             "cycle_options": cycle_options,
             "selected_cycle": selected_cycle,
+            "restart_url": restart_url,
             **report,
         },
+        status=409 if report["restart_required"] else 200,
     )
     response["Cache-Control"] = "no-store"
     return response

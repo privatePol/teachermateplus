@@ -793,9 +793,11 @@ ADMIN_HELP_SECTIONS = [
                     ),
                     "Set the campus, academic year, term, period, course, or status filters before reviewing results.",
                     (
-                        "For Midterm Exam Performance, select the Midterm examination cycle and move through "
-                        "unit and offering pages. An exact Course code filter includes its full authorized "
-                        "examination unit. Exempt courses are omitted."
+                        "For Midterm Exam Performance, select the Midterm examination cycle, then use Load more "
+                        "to show additional course tables and sections. Each heading shows COURSE CODE | COURSE TITLE; "
+                        "ranked sections appear in numeric rank order, followed by unranked sections. An exact Course "
+                        "code filter includes its full authorized examination unit. Ranks include all authorized "
+                        "sections in that unit, even before they are displayed. Exempt courses are omitted."
                     ),
                     (
                         "A Midterm row receives statistics only after the exact gradebook submission is "
