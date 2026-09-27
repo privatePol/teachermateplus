@@ -4,7 +4,7 @@
 <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
   <div>
     <h1 class="h4 mb-1">Midterm Examination Class Performance</h1>
-    <p class="text-muted mb-0">Aggregate official Midterm results for included Standardized and Departmental examination courses.</p>
+    <p class="text-muted mb-0">Aggregate official Midterm results for included examination courses, regardless of historical classification.</p>
   </div>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:academic_performance_insights' %}">Back to Performance Insights</a>
 </div>
@@ -74,7 +74,7 @@
           <td>{% if row.rank is not None %}{{ row.rank }}{% endif %}</td>
           <td>
             <strong>{{ row.course_group }}</strong>
-            <div class="small text-muted">{{ row.member_codes|join:", " }} - {{ row.classification_label }}</div>
+            <div class="small text-muted">{{ row.member_codes|join:", " }}</div>
           </td>
           <td>{{ row.campus_code }}<div class="small text-muted">{{ row.campus_name }}</div></td>
           <td>{{ row.faculty_name }}</td>

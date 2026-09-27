@@ -800,7 +800,9 @@ ADMIN_HELP_SECTIONS = [
                     (
                         "A Midterm row receives statistics only after the exact gradebook submission is "
                         "Submitted and every eligible student has a finalized official exam grade. "
-                        "Ranking also requires compatible grading configurations within the examination unit."
+                        "Included offerings are reported regardless of historical examination classification; "
+                        "authoritatively Exempt courses are omitted. Ranking also requires compatible grading "
+                        "configurations within the examination unit."
                     ),
                     (
                         "On Grading Analytics, choose one Course code to show every authorized section or "

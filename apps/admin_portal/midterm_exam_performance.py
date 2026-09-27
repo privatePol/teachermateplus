@@ -12,9 +12,12 @@ from apps.admin_portal.services import AdminScopeService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
 from apps.core.services.settings import SystemSettingService
-from apps.departmental_exams.exam_units import ExaminationUnit, resolve_examination_unit
+from apps.departmental_exams.exam_units import (
+    ExaminationUnit, configuration_compatibility_key, resolve_examination_unit,
+)
 from apps.departmental_exams.models import (
-    CycleCourse, CycleCourseOffering, ExamCourseEquivalencyMembership, ExaminationCycle,
+    CourseExamConfiguration, CycleCourse, CycleCourseOffering,
+    ExamCourseEquivalencyMembership, ExaminationCycle,
 )
 from apps.enrollment.models import Enrollment
 from apps.grading.models import (
@@ -24,6 +27,35 @@ from apps.grading.models import (
 from apps.grading.services import FacultyGradingService
 from apps.rbac.models import UserPermission, UserRole
 from apps.tenants.models import Department
+
+
+def _resolve_report_unit(cycle_course):
+    """Read historical units without applying the builder's classification rule.
+
+    Keep the other validate_examination_unit invariants here. The shared
+    resolver still rejects ambiguous membership; builder validation is unchanged.
+    """
+    unit = resolve_examination_unit(cycle_course, validate=False)
+    if not unit.grouped:
+        return unit
+    if unit.group.cycle.processing_mode != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+        raise ValidationError("Course equivalency requires an Automatic Generation cycle.")
+    if len(unit.members) < 2 or unit.primary.id not in unit.member_ids:
+        raise ValidationError("An examination unit requires two members and its active primary.")
+    if any(member.cycle_id != unit.group.cycle_id for member in unit.members):
+        raise ValidationError("Equivalency member cycle scope is inconsistent.")
+    if any(member.inclusion_status != CycleCourse.InclusionStatus.INCLUDED for member in unit.members):
+        raise ValidationError("All equivalency members must be Included.")
+    configurations = {
+        row.cycle_course_id: row
+        for row in CourseExamConfiguration.objects.filter(cycle_course_id__in=unit.member_ids)
+    }
+    if any(member.id not in configurations for member in unit.members):
+        raise ValidationError("Every equivalency member requires an examination configuration.")
+    primary_key = configuration_compatibility_key(configurations[unit.primary.id])
+    if any(configuration_compatibility_key(row) != primary_key for row in configurations.values()):
+        raise ValidationError("Equivalency members must have compatible examination configurations.")
+    return unit
 
 
 class _BulkGradingConfiguration:
@@ -186,7 +218,6 @@ class MidtermExamPerformanceReportService:
     STATUS_INCOMPLETE = "Incomplete finalized results"
     STATUS_NO_PERIOD = "Midterm grading period unavailable"
     STATUS_INVALID_SCALE = "Official result outside 0-100 scale"
-    STATUS_UNCLASSIFIED = "Legacy classification unconfirmed"
     STATUS_INVALID_UNIT = "Invalid examination unit"
 
     @staticmethod
@@ -499,7 +530,7 @@ class MidtermExamPerformanceReportService:
             cycle_course = snapshot.cycle_course
             if cycle_course.id not in units_by_member:
                 try:
-                    unit = resolve_examination_unit(cycle_course)
+                    unit = _resolve_report_unit(cycle_course)
                     unit_error = False
                 except ValidationError:
                     unit = ExaminationUnit(primary=cycle_course, members=(cycle_course,))
@@ -552,13 +583,10 @@ class MidtermExamPerformanceReportService:
         ) if unit.group is not None else unit.primary.course.code
         unit_key = ("group", unit.group.id) if unit.group is not None else ("course", unit.primary.id)
         faculty_name = ((faculty.full_name or "").strip() or faculty.username) if faculty else "Unassigned"
-        classification = snapshot.cycle_course.exam_classification
         row = {
             "unit_key": unit_key,
             "course_group": course_group,
             "member_codes": member_codes,
-            "classification": classification,
-            "classification_label": snapshot.cycle_course.get_exam_classification_display(),
             "campus_code": offering.campus.code,
             "campus_name": offering.campus.name,
             "course_code": offering.course.code,
@@ -577,9 +605,6 @@ class MidtermExamPerformanceReportService:
 
         if unit_error:
             row["data_status"] = cls.STATUS_INVALID_UNIT
-            return row
-        if classification == CycleCourse.ExamClassification.UNCLASSIFIED_LEGACY:
-            row["data_status"] = cls.STATUS_UNCLASSIFIED
             return row
         if not eligible_student_ids:
             row["data_status"] = cls.STATUS_NO_ROSTER

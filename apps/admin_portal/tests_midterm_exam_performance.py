@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import connection
 from django.test import RequestFactory, TestCase
 from django.test.utils import CaptureQueriesContext
@@ -17,12 +18,13 @@ from apps.admin_portal.midterm_exam_performance import (
 from apps.admin_portal.views import midterm_exam_performance_view
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
-from apps.departmental_exams.exam_units import ExamCourseEquivalencyService
+from apps.departmental_exams.exam_units import ExamCourseEquivalencyService, resolve_examination_unit
 from apps.departmental_exams.models import (
     CourseExamConfiguration,
     CycleCourse,
     CycleCourseOffering,
     ExaminationCycle,
+    _classification_service_scope,
 )
 from apps.enrollment.models import Enrollment
 from apps.grading.models import (
@@ -147,6 +149,10 @@ class MidtermExamPerformanceReportTests(TestCase):
         self.url = reverse("admin_portal:midterm_exam_performance")
 
     def test_complete_results_preserve_zero_and_missing_result_stays_blank(self):
+        with _classification_service_scope():
+            CycleCourse.objects.filter(pk=self.cycle_course.pk).update(
+                exam_classification=CycleCourse.ExamClassification.UNCLASSIFIED_LEGACY,
+            )
         complete = self._offering(self.cycle_course, self.fairview, self.faculty_fv, "FV-1")
         students = [self._student(complete, "FV-001"), self._student(complete, "FV-002")]
         self._submitted_results(complete, zip(students, (Decimal("0"), Decimal("80"))))
@@ -171,6 +177,8 @@ class MidtermExamPerformanceReportTests(TestCase):
         self.assertEqual(incomplete_row["student_count"], 2)
         self.assertEqual(incomplete_row["data_status"], MidtermExamPerformanceReportService.STATUS_INCOMPLETE)
         self.assertIsNone(incomplete_row["class_average"])
+        self.assertIsNone(incomplete_row["highest_score"])
+        self.assertIsNone(incomplete_row["lowest_score"])
         self.assertIsNone(incomplete_row["rank"])
         self.assertEqual(
             invalid_scale_row["data_status"],
@@ -245,7 +253,7 @@ class MidtermExamPerformanceReportTests(TestCase):
             ranks,
         )
 
-    def test_departmental_is_reported_and_legacy_is_not_guessed(self):
+    def test_legacy_classified_included_course_with_complete_grades_is_reported(self):
         departmental_course = Course.objects.create(tenant=self.tenant, code="DEPT", title="Departmental")
         departmental = self._cycle_course(
             departmental_course,
@@ -266,12 +274,59 @@ class MidtermExamPerformanceReportTests(TestCase):
         rows = self._get_rows()
         self.assertEqual(self._row(rows, "DEPT-1")["data_status"], "Complete")
         legacy_row = self._row(rows, "LEGACY-1")
-        self.assertEqual(
-            legacy_row["data_status"],
-            MidtermExamPerformanceReportService.STATUS_UNCLASSIFIED,
+        self.assertEqual(legacy_row["data_status"], "Complete")
+        self.assertEqual(legacy_row["class_average"], Decimal("99.00"))
+        self.assertEqual(legacy_row["rank"], 1)
+        self.assertEqual(legacy_row["highest_score"], Decimal("99.00"))
+        self.assertEqual(legacy_row["lowest_score"], Decimal("99.00"))
+        response = self.client.get(self.url, {"cycle_id": self.cycle.id})
+        self.assertNotContains(response, "Legacy classification unconfirmed")
+        self.assertNotContains(response, "UNCLASSIFIED_LEGACY")
+
+    def test_report_accepts_legacy_unit_while_builder_preserves_classification_rule(self):
+        course = Course.objects.create(tenant=self.tenant, code="LEG-EQ", title="Legacy equivalent")
+        member = self._cycle_course(course, CycleCourse.ExamClassification.STANDARDIZED)
+        self._configuration(member)
+        first = self._offering(self.cycle_course, self.fairview, self.faculty_fv, "LEG-EQ-1")
+        second = self._offering(member, self.cubao, self.faculty_cub, "LEG-EQ-2")
+        ExamCourseEquivalencyService.create_group(
+            cycle_id=self.cycle.id, name="Historical Midterm unit",
+            primary_cycle_course_id=self.cycle_course.id,
+            member_ids=(self.cycle_course.id, member.id), actor=self.admin,
         )
-        self.assertIsNone(legacy_row["class_average"])
-        self.assertIsNone(legacy_row["rank"])
+        for index, (offering, grade) in enumerate(((first, "90"), (second, "80"))):
+            student = self._student(offering, f"LEG-EQ-{index}")
+            self._submitted_results(offering, ((student, Decimal(grade)),))
+
+        # Simulate historical metadata only in the disposable test database.
+        with _classification_service_scope():
+            CycleCourse.objects.filter(pk=member.pk).update(
+                exam_classification=CycleCourse.ExamClassification.UNCLASSIFIED_LEGACY,
+            )
+        with self.assertRaisesMessage(ValidationError, "same explicit exam classification"):
+            resolve_examination_unit(self.cycle_course)
+        rows = self._get_rows()
+        self.assertEqual({row["course_group"] for row in rows}, {"Historical Midterm unit"})
+        self.assertEqual({row["data_status"] for row in rows}, {"Complete"})
+        self.assertEqual({row["section_code"]: row["rank"] for row in rows},
+                         {"LEG-EQ-1": 1, "LEG-EQ-2": 2})
+        member.refresh_from_db()
+        self.assertEqual(member.exam_classification, CycleCourse.ExamClassification.UNCLASSIFIED_LEGACY)
+
+        with _classification_service_scope():
+            CycleCourse.objects.filter(pk=self.cycle_course.pk).update(
+                exam_classification=CycleCourse.ExamClassification.UNCLASSIFIED_LEGACY,
+            )
+        self.assertEqual({row["data_status"] for row in self._get_rows()}, {"Complete"})
+
+        # Classification independence must not bypass examination-configuration validity.
+        CourseExamConfiguration.objects.filter(cycle_course=member).update(
+            additional_instructions="Different preserved exam instructions",
+        )
+        for row in self._get_rows():
+            self.assertEqual(row["data_status"], MidtermExamPerformanceReportService.STATUS_INVALID_UNIT)
+            for field in ("highest_score", "lowest_score", "class_average", "rank"):
+                self.assertIsNone(row[field])
 
     def test_exempt_course_is_absent_while_included_missing_results_remains_visible(self):
         included = self._offering(self.cycle_course, self.fairview, self.faculty_fv, "INCLUDED")
@@ -282,7 +337,7 @@ class MidtermExamPerformanceReportTests(TestCase):
             course=exempt_course,
             responsible_department=self.fairview[1],
             inclusion_status=CycleCourse.InclusionStatus.EXEMPT,
-            exam_classification=CycleCourse.ExamClassification.DEPARTMENTAL,
+            exam_classification=CycleCourse.ExamClassification.UNCLASSIFIED_LEGACY,
             exemption_category=CycleCourse.ExemptionCategory.PRACTICUM_OJT,
             exemption_reason="Approved practical examination exemption.",
             exemption_changed_by=self.admin,
