@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import F, Prefetch, Q
+from django.db.models.functions import SHA256
 from django.http import Http404
 
 from apps.academics.models import FacultyAssignment
@@ -477,51 +480,63 @@ def revise_historical_case(
     return revision
 
 
-def owned_items(*, actor, tenant_id, campus_id=None, course_id=None):
+def _scope_pairs(*, actor, tenant_id, campus_id=None, course_id=None):
     scopes = authoring_scopes(user=actor, tenant_id=tenant_id, campus_id=campus_id)
-    allowed_pairs = {
+    return {
         (scope.campus_id, scope.course_id)
         for scope in scopes
         if course_id is None or scope.course_id == course_id
     }
-    if not allowed_pairs:
-        return []
+
+
+def _pair_filter(pairs, *, campus_field, course_field):
     allowed = None
-    for allowed_campus_id, allowed_course_id in allowed_pairs:
-        pair = Q(campus_id=allowed_campus_id, course_id=allowed_course_id)
+    for campus_id, course_id in pairs:
+        pair = Q(**{campus_field: campus_id, course_field: course_id})
         allowed = pair if allowed is None else allowed | pair
-    queryset = QuestionBankItem.objects.filter(
-        allowed, owner=actor, tenant_id=tenant_id
+    return allowed
+
+
+def _owned_revision_queryset(*, actor, tenant_id, allowed_pairs, kind, query):
+    if kind == "question":
+        item_kind = QuestionBankItem.Kind.QUESTION
+    elif kind == "case":
+        item_kind = QuestionBankItem.Kind.CASE
+    else:
+        item_kind = None
+    queryset = QuestionBankRevision.objects.filter(
+        _pair_filter(
+            allowed_pairs,
+            campus_field="item__campus_id",
+            course_field="item__course_id",
+        ),
+        item__owner=actor,
+        item__tenant_id=tenant_id,
+        revision=F("item__current_revision"),
     )
-    items = list(queryset.select_related("course", "campus").order_by("course__code", "-updated_at", "id"))
-    revisions = {
-        (row.item_id, row.revision): row
-        for row in QuestionBankRevision.objects.filter(item__in=items).prefetch_related(
-            Prefetch(
-                "members",
-                queryset=QuestionBankCaseMember.objects.order_by("position", "id"),
-            )
+    if item_kind:
+        queryset = queryset.filter(item__kind=item_kind)
+    if query:
+        queryset = queryset.filter(
+            Q(title__icontains=query)
+            | Q(stimulus__icontains=query)
+            | Q(question_text__icontains=query)
+            | Q(members__question_text__icontains=query)
+        ).distinct()
+    return queryset.select_related("item__course", "item__campus").prefetch_related(
+        Prefetch(
+            "members",
+            queryset=QuestionBankCaseMember.objects.order_by("position", "id"),
         )
-    }
-    return [(item, revisions.get((item.id, item.current_revision))) for item in items]
+    ).order_by("item__course__code", "-item__updated_at", "item__id")
 
 
-def historical_items(*, actor, tenant_id, campus_id=None, course_id=None):
-    scopes = authoring_scopes(user=actor, tenant_id=tenant_id, campus_id=campus_id)
-    allowed_pairs = {
-        (scope.campus_id, scope.course_id)
-        for scope in scopes
-        if course_id is None or scope.course_id == course_id
-    }
-    if not allowed_pairs:
-        return [], []
-    allowed = None
-    for allowed_campus_id, allowed_course_id in allowed_pairs:
-        pair = Q(
-            source_campus_id=allowed_campus_id,
-            cycle_course__course_id=allowed_course_id,
-        )
-        allowed = pair if allowed is None else allowed | pair
+def _historical_querysets(*, actor, tenant_id, allowed_pairs, kind, query):
+    allowed = _pair_filter(
+        allowed_pairs,
+        campus_field="source_campus_id",
+        course_field="cycle_course__course_id",
+    )
     contributions = FacultyContribution.objects.filter(
         allowed,
         faculty_user=actor,
@@ -529,37 +544,241 @@ def historical_items(*, actor, tenant_id, campus_id=None, course_id=None):
         submitted_at__isnull=False,
         cycle_course__cycle__tenant_id=tenant_id,
     ).exclude(correction_successor__status=FacultyContribution.Status.SUBMITTED)
-    if campus_id is not None:
-        contributions = contributions.filter(source_campus_id=campus_id)
-    if course_id is not None:
-        contributions = contributions.filter(cycle_course__course_id=course_id)
-    contribution_ids = contributions.values_list("id", flat=True)
-    cases = list(
-        ExamScenario.objects.filter(
+    contribution_ids = contributions.values("id")
+    cases = ExamScenario.objects.none()
+    if kind != "question":
+        cases = ExamScenario.objects.filter(
             contribution_id__in=contribution_ids,
             adopted_bank_item__isnull=True,
         )
-        .select_related("contribution__cycle_course__course", "contribution__source_campus")
-        .prefetch_related(
-            Prefetch(
-                "members",
-                queryset=ExamScenarioMember.objects.select_related("question").order_by(
-                    "position", "id"
-                ),
+        if query:
+            cases = cases.filter(
+                Q(title__icontains=query)
+                | Q(stimulus__icontains=query)
+                | Q(members__question__question_text__icontains=query)
+            ).distinct()
+        cases = (
+            cases.select_related(
+                "contribution__cycle_course__course", "contribution__source_campus"
             )
+            .prefetch_related(
+                Prefetch(
+                    "members",
+                    queryset=ExamScenarioMember.objects.select_related("question").order_by(
+                        "position", "id"
+                    ),
+                )
+            )
+            .order_by("-contribution__submitted_at", "id")
         )
-        .order_by("-contribution__submitted_at", "id")
-    )
     linked_question_ids = ExamScenarioMember.objects.filter(
         scenario__contribution_id__in=contribution_ids
     ).values_list("question_id", flat=True)
-    questions = list(
-        Question.objects.filter(
-            contribution_id__in=contribution_ids,
-            adopted_bank_item__isnull=True,
+    questions = Question.objects.none()
+    if kind != "case":
+        questions = (
+            Question.objects.filter(
+                contribution_id__in=contribution_ids,
+                adopted_bank_item__isnull=True,
+            )
+            .exclude(pk__in=linked_question_ids)
         )
-        .exclude(pk__in=linked_question_ids)
-        .select_related("contribution__cycle_course__course", "contribution__source_campus")
-        .order_by("-contribution__submitted_at", "position", "id")
-    )
+        if query:
+            questions = questions.filter(question_text__icontains=query)
+        questions = questions.select_related(
+            "contribution__cycle_course__course", "contribution__source_campus"
+        ).order_by("-contribution__submitted_at", "position", "id")
     return cases, questions
+
+
+def _owned_entry(revision):
+    item = revision.item
+    kind = "case" if item.kind == QuestionBankItem.Kind.CASE else "question"
+    return {
+        "key": f"bank-{item.id}",
+        "kind": kind,
+        "item": item,
+        "revision": revision,
+    }
+
+
+def _historical_case_entry(scenario):
+    return {
+        "key": f"history-case-{scenario.id}",
+        "kind": "case",
+        "historical_case": scenario,
+    }
+
+
+def _historical_question_entry(question):
+    return {
+        "key": f"history-question-{question.id}",
+        "kind": "question",
+        "historical_question": question,
+    }
+
+
+class CatalogueEntries:
+    """A countable, sliceable concatenation of ordered authorized querysets."""
+
+    def __init__(self, segments):
+        self.segments = segments
+        self._counts = None
+
+    def _segment_counts(self):
+        if self._counts is None:
+            self._counts = [
+                segment["queryset"].count() for segment in self.segments
+            ]
+        return self._counts
+
+    def version(self):
+        """Hash ordered identity/version tuples without hydrating catalogue cards."""
+
+        digest = hashlib.sha256()
+        for segment in self.segments:
+            digest.update(segment["label"].encode("ascii"))
+            digest.update(b"\0")
+            values = segment["queryset"].values_list(*segment["version_fields"])
+            for row in values.iterator(chunk_size=512):
+                digest.update(
+                    json.dumps(
+                        row,
+                        default=str,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
+                digest.update(b"\n")
+            if segment.get("member_queryset") is not None:
+                digest.update(b"case-members\0")
+                members = segment["member_queryset"].values_list(
+                    "scenario_id",
+                    "id",
+                    "active_marker",
+                    "position",
+                    "question_id",
+                    "updated_at",
+                    "question__revision",
+                    "question__updated_at",
+                    "question__content_format",
+                    SHA256("question__question_text"),
+                )
+                for row in members.iterator(chunk_size=512):
+                    digest.update(
+                        json.dumps(
+                            row,
+                            default=str,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    )
+                    digest.update(b"\n")
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    def count(self):
+        return sum(self._segment_counts())
+
+    def __len__(self):
+        return self.count()
+
+    def __getitem__(self, key):
+        if not isinstance(key, slice) or key.step not in (None, 1):
+            raise TypeError("Catalogue entries support simple slices only.")
+        start = 0 if key.start is None else key.start
+        stop = self.count() if key.stop is None else key.stop
+        if start < 0 or stop < start:
+            raise IndexError("Catalogue slice is invalid.")
+        rows = []
+        segment_start = 0
+        for segment, segment_count in zip(
+            self.segments, self._segment_counts()
+        ):
+            queryset = segment["queryset"]
+            mapper = segment["mapper"]
+            segment_stop = segment_start + segment_count
+            local_start = max(0, start - segment_start)
+            local_stop = min(segment_count, stop - segment_start)
+            if local_start < local_stop:
+                rows.extend(mapper(row) for row in queryset[local_start:local_stop])
+            if segment_stop >= stop:
+                break
+            segment_start = segment_stop
+        return rows
+
+
+def catalogue_entries(*, actor, tenant_id, campus_id=None, course_id=None, kind="", query=""):
+    allowed_pairs = _scope_pairs(
+        actor=actor,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+        course_id=course_id,
+    )
+    if not allowed_pairs:
+        return CatalogueEntries([])
+    owned = _owned_revision_queryset(
+        actor=actor,
+        tenant_id=tenant_id,
+        allowed_pairs=allowed_pairs,
+        kind=kind,
+        query=query,
+    )
+    cases, questions = _historical_querysets(
+        actor=actor,
+        tenant_id=tenant_id,
+        allowed_pairs=allowed_pairs,
+        kind=kind,
+        query=query,
+    )
+    segments = [
+        {
+            "label": "bank",
+            "queryset": owned,
+            "mapper": _owned_entry,
+            "version_fields": (
+                "item_id",
+                "item__course__code",
+                "item__updated_at",
+                "item__current_revision",
+                "id",
+            ),
+        }
+    ]
+    if kind != "question":
+        segments.append(
+            {
+                "label": "history-case",
+                "queryset": cases,
+                "mapper": _historical_case_entry,
+                "version_fields": (
+                    "id",
+                    "contribution__submitted_at",
+                    "contribution_id",
+                    "revision",
+                    "updated_at",
+                    "active_marker",
+                    "content_format",
+                    SHA256("title"),
+                    SHA256("stimulus"),
+                ),
+                "member_queryset": ExamScenarioMember.objects.filter(
+                    scenario_id__in=cases.order_by().values("id")
+                ).order_by("scenario_id", "position", "id"),
+            }
+        )
+    if kind != "case":
+        segments.append(
+            {
+                "label": "history-question",
+                "queryset": questions,
+                "mapper": _historical_question_entry,
+                "version_fields": (
+                    "id",
+                    "contribution__submitted_at",
+                    "position",
+                    "contribution_id",
+                ),
+            }
+        )
+    return CatalogueEntries(segments)

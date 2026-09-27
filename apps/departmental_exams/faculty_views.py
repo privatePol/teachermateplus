@@ -84,12 +84,11 @@ from .personalized_answer_sheets import PersonalizedAnswerSheetService
 from .my_questions import (
     QUESTION_FIELDS as BANK_QUESTION_FIELDS,
     authoring_scopes,
+    catalogue_entries as bank_catalogue_entries,
     create_case as create_bank_case,
     create_question as create_bank_question,
     current_revision as current_bank_revision,
     historical_question_owner as historical_bank_question_owner,
-    historical_items as historical_bank_items,
-    owned_items as owned_bank_items,
     require_owner as require_bank_owner,
     require_case_enabled,
     require_scope as require_bank_scope,
@@ -486,6 +485,44 @@ def _bank_scope_ids(request):
     return tenant_id, campus_id
 
 
+def _my_questions_page_url(
+    request, page_number, *, catalogue_version, partial=False
+):
+    params = request.GET.copy()
+    params.pop("page", None)
+    params.pop("partial", None)
+    params.pop("catalogue", None)
+    params.pop("catalogue_changed", None)
+    params["page"] = str(page_number)
+    params["catalogue"] = catalogue_version
+    if partial:
+        params["partial"] = "1"
+    return f"{request.path}?{params.urlencode()}"
+
+
+def _my_questions_restart_url(request):
+    params = request.GET.copy()
+    for key in ("page", "partial", "catalogue", "catalogue_changed"):
+        params.pop(key, None)
+    params["catalogue_changed"] = "1"
+    return f"{request.path}?{params.urlencode()}"
+
+
+def _my_questions_changed_response(request, *, partial):
+    restart_url = _my_questions_restart_url(request)
+    message = "Your My Questions results changed. Restart to load the current list."
+    if partial:
+        return _no_store_json(
+            {
+                "catalogue_changed": True,
+                "message": message,
+                "restart_url": restart_url,
+            },
+            status=409,
+        )
+    return redirect(restart_url)
+
+
 @_faculty_error_page
 @never_cache
 @portal_required("FACULTY")
@@ -499,53 +536,37 @@ def my_questions_view(request):
         raise PermissionDenied("No retained accepted course assignment is available.")
     course_filter = request.GET.get("course", "")
     kind_filter = request.GET.get("content_type", "")
-    query = (request.GET.get("search", "") or "").strip().casefold()
+    search_value = request.GET.get("search", "") or ""
+    query = search_value.strip().casefold()
     if len(query) > 200:
         raise ValidationError("Search may not exceed 200 characters.")
     if kind_filter not in ("", "question", "case"):
         raise ValidationError("Select a valid content type.")
     valid_courses = {str(scope.course_id) for scope in scopes}
     if course_filter and course_filter not in valid_courses:
-        raise ValidationError("Select an available course.")
+        raise PermissionDenied("Selected course is unavailable.")
     course_id = int(course_filter) if course_filter else None
-    entries = []
-    for item, revision in owned_bank_items(
-        actor=request.user,
-        tenant_id=tenant_id,
-        campus_id=campus_id,
-        course_id=course_id,
-    ):
-        if revision is None:
-            continue
-        kind = "case" if item.kind == QuestionBankItem.Kind.CASE else "question"
-        if kind_filter and kind_filter != kind:
-            continue
-        haystack = " ".join(
-            [revision.title, revision.stimulus, revision.question_text]
-            + [member.question_text for member in revision.members.all()]
-        ).casefold()
-        if query and query not in haystack:
-            continue
-        entries.append({"kind": kind, "item": item, "revision": revision})
-    historical_cases, historical_questions = historical_bank_items(
-        actor=request.user,
-        tenant_id=tenant_id,
-        campus_id=campus_id,
-        course_id=course_id,
-    )
-    if kind_filter != "question":
-        for scenario in historical_cases:
-            text = " ".join(
-                [scenario.title, scenario.stimulus]
-                + [row.question.question_text for row in scenario.members.all()]
-            ).casefold()
-            if not query or query in text:
-                entries.append({"kind": "case", "historical_case": scenario})
-    if kind_filter != "case":
-        for question in historical_questions:
-            if not query or query in question.question_text.casefold():
-                entries.append({"kind": "question", "historical_question": question})
-    page = Paginator(entries, 12).get_page(request.GET.get("page") or 1)
+    partial = request.GET.get("partial") == "1"
+    requested_version = request.GET.get("catalogue", "")
+    for attempt in range(2):
+        entries = bank_catalogue_entries(
+            actor=request.user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+            course_id=course_id,
+            kind=kind_filter,
+            query=query,
+        )
+        version_before = entries.version()
+        if requested_version and requested_version != version_before:
+            return _my_questions_changed_response(request, partial=partial)
+        page = Paginator(entries, 12).get_page(request.GET.get("page") or 1)
+        version_after = entries.version()
+        if version_before == version_after:
+            catalogue_version = version_after
+            break
+        if requested_version or attempt == 1:
+            return _my_questions_changed_response(request, partial=partial)
     drafts = []
     if FeatureSettingsService.is_departmental_exam_question_reuse_enabled(
         tenant_id=tenant_id
@@ -561,23 +582,56 @@ def my_questions_view(request):
             )
             .order_by("cycle_course__course__code", "id")
         )
-    return render(
-        request,
-        "departmental_exams/faculty/my_questions.html",
-        {
-            "page": page,
-            "scopes": scopes,
-            "filters": {
-                "course": course_filter,
-                "content_type": kind_filter,
-                "search": request.GET.get("search", ""),
-            },
-            "drafts": drafts,
-            "case_authoring_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
-                tenant_id=tenant_id
-            ),
+    context = {
+        "page": page,
+        "scopes": scopes,
+        "filters": {
+            "course": course_filter,
+            "content_type": kind_filter,
+            "search": search_value,
         },
-    )
+        "drafts": drafts,
+        "case_authoring_enabled": FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+            tenant_id=tenant_id
+        ),
+        "catalogue_changed": request.GET.get("catalogue_changed") == "1",
+        "next_batch_url": (
+            _my_questions_page_url(
+                request,
+                page.next_page_number(),
+                catalogue_version=catalogue_version,
+                partial=True,
+            )
+            if page.has_next() else ""
+        ),
+        "previous_page_url": (
+            _my_questions_page_url(
+                request,
+                page.previous_page_number(),
+                catalogue_version=catalogue_version,
+            )
+            if page.has_previous() else ""
+        ),
+        "next_page_url": (
+            _my_questions_page_url(
+                request,
+                page.next_page_number(),
+                catalogue_version=catalogue_version,
+            )
+            if page.has_next() else ""
+        ),
+    }
+    if partial:
+        return _no_store_json({
+            "html": render_to_string(
+                "departmental_exams/faculty/_my_question_cards.html",
+                context,
+                request=request,
+            ),
+            "next_url": context["next_batch_url"] or None,
+            "page": page.number,
+        })
+    return render(request, "departmental_exams/faculty/my_questions.html", context)
 
 
 def _render_my_question_form(request, *, form, heading, cancel_url, course_id, status=200):

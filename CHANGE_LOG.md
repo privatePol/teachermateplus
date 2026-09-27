@@ -1,3 +1,10 @@
+## My Questions progressive catalogue loading - 2026-09-27
+
+- The Faculty My Questions catalogue now server-renders its first 12 authorized cards, then progressively appends deterministic 12-card batches near the end of the page. A visible Load more/retry control, loading feedback, an end state, and ordinary filter-preserving pagination support accessible and non-JavaScript use.
+- Search, Course, and Type filtering now happens in bounded database queries across current bank revisions and unadopted historical sources. Stable item keys prevent duplicate cards, while every batch rechecks owner, retained exact course/campus scope, current permission, and direct-DENY rules. Whole Cases remain atomic and their linked questions retain position order. No model or migration change is required.
+- Each continuation now carries a fingerprint of the exact authorized ordering. A revision, adoption, or other catalogue change rejects the stale continuation and presents a filter-preserving restart instead of skipping or duplicating a card. Filter changes also invalidate in-flight JavaScript generations after every asynchronous response step, preventing a late old response from changing the DOM or continuation.
+- Historical whole-Case fingerprints now include the displayed scenario content and the ordered linked-member graph: membership, active state, position, question identity, content format, text digest, and revisions. Late rejected responses from an abandoned filter request cannot change the new filter's controls or status.
+
 ## My Questions rich authoring follow-up - 2026-09-26
 
 - My Questions now uses the existing rich question and Case editors for standalone stems, choices, Case narratives, and linked MCQs. Preview uses the same server sanitizers without requiring an open contribution cycle. Untouched plain-text questions retain their stored text and format; revisions and Draft copies remain format-aware. No model or migration change is required.

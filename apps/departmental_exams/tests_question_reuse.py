@@ -1,5 +1,7 @@
 import csv
 import io
+import re
+from urllib.parse import parse_qs, urlparse
 
 from django.urls import reverse
 from django.utils import timezone
@@ -29,6 +31,7 @@ from .faculty_case_services import FacultyCaseMutationService
 from .scenario_content import canonicalize_scenario_content
 from .my_questions import (
     authoring_scopes,
+    catalogue_entries as bank_catalogue_entries,
     create_case as create_bank_case,
     create_question as create_bank_question,
     require_owner as require_bank_owner,
@@ -357,6 +360,269 @@ class QuestionReuseHTTPTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertFalse(
             FacultyContribution.objects.filter(faculty_user=between_terms).exists()
         )
+
+    def test_my_questions_progressive_filtered_batches_are_complete_and_stable(self):
+        for index in range(10):
+            create_bank_question(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                course_id=self.destination_course.course_id,
+                payload=self.payload(f"Progressive bank {index:02d}"),
+            )
+        historical = [
+            self._source_question(f"Progressive history {index:02d}")
+            for index in range(5)
+        ]
+        revise_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            historical_question_id=historical[0].id,
+            expected_revision=0,
+            payload=self.payload("Progressive corrected history 00"),
+        )
+        params = {
+            "course": str(self.destination_course.course_id),
+            "content_type": "question",
+            "search": "Progressive",
+        }
+
+        first = self.client.get(reverse("departmental_exams:my_questions"), params)
+
+        self.assertEqual(first.status_code, 200)
+        first_keys = [entry["key"] for entry in first.context["page"].object_list]
+        self.assertEqual(len(first_keys), 12)
+        self.assertEqual(len(set(first_keys)), 12)
+        self.assertContains(first, "data-myq-pagination")
+        self.assertContains(first, "Load more")
+        self.assertContains(first, "Progressive corrected history 00")
+        self.assertNotContains(first, "Progressive history 00")
+        next_batch_url = first.context["next_batch_url"]
+        next_page_url = first.context["next_page_url"]
+        batch_query = parse_qs(urlparse(next_batch_url).query)
+        page_query = parse_qs(urlparse(next_page_url).query)
+        self.assertEqual(batch_query["course"], [params["course"]])
+        self.assertEqual(batch_query["content_type"], ["question"])
+        self.assertEqual(batch_query["search"], ["Progressive"])
+        self.assertEqual(batch_query["page"], ["2"])
+        self.assertEqual(batch_query["partial"], ["1"])
+        self.assertRegex(batch_query["catalogue"][0], r"^[0-9a-f]{64}$")
+        self.assertNotIn("partial", page_query)
+        self.assertEqual(page_query["page"], ["2"])
+        self.assertEqual(page_query["catalogue"], batch_query["catalogue"])
+
+        second = self.client.get(next_batch_url)
+
+        self.assertEqual(second.status_code, 200)
+        self.assertIn("no-store", second["Cache-Control"])
+        payload = second.json()
+        second_keys = re.findall(r'data-myq-key="([^"]+)"', payload["html"])
+        self.assertEqual(len(second_keys), 3)
+        self.assertEqual(len(set(first_keys + second_keys)), 15)
+        self.assertIsNone(payload["next_url"])
+        no_script_second = self.client.get(next_page_url)
+        self.assertEqual(no_script_second.status_code, 200)
+        self.assertEqual(
+            [entry["key"] for entry in no_script_second.context["page"].object_list],
+            second_keys,
+        )
+        self.assertContains(no_script_second, "data-myq-pagination")
+        repeated = self.client.get(reverse("departmental_exams:my_questions"), params)
+        self.assertEqual(
+            [entry["key"] for entry in repeated.context["page"].object_list],
+            first_keys,
+        )
+
+    def test_my_questions_revision_between_batches_requires_visible_restart(self):
+        items = [
+            create_bank_question(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                course_id=self.destination_course.course_id,
+                payload=self.payload(f"Mutable order {index:02d}"),
+            )
+            for index in range(13)
+        ]
+        QuestionBankItem.objects.filter(pk__in=[item.id for item in items]).update(
+            updated_at=self.previous.submitted_at
+        )
+        params = {
+            "course": str(self.destination_course.course_id),
+            "content_type": "question",
+            "search": "Mutable order",
+        }
+        first = self.client.get(reverse("departmental_exams:my_questions"), params)
+        first_keys = [entry["key"] for entry in first.context["page"].object_list]
+        self.assertEqual(
+            first_keys,
+            [f"bank-{item.id}" for item in sorted(items, key=lambda item: item.id)[:12]],
+        )
+        moved_item = max(items, key=lambda item: item.id)
+
+        revise_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            item_id=moved_item.id,
+            expected_revision=1,
+            payload=self.payload("Mutable order corrected"),
+        )
+        stale = self.client.get(first.context["next_batch_url"])
+
+        self.assertEqual(stale.status_code, 409)
+        stale_payload = stale.json()
+        self.assertTrue(stale_payload["catalogue_changed"])
+        self.assertNotIn("html", stale_payload)
+        stale_page = self.client.get(first.context["next_page_url"])
+        self.assertRedirects(
+            stale_page,
+            stale_payload["restart_url"],
+            fetch_redirect_response=False,
+        )
+        restart = self.client.get(stale_payload["restart_url"])
+        self.assertEqual(restart.status_code, 200)
+        self.assertContains(restart, "restarted with the current results")
+        restarted_keys = [
+            entry["key"] for entry in restart.context["page"].object_list
+        ]
+        self.assertEqual(restarted_keys[0], f"bank-{moved_item.id}")
+        restarted_second = self.client.get(restart.context["next_batch_url"])
+        final_keys = re.findall(
+            r'data-myq-key="([^"]+)"', restarted_second.json()["html"]
+        )
+        self.assertEqual(len(set(restarted_keys + final_keys)), 13)
+        self.assertEqual(
+            set(restarted_keys + final_keys),
+            {f"bank-{item.id}" for item in items},
+        )
+
+    def test_my_questions_historical_adoption_between_batches_requires_restart(self):
+        bank_items = [
+            create_bank_question(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                course_id=self.destination_course.course_id,
+                payload=self.payload(f"Adoption boundary bank {index:02d}"),
+            )
+            for index in range(11)
+        ]
+        historical = [
+            self._source_question(f"Adoption boundary history {index:02d}")
+            for index in range(2)
+        ]
+        params = {
+            "course": str(self.destination_course.course_id),
+            "content_type": "question",
+            "search": "Adoption boundary",
+        }
+        first = self.client.get(reverse("departmental_exams:my_questions"), params)
+        first_keys = [entry["key"] for entry in first.context["page"].object_list]
+        self.assertEqual(len(first_keys), 12)
+        self.assertEqual(first_keys[-1], f"history-question-{historical[0].id}")
+        self.assertEqual(
+            set(first_keys[:-1]), {f"bank-{item.id}" for item in bank_items}
+        )
+
+        revise_bank_question(
+            actor=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            historical_question_id=historical[1].id,
+            expected_revision=0,
+            payload=self.payload("Adoption boundary corrected"),
+        )
+        adopted = QuestionBankItem.objects.get(origin_question=historical[1])
+        stale = self.client.get(first.context["next_batch_url"])
+
+        self.assertEqual(stale.status_code, 409)
+        stale_payload = stale.json()
+        self.assertTrue(stale_payload["catalogue_changed"])
+        restart = self.client.get(stale_payload["restart_url"])
+        restarted_keys = [
+            entry["key"] for entry in restart.context["page"].object_list
+        ]
+        restarted_second = self.client.get(restart.context["next_batch_url"])
+        final_keys = re.findall(
+            r'data-myq-key="([^"]+)"', restarted_second.json()["html"]
+        )
+        combined = restarted_keys + final_keys
+        self.assertEqual(len(combined), 13)
+        self.assertEqual(len(set(combined)), 13)
+        self.assertIn(f"bank-{adopted.id}", combined)
+        self.assertIn(f"history-question-{historical[0].id}", combined)
+        self.assertNotIn(f"history-question-{historical[1].id}", combined)
+
+    def test_my_questions_partial_rechecks_permission_and_never_returns_other_owner(self):
+        for index in range(13):
+            create_bank_question(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                course_id=self.destination_course.course_id,
+                payload=self.payload(f"Authorized batch {index:02d}"),
+            )
+        private = create_bank_question(
+            actor=self.other,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            course_id=self.destination_course.course_id,
+            payload=self.payload("Other owner private progressive question"),
+        )
+        first = self.client.get(reverse("departmental_exams:my_questions"))
+        self.assertEqual(first.status_code, 200)
+        next_batch_url = first.context["next_batch_url"]
+        self.assertTrue(next_batch_url)
+        partial = self.client.get(next_batch_url)
+        self.assertEqual(partial.status_code, 200)
+        self.assertNotIn(f'data-myq-key="bank-{private.id}"', partial.json()["html"])
+        self.assertNotContains(first, "Other owner private progressive question")
+
+        faculty_role = UserRole.objects.get(
+            user=self.faculty, campus=self.campus
+        ).role
+        UserRole.objects.create(
+            user=self.faculty,
+            role=faculty_role,
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+        )
+        wrong_campus_url = (
+            f"{next_batch_url}&scope_tenant_id={self.tenant.id}"
+            f"&scope_campus_id={self.other_campus.id}"
+        )
+        self.assertEqual(self.client.get(wrong_campus_url).status_code, 403)
+        main_campus_url = (
+            f"{next_batch_url}&scope_tenant_id={self.tenant.id}"
+            f"&scope_campus_id={self.campus.id}"
+        )
+        self.assertEqual(self.client.get(main_campus_url).status_code, 200)
+
+        unavailable_course = self.make_course(
+            cycle=self.destination_course.cycle, code="S5-NOT-ASSIGNED"
+        )
+        unavailable_url = reverse("departmental_exams:my_questions")
+        unavailable_response = self.client.get(
+            unavailable_url,
+            {
+                "course": unavailable_course.course_id,
+                "page": 2,
+                "partial": 1,
+            },
+        )
+        self.assertEqual(unavailable_response.status_code, 403)
+
+        UserPermission.objects.create(
+            user=self.faculty,
+            permission=Permission.objects.get(code="faculty_portal.access"),
+            tenant=self.tenant,
+            campus=self.campus,
+            grant_type=UserPermission.GrantType.DENY,
+        )
+        self.assertEqual(self.client.get(main_campus_url).status_code, 403)
 
     def test_edit_and_catalogue_recheck_exact_course_assignment_on_get_and_post(self):
         item = create_bank_question(
@@ -876,6 +1142,111 @@ class QuestionReuseCaseHTTPTests(FacultyCaseFixtureMixin, Stage4TestCase):
         ExamScenarioMember.objects.create(scenario=case, question=first, position=1, active_marker=None)
         ExamScenarioMember.objects.create(scenario=case, question=second, position=2, active_marker=None)
         return case, first, second
+
+    def test_my_questions_off_page_case_member_change_requires_restart(self):
+        first_case, _first, _second = self._source_case(
+            title="Fingerprint Case 00"
+        )
+        cases = [first_case]
+        for index in range(1, 13):
+            case = ExamScenario.objects.create(
+                blueprint=first_case.blueprint,
+                section=first_case.section,
+                contribution=self.previous,
+                title=f"Fingerprint Case {index:02d}",
+                stimulus=first_case.stimulus,
+                content_format=first_case.content_format,
+                created_by=self.faculty,
+                updated_by=self.faculty,
+                active_marker=None,
+            )
+            linked = QuestionReuseHTTPTests._source_question(
+                self, f"Fingerprint linked {index:02d}"
+            )
+            ExamScenarioMember.objects.create(
+                scenario=case, question=linked, position=1, active_marker=None
+            )
+            cases.append(case)
+        url = reverse("departmental_exams:my_questions")
+        filters = {"content_type": "case", "search": "Fingerprint Case"}
+        first = self.client.get(url, filters)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(
+            [entry["key"] for entry in first.context["page"].object_list],
+            [f"history-case-{case.id}" for case in cases[:12]],
+        )
+        next_batch_url = first.context["next_batch_url"]
+        self.assertTrue(next_batch_url)
+
+        linked = cases[12].members.order_by("position", "id").first().question
+        Question.objects.filter(pk=linked.id).update(
+            question_text="Changed off-page linked question"
+        )
+        stale = self.client.get(next_batch_url)
+
+        self.assertEqual(stale.status_code, 409)
+        self.assertTrue(stale.json()["catalogue_changed"])
+        self.assertNotIn("html", stale.json())
+        restart = self.client.get(stale.json()["restart_url"])
+        self.assertEqual(restart.status_code, 200)
+        self.assertContains(restart, "restarted with the current results")
+        second = self.client.get(restart.context["next_batch_url"])
+        self.assertEqual(second.status_code, 200)
+        self.assertIn("Changed off-page linked question", second.json()["html"])
+
+    def test_my_questions_case_fingerprint_tracks_member_graph_and_display(self):
+        case, first_question, _second_question = self._source_case(
+            title="Fingerprint graph"
+        )
+
+        def fingerprint():
+            return bank_catalogue_entries(
+                actor=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                kind="case",
+            ).version()
+
+        previous = fingerprint()
+
+        def assert_changed():
+            nonlocal previous
+            current = fingerprint()
+            self.assertNotEqual(current, previous)
+            previous = current
+
+        member = case.members.order_by("position", "id").first()
+        ExamScenarioMember.objects.filter(pk=member.id).update(active_marker=1)
+        assert_changed()
+        ExamScenarioMember.objects.filter(pk=member.id).update(position=3)
+        assert_changed()
+        replacement = QuestionReuseHTTPTests._source_question(
+            self, "Replacement graph question"
+        )
+        ExamScenarioMember.objects.filter(pk=member.id).update(question=replacement)
+        assert_changed()
+        Question.objects.filter(pk=replacement.id).update(
+            question_text="Changed graph text without a version bump"
+        )
+        assert_changed()
+        Question.objects.filter(pk=replacement.id).update(
+            content_format=Question.ContentFormat.RICH_HTML_V1,
+            question_text="<p>Changed graph format</p>",
+        )
+        assert_changed()
+        Question.objects.filter(pk=replacement.id).update(revision=2)
+        assert_changed()
+        ExamScenarioMember.objects.create(
+            scenario=case,
+            question=first_question,
+            position=4,
+            active_marker=None,
+        )
+        assert_changed()
+        ExamScenario.objects.filter(pk=case.id).update(
+            title="Changed Case title", stimulus="<p>Changed Case narrative</p>"
+        )
+        assert_changed()
 
     def _post(self, token, **extra):
         self.destination.refresh_from_db()

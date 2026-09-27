@@ -1,0 +1,20 @@
+{% load departmental_exam_content %}
+{% for entry in page.object_list %}
+<article class="card shadow-sm mb-3" data-myq-card data-myq-key="{{ entry.key }}">
+  <div class="card-header d-flex justify-content-between gap-3 flex-wrap">
+    <strong>{% if entry.kind == 'case' %}Whole Case{% else %}Question{% endif %}</strong>
+    <span class="small text-muted">{% if entry.item %}{{ entry.item.course.code }} &middot; Current revision {{ entry.item.current_revision }}{% elif entry.historical_case %}{{ entry.historical_case.contribution.cycle_course.course.code }} &middot; Submitted history{% else %}{{ entry.historical_question.contribution.cycle_course.course.code }} &middot; Submitted history{% endif %}</span>
+  </div>
+  <div class="card-body">
+    {% if entry.revision %}
+      {% if entry.kind == 'case' %}<h2 class="h5">{{ entry.revision.title|default:"Case / Scenario" }}</h2><div class="mb-3">{{ entry.revision.stimulus|scenario_content:entry.revision.scenario_content_format }}</div>{% for member in entry.revision.members.all %}<div class="border rounded p-2 mb-2"><strong>Question {{ member.position }}.</strong> {{ member.question_text|question_content:member.content_format }}{% if case_authoring_enabled %} <a class="btn btn-sm btn-link" href="{% url 'departmental_exams:my_case_member_edit' entry.item.id member.position %}">Edit</a>{% endif %}</div>{% endfor %}{% if case_authoring_enabled %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:my_case_edit' entry.item.id %}">Edit Case</a> <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:my_case_member_add' entry.item.id %}">Add linked MCQ</a>{% endif %}
+      {% else %}<div>{{ entry.revision.question_text|question_content:entry.revision.content_format }}</div><a class="btn btn-sm btn-outline-primary mt-2" href="{% url 'departmental_exams:my_question_edit' entry.item.id %}">Edit</a>{% endif %}
+    {% elif entry.historical_case %}
+      <h2 class="h5">{{ entry.historical_case.title|default:"Case / Scenario" }}</h2><div class="mb-3">{{ entry.historical_case.stimulus|scenario_content:entry.historical_case.content_format }}</div>{% for member in entry.historical_case.members.all %}<div class="border rounded p-2 mb-2"><strong>Question {{ member.position }}.</strong> {{ member.question.question_text|question_content:member.question.content_format }}</div>{% endfor %}{% if case_authoring_enabled %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:my_historical_case_edit' entry.historical_case.id %}">Edit for future use</a>{% endif %}
+    {% else %}
+      <div>{{ entry.historical_question.question_text|question_content:entry.historical_question.content_format }}</div><a class="btn btn-sm btn-outline-primary mt-2" href="{% url 'departmental_exams:my_historical_question_edit' entry.historical_question.id %}">Edit for future use</a>
+    {% endif %}
+    {% if drafts %}<div class="mt-3 small"><span class="text-muted">Use in an open Draft:</span>{% for draft in drafts %}{% if entry.item and draft.cycle_course.course_id == entry.item.course_id or entry.historical_case and draft.cycle_course.course_id == entry.historical_case.contribution.cycle_course.course_id or entry.historical_question and draft.cycle_course.course_id == entry.historical_question.contribution.cycle_course.course_id %} <a href="{% url 'departmental_exams:question_reuse' draft.id %}">{{ draft.cycle_course.course.code }} Draft</a>{% endif %}{% endfor %}</div>{% endif %}
+  </div>
+</article>
+{% endfor %}
