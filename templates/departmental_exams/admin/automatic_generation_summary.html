@@ -6,6 +6,8 @@
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a data-automatic-action href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Exam Generation Status</li></ol></nav>
 <header class="de-exam-hero"><div class="d-flex flex-wrap justify-content-between gap-3"><div><span class="badge text-bg-light text-dark mb-2">AUTOMATIC GENERATION</span><h1>Exam Generation Status</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }}</p></div><a class="btn btn-light btn-sm" data-automatic-action href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Departmental Exam Builder</a></div></header>
 
+{% for item in generated %}{% if item.equivalency %}{% include "departmental_exams/admin/_equivalent_membership_context.html" with equivalency=item.equivalency %}{% endif %}{% endfor %}
+{% for item in not_generated %}{% if item.equivalency %}{% include "departmental_exams/admin/_equivalent_membership_context.html" with equivalency=item.equivalency %}{% endif %}{% endfor %}
 <div class="alert alert-info de-automatic-processing" data-automatic-processing role="status" aria-live="assertive" hidden>
   <div class="fw-semibold mb-2">Processing Set A and Set B&hellip; Please wait.</div>
   <div class="progress" role="progressbar" aria-label="Automatic Set A and Set B processing">

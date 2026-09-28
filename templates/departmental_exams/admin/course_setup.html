@@ -9,6 +9,8 @@
 <p>Cycle defaults → course configuration → optional exam structure → prepare and open contributions → monitor submissions → generation status → release and print.</p>
 <p><strong>Cycle contributor instructions:</strong> {{ cycle.contributor_instructions|default:"None configured" }}</p>
 <p><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Cycle defaults</a> · <a href="{% url 'departmental_exams:assigned_course_examinations' %}">Manage Course Exams</a></p>
+{% if can_manage_equivalency %}<p><a class="btn btn-outline-primary btn-sm" href="{% url 'departmental_exams:equivalent_courses' cycle.id %}">Equivalent course codes</a></p>{% endif %}
+{% for row in rows %}{% if row.equivalency %}<div class="alert alert-light border small"><strong>{{ row.equivalency.name }}</strong>: primary {{ row.equivalency.primary }}; member course codes {{ row.equivalency.members|join:", " }}. <a href="{% url 'departmental_exams:equivalent_courses' cycle.id %}">View group and lifecycle status</a></div>{% endif %}{% endfor %}
 {% if setup_error %}<div class="alert alert-warning" role="alert">{{ setup_error }}</div>{% endif %}
 {% if completed %}<div class="alert alert-success">{% if replayed_confirmation %}This confirmed selection was already processed. Current statuses are shown below.{% else %}{{ opened_unit_count }} examination unit{{ opened_unit_count|pluralize }} opened. Their current status is shown below.{% endif %}</div>{% endif %}
 <form method="post">{% csrf_token %}

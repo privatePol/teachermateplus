@@ -1,3 +1,7 @@
+## Equivalent course codes Admin UI - 2026-09-28
+
+- Added an authorized Admin page within Prepare Faculty Contributions to review, create, change, and retire current-cycle Automatic equivalent-course groups. It shows each operational code/title, primary, represented campuses, offering and current-contribution counts, effective settings, and lifecycle locks. A short-lived signed review rechecks exact membership/settings before the existing protected service performs each change. Setup and generation pages show concise authorized membership context. No course, offering, assignment, contribution, question, or historical record is moved; no model or migration changed.
+
 ## Midterm course tables and progressive loading - 2026-09-27
 
 - Decimal-rank remediation: aggregate official two-decimal grades as integer hundredths, then calculate displayed averages with explicit Decimal HALF_EVEN rounding. Full-unit competition ranks use those displayed values and exact integer aggregate keys, never floating-point sum equality. Regression coverage includes three `80.10` grades and tied averages across progressive page boundaries.

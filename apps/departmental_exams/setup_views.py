@@ -6,6 +6,7 @@ from django.views.decorators.http import require_http_methods
 from apps.core.services.features import FeatureSettingsService
 
 from .models import CycleCourse, ExaminationCycle
+from .equivalency_views import authorized_membership_context
 from .services import CourseExamConfigurationConflict, DepartmentalExamAuthorizationService
 from .setup_services import CourseSetupService
 from .views import _tenant_id, portal_required
@@ -52,6 +53,17 @@ def setup_view(request, cycle_id):
             error = " ".join(exc.messages)
             status = 409 if isinstance(exc, CourseExamConfigurationConflict) else 400
             rows = CourseSetupService.preview(cycle=cycle, actor=request.user)
+    for row in rows:
+        row["equivalency"] = authorized_membership_context(
+            user=request.user, cycle_course=row["course"],
+            permissions=(DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,),
+        )
+    can_manage_equivalency = cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION and any(
+        DepartmentalExamAuthorizationService.has_automatic_course_permission(
+            user=request.user, cycle_course=row["course"],
+            permissions=(DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,),
+        ) for row in rows
+    )
     return render(request, "departmental_exams/admin/course_setup.html", {
         "cycle": cycle,
         "rows": rows,
@@ -62,6 +74,7 @@ def setup_view(request, cycle_id):
         "opened_unit_count": opened_unit_count,
         "selected_unit_count": len(rows) if token else 0,
         "selected_member_count": sum(len(row["member_ids"]) for row in rows) if token else 0,
+        "can_manage_equivalency": can_manage_equivalency,
         "structured_exam_lifecycle_enabled": (
             FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
                 tenant_id=cycle.tenant_id

@@ -67,6 +67,7 @@ from .forms import (
     QuestionnairePrintReleaseForm,
 )
 from .exam_units import resolve_examination_unit
+from .equivalency_views import authorized_membership_context
 from .questionnaire_printing import QuestionnairePrintReleaseService
 from .release_review import make_review, confirm_review
 from .services import (
@@ -618,6 +619,10 @@ def generation_workspace_view(request, cycle_course_id):
             ),
             "is_locked": is_locked,
             "automatic_mode": automatic_mode,
+            "equivalency": authorized_membership_context(
+                user=request.user, cycle_course=course,
+                permissions=(DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,),
+            ) if automatic_mode else None,
         },
     )
 
@@ -799,6 +804,13 @@ def generated_revision_detail_view(request, revision_id):
             ),
             "automatic_mode": automatic_mode,
             "can_manage_generation": can_manage_generation,
+            "equivalency": authorized_membership_context(
+                user=request.user, cycle_course=revision.cycle_course,
+                permissions=(
+                    DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+                    DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+                ),
+            ) if automatic_mode else None,
             "can_regenerate": bool(
                 revision.current_marker == 1
                 and revision.status == ExamGenerationRevision.Status.GENERATED
@@ -923,6 +935,13 @@ def automatic_generation_summary_view(request, cycle_id):
         cycle_course_ids=visible_course_ids,
     )
     for item in summary["generated"]:
+        item["equivalency"] = authorized_membership_context(
+            user=request.user, cycle_course=item["course"],
+            permissions=(
+                DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+                DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+            ),
+        )
         item["can_manage_generation"] = (
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
             in permission_map[item["course"].id]
@@ -939,6 +958,13 @@ def automatic_generation_summary_view(request, cycle_id):
                 }
             )
     for item in summary["not_generated"]:
+        item["equivalency"] = authorized_membership_context(
+            user=request.user, cycle_course=item["course"],
+            permissions=(
+                DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+                DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+            ),
+        )
         item["can_manage_generation"] = (
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
             in permission_map[item["course"].id]

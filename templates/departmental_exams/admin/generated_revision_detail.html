@@ -10,6 +10,7 @@
     <div class="text-end"><span class="badge {% if revision.status == 'LOCKED' %}text-bg-dark{% elif revision.status == 'GENERATED' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ revision.get_status_display }}</span><div class="small mt-2">Generated {{ revision.generated_at|date:"M j, Y g:i A" }} by {% if revision.generated_by %}{{ revision.generated_by.full_name }}{% else %}TMP automatic processing{% endif %} &middot; {{ revision.get_generation_trigger_display }}</div>{% if revision.status == 'LOCKED' %}<div class="small mt-1">Approved &amp; Locked {{ revision.locked_at|date:"M j, Y g:i A" }} by {{ revision.locked_by.full_name }}</div>{% endif %}</div>
   </div>
 </header>
+{% include "departmental_exams/admin/_equivalent_membership_context.html" %}
 
 {% if revision.status == 'SUPERSEDED' %}<div class="alert alert-warning" role="status"><strong>Superseded historical revision.</strong> This exact output remains available to authorized administrators for audit. It is no longer available through Faculty releases; a replacement needs separate new releases.</div>{% endif %}
 

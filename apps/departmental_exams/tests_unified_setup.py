@@ -895,7 +895,7 @@ class UnifiedSetupTests(Stage4TestCase):
         review = self.client.post(url, {"courses": [rendered_id]})
         opened = self.client.post(url, {"confirmation": review.context["confirmation"]})
         self.assertEqual(opened.status_code, 200)
-        self.assertContains(opened, "confirmed selection was processed")
+        self.assertContains(opened, "1 examination unit opened. Their current status is shown below.")
 
     def test_group_primary_change_invalidates_signed_preview(self):
         from .exam_units import ExamCourseEquivalencyService

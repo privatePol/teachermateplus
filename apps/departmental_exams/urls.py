@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import (
+    equivalency_views,
     faculty_views,
     generation_readiness_views,
     monitoring_views,
@@ -14,6 +15,8 @@ from . import (
 app_name = "departmental_exams"
 
 urlpatterns = [
+    path("admin-portal/departmental-exams/cycles/<int:cycle_id>/equivalent-courses/", equivalency_views.equivalent_courses_view, name="equivalent_courses"),
+    path("admin-portal/departmental-exams/cycles/<int:cycle_id>/equivalent-courses/<int:group_id>/", equivalency_views.equivalent_courses_view, name="equivalent_courses_group"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/setup/", setup_views.setup_view, name="course_setup"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/classification/", setup_views.classification_view, name="course_classification"),
     path(
