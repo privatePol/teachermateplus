@@ -11,7 +11,7 @@ from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 from apps.rbac.models import Permission, UserPermission, UserRole
-from apps.tenants.models import Department
+from apps.tenants.models import Department, Tenant
 
 from .models import (
     CourseExamConfiguration,
@@ -739,6 +739,21 @@ class ExaminationCycleConfigurationService:
             raise CourseExamConfigurationConflict("The examination cycle changed after this page was loaded.")
         cycle.status = ExaminationCycle.Status.OPEN
         cycle.save(update_fields=["status", "updated_at"])
+        from .persistent_equivalency import PersistentCourseEquivalencyService
+        for plan in cycle.equivalency_plans.select_related("revision").all():
+            course_ids = plan.revision.memberships.values_list("course_id", flat=True)
+            member = CycleCourse.objects.filter(cycle=cycle, course_id__in=course_ids).first()
+            if member is not None:
+                try:
+                    PersistentCourseEquivalencyService.ensure_for_course(
+                        cycle_course=member, actor=user,
+                    )
+                except PermissionDenied:
+                    plan.status = plan.Status.BLOCKED
+                    plan.reason = "A manager with authority for every member campus must complete automatic application."
+                    from .models import _equivalency_lifecycle_service_scope
+                    with _equivalency_lifecycle_service_scope():
+                        plan.save(update_fields=["status", "reason", "updated_at"])
         AuditService.log_event(action="DE_EXAM_CYCLE_OPENED", portal="ADMIN", entity_type="ExaminationCycle", entity_id=cycle.id, actor=user, tenant=tenant_id, metadata=cls._configuration_audit_payload(cycle), request=request)
         return cycle, True
 
@@ -2350,6 +2365,8 @@ class ExaminationCycleService:
             permission="departmental_exams.manage_cycles",
             tenant_id=tenant.id,
         )
+        # Serialize the definition version captured for this new cycle.
+        Tenant.objects.select_for_update().get(pk=tenant.id)
         cycle = ExaminationCycle(
             tenant=tenant,
             academic_year=academic_year,
@@ -2409,6 +2426,8 @@ class ExaminationCycleService:
             if len(snapshot_batch) >= cls.SNAPSHOT_BATCH_SIZE:
                 cls._flush_snapshot_batch(snapshot_batch)
         cls._flush_snapshot_batch(snapshot_batch)
+        from .persistent_equivalency import PersistentCourseEquivalencyService
+        PersistentCourseEquivalencyService.snapshot_cycle(cycle)
         AuditService.log_event(
             action="DE_EXAM_CYCLE_CREATED",
             portal="ADMIN",
@@ -2665,6 +2684,14 @@ class CourseExamConfigurationService:
         configuration.full_clean()
         configuration.save()
         cls._audit(action="DE_EXAM_COURSE_CONFIGURATION_SAVED", parent=parent, configuration=configuration, actor=user, before=before, request=request, metadata={"expected_revision": expected_revision, "resulting_revision": configuration.revision})
+        if parent.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+            from .persistent_equivalency import PersistentCourseEquivalencyService
+            try:
+                PersistentCourseEquivalencyService.ensure_for_course(cycle_course=parent, actor=user)
+            except PermissionDenied:
+                # A course-setting editor may lack the full member-campus authority
+                # needed to apply the group. Leave its plan for an authorized manager.
+                pass
         return configuration, True
 
     @classmethod
@@ -2729,6 +2756,9 @@ class CourseExamConfigurationService:
     def open_for_contribution(cls, *, cycle_course_id, tenant_id, user, expected_revision, request=None):
         parent, configuration = cls._lock_parent_and_configuration(cycle_course_id=cycle_course_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
+        if parent.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+            from .persistent_equivalency import PersistentCourseEquivalencyService
+            PersistentCourseEquivalencyService.require_applied_or_excepted(cycle_course=parent, actor=user)
         cls._require_active_responsible_department(parent)
         cls._require_cycle_open_for_workflow(parent)
         cls.require_existing_intake_deadline(configuration)

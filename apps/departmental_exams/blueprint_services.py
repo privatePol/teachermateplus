@@ -559,6 +559,11 @@ class BlueprintMutationService:
         DepartmentalExamAuthorizationService.require_blueprint_structure_management(
             user=actor, cycle_course=requested_course
         )
+        if requested_course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+            from .persistent_equivalency import PersistentCourseEquivalencyService
+            PersistentCourseEquivalencyService.require_applied_or_excepted(
+                cycle_course=requested_course, actor=actor,
+            )
         if requested_course.exam_classification == "STANDARDIZED" and (mode != "NO_SECTIONS" or sections):
             raise ValidationError("Standardized exams use No Sections. Explicitly classify this Draft unit as Departmental first.")
         unified_automatic = (
@@ -809,7 +814,7 @@ class StructuredExamLifecyclePolicy:
                 "The course final item count does not match the authoritative examination unit."
             )
         blueprints = tuple(
-            ExamBlueprint.objects.select_for_update()
+            ExamBlueprint.active_objects.select_for_update()
             .filter(cycle_course_id__in=unit.member_ids)
             .order_by("cycle_course_id", "id")
         )
@@ -953,9 +958,11 @@ def _stage6_question_identity(*, question_id, tenant_id):
 # blueprint, Questions by PK, required Section, placements by PK, scenario,
 # then scenario members by PK. Blueprint ownership serializes structure writes.
 def _lock_stage6_blueprint(*, cycle_course):
+    from .exam_units import resolve_examination_unit
+    unit = resolve_examination_unit(cycle_course, for_update=True, validate=False)
     return (
-        ExamBlueprint.objects.select_for_update()
-        .filter(cycle_course=cycle_course)
+        ExamBlueprint.active_objects.select_for_update()
+        .filter(cycle_course=unit.primary)
         .first()
     )
 

@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import (
     equivalency_views,
+    persistent_equivalency_views,
     faculty_views,
     generation_readiness_views,
     monitoring_views,
@@ -15,6 +16,15 @@ from . import (
 app_name = "departmental_exams"
 
 urlpatterns = [
+    path("admin-portal/departmental-exams/equivalent-courses/", persistent_equivalency_views.saved_equivalency_landing, name="saved_equivalent_courses"),
+    path("admin-portal/departmental-exams/equivalent-courses/search/", persistent_equivalency_views.search_equivalent_courses, name="saved_equivalent_courses_search"),
+    path("admin-portal/departmental-exams/equivalent-courses/save/", persistent_equivalency_views.save_equivalent_definition, name="saved_equivalent_courses_save"),
+    path("admin-portal/departmental-exams/equivalent-courses/retire/", persistent_equivalency_views.retire_equivalent_definition, name="saved_equivalent_courses_retire"),
+    path("admin-portal/departmental-exams/equivalent-courses/adopt/", persistent_equivalency_views.adopt_historical_equivalency, name="saved_equivalent_courses_adopt"),
+    path("admin-portal/departmental-exams/equivalent-courses/exception/", persistent_equivalency_views.except_equivalency_plan, name="saved_equivalent_courses_exception"),
+    path("admin-portal/departmental-exams/equivalent-courses/apply/", persistent_equivalency_views.apply_equivalency_plan, name="saved_equivalent_courses_apply"),
+    path("admin-portal/departmental-exams/equivalent-courses/blueprint-review/", persistent_equivalency_views.review_blueprint_recovery, name="saved_equivalent_blueprint_review"),
+    path("admin-portal/departmental-exams/equivalent-courses/blueprint-retain/", persistent_equivalency_views.retain_secondary_blueprint, name="saved_equivalent_blueprint_retain"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/equivalent-courses/", equivalency_views.equivalent_courses_view, name="equivalent_courses"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/equivalent-courses/<int:group_id>/", equivalency_views.equivalent_courses_view, name="equivalent_courses_group"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/setup/", setup_views.setup_view, name="course_setup"),

@@ -110,7 +110,7 @@ class ExamGenerationService:
             == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
         ):
             blueprint = (
-                ExamBlueprint.objects.select_for_update()
+                ExamBlueprint.active_objects.select_for_update()
                 .filter(cycle_course=course)
                 .first()
             )

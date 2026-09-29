@@ -21,7 +21,7 @@ def resolve_import_section(*, contribution, tenant_id, section_id=None, for_upda
         from .models import ExamBlueprint
 
         unit = resolve_examination_unit(contribution.cycle_course, for_update=for_update)
-        if ExamBlueprint.objects.filter(
+        if ExamBlueprint.active_objects.filter(
             cycle_course=unit.primary, mode=ExamBlueprint.Mode.USE_SECTIONS,
         ).exists():
             raise PermissionDenied("Sectioned question import requires enabled, frozen section placement.")

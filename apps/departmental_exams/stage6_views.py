@@ -174,7 +174,6 @@ def _course(tenant_id, cycle_course_id):
             "responsible_department__campus",
             "reviewer",
             "configuration",
-            "exam_blueprint",
         ).prefetch_related("offering_snapshots__campus"),
         pk=cycle_course_id,
         cycle__tenant_id=tenant_id,
@@ -211,7 +210,9 @@ def blueprint_configuration_view(request, cycle_course_id):
     DepartmentalExamAuthorizationService.require_blueprint_structure_management(
         user=request.user, cycle_course=course
     )
-    blueprint = getattr(course, "exam_blueprint", None)
+    blueprint = ExamBlueprint.active_objects.filter(
+        cycle_course=course,
+    ).first()
     current_revision = ExamGenerationService.current_for_course(cycle_course=course)
     is_locked = bool(
         current_revision
@@ -328,10 +329,17 @@ def blueprint_configuration_view(request, cycle_course_id):
 def blueprint_review_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
+    if course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+        from .exam_units import resolve_examination_unit
+        unit = resolve_examination_unit(course, validate=False)
+        if unit.primary.id != course.id:
+            course = _course(tenant_id, unit.primary.id)
     DepartmentalExamAuthorizationService.require_generation_input_management(
         user=request.user, cycle_course=course
     )
-    blueprint = getattr(course, "exam_blueprint", None)
+    blueprint = ExamBlueprint.active_objects.filter(
+        cycle_course=course,
+    ).first()
     configuration = getattr(course, "configuration", None)
     current_revision = ExamGenerationService.current_for_course(cycle_course=course)
     is_locked = bool(
@@ -476,7 +484,7 @@ def blocked_contribution_resolve_view(request, contribution_id):
 def question_placement_view(request, question_id):
     tenant_id = _tenant_id(request)
     blueprint_id = request.POST.get("blueprint_id")
-    blueprint = ExamBlueprint.objects.filter(
+    blueprint = ExamBlueprint.active_objects.filter(
         pk=blueprint_id,
         cycle_course__cycle__tenant_id=tenant_id,
     ).first()
@@ -512,10 +520,15 @@ def question_placement_view(request, question_id):
 def scenario_save_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
+    if course.cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+        from .exam_units import resolve_examination_unit
+        unit = resolve_examination_unit(course, validate=False)
+        if unit.primary.id != course.id:
+            course = _course(tenant_id, unit.primary.id)
     DepartmentalExamAuthorizationService.require_generation_input_management(
         user=request.user, cycle_course=course
     )
-    blueprint = getattr(course, "exam_blueprint", None)
+    blueprint = ExamBlueprint.active_objects.filter(cycle_course=course).first()
     if blueprint is None:
         return _error(request, status=409, message="Configure the examination blueprint first.")
     form = ScenarioForm(request.POST, blueprint=blueprint)

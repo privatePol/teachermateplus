@@ -669,6 +669,159 @@ class ExamCourseEquivalencyMembership(TimeStampedModel):
         )
 
 
+class _ProtectedEquivalencyStateQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Use the protected equivalency service for state changes.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Use the protected equivalency service for state changes.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Use the protected equivalency service for state changes.")
+
+    def delete(self):
+        raise ValidationError("Equivalency state history cannot be deleted.")
+
+
+class _ProtectedEquivalencyState:
+    def save(self, *args, **kwargs):
+        if not _equivalency_lifecycle_write_allowed():
+            raise ValidationError("Use the protected equivalency service for state changes.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Equivalency state history cannot be deleted.")
+
+
+class CourseEquivalencyDefinition(_ProtectedEquivalencyState, TimeStampedModel):
+    """Tenant-owned intent; revisions carry the immutable course membership."""
+
+    objects = _ProtectedEquivalencyStateQuerySet.as_manager()
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="exam_equivalency_definitions")
+    current_version = models.PositiveIntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="created_exam_equivalency_definitions")
+    updated_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="updated_exam_equivalency_definitions")
+    retired_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="retired_exam_equivalency_definitions")
+    retired_at = models.DateTimeField(null=True, blank=True)
+    retirement_reason = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        db_table = "departmental_exam_equivalency_definitions"
+        indexes = [models.Index(fields=["tenant", "is_active"], name="idx_de_eqdef_active")]
+
+
+class _ImmutableEquivalencyEvidenceQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Equivalency revision evidence is immutable.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Equivalency revision evidence is immutable.")
+
+    def delete(self):
+        raise ValidationError("Equivalency revision evidence is immutable.")
+
+    def bulk_create(self, objs, **kwargs):
+        if not _equivalency_lifecycle_write_allowed():
+            raise ValidationError("Create equivalency revision evidence through the protected service.")
+        return super().bulk_create(objs, **kwargs)
+
+
+class _ImmutableEquivalencyEvidence:
+    def save(self, *args, **kwargs):
+        if not self._state.adding or not _equivalency_lifecycle_write_allowed():
+            raise ValidationError("Equivalency revision evidence is immutable outside the protected service.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Equivalency revision evidence is immutable.")
+
+
+class CourseEquivalencyDefinitionRevision(_ImmutableEquivalencyEvidence, TimeStampedModel):
+    objects = _ImmutableEquivalencyEvidenceQuerySet.as_manager()
+
+    definition = models.ForeignKey(CourseEquivalencyDefinition, on_delete=models.PROTECT, related_name="revisions")
+    version = models.PositiveIntegerField()
+    label = models.CharField(max_length=255)
+    primary_course = models.ForeignKey("academics.Course", on_delete=models.PROTECT, related_name="primary_exam_equivalency_revisions")
+    created_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="created_exam_equivalency_revisions")
+
+    class Meta:
+        db_table = "departmental_exam_equivalency_revisions"
+        constraints = [models.UniqueConstraint(fields=["definition", "version"], name="uq_de_eqdef_revision")]
+
+
+class CourseEquivalencyDefinitionMember(_ImmutableEquivalencyEvidence, models.Model):
+    objects = _ImmutableEquivalencyEvidenceQuerySet.as_manager()
+
+    revision = models.ForeignKey(CourseEquivalencyDefinitionRevision, on_delete=models.PROTECT, related_name="memberships")
+    course = models.ForeignKey("academics.Course", on_delete=models.PROTECT, related_name="exam_equivalency_definition_memberships")
+    code_snapshot = models.CharField(max_length=50)
+    title_snapshot = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "departmental_exam_equivalency_revision_members"
+        constraints = [models.UniqueConstraint(fields=["revision", "course"], name="uq_de_eqrev_member")]
+
+
+class CourseEquivalencyCyclePlan(_ProtectedEquivalencyState, TimeStampedModel):
+    objects = _ProtectedEquivalencyStateQuerySet.as_manager()
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        BLOCKED = "BLOCKED", "Needs correction"
+        APPLIED = "APPLIED", "Applied"
+        NOT_APPLICABLE = "NOT_APPLICABLE", "Fewer than two members present"
+        EXCEPTED = "EXCEPTED", "Cycle exception"
+
+    cycle = models.ForeignKey(ExaminationCycle, on_delete=models.PROTECT, related_name="equivalency_plans")
+    definition = models.ForeignKey(CourseEquivalencyDefinition, on_delete=models.PROTECT, related_name="cycle_plans")
+    revision = models.ForeignKey(CourseEquivalencyDefinitionRevision, on_delete=models.PROTECT, related_name="cycle_plans")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    reason = models.TextField(blank=True)
+    applied_group = models.ForeignKey(ExamCourseEquivalencyGroup, on_delete=models.PROTECT, null=True, blank=True, related_name="definition_plans")
+    exception_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="exam_equivalency_cycle_exceptions")
+    exception_at = models.DateTimeField(null=True, blank=True)
+    exception_reason = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        db_table = "departmental_exam_equivalency_cycle_plans"
+        constraints = [models.UniqueConstraint(fields=["cycle", "definition"], name="uq_de_eqplan_cycle_def")]
+        indexes = [models.Index(fields=["cycle", "status"], name="idx_de_eqplan_status")]
+
+
+class ExamBlueprintDisposition(_ImmutableEquivalencyEvidence, TimeStampedModel):
+    """A retained secondary structure excluded from current unit ownership."""
+
+    objects = _ImmutableEquivalencyEvidenceQuerySet.as_manager()
+
+    blueprint = models.OneToOneField("ExamBlueprint", on_delete=models.PROTECT, related_name="historical_disposition")
+    primary_blueprint = models.ForeignKey("ExamBlueprint", on_delete=models.PROTECT, related_name="retained_secondary_blueprints")
+    actor = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="exam_blueprint_dispositions")
+    reason = models.CharField(max_length=500)
+    evidence = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "departmental_exam_blueprint_dispositions"
+
+
+class ExamBlueprintRestoration(_ImmutableEquivalencyEvidence, TimeStampedModel):
+    """Immutable evidence that a retained structure became active after separation."""
+
+    objects = _ImmutableEquivalencyEvidenceQuerySet.as_manager()
+
+    disposition = models.OneToOneField(ExamBlueprintDisposition, on_delete=models.PROTECT, related_name="restoration")
+    retired_group = models.ForeignKey(ExamCourseEquivalencyGroup, on_delete=models.PROTECT, null=True, blank=True,
+                                      related_name="blueprint_restorations")
+    actor = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="exam_blueprint_restorations")
+    reason = models.CharField(max_length=500)
+    evidence = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "departmental_exam_blueprint_restorations"
+
+
 class CycleCourseOffering(TimeStampedModel):
     cycle_course = models.ForeignKey(CycleCourse, on_delete=models.PROTECT, related_name="offering_snapshots")
     offering = models.ForeignKey("academics.CourseOffering", on_delete=models.PROTECT, related_name="exam_cycle_snapshots")
@@ -1569,12 +1722,17 @@ def _lock_exam_blueprint_rows(
         condition |= models.Q(cycle_course_id__in=cycle_course_ids)
     if not normalized_blueprint_ids and not cycle_course_ids:
         return ()
-    return tuple(
+    locked = tuple(
         ExamBlueprint._base_manager.using(using)
         .select_for_update()
         .filter(condition)
         .order_by("cycle_course_id", "id")
     )
+    if (locked and ExamBlueprintDisposition.objects.using(using).filter(
+                blueprint_id__in=[row.pk for row in locked], restoration__isnull=True,
+            ).exists()):
+        raise ValidationError("A retained historical blueprint and its sections are immutable.")
+    return locked
 
 
 def _lock_exam_section_rows(*, using, section_ids=(), blueprint_ids=()):
@@ -1802,6 +1960,14 @@ class _ExamSectionQuerySet(models.QuerySet):
                 return super().delete()
 
 
+class _ActiveExamBlueprintManager(models.Manager.from_queryset(_ExamBlueprintQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().filter(
+            models.Q(historical_disposition__isnull=True)
+            | models.Q(historical_disposition__restoration__isnull=False)
+        )
+
+
 class ExamBlueprint(TimeStampedModel):
     class Mode(models.TextChoices):
         NO_SECTIONS = "NO_SECTIONS", "No Sections"
@@ -1842,6 +2008,7 @@ class ExamBlueprint(TimeStampedModel):
     )
 
     objects = _ExamBlueprintQuerySet.as_manager()
+    active_objects = _ActiveExamBlueprintManager()
 
     class Meta:
         db_table = "departmental_exam_blueprints"

@@ -15,6 +15,7 @@ from .models import (
     CourseExamConfiguration,
     CycleCourse,
     ExamBlueprint,
+    ExamBlueprintDisposition,
     ExamCourseEquivalencyGroup,
     ExamCourseEquivalencyMembership,
     ExamGenerationRevision,
@@ -271,7 +272,7 @@ class ExamCourseEquivalencyService:
     @staticmethod
     def _require_single_structure_blueprint(*, member_ids, proposed_primary_id):
         blueprints = tuple(
-            ExamBlueprint.objects.select_for_update()
+            ExamBlueprint.active_objects.select_for_update()
             .filter(cycle_course_id__in=tuple(sorted(set(member_ids))))
             .order_by("cycle_course_id", "id")
             .values_list("cycle_course_id", flat=True)
@@ -398,6 +399,10 @@ class ExamCourseEquivalencyService:
         )
         cls._require_authority(cycle=cycle, members=affected_members, actor=actor)
         cls._require_mutable(cycle=cycle, members=affected_members)
+        if ExamBlueprintDisposition.objects.filter(
+            blueprint__cycle_course_id__in=affected_ids, restoration__isnull=True,
+        ).exists():
+            raise ValidationError("Retained blueprint ownership must be resolved before replacing group members.")
         if ExamCourseEquivalencyMembership.objects.select_for_update().filter(
             cycle_course__in=members,
             active_marker=1,
@@ -515,6 +520,12 @@ class ExamCourseEquivalencyService:
         cls._require_mutable(cycle=cycle, members=members)
         cls._require_structure_ownership_mutable(
             member_ids=(member.id for member in members)
+        )
+        from .persistent_equivalency import BlueprintDispositionService
+        BlueprintDispositionService.restore_for_separation(
+            cycle=cycle, members=members,
+            primary_cycle_course_id=group.primary_cycle_course_id,
+            actor=actor, reason=normalized_reason, retired_group=group,
         )
 
         now = timezone.now()
