@@ -2,6 +2,7 @@
 
 import json
 import re
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.urls import reverse
@@ -16,6 +17,7 @@ from .models import (
     CourseEquivalencyDefinition,
     CourseExamConfiguration,
     CycleCourse,
+    CycleCourseOffering,
     ExamBlueprint,
     ExamBlueprintDisposition,
     ExamBlueprintRestoration,
@@ -697,3 +699,203 @@ class PersistentEquivalencyTests(Stage4TestCase):
         plan.refresh_from_db()
         self.assertEqual(plan.status, plan.Status.APPLIED)
         self.assertEqual(ExamBlueprintDisposition.objects.count(), 1)
+
+    def _existing_review(self, definition):
+        return self.client.get(reverse("departmental_exams:saved_equivalent_existing_cycle_review"),
+                               {"cycle_id": self.cycle.pk, "definition_id": definition.pk})
+
+    def _existing_apply(self, definition, token):
+        return self.client.post(reverse("departmental_exams:saved_equivalent_existing_cycle_apply"),
+                                data=json.dumps({"cycle_id": self.cycle.pk,
+                                                 "definition_id": definition.pk,
+                                                 "review_token": token}), content_type="application/json")
+
+    def _existing_ready(self, *, blueprints=0):
+        for member in (self.first, self.second):
+            self._configure(member)
+        definition = self._definition()
+        made = []
+        for member in (self.first, self.second)[:blueprints]:
+            blueprint = ExamBlueprint.objects.create(
+                cycle_course=member, mode=ExamBlueprint.Mode.USE_SECTIONS,
+                created_by=self.admin, updated_by=self.admin)
+            ExamSection.objects.create(blueprint=blueprint, display_order=1,
+                                       title="Common section", instructions="Reviewed", item_quota=50)
+            made.append(blueprint)
+        return definition, made
+
+    def test_existing_cycle_one_blueprint_pins_and_applies(self):
+        definition, blueprints = self._existing_ready(blueprints=1)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.filter(cycle=self.cycle).exists())
+        landing = self.client.get(reverse("departmental_exams:saved_equivalent_courses"),
+                                  {"cycle_id": self.cycle.pk})
+        self.assertContains(landing, 'data-existing-cycle-review="' + str(definition.pk) + '"')
+        self.assertContains(landing, 'value="' + str(self.cycle.pk) + '"')
+        review = self._existing_review(definition)
+        self.assertEqual(review.status_code, 200)
+        evidence = review.json()["evidence"]
+        self.assertEqual({row["cycle_course_id"] for row in evidence["members"]},
+                         {self.first.pk, self.second.pk})
+        self.assertEqual(evidence["blueprints"][0]["id"], blueprints[0].pk)
+        response = self._existing_apply(definition, review.json()["review_token"])
+        self.assertEqual(response.status_code, 200, response.content)
+        plan = CourseEquivalencyCyclePlan.objects.get(cycle=self.cycle, definition=definition)
+        self.assertEqual(plan.status, plan.Status.APPLIED)
+        self.assertEqual(plan.revision.version, 1)
+        self.assertEqual(plan.applied_group.primary_cycle_course_id, self.first.pk)
+        self.assertFalse(ExamBlueprintDisposition.objects.exists())
+
+    def test_existing_cycle_action_requires_frozen_member_campus_authority(self):
+        definition, _ = self._existing_ready()
+        program = Program.objects.create(tenant=self.tenant, campus=self.other_campus,
+                                         department=self.other_department, code="P-EQ-OLD-N", name="North")
+        section = Section.objects.create(tenant=self.tenant, campus=self.other_campus,
+                                         department=self.other_department, program=program,
+                                         code="P-EQ-OLD-N", name="North section")
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant, campus=self.other_campus, department=self.other_department,
+            program=program, academic_year=self.cycle.academic_year, term=self.cycle.term,
+            course=self.second.course, section=section,
+        )
+        CycleCourseOffering.objects.create(cycle_course=self.second, offering=offering,
+                                           campus=self.other_campus)
+        offering.is_active = False
+        offering.save(update_fields=["is_active", "updated_at"])
+
+        permission = Permission.objects.get(code="departmental_exams.manage_exam_generation")
+        denied = self.make_user("existing-cycle-north-denied", self.department,
+                                ("admin_portal.access",))
+        UserPermission.objects.create(user=denied, permission=permission,
+                                      grant_type=UserPermission.GrantType.ALLOW,
+                                      tenant=None, campus=None)
+        UserPermission.objects.create(user=denied, permission=permission,
+                                      grant_type=UserPermission.GrantType.DENY,
+                                      tenant=self.tenant, campus=self.other_campus)
+        self.client.force_login(denied)
+        landing_url = reverse("departmental_exams:saved_equivalent_courses")
+        landing = self.client.get(landing_url, {"cycle_id": self.cycle.pk})
+        self.assertContains(landing, definition.revisions.get(version=1).label)
+        self.assertNotContains(landing, f'data-existing-cycle-review="{definition.pk}"')
+        self.assertEqual(self._existing_review(definition).status_code, 403)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.exists())
+
+        authorized = self.make_user("existing-cycle-north-allowed", self.department,
+                                    ("admin_portal.access",))
+        UserPermission.objects.create(user=authorized, permission=permission,
+                                      grant_type=UserPermission.GrantType.ALLOW,
+                                      tenant=None, campus=None)
+        self.client.force_login(authorized)
+        self.assertContains(self.client.get(landing_url, {"cycle_id": self.cycle.pk}),
+                            f'data-existing-cycle-review="{definition.pk}"')
+        self.assertEqual(self._existing_review(definition).status_code, 200)
+
+    def test_existing_cycle_two_blueprints_retains_secondary_and_sections(self):
+        definition, blueprints = self._existing_ready(blueprints=2)
+        review = self._existing_review(definition)
+        self.assertEqual(review.status_code, 200)
+        response = self._existing_apply(definition, review.json()["review_token"])
+        self.assertEqual(response.status_code, 200, response.content)
+        disposition = ExamBlueprintDisposition.objects.get()
+        self.assertEqual((disposition.primary_blueprint_id, disposition.blueprint_id),
+                         (blueprints[0].pk, blueprints[1].pk))
+        self.assertEqual(ExamSection.objects.filter(blueprint__in=blueprints).count(), 2)
+        self.assertEqual(CourseEquivalencyCyclePlan.objects.get(cycle=self.cycle).status,
+                         CourseEquivalencyCyclePlan.Status.APPLIED)
+
+    def test_existing_cycle_stale_review_and_duplicate_have_no_partial_changes(self):
+        definition, _ = self._existing_ready()
+        review = self._existing_review(definition)
+        self.first.course.title = "Changed after review"
+        self.first.course.save(update_fields=["title", "updated_at"])
+        stale = self._existing_apply(definition, review.json()["review_token"])
+        self.assertEqual(stale.status_code, 409)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.exists())
+        fresh = self._existing_review(definition)
+        self.assertEqual(self._existing_apply(definition, fresh.json()["review_token"]).status_code, 200)
+        self.assertEqual(self._existing_apply(definition, fresh.json()["review_token"]).status_code, 409)
+        self.assertEqual(CourseEquivalencyCyclePlan.objects.count(), 1)
+        self.assertEqual(ExamCourseEquivalencyGroup.objects.count(), 1)
+
+    def test_existing_cycle_direct_deny_after_review_blocks_application(self):
+        definition, _ = self._existing_ready()
+        manager = self.make_user("existing-cycle-manager", self.department, ("admin_portal.access",))
+        permission = Permission.objects.get(code="departmental_exams.manage_exam_generation")
+        UserPermission.objects.create(user=manager, permission=permission,
+                                      grant_type=UserPermission.GrantType.ALLOW,
+                                      tenant=None, campus=None)
+        self.client.force_login(manager)
+        review = self._existing_review(definition)
+        self.assertEqual(review.status_code, 200)
+        UserPermission.objects.create(user=manager, permission=permission,
+                                      grant_type=UserPermission.GrantType.DENY,
+                                      tenant=self.tenant, campus=self.campus)
+        self.assertEqual(self._existing_apply(definition, review.json()["review_token"]).status_code, 403)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.exists())
+
+    def test_existing_cycle_mismatched_settings_and_classification_block_review(self):
+        definition, _ = self._existing_ready()
+        config = CourseExamConfiguration.objects.get(cycle_course=self.second)
+        config.final_item_count = 60
+        config.save(update_fields=["final_item_count", "updated_at"])
+        self.assertEqual(self._existing_review(definition).status_code, 409)
+        config.final_item_count = 50
+        config.save(update_fields=["final_item_count", "updated_at"])
+        from .models import _classification_write
+        token = _classification_write.set(True)
+        try:
+            self.second.exam_classification = CycleCourse.ExamClassification.DEPARTMENTAL
+            self.second.save(update_fields=["exam_classification", "updated_at"])
+        finally:
+            _classification_write.reset(token)
+        self.assertEqual(self._existing_review(definition).status_code, 409)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.exists())
+
+    def test_existing_cycle_opened_intake_and_unsafe_disposition_block(self):
+        definition, blueprints = self._existing_ready(blueprints=2)
+        review = self._existing_review(definition)
+        section = ExamSection.objects.get(blueprint=blueprints[1])
+        section.instructions = "Changed section"
+        section.save(update_fields=["instructions", "updated_at"])
+        self.assertEqual(self._existing_apply(definition, review.json()["review_token"]).status_code, 409)
+        self.assertFalse(ExamBlueprintDisposition.objects.exists())
+        section.instructions = "Reviewed"
+        section.save(update_fields=["instructions", "updated_at"])
+        config = CourseExamConfiguration.objects.get(cycle_course=self.second)
+        config.workflow_status = config.WorkflowStatus.OPEN
+        config.save(update_fields=["workflow_status", "updated_at"])
+        self.assertEqual(self._existing_review(definition).status_code, 409)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.exists())
+
+    def test_existing_cycle_mismatched_blueprints_and_processing_block_review(self):
+        definition, blueprints = self._existing_ready(blueprints=2)
+        section = ExamSection.objects.get(blueprint=blueprints[1])
+        section.item_quota = 49
+        section.save(update_fields=["item_quota", "updated_at"])
+        self.assertEqual(self._existing_review(definition).status_code, 409)
+        section.item_quota = 50
+        section.save(update_fields=["item_quota", "updated_at"])
+        config = CourseExamConfiguration.objects.get(cycle_course=self.first)
+        config.automatic_processing_status = config.AutomaticProcessingStatus.BLOCKED
+        config.save(update_fields=["automatic_processing_status", "updated_at"])
+        self.assertEqual(self._existing_review(definition).status_code, 409)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.exists())
+
+    def test_existing_cycle_signed_review_is_actor_bound(self):
+        definition, _ = self._existing_ready()
+        review = self._existing_review(definition)
+        manager = self.make_user("existing-other-manager", self.department,
+                                 ("admin_portal.access", "departmental_exams.manage_exam_generation"))
+        self.client.force_login(manager)
+        self.assertEqual(self._existing_apply(definition, review.json()["review_token"]).status_code, 409)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.exists())
+
+    def test_existing_cycle_group_failure_rolls_back_plan_and_disposition(self):
+        definition, _ = self._existing_ready(blueprints=2)
+        review = self._existing_review(definition)
+        with patch.object(ExamCourseEquivalencyService, "create_group",
+                          side_effect=ValidationError("forced group failure")):
+            response = self._existing_apply(definition, review.json()["review_token"])
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(CourseEquivalencyCyclePlan.objects.exists())
+        self.assertFalse(ExamBlueprintDisposition.objects.exists())
+        self.assertFalse(ExamCourseEquivalencyGroup.objects.exists())

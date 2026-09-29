@@ -35,6 +35,7 @@ from .views import _tenant_id, portal_required
 
 
 HISTORICAL_ADOPTION_SALT = "departmental-exams-historical-adoption-v1"
+EXISTING_CYCLE_APPLY_SALT = "departmental-exams-existing-cycle-apply-v1"
 
 
 def _definition_rows(user, tenant_id):
@@ -125,9 +126,25 @@ def _response(request, *, cycle, notice=""):
     definitions = _definition_rows(request.user, tenant_id)
     historical = _historical_rows(request.user, tenant_id)
     plans = _plan_rows(request.user, cycle)
+    planned_definition_ids = {plan.definition_id for plan in plans}
+    reviewable_definition_ids = set()
+    if (cycle and cycle.status == ExaminationCycle.Status.OPEN and
+            cycle.processing_mode == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION):
+        for definition in definitions:
+            if not definition["active"] or definition["id"] in planned_definition_ids:
+                continue
+            course_ids = {member["id"] for member in definition["members"]}
+            members = list(CycleCourse.objects.filter(cycle=cycle, course_id__in=course_ids)
+                           .select_related("cycle").prefetch_related("offering_snapshots"))
+            if (len(members) == len(course_ids) and
+                    DepartmentalExamAuthorizationService.has_automatic_courses_permission(
+                        user=request.user, cycle=cycle, courses=members,
+                        permissions=(DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,))):
+                reviewable_definition_ids.add(definition["id"])
     html = render_to_string("departmental_exams/admin/_saved_equivalency_lists.html", {
         "definitions": definitions, "historical": historical,
         "plans": plans, "cycle": cycle,
+        "reviewable_definition_ids": reviewable_definition_ids,
     }, request=request)
     return {"html": html, "definitions": definitions, "notice": notice}
 
@@ -163,8 +180,24 @@ def saved_equivalency_landing(request):
     data = _response(request, cycle=cycle)
     if request.GET.get("format") == "fragment":
         return JsonResponse(data)
+    cycle_options = []
+    active_definitions = [row for row in data["definitions"] if row["active"]]
+    for option in ExaminationCycle.objects.filter(
+            tenant_id=_tenant_id(request), status=ExaminationCycle.Status.OPEN,
+            processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+    ).select_related("academic_year", "term").order_by("-pk"):
+        for definition in active_definitions:
+            course_ids = {row["id"] for row in definition["members"]}
+            members = list(CycleCourse.objects.filter(cycle=option, course_id__in=course_ids)
+                           .select_related("cycle").prefetch_related("offering_snapshots"))
+            if len(members) == len(course_ids) and DepartmentalExamAuthorizationService.has_automatic_courses_permission(
+                    user=request.user, cycle=option, courses=members,
+                    permissions=(DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,)):
+                cycle_options.append(option)
+                break
     return render(request, "departmental_exams/admin/saved_equivalent_courses.html", {
         "list_html": data["html"], "cycle": cycle,
+        "cycle_options": cycle_options,
         "definitions_json": data["definitions"],
     })
 
@@ -331,6 +364,52 @@ def apply_equivalency_plan(request):
         return _error(exc)
     return JsonResponse({"ok": True, **_response(request, cycle=cycle,
                         notice="Cycle plan status: " + updated.get_status_display() + ".")})
+
+
+@portal_required("ADMIN")
+@require_GET
+def review_existing_cycle_application(request):
+    cycle = _cycle(request)
+    if cycle is None:
+        raise Http404
+    definition = get_object_or_404(CourseEquivalencyDefinition,
+                                   pk=request.GET.get("definition_id"), tenant_id=cycle.tenant_id)
+    try:
+        evidence = PersistentCourseEquivalencyService.existing_cycle_review(
+            cycle=cycle, definition=definition, actor=request.user)
+    except CourseExamConfigurationConflict as exc:
+        return _error(exc, 409)
+    except ValidationError as exc:
+        return _error(exc, 409)
+    token = signing.dumps({"actor_id": request.user.pk, "tenant_id": cycle.tenant_id,
+                           "cycle_id": cycle.pk, "definition_id": definition.pk,
+                           "evidence": evidence}, salt=EXISTING_CYCLE_APPLY_SALT, compress=True)
+    return JsonResponse({"ok": True, "evidence": evidence, "review_token": token})
+
+
+@portal_required("ADMIN")
+@require_POST
+def apply_existing_cycle_application(request):
+    try:
+        data = _payload(request)
+        cycle = get_object_or_404(ExaminationCycle, pk=data.get("cycle_id"), tenant_id=_tenant_id(request))
+        try:
+            state = signing.loads(data.get("review_token") or "",
+                                  salt=EXISTING_CYCLE_APPLY_SALT, max_age=1200)
+        except signing.BadSignature as exc:
+            raise CourseExamConfigurationConflict("The review expired. Review current facts again.") from exc
+        if (state.get("actor_id") != request.user.pk or
+                state.get("tenant_id") != cycle.tenant_id or
+                state.get("cycle_id") != cycle.pk or
+                state.get("definition_id") != data.get("definition_id")):
+            raise CourseExamConfigurationConflict("The review belongs to a different actor, cycle, or group.")
+        PersistentCourseEquivalencyService.apply_to_existing_cycle(
+            cycle_id=cycle.pk, definition_id=state["definition_id"],
+            actor=request.user, expected_review=state["evidence"])
+    except (CourseExamConfigurationConflict, ValidationError, ValueError, TypeError, KeyError) as exc:
+        return _error(exc, 409)
+    return JsonResponse({"ok": True, **_response(request, cycle=cycle,
+                        notice="Saved group pinned and applied to this cycle.")})
 
 
 @portal_required("ADMIN")

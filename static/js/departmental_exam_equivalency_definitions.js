@@ -17,12 +17,15 @@
   const recoveryEvidence = document.getElementById("equivalency-recovery-evidence");
   const recoveryReason = document.getElementById("equivalency-recovery-reason");
   const notice = document.getElementById("equivalency-notice");
+  const existingPanel = document.getElementById("equivalency-existing-review");
+  const existingEvidence = document.getElementById("equivalency-existing-evidence");
   const csrf = form.querySelector('input[name="csrfmiddlewaretoken"]').value;
   let definitions = JSON.parse(document.getElementById("equivalency-initial-definitions").textContent);
   let selected = [];
   let editing = null;
   let action = null;
   let recovery = null;
+  let existingReview = null;
   let searchSequence = 0;
 
   function endpoint(name) {
@@ -34,6 +37,39 @@
   function message(value, danger = false) {
     notice.className = value ? `alert ${danger ? "alert-warning" : "alert-success"}` : "";
     notice.textContent = value;
+  }
+
+  function renderExistingEvidence(evidence) {
+    existingEvidence.replaceChildren();
+    const line = (parent, tag, value) => {
+      const node = document.createElement(tag);
+      node.textContent = value;
+      parent.append(node);
+      return node;
+    };
+    line(existingEvidence, "p", `${evidence.label} · saved version ${evidence.definition_version} · cycle ${evidence.cycle_id}`);
+    evidence.members.forEach(member => {
+      const card = document.createElement("div");
+      card.className = "border-top pt-2 mt-2";
+      line(card, "h3", `${member.code} — ${member.title}${member.is_primary ? " (primary)" : ""}`);
+      line(card, "p", `CycleCourse ${member.cycle_course_id} · Course ${member.course_id} · ${member.classification} · ${member.inclusion}`);
+      const campuses = document.createElement("ul");
+      member.campuses.forEach(campus => line(campuses, "li",
+        `${campus.campus} (campus ${campus.campus_id}, frozen offering ${campus.offering_id}, snapshot ${campus.snapshot_id})`));
+      card.append(campuses);
+      line(card, "h4", "Course configuration").className = "h6";
+      line(card, "pre", JSON.stringify(member.configuration_state, null, 2)).className = "text-wrap small";
+      existingEvidence.append(card);
+    });
+    line(existingEvidence, "h3", "Blueprint ownership and ordered sections").className = "h6 mt-3";
+    if (!evidence.blueprints.length) line(existingEvidence, "p", "No blueprint exists for these members.");
+    evidence.blueprints.forEach(blueprint => {
+      line(existingEvidence, "p", `${blueprint.ownership} · blueprint ${blueprint.id} · CycleCourse ${blueprint.cycle_course_id} · revision ${blueprint.revision} · ${blueprint.mode}`);
+      const sections = document.createElement("ol");
+      blueprint.sections.forEach(section => line(sections, "li",
+        `${section[0]}. ${section[1]} · ${section[3]} items · ${section[2] || "No instructions"}`));
+      existingEvidence.append(sections);
+    });
   }
 
   function clearErrors() {
@@ -190,6 +226,26 @@
   });
 
   list.addEventListener("click", async event => {
+    const existingButton = event.target.closest("[data-existing-cycle-review]");
+    if (existingButton) {
+      existingPanel.hidden = true;
+      existingReview = null;
+      const url = endpoint("existingReview");
+      url.searchParams.set("definition_id", existingButton.dataset.existingCycleReview);
+      try {
+        const response = await fetch(url, { credentials: "same-origin" });
+        const data = await response.json();
+        if (!response.ok) {
+          message(Object.values(data.errors || {}).flat().join(" ") || "Review is unavailable.", true);
+          return;
+        }
+        existingReview = { definitionId: Number(existingButton.dataset.existingCycleReview), token: data.review_token };
+        renderExistingEvidence(data.evidence);
+        existingPanel.hidden = false;
+        existingPanel.scrollIntoView({ block: "nearest" });
+      } catch (error) { message(error.message, true); }
+      return;
+    }
     const edit = event.target.closest("[data-equivalency-edit]");
     if (edit) {
       const row = definitions.find(item => item.id === Number(edit.dataset.equivalencyEdit));
@@ -257,6 +313,26 @@
     reason.focus();
   });
   document.getElementById("equivalency-reason-cancel").addEventListener("click", () => { reasonPanel.hidden = true; });
+  document.getElementById("equivalency-existing-cancel").addEventListener("click", () => {
+    existingPanel.hidden = true;
+    existingReview = null;
+  });
+  document.getElementById("equivalency-existing-confirm").addEventListener("click", async event => {
+    if (!existingReview) return;
+    event.target.disabled = true;
+    try {
+      const result = await submit("existingApply", {
+        cycle_id: Number(endpoints.dataset.cycle),
+        definition_id: existingReview.definitionId,
+        review_token: existingReview.token,
+      });
+      existingPanel.hidden = true;
+      existingReview = null;
+      if (!result.ok) message("The application was not made. Review fresh cycle facts before retrying. " +
+        Object.values(result.data.errors || {}).flat().join(" "), true);
+    } catch (error) { message(error.message, true); }
+    finally { event.target.disabled = false; }
+  });
   document.getElementById("equivalency-recovery-cancel").addEventListener("click", () => { recoveryPanel.hidden = true; });
   document.getElementById("equivalency-recovery-form").addEventListener("submit", async event => {
     event.preventDefault();

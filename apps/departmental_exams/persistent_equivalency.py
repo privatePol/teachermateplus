@@ -6,13 +6,14 @@ import json
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import F
+from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 
 from apps.academics.models import Course, CourseOffering
 from apps.core.services.audit import AuditService
 from apps.tenants.models import Tenant
 
-from .exam_units import ExamCourseEquivalencyService, _compatibility_errors
+from .exam_units import ExamCourseEquivalencyService, _compatibility_errors, configuration_compatibility_key
 from .models import (
     AnswerKeyRelease,
     CourseEquivalencyCyclePlan,
@@ -138,6 +139,144 @@ def require_manage_definition(*, user, tenant_id, course_ids):
 
 
 class PersistentCourseEquivalencyService:
+    @classmethod
+    def existing_cycle_review(cls, *, cycle, definition, actor, lock=False):
+        """One canonical, displayed review for an explicit old-cycle application."""
+        if (cycle.status != ExaminationCycle.Status.OPEN or
+                cycle.processing_mode != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION or
+                definition.tenant_id != cycle.tenant_id or not definition.is_active):
+            raise ValidationError("Select an active definition and an Open Automatic cycle.")
+        revision = definition.revisions.get(version=definition.current_version)
+        ids = _member_ids(revision)
+        require_manage_definition(user=actor, tenant_id=cycle.tenant_id, course_ids=ids)
+        if CourseEquivalencyCyclePlan.objects.filter(cycle=cycle, definition=definition).exists():
+            raise CourseExamConfigurationConflict("This cycle already has a plan for the saved group.")
+        if CourseEquivalencyCyclePlan.objects.filter(
+                cycle=cycle, revision__memberships__course_id__in=ids).exists():
+            raise ValidationError("Another cycle plan already covers a selected course.")
+        query = CycleCourse.objects.filter(cycle=cycle, course_id__in=ids).select_related(
+            "cycle", "course").prefetch_related("offering_snapshots__campus").order_by("course_id")
+        if lock:
+            query = query.select_for_update()
+        members = list(query)
+        if len(members) != len(ids) or len(ids) < 2:
+            raise ValidationError("Every saved member must be present in this cycle.")
+        DepartmentalExamAuthorizationService.require_automatic_courses_permission(
+            user=actor, cycle=cycle, courses=members,
+            permissions=(DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,),
+        )
+        ExamCourseEquivalencyService._require_mutable(cycle=cycle, members=members)
+        if ExamCourseEquivalencyMembership.objects.filter(
+                cycle_course__in=members, active_marker=1, group__is_active=True).exists():
+            raise ValidationError("A member already belongs to an active cycle group.")
+        configs_query = CourseExamConfiguration.objects.filter(cycle_course__in=members)
+        if lock:
+            configs_query = configs_query.select_for_update()
+        configs = {row.cycle_course_id: row for row in configs_query}
+        errors = _compatibility_errors(members=members, configurations=configs)
+        if errors:
+            raise ValidationError(errors)
+        if any(row.opened_at or row.workflow_status != row.WorkflowStatus.DRAFT or
+               row.contributor_roster_initialized_at or row.automatic_processed_at or
+               row.automatic_processing_status for row in configs.values()):
+            raise ValidationError("Opened intake, roster, or processing history blocks this application.")
+        member_ids = [row.pk for row in members]
+        if FacultyContribution.objects.filter(cycle_course_id__in=member_ids).exists():
+            raise ValidationError("Contribution history blocks this application.")
+        blueprints_query = ExamBlueprint.objects.filter(cycle_course__in=members).select_related(
+            "cycle_course__course").order_by("cycle_course_id")
+        if lock:
+            blueprints_query = blueprints_query.select_for_update()
+        blueprints = list(blueprints_query)
+        if len(blueprints) > 2 or any(row.structure_frozen_at for row in blueprints):
+            raise ValidationError("Frozen or multiple structures block this application.")
+        primary = next(row for row in members if row.course_id == revision.primary_course_id)
+        if len(blueprints) == 1 and blueprints[0].cycle_course_id != primary.pk:
+            raise ValidationError("The sole blueprint must belong to the selected primary.")
+        if len(blueprints) == 2 and (len(members) != 2 or
+                primary.pk not in {row.cycle_course_id for row in blueprints}):
+            raise ValidationError("Two blueprints require exactly two members and primary ownership.")
+        if blueprints and (ExamBlueprintDisposition.objects.filter(blueprint__in=blueprints).exists() or
+                           QuestionBlueprintPlacement.objects.filter(blueprint__in=blueprints).exists() or
+                           ExamScenario.objects.filter(blueprint__in=blueprints).exists()):
+            raise ValidationError("Existing disposition, placements, or scenarios block this application.")
+        if len(blueprints) == 2 and (blueprints[0].mode != blueprints[1].mode or
+                BlueprintDispositionService._section_evidence(blueprints[0]) !=
+                BlueprintDispositionService._section_evidence(blueprints[1])):
+            raise ValidationError("Both blueprint modes and ordered sections must match exactly.")
+        evidence = {
+            "cycle_id": cycle.pk, "cycle_status": cycle.status, "processing_mode": cycle.processing_mode,
+            "definition_id": definition.pk, "definition_version": definition.current_version,
+            "revision_id": revision.pk, "label": revision.label,
+            "primary_course_id": revision.primary_course_id,
+            "members": [{
+                "cycle_course_id": row.pk, "course_id": row.course_id,
+                "code": row.course.code, "title": row.course.title,
+                "is_primary": row.course_id == revision.primary_course_id,
+                "classification": row.exam_classification, "inclusion": row.inclusion_status,
+                "campuses": [{"snapshot_id": snap.pk, "offering_id": snap.offering_id,
+                              "campus_id": snap.campus_id, "campus": snap.campus.name}
+                             for snap in row.offering_snapshots.all().order_by("pk")],
+                "configuration": configuration_compatibility_key(configs[row.pk]),
+                "configuration_state": {field.attname: getattr(configs[row.pk], field.attname)
+                                        for field in configs[row.pk]._meta.concrete_fields},
+            } for row in members],
+            "blueprints": [{"id": row.pk, "cycle_course_id": row.cycle_course_id,
+                            "ownership": "primary" if row.cycle_course_id == primary.pk else "secondary",
+                            "revision": row.revision, "mode": row.mode,
+                            "digest": BlueprintDispositionService.structure_digest(row),
+                            "frozen_at": row.structure_frozen_at,
+                            "sections": [list(section) for section in
+                                         BlueprintDispositionService._section_evidence(row)]}
+                           for row in blueprints],
+        }
+        return json.loads(json.dumps(evidence, cls=DjangoJSONEncoder))
+
+    @classmethod
+    @transaction.atomic
+    def apply_to_existing_cycle(cls, *, cycle_id, definition_id, actor, expected_review):
+        cycle = ExaminationCycle.objects.select_for_update().get(pk=cycle_id)
+        definition = CourseEquivalencyDefinition.objects.select_for_update().get(
+            pk=definition_id, tenant_id=cycle.tenant_id)
+        current = cls.existing_cycle_review(cycle=cycle, definition=definition, actor=actor, lock=True)
+        if current != expected_review:
+            raise CourseExamConfigurationConflict("The cycle review changed. Review current facts again.")
+        revision = definition.revisions.get(pk=current["revision_id"])
+        with _equivalency_lifecycle_service_scope():
+            plan = CourseEquivalencyCyclePlan.objects.create(
+                cycle=cycle, definition=definition, revision=revision,
+                status=CourseEquivalencyCyclePlan.Status.PENDING,
+                reason="Explicit application to an existing cycle.",
+            )
+        primary_id = next(row["cycle_course_id"] for row in current["members"]
+                          if row["course_id"] == current["primary_course_id"])
+        if len(current["blueprints"]) == 2:
+            blueprint_by_member = {row["cycle_course_id"]: row for row in current["blueprints"]}
+            secondary_id = next(row["cycle_course_id"] for row in current["members"]
+                                if row["cycle_course_id"] != primary_id)
+            BlueprintDispositionService.retain_secondary(
+                cycle_id=cycle.pk, primary_cycle_course_id=primary_id,
+                secondary_cycle_course_id=secondary_id, actor=actor,
+                reason="Retained matching secondary structure for explicit saved equivalency application.",
+                expected_primary_revision=blueprint_by_member[primary_id]["revision"],
+                expected_secondary_revision=blueprint_by_member[secondary_id]["revision"],
+                expected_primary_digest=blueprint_by_member[primary_id]["digest"],
+                expected_secondary_digest=blueprint_by_member[secondary_id]["digest"],
+                plan_id=plan.pk,
+            )
+        applied = cls.ensure_for_course(cycle_course=CycleCourse.objects.get(pk=primary_id), actor=actor)
+        if applied is None or applied.pk != plan.pk or applied.status != plan.Status.APPLIED:
+            raise ValidationError("The saved group could not be applied; no changes were retained.")
+        AuditService.log_event(
+            action="DE_EXAM_EQUIVALENCY_EXISTING_CYCLE_APPLIED", portal="ADMIN",
+            entity_type="CourseEquivalencyCyclePlan", entity_id=plan.pk,
+            actor=actor, tenant=cycle.tenant_id,
+            metadata={"cycle_id": cycle.pk, "definition_id": definition.pk,
+                      "version": revision.version, "group_id": applied.applied_group_id,
+                      "blueprint_ids": [row["id"] for row in current["blueprints"]]},
+        )
+        return applied
+
     @classmethod
     @transaction.atomic
     def save_definition(cls, *, tenant_id, actor, label, member_course_ids,

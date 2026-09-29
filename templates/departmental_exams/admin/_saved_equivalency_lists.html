@@ -7,6 +7,7 @@
       <ul>{% for member in row.members %}<li>{{ member.code }} — {{ member.title }}</li>{% endfor %}</ul>
       {% if row.retirement_reason %}<p class="small text-muted">Retirement reason: {{ row.retirement_reason }}</p>{% endif %}
       {% if row.active %}<button type="button" class="btn btn-sm btn-outline-primary" data-equivalency-edit="{{ row.id }}">Edit group</button> <button type="button" class="btn btn-sm btn-outline-danger" data-equivalency-action="retire" data-id="{{ row.id }}" data-version="{{ row.version }}">Retire group</button>{% endif %}
+      {% if row.id in reviewable_definition_ids %}<button type="button" class="btn btn-sm btn-outline-primary" data-existing-cycle-review="{{ row.id }}">Review application to this cycle</button>{% endif %}
     </div></article>
   {% empty %}<p class="text-muted">No saved equivalent groups are visible in your authorized scope.</p>{% endfor %}
 </section>
