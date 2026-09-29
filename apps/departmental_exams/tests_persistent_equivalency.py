@@ -2,6 +2,7 @@
 
 import json
 import re
+from pathlib import Path
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -744,6 +745,31 @@ class PersistentEquivalencyTests(Stage4TestCase):
         self.assertEqual(plan.revision.version, 1)
         self.assertEqual(plan.applied_group.primary_cycle_course_id, self.first.pk)
         self.assertFalse(ExamBlueprintDisposition.objects.exists())
+
+    def test_existing_cycle_review_uses_current_delegated_javascript(self):
+        definition, _ = self._existing_ready()
+        landing = self.client.get(reverse("departmental_exams:saved_equivalent_courses"),
+                                  {"cycle_id": self.cycle.pk})
+        self.assertContains(
+            landing,
+            "departmental_exam_equivalency_definitions.js?v=20260929-existing-cycle-review",
+        )
+        self.assertContains(landing, f'data-existing-cycle-review="{definition.pk}"')
+
+        script = (
+            Path(__file__).resolve().parents[2]
+            / "static/js/departmental_exam_equivalency_definitions.js"
+        ).read_text(encoding="utf-8")
+        delegated_handler = script.index('list.addEventListener("click", async event => {')
+        existing_selector = script.index(
+            'event.target.closest("[data-existing-cycle-review]")', delegated_handler
+        )
+        fallback_action = script.index(
+            'event.target.closest("[data-equivalency-action]")', existing_selector
+        )
+        self.assertLess(existing_selector, fallback_action)
+        self.assertGreaterEqual(script.count("list.innerHTML = data.html;"), 2)
+        self.assertNotIn("list.outerHTML", script)
 
     def test_existing_cycle_action_requires_frozen_member_campus_authority(self):
         definition, _ = self._existing_ready()

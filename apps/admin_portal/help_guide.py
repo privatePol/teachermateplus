@@ -233,6 +233,7 @@ ADMIN_HELP_SECTIONS = [
                 "check_first": [
                     "Confirm the selected tenant and every participating campus in the grouped unit; assigning an Exam Department does not grant access or assign its Area Chair.",
                     "Review application to this cycle appears only when your generation permission covers every frozen member-offering campus, even if an offering is now inactive. A direct campus DENY hides the action.",
+                    "After a saved-group action refreshes the list, continue from the action shown on the refreshed card.",
                     "Before choosing Exempt, confirm the course has no faculty contribution or question work. That downstream activity blocks Exempt only; a saved exam configuration is preserved and becomes dormant while Exempt.",
                     "For Manual Review, confirm the explicitly assigned reviewer still has an active exact-department role and review/generate permission. Automatic Generation does not require or use that reviewer assignment.",
                 ],
