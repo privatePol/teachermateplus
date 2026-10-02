@@ -32,12 +32,23 @@
     workspace.style.setProperty('--qb-toolbar-height', `${toolbarHeight()}px`);
     scheduleCurrent();
   }
-  function addEntry(fragment, target, text, kind, selected) {
+  function indexStem(stem, number) {
+    const escaped = String(number).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return stem.replace(new RegExp(`^(?:Question\\s+)?${escaped}(?:[.):]|\\s+-)\\s*`, 'i'), '').trim();
+  }
+  function addEntry(fragment, target, text, kind, selected, number = null) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `qb-index-entry is-${kind}`;
     button.dataset.qbIndexTarget = target.id;
-    button.append(document.createTextNode(text));
+    if (number === null) {
+      button.append(document.createTextNode(text));
+    } else {
+      const numberLabel = document.createElement('strong');
+      numberLabel.className = 'qb-index-number';
+      numberLabel.textContent = `Question ${number}.`;
+      button.append(numberLabel, document.createTextNode(` ${indexStem(text, number)}`));
+    }
     if (selected) {
       const mark = document.createElement('span');
       mark.className = 'qb-index-selected';
@@ -59,9 +70,13 @@
         if (!members.length && item.querySelector('.question-card')) return;
         if (!members.length && filter?.value !== 'all') return;
         addEntry(fragment, item, item.dataset.qbCaseTitle || 'Case / Scenario', 'case', false);
-        members.forEach(card => addEntry(fragment, card, `Question ${label(card.querySelector('.question-position'))}: ${label(card.querySelector('[data-question-index-label]'))}`, 'member', card.querySelector('[data-bulk-question]')?.checked));
+        members.forEach(card => {
+          const number = label(card.querySelector('.question-position'));
+          addEntry(fragment, card, label(card.querySelector('[data-question-index-label]')), 'member', card.querySelector('[data-bulk-question]')?.checked, number);
+        });
       } else if (!item.closest('.qb-case-card') && visibleForFilter(item)) {
-        addEntry(fragment, item, `Question ${label(item.querySelector('.question-position'))}: ${label(item.querySelector('[data-question-index-label]'))}`, 'question', item.querySelector('[data-bulk-question]')?.checked);
+        const number = label(item.querySelector('.question-position'));
+        addEntry(fragment, item, label(item.querySelector('[data-question-index-label]')), 'question', item.querySelector('[data-bulk-question]')?.checked, number);
       }
     });
     indexList.replaceChildren(fragment);

@@ -102,26 +102,20 @@ class ContributionDifficultyDistributionService:
             )
 
         deficient = [row for row in rows if row["shortfall"]]
+        advisory_guidance = (
+            "Preferred difficulty target: advisory. You may Final Submit with a different mix "
+            "once the required valid question count and other submission checks are satisfied."
+        )
         if deficient:
-            if sum(row["current"] for row in rows) >= sum(required.values()):
-                guidance = cls._reclassification_guidance(
-                    deficient=deficient,
-                    surplus=[row for row in rows if row["current"] > row["required"]],
-                )
-            else:
-                needs = " and ".join(
-                    cls._question_count_phrase(row["shortfall"], row["label"])
-                    for row in deficient
-                )
-                guidance = f"Needs {needs} before Final Submission."
+            guidance = advisory_guidance
             submission_guidance = (
                 "Your difficulty mix differs from the preferred target shown above. "
                 "You may still Final Submit when the required valid question count is "
                 "complete."
             )
         else:
-            guidance = "Preferred difficulty target achieved."
-            submission_guidance = guidance
+            guidance = advisory_guidance
+            submission_guidance = advisory_guidance
 
         submission_details = " ".join(
             f"{row['label']}: {row['current']} of {row['required']} required."

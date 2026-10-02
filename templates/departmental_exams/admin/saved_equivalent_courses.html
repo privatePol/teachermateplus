@@ -1,0 +1,44 @@
+{% extends "admin_portal/base.html" %}
+{% load static %}
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Equivalent course codes</li></ol></nav>
+<h1>Equivalent course codes</h1>
+<p>Save explicit tenant course groups once. Future Automatic cycles retain the saved version and apply it when their members and settings are valid. Operational Course, offering, assignment, and contribution records remain separate.</p>
+<form method="get" class="mb-3"><label class="form-label" for="equivalency-cycle-select">Open Automatic cycle</label><div class="d-flex gap-2"><select class="form-select" id="equivalency-cycle-select" name="cycle_id"><option value="">Select a cycle</option>{% for option in cycle_options %}<option value="{{ option.pk }}" {% if cycle.pk == option.pk %}selected{% endif %}>{{ option.pk }} · {{ option.academic_year.code }} · {{ option.term.code }} · {{ option.get_exam_period_display }}</option>{% endfor %}</select><button class="btn btn-outline-primary" type="submit">View cycle</button></div></form>
+<button type="button" class="btn btn-primary mb-3" id="equivalency-create">Create equivalent group</button>
+<div id="equivalency-notice" role="status" aria-live="polite"></div>
+<div id="equivalency-list">{{ list_html|safe }}</div>
+<section id="equivalency-existing-review" class="card my-3" aria-labelledby="equivalency-existing-heading" hidden><div class="card-body">
+  <h2 id="equivalency-existing-heading" class="h4">Apply saved group to this existing cycle</h2>
+  <p>Review the resolved cycle courses, frozen campuses, classification, full configuration, blueprint ownership, and ordered sections. Confirmation pins this saved version. Matching secondary blueprint history is retained through the protected disposition.</p>
+  <div id="equivalency-existing-evidence" class="border rounded p-2"></div>
+  <button type="button" id="equivalency-existing-confirm" class="btn btn-warning">Pin plan and apply group</button> <button type="button" id="equivalency-existing-cancel" class="btn btn-outline-secondary">Cancel</button>
+</div></section>
+
+<section id="equivalency-editor" class="card my-3" aria-labelledby="equivalency-editor-heading" hidden><div class="card-body">
+  <h2 class="h4" id="equivalency-editor-heading">Create equivalent group</h2>
+  <form id="equivalency-form" novalidate>{% csrf_token %}
+    <div class="mb-3"><label class="form-label" for="equivalency-label">Equivalent label</label><input id="equivalency-label" name="label" class="form-control" maxlength="255" required><div class="invalid-feedback" data-error="label"></div></div>
+    <fieldset class="mb-3"><legend class="h6">Member courses</legend><div id="equivalency-members"></div><div class="text-danger small" data-error="members"></div><button type="button" id="equivalency-add-course" class="btn btn-outline-primary btn-sm mt-2">Add course</button></fieldset>
+    <div id="equivalency-search-panel" class="mb-3" hidden><label class="form-label" for="equivalency-search">Search course code or title</label><input id="equivalency-search" class="form-control" autocomplete="off" aria-controls="equivalency-search-results"><div id="equivalency-search-results" class="list-group mt-1" aria-live="polite"></div></div>
+    <div class="mb-3"><label class="form-label" for="equivalency-primary">Primary course code</label><select id="equivalency-primary" class="form-select" required><option value="">Select a member</option></select><div class="invalid-feedback" data-error="primary"></div></div>
+    <div class="text-danger small mb-2" data-error="__all__"></div>
+    <button type="submit" class="btn btn-primary">Save</button> <button type="button" class="btn btn-outline-secondary" id="equivalency-cancel">Cancel</button>
+  </form>
+</div></section>
+
+<section id="equivalency-reason-panel" class="card my-3" aria-labelledby="equivalency-reason-heading" hidden><div class="card-body">
+  <h2 class="h4" id="equivalency-reason-heading">Record reason</h2>
+  <p id="equivalency-reason-context"></p>
+  <form id="equivalency-reason-form">{% csrf_token %}<label class="form-label" for="equivalency-reason">Reason (10–500 characters)</label><textarea id="equivalency-reason" class="form-control" minlength="10" maxlength="500" required></textarea><div class="text-danger small" data-reason-error></div><button type="submit" class="btn btn-warning mt-2">Save reasoned action</button> <button type="button" id="equivalency-reason-cancel" class="btn btn-outline-secondary mt-2">Cancel</button></form>
+</div></section>
+<section id="equivalency-recovery-panel" class="card my-3" aria-labelledby="equivalency-recovery-heading" hidden><div class="card-body">
+  <h2 class="h4" id="equivalency-recovery-heading">Retain secondary blueprint as historical</h2>
+  <p>Review the two blueprint identities, revisions, and ordered sections. This action preserves every blueprint and section row. The service checks current locks, settings, and confidential placement/scenario absence again before saving.</p>
+  <div id="equivalency-recovery-evidence"></div>
+  <form id="equivalency-recovery-form">{% csrf_token %}<label for="equivalency-recovery-reason" class="form-label">Recovery reason</label><textarea id="equivalency-recovery-reason" class="form-control" minlength="10" maxlength="500" required></textarea><div class="text-danger small" data-recovery-error></div><button type="submit" class="btn btn-warning mt-2">Retain secondary blueprint</button> <button type="button" id="equivalency-recovery-cancel" class="btn btn-outline-secondary mt-2">Cancel</button></form>
+</div></section>
+{{ definitions_json|json_script:"equivalency-initial-definitions" }}
+<div id="equivalency-endpoints" hidden data-search="{% url 'departmental_exams:saved_equivalent_courses_search' %}" data-save="{% url 'departmental_exams:saved_equivalent_courses_save' %}" data-retire="{% url 'departmental_exams:saved_equivalent_courses_retire' %}" data-adopt="{% url 'departmental_exams:saved_equivalent_courses_adopt' %}" data-exception="{% url 'departmental_exams:saved_equivalent_courses_exception' %}" data-apply="{% url 'departmental_exams:saved_equivalent_courses_apply' %}" data-existing-review="{% url 'departmental_exams:saved_equivalent_existing_cycle_review' %}" data-existing-apply="{% url 'departmental_exams:saved_equivalent_existing_cycle_apply' %}" data-recovery-review="{% url 'departmental_exams:saved_equivalent_blueprint_review' %}" data-recovery-retain="{% url 'departmental_exams:saved_equivalent_blueprint_retain' %}" data-cycle="{% if cycle %}{{ cycle.id }}{% endif %}"></div>
+{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'js/departmental_exam_equivalency_definitions.js' %}?v=20260929-existing-cycle-review" defer></script>{% endblock %}

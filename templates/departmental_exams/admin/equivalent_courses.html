@@ -1,0 +1,41 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:course_setup' cycle.id %}">Prepare Faculty Contributions</a></li><li class="breadcrumb-item active" aria-current="page">Equivalent course codes</li></ol></nav>
+<h1>Equivalent course codes</h1>
+<p>{{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }}. A group combines Submitted questions for one standard questionnaire while every operational course, offering, assignment, and contribution keeps its own record.</p>
+<p class="text-muted">Membership can change only while this Automatic cycle is Open and the affected exam structure is unfrozen. Generation, automatic processing, or any questionnaire or Answer Key release history locks membership. Reopen for correction changes contribution content within the same membership; it cannot repair a wrong course mapping.</p>
+{% if messages %}{% for message in messages %}<div class="alert alert-success" role="status">{{ message }}</div>{% endfor %}{% endif %}
+{% if error %}<div class="alert alert-warning" role="alert">{{ error }}</div>{% endif %}
+
+<section aria-labelledby="existing-groups"><h2 class="h4" id="existing-groups">Current groups in your authorized scope</h2>
+{% for entry in groups %}
+<div class="card mb-3"><div class="card-body"><div class="d-flex justify-content-between flex-wrap gap-2"><div><h3 class="h5 mb-1">{{ entry.group.name }}</h3><div class="small">Primary: <strong>{{ entry.group.primary_cycle_course.course.code }}</strong></div></div><div>{% if entry.lock_reason %}<span class="badge text-bg-secondary">Read-only</span>{% else %}<span class="badge text-bg-success">Membership editable</span>{% endif %}</div></div>
+<div class="table-responsive mt-3"><table class="table table-sm"><thead><tr><th>Course code and title</th><th>Role</th><th>Represented campuses</th><th>Offerings</th><th>Current contributions</th></tr></thead><tbody>{% for member in entry.members %}<tr><td>{{ member.course.course.code }} — {{ member.course.course.title }}</td><td>{% if member.primary %}Primary{% else %}Member{% endif %}</td><td>{{ member.campuses|join:", "|default:"None" }}</td><td>{{ member.offering_count }}</td><td>{{ member.contribution_count }}</td></tr>{% endfor %}</tbody></table></div>
+{% if entry.lock_reason %}<p class="small text-muted mb-0">{{ entry.lock_reason }} Historical memberships and audit records remain available in the protected backend.</p>{% else %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:equivalent_courses_group' cycle.id entry.group.id %}">Review or change members</a>{% endif %}
+</div></div>
+{% empty %}<p class="text-muted">No groups are visible in your authorized scope.</p>{% endfor %}</section>
+
+{% if review %}
+<section class="card mb-3" aria-labelledby="membership-review"><div class="card-body"><h2 class="h4" id="membership-review">Review exact {% if review.state.action == 'retire' %}retirement{% else %}membership{% endif %}</h2>
+<p><strong>Group:</strong> {{ review.state.name }}<br><strong>Primary course:</strong> {% for row in review.members %}{% if row.primary %}{{ row.code }} — {{ row.title }}{% endif %}{% endfor %}</p>
+<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Member course</th><th>Campuses</th><th>Offerings</th><th>Current contributions</th><th>Effective settings</th></tr></thead><tbody>{% for row in review.members %}<tr><td>{{ row.code }} — {{ row.title }}</td><td>{{ row.campuses|join:", "|default:"None" }}</td><td>{{ row.offering_count }}</td><td>{{ row.contribution_count }}</td><td>{% if row.settings %}Final items {{ row.settings.final_item_count }}; faculty quota {{ row.settings.questions_required_per_faculty }}; deadline {{ row.settings.active_contribution_deadline|date:"M j, Y g:i A" }}; workflow {{ row.settings.workflow_status }}; difficulty {{ row.settings.difficulty_percentages|join:" / " }}; coverage {{ row.settings.coverage|default:"None" }}; general instructions {{ row.settings.general_instructions|default:"None" }}; additional instructions {{ row.settings.additional_instructions|default:"None" }}; contributor instructions {{ row.settings.contributor_instructions_snapshot|default:"None" }}{% else %}No configuration{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+{% if review.state.action == 'retire' %}<p><strong>Reason:</strong> {{ review.state.reason }}</p><p class="text-warning">Retirement returns each member to a separate examination unit. Existing course records and history are preserved.</p>{% endif %}
+<form method="post">{% csrf_token %}<input type="hidden" name="intent" value="confirm"><input type="hidden" name="confirmation" value="{{ review.token }}"><button class="btn btn-warning" type="submit">Confirm {{ review.state.action }}</button> <a class="btn btn-outline-secondary" href="{% if selected_group %}{% url 'departmental_exams:equivalent_courses_group' cycle.id selected_group.group.id %}{% else %}{% url 'departmental_exams:equivalent_courses' cycle.id %}{% endif %}">Cancel and refresh</a></form>
+</div></section>
+{% endif %}
+
+{% if cycle.status == 'OPEN' and not review and candidates %}
+<section class="card mb-3" aria-labelledby="membership-editor"><div class="card-body"><h2 class="h4" id="membership-editor">{% if selected_group %}Change {{ selected_group.group.name }}{% else %}Create a group{% endif %}</h2>
+{% if selected_group and selected_group.lock_reason %}<p class="alert alert-secondary">{{ selected_group.lock_reason }}</p>{% else %}
+<form method="post">{% csrf_token %}<input type="hidden" name="intent" value="review">
+<div class="mb-3"><label class="form-label" for="{{ form.name.id_for_label }}">Shared examination name</label>{{ form.name }}{{ form.name.errors }}{% if selected_group %}<div class="form-text">The group name is fixed. Change members or the primary course below.</div>{% endif %}</div>
+<fieldset class="mb-3"><legend class="h6">Operational course codes</legend>{{ form.members.errors }}{% for option in form.members %}<div class="form-check">{{ option.tag }} <label class="form-check-label" for="{{ option.id_for_label }}">{{ option.choice_label }}</label></div>{% endfor %}</fieldset>
+<div class="mb-3"><label class="form-label" for="{{ form.primary.id_for_label }}">Primary course code</label>{{ form.primary }}{{ form.primary.errors }}<div class="form-text">This member owns the shared blueprint and generated revision.</div></div>
+{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+<button class="btn btn-primary" type="submit">Review exact membership and settings</button></form>
+{% if selected_group %}<hr><h3 class="h5">Retire this group</h3><form method="post">{% csrf_token %}<input type="hidden" name="intent" value="review_retirement"><label class="form-label" for="{{ retirement_form.reason.id_for_label }}">Reason for retirement</label>{{ retirement_form.reason }}{{ retirement_form.reason.errors }}<div class="form-text mb-2">10–500 characters. Retirement cannot be undone; historical records remain.</div><button class="btn btn-outline-danger" type="submit">Review retirement</button></form>{% endif %}
+{% endif %}
+</div></section>
+{% endif %}
+<p><a href="{% url 'departmental_exams:course_setup' cycle.id %}">Back to Prepare Faculty Contributions</a></p>
+{% endblock %}

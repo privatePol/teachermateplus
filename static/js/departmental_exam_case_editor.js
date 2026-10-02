@@ -54,7 +54,7 @@ export function mountCaseEditor(form) {
       ? error.diagnosticCode : `CASE_${phase}_UNKNOWN`;
   }
   function fail(error, phase='SERIALIZE') {
-    failed = true; saveButton.disabled = true; previewButton.disabled = true;
+    failed = true; form.dataset.caseEditorFailed = 'true'; saveButton.disabled = true; previewButton.disabled = true;
     for (const control of toolbar.querySelectorAll('button,input')) control.disabled = true;
     if (editor && !editor.isDestroyed) editor.setEditable(false);
     show(errors, [preservationError, '['+diagnostic(error,phase)+']']);
@@ -350,10 +350,11 @@ export function mountQuestionEditors(form) {
   const saveButton=form.querySelector('[data-question-save]'), previewButton=form.querySelector('[data-question-preview-button]');
   const globalErrors=form.querySelector('[data-question-editor-errors]'), status=form.querySelector('[data-question-editor-status]');
   const format=form.querySelector('[name=content_format]'), csrf=form.querySelector('[name=csrfmiddlewaretoken]');
+  const initialFormat=format.value;
   const fieldErrors={}; const states=[];
   let previewSequence=0, previewPending=false, previewInvalid=false, failed=false;
   const show=(box,messages)=>{ box.textContent=(messages||[]).join(' '); box.hidden=!(messages||[]).length; };
-  const setBusy=busy=>{ previewPending=busy; previewButton.disabled=busy||failed; saveButton.disabled=busy||failed; form.setAttribute('aria-busy',String(busy)); };
+  const setBusy=busy=>{ previewPending=busy; previewButton.disabled=busy||failed; saveButton.disabled=busy||failed||form.dataset.caseEditorFailed==='true'; form.setAttribute('aria-busy',String(busy)); };
   const clearFieldErrors=()=>{ Object.values(fieldErrors).forEach(box=>show(box,[])); show(globalErrors,[]); };
   const invalidatePreview=()=>{ previewSequence++; previewInvalid=false; clearFieldErrors(); };
   for (const field of form.querySelectorAll('[data-question-rich-field]')) {
@@ -362,7 +363,11 @@ export function mountQuestionEditors(form) {
     fieldErrors[name]=errorBox;
     const safeHtml=host.innerHTML, original=source.value; let editor, dirty=false, anchorCell=null, rejectedPaste=null;
     let refresh=()=>{};
-    const state={name,source,host,get editor(){ return editor; },get dirty(){ return dirty; },sync(){
+    let initialEditorContent;
+    const state={name,source,host,original,get editor(){ return editor; },unchanged(){
+      if (!editor || editor.isDestroyed) throw new Error('Editor unavailable.');
+      return serializeEditor(editor)===initialEditorContent;
+    },sync(){
       if (!editor || editor.isDestroyed) throw new Error('Editor unavailable.');
       source.value=serializeEditor(editor); return source.value;
     }};
@@ -390,6 +395,7 @@ export function mountQuestionEditors(form) {
       if (host.dataset.questionEditorDisplayUnavailable==='true') throw new Error('Unsafe editor source.');
       host.replaceChildren();
       editor=createCaseEditor(host,safeHtml,{onUpdate:()=>{dirty=true; invalidatePreview(); status.textContent='Content changed. Use Preview to validate the current question.';},onTransaction:({transaction})=>{if(anchorCell!==null&&transaction.docChanged){const mapped=transaction.mapping.mapResult(anchorCell);anchorCell=mapped.deleted?null:mapped.pos;} refresh();},editorProps:{attributes:{role:'textbox','aria-label':field.dataset.questionFieldLabel,'aria-multiline':'true','aria-describedby':field.dataset.questionEditorHelp},handlePaste:(_view,event)=>{event.preventDefault(); insertPaste(event.clipboardData?.getData('text/html')||'',event.clipboardData?.getData('text/plain')||'',Boolean(event.clipboardData?.files?.length)); return true;}}});
+      initialEditorContent=serializeEditor(editor);
       const controls=[]; refresh=createQuestionToolbar({editor,toolbar,errorBox,status,controls,getAnchor:()=>anchorCell,setAnchor:value=>{anchorCell=value;}}); refresh();
       host.TMPScientificEditor={insertText(text){editor.chain().focus().insertContent(text).run();},insertTemplate(before,after,placeholder){const {from,to}=editor.state.selection,selected=editor.state.doc.textBetween(from,to,'\n');editor.chain().focus().insertContent(before+(selected||placeholder)+after).run();}};
       recovery.querySelector('[data-question-paste-dismiss]').addEventListener('click',()=>{rejectedPaste=null; recovery.hidden=true; show(errorBox,[]); editor.commands.focus();});
@@ -401,10 +407,18 @@ export function mountQuestionEditors(form) {
     states.push(state);
   }
   if (failed) { setBusy(false); saveButton.disabled=true; previewButton.disabled=true; return; }
-  saveButton.disabled=false; previewButton.disabled=false; status.textContent='Five editors ready. Preview validates the complete question before Save.';
+  saveButton.disabled=form.dataset.caseEditorFailed==='true'; previewButton.disabled=false; status.textContent='Five editors ready. Preview validates the complete question before Save.';
   form.addEventListener('submit',event=>{
     if (previewPending || previewInvalid || failed) { event.preventDefault(); show(globalErrors,[previewPending ? 'Preview processing is still in progress.' : 'Resolve the rich-text validation errors or change the affected field before saving.']); return; }
-    try { for (const state of states) state.sync(); if (states.some(state=>state.dirty)) format.value='RICH_HTML_V1'; }
+    try {
+      if (initialFormat==='PLAIN_TEXT' && states.every(state=>state.unchanged())) {
+        for (const state of states) state.source.value=state.original;
+        format.value='PLAIN_TEXT';
+      } else {
+        for (const state of states) state.sync();
+        format.value='RICH_HTML_V1';
+      }
+    }
     catch (_error) { event.preventDefault(); show(globalErrors,['The question editor could not preserve content safely.']); }
   });
   previewButton.addEventListener('click',async()=>{

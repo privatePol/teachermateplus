@@ -260,9 +260,12 @@ ADMIN_HELP_SECTIONS = [
                     "For historical Manual Review with Structured Case/Scenario Exam Lifecycle off, after contribution is Closed use the legacy Stage 6 Blueprint for No Sections or exact ordered section quotas. The assigned reviewer uses Confidential Review for question placements and reviewer-owned textual atomic scenarios only. Legacy Stage 6 lists, edits, deletes, member replacement, and readiness exclude faculty-owned Cases; Phase 2A does not feed those Cases into generation. Aggregate readiness applies fixed campus and 30/50/20 difficulty Hamilton margins plus exact section margins without persisting selected questions.",
                     "When aggregate readiness is READY, the assigned reviewer opens Generate Sets. Generate persists Set A and Set B atomically; Regenerate requires a reason and preserves the superseded revision. The busy indicator is indeterminate and browser-side only, while server locks, idempotency, and stale-input checks remain authoritative.",
                     "For Automatic Generation, use Release Exam for Printing to choose the exact generated revision and bounded Asia/Manila Print From/Until window. Releasing a replacement revokes but preserves the prior release record; regeneration never makes the newer revision printable automatically.",
+                    "Open Equivalent course codes to save an explicit tenant group of at least two operational Course records. Enter its label, add each exact code through search, choose the primary, and Save; edits and retirement refresh in place. Saved versions are captured for future Automatic cycles and applied when member settings and full-campus authority permit; an authorized manager can use Apply saved group after another editor finishes the settings. A blocked cycle plan shows its reason and an authorized correction or audited reasoned exception path; exception authority includes every frozen member-offering campus even when an offering is now inactive. Historical Midterm groups are read-only references and require a fresh signed review before explicit adoption; changed primary or membership details require review again. Matching unused secondary blueprints may be retained as historical after a protected review; safe separation restores their original structure with an audit record, while unsafe separation is blocked. Partial campus authority or a direct DENY hides group details. Reopen for correction does not repair a wrong member mapping. For an existing Open Automatic cycle with no saved-definition plan, select the cycle on Equivalent course codes and choose Review application to this cycle for an active saved group. Check the resolved CycleCourse IDs and codes, primary, frozen campuses, classification, configuration, blueprint ownership and ordered sections before Pin plan and apply group. The confirmation is short-lived and rejects changed or unsafe facts without a partial plan or group. A matching secondary blueprint is retained with its sections as historical; a primary-only blueprint remains with the primary. Opened faculty intake, frozen structure, downstream generation or release, or incomplete campus authority blocks application. New definitions never silently apply to old cycles.",
                 ],
                 "check_first": [
                     "Confirm the selected tenant and every participating campus in the grouped unit; assigning an Exam Department does not grant access or assign its Area Chair.",
+                    "Review application to this cycle appears only when your generation permission covers every frozen member-offering campus, even if an offering is now inactive. A direct campus DENY hides the action.",
+                    "After a saved-group action refreshes the list, continue from the action shown on the refreshed card.",
                     "Before choosing Exempt, confirm the course has no faculty contribution or question work. That downstream activity blocks Exempt only; a saved exam configuration is preserved and becomes dormant while Exempt.",
                     "For Manual Review, confirm the explicitly assigned reviewer still has an active exact-department role and review/generate permission. Automatic Generation does not require or use that reviewer assignment.",
                 ],
@@ -808,6 +811,7 @@ ADMIN_HELP_SECTIONS = [
                 ],
                 "purpose": "Supports academic review, submission follow-up, clearance, audit, and printing.",
                 "menu_path": (
+                    "Admin Portal -> Grading -> Academic Performance Insights -> Midterm Exam Performance; "
                     "Admin Portal -> Grading -> Grading Analytics or Grade Distribution Monitor; "
                     "Admin Portal -> Academics -> Faculty Final Clearance; Admin Portal -> Audit"
                 ),
@@ -824,6 +828,20 @@ ADMIN_HELP_SECTIONS = [
                     ),
                     "Set the campus, academic year, term, period, course, or status filters before reviewing results.",
                     (
+                        "For Midterm Exam Performance, select the Midterm examination cycle, then use Load more "
+                        "to show additional course tables and sections. Each heading shows COURSE CODE | COURSE TITLE; "
+                        "ranked sections appear in numeric rank order, followed by unranked sections. An exact Course "
+                        "code filter includes its full authorized examination unit. Ranks include all authorized "
+                        "sections in that unit, even before they are displayed. Exempt courses are omitted."
+                    ),
+                    (
+                        "A Midterm row receives statistics only after the exact gradebook submission is "
+                        "Submitted and every eligible student has a finalized official exam grade. "
+                        "Included offerings are reported regardless of historical examination classification; "
+                        "authoritatively Exempt courses are omitted. Ranking also requires compatible grading "
+                        "configurations within the examination unit."
+                    ),
+                    (
                         "On Grading Analytics, choose one Course code to show every authorized section or "
                         "offering for that code. The rows stay separate; the filter does not combine sections."
                     ),
@@ -837,6 +855,7 @@ ADMIN_HELP_SECTIONS = [
                 "check_first": [
                     "Confirm campus, academic year, term, period, and report date.",
                     "Confirm whether the source gradebook is Draft, Submitted, or Reopened.",
+                    "Treat blank Midterm statistics as unavailable or incomplete data, never as zero scores.",
                     "Check that student and faculty scope is correct before export or printing.",
                 ],
                 "actions": [

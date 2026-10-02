@@ -176,7 +176,7 @@ def departmental_no_sections_default_eligibility(course, *, actor=None):
         )
 
     blueprints = list(
-        ExamBlueprint.objects.filter(cycle_course_id__in=member_ids).order_by(
+        ExamBlueprint.active_objects.filter(cycle_course_id__in=member_ids).order_by(
             "cycle_course_id", "id"
         )
     )
@@ -219,8 +219,23 @@ def automatic_structure_blockers(course):
     """Reject unsupported inputs even on legacy Automatic retry/worker routes."""
     if course.cycle.processing_mode != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
         return []
+    from .persistent_equivalency import PersistentCourseEquivalencyService
+    plan = PersistentCourseEquivalencyService.relevant_plan(course)
+    if plan and plan.status == plan.Status.APPLIED:
+        from .persistent_equivalency import applied_plan_is_current
+        if not applied_plan_is_current(plan):
+            return ["The applied saved equivalent group changed. Review and record an exception or correction."]
+    if plan and plan.status in (plan.Status.PENDING, plan.Status.BLOCKED):
+        return ["Saved equivalent course group needs correction: " + plan.reason]
+    if plan and plan.status == plan.Status.NOT_APPLICABLE:
+        present = CycleCourse.objects.filter(
+            cycle=course.cycle,
+            course_id__in=plan.revision.memberships.values_list("course_id", flat=True),
+        ).count()
+        if present >= 2:
+            return ["Saved equivalent course membership changed. Revalidate the cycle plan before structure or opening."]
     unit = resolve_examination_unit(course, validate=False)
-    blueprints = ExamBlueprint.objects.filter(cycle_course_id__in=unit.member_ids)
+    blueprints = ExamBlueprint.active_objects.filter(cycle_course_id__in=unit.member_ids)
     reasons = []
     if case_aware_automatic_enabled(unit.primary):
         rows = list(blueprints)
@@ -330,7 +345,7 @@ class CourseSetupService:
         if classification not in ("STANDARDIZED", "DEPARTMENTAL"):
             raise ValidationError("Select an explicit exam classification.")
         if classification == "STANDARDIZED":
-            blueprints = ExamBlueprint.objects.filter(cycle_course_id__in=unit.member_ids)
+            blueprints = ExamBlueprint.active_objects.filter(cycle_course_id__in=unit.member_ids)
             if blueprints.exclude(mode="NO_SECTIONS").exists() or ExamSection.objects.filter(blueprint__in=blueprints).exists() or ExamScenario.objects.filter(blueprint__in=blueprints).exists():
                 raise ValidationError("Existing explicit structure cannot be replaced by Standardized classification.")
             if QuestionBlueprintPlacement.objects.filter(blueprint__in=blueprints).exists():
@@ -465,11 +480,16 @@ class CourseSetupService:
                         reasons.append("No qualifying accepted Faculty teaching assignments.")
                 if course.exam_classification == "UNCLASSIFIED_LEGACY":
                     reasons.append("Explicit classification is required for this legacy course before using unified setup.")
+                elif course.exam_classification not in {
+                    CycleCourse.ExamClassification.STANDARDIZED,
+                    CycleCourse.ExamClassification.DEPARTMENTAL,
+                }:
+                    reasons.append("An explicit Standardized or Departmental classification is required before using unified setup.")
                 status = "Blocked" if reasons else "Ready"
                 if status == "Ready":
                     reasons = ["All opening requirements are satisfied."]
             blueprints = list(
-                ExamBlueprint.objects.filter(
+                ExamBlueprint.active_objects.filter(
                     cycle_course_id__in=unit.member_ids
                 ).order_by("cycle_course_id", "id")
             )
@@ -529,13 +549,32 @@ class CourseSetupService:
                     | Q(recipient_course_id__in=unit.member_ids)
                 ).exists()
             )
+            standardized_bulk_eligible = False
+            if (
+                status == "Ready"
+                and all(
+                    member.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+                    and member.exam_classification == CycleCourse.ExamClassification.STANDARDIZED
+                    for member in unit.members
+                )
+            ):
+                try:
+                    for member in unit.members:
+                        DepartmentalExamAuthorizationService.require_cycle_course_inclusion_management(
+                            user=actor, cycle_course=member
+                        )
+                except PermissionDenied:
+                    pass
+                else:
+                    standardized_bulk_eligible = True
             rows.append({"course": course, "configuration": config, "status": status,
                          "reasons": list(dict.fromkeys(reasons)),
                          "fingerprint": review_fingerprint,
                          "member_ids": list(unit.member_ids),
                          "structure_display": structure_display,
                          "sections": list(blueprint.sections.order_by("display_order", "id")) if blueprint else [],
-                         "can_configure_structure": can_configure_structure})
+                         "can_configure_structure": can_configure_structure,
+                         "standardized_bulk_eligible": standardized_bulk_eligible})
         return rows
 
     @classmethod
@@ -624,19 +663,28 @@ class CourseSetupService:
     @classmethod
     def prepare_structure(cls, course, *, actor, request=None):
         """Called under the existing cycle/parent transaction, before first Open."""
+        from .persistent_equivalency import PersistentCourseEquivalencyService
+        PersistentCourseEquivalencyService.require_applied_or_excepted(
+            cycle_course=course, actor=actor,
+        )
         reasons = automatic_structure_blockers(course)
         if reasons:
             raise ValidationError(reasons)
-        if course.exam_classification == "UNCLASSIFIED_LEGACY":
-            return
+        if course.exam_classification not in {
+            CycleCourse.ExamClassification.STANDARDIZED,
+            CycleCourse.ExamClassification.DEPARTMENTAL,
+        }:
+            raise ValidationError(
+                "An explicit Standardized or Departmental classification is required before creating an examination structure."
+            )
         unit = resolve_examination_unit(course, for_update=True, validate=False)
         for member in unit.members:
             if member.exam_classification != course.exam_classification:
                 raise ValidationError("Equivalency members have inconsistent classifications.")
             cls.materialize(member, actor=actor, request=request)
-        blueprints = ExamBlueprint.objects.filter(cycle_course_id__in=unit.member_ids)
+        blueprints = ExamBlueprint.active_objects.filter(cycle_course_id__in=unit.member_ids)
         if not blueprints.exists():
-            if course.exam_classification == "DEPARTMENTAL":
+            if course.exam_classification == CycleCourse.ExamClassification.DEPARTMENTAL:
                 default = departmental_no_sections_default_eligibility(
                     unit.primary, actor=actor
                 )
@@ -645,10 +693,12 @@ class CourseSetupService:
                 action = "DE_EXAM_DEPARTMENTAL_DEFAULT_STRUCTURE_CREATED"
                 origin = "DEPTAL_NO_SECTIONS_DEFAULT"
                 final_item_count = default["effective_final_item_count"]
-            else:
+            elif course.exam_classification == CycleCourse.ExamClassification.STANDARDIZED:
                 action = "DE_EXAM_STANDARD_STRUCTURE_CREATED"
                 origin = "STANDARDIZED_NO_SECTIONS_DEFAULT"
                 final_item_count = cls.effective(unit.primary).final_item_count
+            else:
+                raise ValidationError("An explicit Standardized or Departmental classification is required before creating an examination structure.")
             blueprint = ExamBlueprint.objects.create(
                 cycle_course=unit.primary, mode="NO_SECTIONS", revision=1,
                 created_by=actor, updated_by=actor)

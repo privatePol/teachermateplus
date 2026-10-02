@@ -19,6 +19,7 @@ from .views import (
     academic_activity_consistency_view,
     academic_performance_insights_view,
     academic_performance_section_detail_view,
+    midterm_exam_performance_view,
     academic_intervention_monitor_view,
     academic_intervention_monitor_detail_view,
     academic_year_create_view,
@@ -207,6 +208,11 @@ urlpatterns = [
         "admin-portal/grading/performance-insights/",
         academic_performance_insights_view,
         name="academic_performance_insights",
+    ),
+    path(
+        "admin-portal/grading/midterm-exam-performance/",
+        midterm_exam_performance_view,
+        name="midterm_exam_performance",
     ),
     path(
         "admin-portal/grading/performance-insights/activity-consistency/",

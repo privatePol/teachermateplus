@@ -1211,10 +1211,15 @@ class AutomaticContributionReopenService:
         if len(selected_ids) != len(set(selected_ids)):
             raise CourseExamConfigurationConflict("Selected contributions changed. Refresh and retry.")
         # Follow the generation path's blueprint -> contribution -> content lock order.
-        list(ExamBlueprint.objects.select_for_update().filter(
+        list(ExamBlueprint.active_objects.select_for_update().filter(
             cycle_course_id__in=unit.member_ids).order_by("id"))
         locked_cases = list(ExamScenario.objects.select_for_update().filter(
-            blueprint__cycle_course_id__in=unit.member_ids, active_marker=1).order_by("id"))
+            blueprint__cycle_course_id__in=unit.member_ids,
+        ).filter(
+            Q(blueprint__historical_disposition__isnull=True)
+            | Q(blueprint__historical_disposition__restoration__isnull=False),
+        ).filter(
+            active_marker=1).order_by("id"))
         locked_members = list(ExamScenarioMember.objects.select_for_update().filter(
             scenario_id__in=[row.id for row in locked_cases], active_marker=1
         ).select_related("question__contribution", "scenario__blueprint").order_by("id"))

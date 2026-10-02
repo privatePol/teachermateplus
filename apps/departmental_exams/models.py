@@ -669,6 +669,159 @@ class ExamCourseEquivalencyMembership(TimeStampedModel):
         )
 
 
+class _ProtectedEquivalencyStateQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Use the protected equivalency service for state changes.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Use the protected equivalency service for state changes.")
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError("Use the protected equivalency service for state changes.")
+
+    def delete(self):
+        raise ValidationError("Equivalency state history cannot be deleted.")
+
+
+class _ProtectedEquivalencyState:
+    def save(self, *args, **kwargs):
+        if not _equivalency_lifecycle_write_allowed():
+            raise ValidationError("Use the protected equivalency service for state changes.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Equivalency state history cannot be deleted.")
+
+
+class CourseEquivalencyDefinition(_ProtectedEquivalencyState, TimeStampedModel):
+    """Tenant-owned intent; revisions carry the immutable course membership."""
+
+    objects = _ProtectedEquivalencyStateQuerySet.as_manager()
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="exam_equivalency_definitions")
+    current_version = models.PositiveIntegerField(default=1)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="created_exam_equivalency_definitions")
+    updated_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="updated_exam_equivalency_definitions")
+    retired_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="retired_exam_equivalency_definitions")
+    retired_at = models.DateTimeField(null=True, blank=True)
+    retirement_reason = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        db_table = "departmental_exam_equivalency_definitions"
+        indexes = [models.Index(fields=["tenant", "is_active"], name="idx_de_eqdef_active")]
+
+
+class _ImmutableEquivalencyEvidenceQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Equivalency revision evidence is immutable.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Equivalency revision evidence is immutable.")
+
+    def delete(self):
+        raise ValidationError("Equivalency revision evidence is immutable.")
+
+    def bulk_create(self, objs, **kwargs):
+        if not _equivalency_lifecycle_write_allowed():
+            raise ValidationError("Create equivalency revision evidence through the protected service.")
+        return super().bulk_create(objs, **kwargs)
+
+
+class _ImmutableEquivalencyEvidence:
+    def save(self, *args, **kwargs):
+        if not self._state.adding or not _equivalency_lifecycle_write_allowed():
+            raise ValidationError("Equivalency revision evidence is immutable outside the protected service.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Equivalency revision evidence is immutable.")
+
+
+class CourseEquivalencyDefinitionRevision(_ImmutableEquivalencyEvidence, TimeStampedModel):
+    objects = _ImmutableEquivalencyEvidenceQuerySet.as_manager()
+
+    definition = models.ForeignKey(CourseEquivalencyDefinition, on_delete=models.PROTECT, related_name="revisions")
+    version = models.PositiveIntegerField()
+    label = models.CharField(max_length=255)
+    primary_course = models.ForeignKey("academics.Course", on_delete=models.PROTECT, related_name="primary_exam_equivalency_revisions")
+    created_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="created_exam_equivalency_revisions")
+
+    class Meta:
+        db_table = "departmental_exam_equivalency_revisions"
+        constraints = [models.UniqueConstraint(fields=["definition", "version"], name="uq_de_eqdef_revision")]
+
+
+class CourseEquivalencyDefinitionMember(_ImmutableEquivalencyEvidence, models.Model):
+    objects = _ImmutableEquivalencyEvidenceQuerySet.as_manager()
+
+    revision = models.ForeignKey(CourseEquivalencyDefinitionRevision, on_delete=models.PROTECT, related_name="memberships")
+    course = models.ForeignKey("academics.Course", on_delete=models.PROTECT, related_name="exam_equivalency_definition_memberships")
+    code_snapshot = models.CharField(max_length=50)
+    title_snapshot = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "departmental_exam_equivalency_revision_members"
+        constraints = [models.UniqueConstraint(fields=["revision", "course"], name="uq_de_eqrev_member")]
+
+
+class CourseEquivalencyCyclePlan(_ProtectedEquivalencyState, TimeStampedModel):
+    objects = _ProtectedEquivalencyStateQuerySet.as_manager()
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        BLOCKED = "BLOCKED", "Needs correction"
+        APPLIED = "APPLIED", "Applied"
+        NOT_APPLICABLE = "NOT_APPLICABLE", "Fewer than two members present"
+        EXCEPTED = "EXCEPTED", "Cycle exception"
+
+    cycle = models.ForeignKey(ExaminationCycle, on_delete=models.PROTECT, related_name="equivalency_plans")
+    definition = models.ForeignKey(CourseEquivalencyDefinition, on_delete=models.PROTECT, related_name="cycle_plans")
+    revision = models.ForeignKey(CourseEquivalencyDefinitionRevision, on_delete=models.PROTECT, related_name="cycle_plans")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    reason = models.TextField(blank=True)
+    applied_group = models.ForeignKey(ExamCourseEquivalencyGroup, on_delete=models.PROTECT, null=True, blank=True, related_name="definition_plans")
+    exception_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="exam_equivalency_cycle_exceptions")
+    exception_at = models.DateTimeField(null=True, blank=True)
+    exception_reason = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        db_table = "departmental_exam_equivalency_cycle_plans"
+        constraints = [models.UniqueConstraint(fields=["cycle", "definition"], name="uq_de_eqplan_cycle_def")]
+        indexes = [models.Index(fields=["cycle", "status"], name="idx_de_eqplan_status")]
+
+
+class ExamBlueprintDisposition(_ImmutableEquivalencyEvidence, TimeStampedModel):
+    """A retained secondary structure excluded from current unit ownership."""
+
+    objects = _ImmutableEquivalencyEvidenceQuerySet.as_manager()
+
+    blueprint = models.OneToOneField("ExamBlueprint", on_delete=models.PROTECT, related_name="historical_disposition")
+    primary_blueprint = models.ForeignKey("ExamBlueprint", on_delete=models.PROTECT, related_name="retained_secondary_blueprints")
+    actor = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="exam_blueprint_dispositions")
+    reason = models.CharField(max_length=500)
+    evidence = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "departmental_exam_blueprint_dispositions"
+
+
+class ExamBlueprintRestoration(_ImmutableEquivalencyEvidence, TimeStampedModel):
+    """Immutable evidence that a retained structure became active after separation."""
+
+    objects = _ImmutableEquivalencyEvidenceQuerySet.as_manager()
+
+    disposition = models.OneToOneField(ExamBlueprintDisposition, on_delete=models.PROTECT, related_name="restoration")
+    retired_group = models.ForeignKey(ExamCourseEquivalencyGroup, on_delete=models.PROTECT, null=True, blank=True,
+                                      related_name="blueprint_restorations")
+    actor = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="exam_blueprint_restorations")
+    reason = models.CharField(max_length=500)
+    evidence = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "departmental_exam_blueprint_restorations"
+
+
 class CycleCourseOffering(TimeStampedModel):
     cycle_course = models.ForeignKey(CycleCourse, on_delete=models.PROTECT, related_name="offering_snapshots")
     offering = models.ForeignKey("academics.CourseOffering", on_delete=models.PROTECT, related_name="exam_cycle_snapshots")
@@ -1186,6 +1339,13 @@ class Question(TimeStampedModel):
         blank=True,
     )
     import_row_number = models.PositiveSmallIntegerField(null=True, blank=True)
+    source_bank_revision = models.ForeignKey(
+        "QuestionBankRevision",
+        on_delete=models.PROTECT,
+        related_name="draft_copies",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = "departmental_exam_questions"
@@ -1562,12 +1722,17 @@ def _lock_exam_blueprint_rows(
         condition |= models.Q(cycle_course_id__in=cycle_course_ids)
     if not normalized_blueprint_ids and not cycle_course_ids:
         return ()
-    return tuple(
+    locked = tuple(
         ExamBlueprint._base_manager.using(using)
         .select_for_update()
         .filter(condition)
         .order_by("cycle_course_id", "id")
     )
+    if (locked and ExamBlueprintDisposition.objects.using(using).filter(
+                blueprint_id__in=[row.pk for row in locked], restoration__isnull=True,
+            ).exists()):
+        raise ValidationError("A retained historical blueprint and its sections are immutable.")
+    return locked
 
 
 def _lock_exam_section_rows(*, using, section_ids=(), blueprint_ids=()):
@@ -1795,6 +1960,14 @@ class _ExamSectionQuerySet(models.QuerySet):
                 return super().delete()
 
 
+class _ActiveExamBlueprintManager(models.Manager.from_queryset(_ExamBlueprintQuerySet)):
+    def get_queryset(self):
+        return super().get_queryset().filter(
+            models.Q(historical_disposition__isnull=True)
+            | models.Q(historical_disposition__restoration__isnull=False)
+        )
+
+
 class ExamBlueprint(TimeStampedModel):
     class Mode(models.TextChoices):
         NO_SECTIONS = "NO_SECTIONS", "No Sections"
@@ -1835,6 +2008,7 @@ class ExamBlueprint(TimeStampedModel):
     )
 
     objects = _ExamBlueprintQuerySet.as_manager()
+    active_objects = _ActiveExamBlueprintManager()
 
     class Meta:
         db_table = "departmental_exam_blueprints"
@@ -2149,6 +2323,13 @@ class ExamScenario(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="updated_exam_scenarios",
     )
+    source_bank_revision = models.ForeignKey(
+        "QuestionBankRevision",
+        on_delete=models.PROTECT,
+        related_name="draft_case_copies",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = "departmental_exam_scenarios"
@@ -2270,6 +2451,185 @@ class ExamScenarioMember(TimeStampedModel):
                     raise ValidationError(
                         "Only Submitted questions or their correction Draft copies may belong to reviewer scenarios."
                     ) from exc
+
+
+class QuestionBankItem(TimeStampedModel):
+    """Stable faculty-owned identity for the My Questions workflow."""
+
+    class Kind(models.TextChoices):
+        QUESTION = "QUESTION", "Standalone question"
+        CASE = "CASE", "Whole Case"
+
+    tenant = models.ForeignKey(
+        "tenants.Tenant", on_delete=models.PROTECT, related_name="question_bank_items"
+    )
+    campus = models.ForeignKey(
+        "tenants.Campus", on_delete=models.PROTECT, related_name="question_bank_items"
+    )
+    course = models.ForeignKey(
+        "academics.Course", on_delete=models.PROTECT, related_name="question_bank_items"
+    )
+    owner = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="owned_question_bank_items"
+    )
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    current_revision = models.PositiveIntegerField(default=1)
+    origin_question = models.OneToOneField(
+        Question,
+        on_delete=models.PROTECT,
+        related_name="adopted_bank_item",
+        null=True,
+        blank=True,
+    )
+    origin_scenario = models.OneToOneField(
+        ExamScenario,
+        on_delete=models.PROTECT,
+        related_name="adopted_bank_item",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "departmental_exam_question_bank_items"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(current_revision__gte=1),
+                name="ck_de_bank_item_revision",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind="QUESTION", origin_scenario__isnull=True)
+                    | models.Q(kind="CASE", origin_question__isnull=True)
+                ),
+                name="ck_de_bank_item_origin_kind",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["owner", "tenant", "campus", "course", "kind"],
+                name="idx_de_bank_owner_scope",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "tenant_id", "campus_id", "course_id", "owner_id", "kind",
+                "origin_question_id", "origin_scenario_id",
+            ).first()
+            immutable = (
+                "tenant_id", "campus_id", "course_id", "owner_id", "kind",
+                "origin_question_id", "origin_scenario_id",
+            )
+            if previous and any(previous[field] != getattr(self, field) for field in immutable):
+                raise ValidationError("Question Bank ownership and scope are immutable.")
+        return super().save(*args, **kwargs)
+
+
+class QuestionBankRevision(TimeStampedModel):
+    """Immutable content revision; Case member rows form the same atomic revision."""
+
+    item = models.ForeignKey(
+        QuestionBankItem, on_delete=models.PROTECT, related_name="revisions"
+    )
+    revision = models.PositiveIntegerField()
+    title = models.CharField(max_length=200, blank=True)
+    stimulus = models.TextField(max_length=50000, blank=True)
+    scenario_content_format = models.CharField(
+        max_length=16,
+        choices=ExamScenario.ContentFormat.choices,
+        default=ExamScenario.ContentFormat.PLAIN_TEXT,
+    )
+    content_format = models.CharField(
+        max_length=20,
+        choices=Question.ContentFormat.choices,
+        default=Question.ContentFormat.PLAIN_TEXT,
+    )
+    question_text = models.TextField(max_length=25000, blank=True)
+    choice_a = models.TextField(max_length=12000, blank=True)
+    choice_b = models.TextField(max_length=12000, blank=True)
+    choice_c = models.TextField(max_length=12000, blank=True)
+    choice_d = models.TextField(max_length=12000, blank=True)
+    correct_answer = models.CharField(
+        max_length=1,
+        choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")],
+        blank=True,
+    )
+    difficulty = models.CharField(
+        max_length=10, choices=Question.Difficulty.choices, blank=True
+    )
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="question_bank_revisions"
+    )
+
+    class Meta:
+        db_table = "departmental_exam_question_bank_revisions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "revision"], name="uq_de_bank_item_revision"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1), name="ck_de_bank_revision_number"
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["item", "revision"], name="idx_de_bank_revision")
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Question Bank revisions are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Question Bank revisions are immutable.")
+
+
+class QuestionBankCaseMember(TimeStampedModel):
+    """Immutable MCQ snapshot belonging to exactly one whole-Case revision."""
+
+    revision = models.ForeignKey(
+        QuestionBankRevision, on_delete=models.PROTECT, related_name="members"
+    )
+    position = models.PositiveSmallIntegerField()
+    content_format = models.CharField(
+        max_length=20,
+        choices=Question.ContentFormat.choices,
+        default=Question.ContentFormat.PLAIN_TEXT,
+    )
+    question_text = models.TextField(max_length=25000)
+    choice_a = models.TextField(max_length=12000)
+    choice_b = models.TextField(max_length=12000)
+    choice_c = models.TextField(max_length=12000)
+    choice_d = models.TextField(max_length=12000)
+    correct_answer = models.CharField(
+        max_length=1, choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")]
+    )
+    difficulty = models.CharField(max_length=10, choices=Question.Difficulty.choices)
+
+    class Meta:
+        db_table = "departmental_exam_question_bank_case_members"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["revision", "position"], name="uq_de_bank_case_position"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(position__gte=1), name="ck_de_bank_case_position"
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["revision", "position"], name="idx_de_bank_case_order"
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Question Bank Case members are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Question Bank Case members are immutable.")
 
 
 class ExamGenerationRevision(TimeStampedModel):

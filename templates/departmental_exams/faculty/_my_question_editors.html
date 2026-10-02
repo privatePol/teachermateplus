@@ -1,0 +1,25 @@
+{% for editor in editor_fields %}
+<section class="qb-author-section mb-4" data-question-rich-field="{{ editor.name }}" data-question-field-label="{{ editor.label }}" data-question-editor-help="question-editor-help-{{ editor.name }}">
+  {% if forloop.first %}<h2 class="h5 qb-author-heading">Question</h2>{% elif editor.name == 'choice_a' %}<h2 class="h5 qb-author-heading">Answer Choices</h2>{% endif %}
+  <div class="form-label" id="question-editor-label-{{ editor.name }}">{{ editor.label }} <span class="text-danger" aria-hidden="true">*</span></div>
+  <div data-scientific-field data-scientific-label="{{ editor.label }}">
+    <div class="tmp-case-toolbar" role="toolbar" aria-label="{{ editor.label }} formatting and tables" data-question-toolbar></div>
+    <div id="question-rich-editor-{{ editor.name }}" class="tmp-case-editor form-control" data-question-rich-editor data-scientific-rich-editor data-scientific-name="{{ editor.name }}" data-question-editor-display-unavailable="{{ editor.unavailable|yesno:'true,false' }}">{{ editor.display_html }}</div>
+    <details class="qb-author-advanced"><summary>Equations &amp; symbols</summary><div data-scientific-toolbar></div></details>
+  </div>
+  <div class="form-text" id="question-editor-help-{{ editor.name }}">Enter creates a paragraph; Shift+Enter inserts a line break. Tables are limited to 40 rows and 12 columns.</div>
+  <p class="small mb-1" data-question-field-status aria-live="polite"></p>
+  <div class="invalid-feedback d-block" role="alert" data-question-field-errors{% if not editor.bound.errors %} hidden{% endif %}>{% for error in editor.bound.errors %}{{ error }}{% endfor %}</div>
+  <section class="tmp-case-paste-recovery" data-question-paste-recovery hidden aria-label="{{ editor.label }} rejected paste recovery"><p data-question-paste-note></p><details><summary>Clipboard HTML source</summary><textarea class="form-control font-monospace" data-question-clipboard-html rows="4" readonly></textarea></details><details><summary>Clipboard plain-text source</summary><textarea class="form-control font-monospace" data-question-clipboard-text rows="4" readonly></textarea></details><button type="button" class="btn btn-sm btn-outline-secondary" data-question-paste-retry>Retry retained paste at current selection</button><button type="button" class="btn btn-sm btn-outline-secondary" data-question-paste-dismiss>Dismiss paste recovery</button></section>
+  <details data-question-original-source hidden><summary>Recover original source (Save disabled)</summary><textarea class="form-control font-monospace" rows="8" readonly></textarea></details>
+  <section class="mt-2" aria-labelledby="question-preview-label-{{ editor.name }}"><div class="small fw-semibold" id="question-preview-label-{{ editor.name }}">Server-authoritative preview</div><div class="tmp-case-preview" data-question-preview-field="{{ editor.name }}" data-scientific-content><p class="text-muted mb-0">Choose Preview to review the canonical content.</p></div></section>
+</section>
+{% endfor %}
+<section class="qb-author-section mb-4"><h2 class="h5 qb-author-heading">Difficulty &amp; Correct Answer</h2>
+  <div class="mb-3"><label class="form-label" for="{{ form.difficulty.id_for_label }}">Difficulty <span class="text-danger">*</span></label>{{ form.difficulty }}{% for error in form.difficulty.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+  <div class="mb-0"><label class="form-label" for="{{ form.correct_answer.id_for_label }}">Correct answer <span class="text-danger">*</span></label>{{ form.correct_answer }}{% for error in form.correct_answer.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+</section>
+{% for error in form.content_format.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+<div class="alert alert-danger" role="alert" data-question-editor-errors hidden></div>
+<p class="small" role="status" aria-live="polite" data-question-editor-status>Loading rich-text editors. Save remains disabled until they are ready.</p>
+<button class="btn btn-outline-primary" type="button" data-question-preview-button disabled>Preview sanitized question</button>

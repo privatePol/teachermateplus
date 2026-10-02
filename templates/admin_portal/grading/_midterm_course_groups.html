@@ -1,0 +1,29 @@
+{% for group in course_groups %}
+<section class="card border-0 shadow-sm mb-4" data-course-id="{{ group.id }}">
+  <div class="card-header"><h2 class="h5 mb-0">{{ group.code }} | {{ group.title }}</h2></div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light"><tr>
+        <th scope="col">Rank</th><th scope="col">Campus</th><th scope="col">Faculty</th><th scope="col">Section</th>
+        <th scope="col" class="text-end">Eligible Students</th><th scope="col" class="text-end">Highest</th>
+        <th scope="col" class="text-end">Lowest</th><th scope="col" class="text-end">Class Ave</th><th scope="col">Data Status</th>
+      </tr></thead>
+      <tbody>
+      {% for row in group.rows %}
+        <tr data-offering-id="{{ row.offering_id }}">
+          <td>{% if row.rank is not None %}{{ row.rank }}{% endif %}</td>
+          <td>{{ row.campus_code }}<div class="small text-muted">{{ row.campus_name }}</div></td>
+          <td>{{ row.faculty_name }}</td><td>{{ row.section_code }}</td>
+          <td class="text-end">{{ row.student_count }}</td>
+          <td class="text-end">{% if row.highest_score is not None %}{{ row.highest_score|floatformat:2 }}{% endif %}</td>
+          <td class="text-end">{% if row.lowest_score is not None %}{{ row.lowest_score|floatformat:2 }}{% endif %}</td>
+          <td class="text-end">{% if row.class_average is not None %}{{ row.class_average|floatformat:2 }}{% endif %}</td>
+          <td><span class="badge {% if row.data_status == 'Complete' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ row.data_status }}</span>
+            {% if row.status_detail %}<div class="small text-muted mt-1">{{ row.status_detail }}</div>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}

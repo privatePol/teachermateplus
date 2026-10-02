@@ -1,0 +1,36 @@
+<section aria-labelledby="saved-equivalency-heading">
+  <h2 class="h4" id="saved-equivalency-heading">Saved equivalent groups</h2>
+  {% for row in definitions %}
+    <article class="card mb-3"><div class="card-body">
+      <div class="d-flex justify-content-between gap-2 flex-wrap"><h3 class="h5">{{ row.label }}</h3><span class="badge {% if row.active %}text-bg-success{% else %}text-bg-secondary{% endif %}">{% if row.active %}Active{% else %}Retired{% endif %}</span></div>
+      <p class="mb-2">Primary: <strong>{{ row.primary_code }}</strong> · Version {{ row.version }}</p>
+      <ul>{% for member in row.members %}<li>{{ member.code }} — {{ member.title }}</li>{% endfor %}</ul>
+      {% if row.retirement_reason %}<p class="small text-muted">Retirement reason: {{ row.retirement_reason }}</p>{% endif %}
+      {% if row.active %}<button type="button" class="btn btn-sm btn-outline-primary" data-equivalency-edit="{{ row.id }}">Edit group</button> <button type="button" class="btn btn-sm btn-outline-danger" data-equivalency-action="retire" data-id="{{ row.id }}" data-version="{{ row.version }}">Retire group</button>{% endif %}
+      {% if row.id in reviewable_definition_ids %}<button type="button" class="btn btn-sm btn-outline-primary" data-existing-cycle-review="{{ row.id }}">Review application to this cycle</button>{% endif %}
+    </div></article>
+  {% empty %}<p class="text-muted">No saved equivalent groups are visible in your authorized scope.</p>{% endfor %}
+</section>
+{% if cycle %}
+<section aria-labelledby="equivalency-cycle-heading" class="mt-4">
+  <h2 class="h4" id="equivalency-cycle-heading">Application in this cycle</h2>
+  <p class="small">The saved version is captured when a cycle is created. A valid plan applies before blueprint or contribution opening. A blocked plan needs correction or a recorded cycle exception.</p>
+  <p><a href="{% url 'departmental_exams:course_setup' cycle.id %}">Correct member settings in Prepare Faculty Contributions</a></p>
+  {% for plan in plans %}<article class="border rounded p-3 mb-2"><strong>{{ plan.revision.label }}</strong> · version {{ plan.revision.version }} · {{ plan.get_status_display }}
+    {% if plan.reason %}<p class="mb-1">{{ plan.reason }}</p>{% endif %}
+    {% if plan.status == 'PENDING' or plan.status == 'BLOCKED' %}{% if cycle.status == 'OPEN' %}<button type="button" class="btn btn-sm btn-outline-primary" data-equivalency-apply="{{ plan.id }}">Apply saved group</button> <button type="button" class="btn btn-sm btn-outline-warning" data-equivalency-action="exception" data-id="{{ plan.id }}">Record a cycle exception</button>{% else %}<p class="small text-muted mb-1">This cycle is not Open; plan changes are locked.</p>{% endif %}{% endif %}
+    {% if plan.status == 'APPLIED' and plan.applied_group and not plan.applied_group.is_active %}<p class="small mb-1">The cycle group was retired. Record a reasoned exception before separate blueprint or contribution work resumes.</p>{% if cycle.status == 'OPEN' %}<button type="button" class="btn btn-sm btn-outline-warning" data-equivalency-action="exception" data-id="{{ plan.id }}">Record a cycle exception</button>{% endif %}{% endif %}
+    {% if plan.status == 'BLOCKED' and cycle.status == 'OPEN' %}<button type="button" class="btn btn-sm btn-outline-secondary" data-equivalency-recovery="{{ plan.id }}">Review matching blueprints</button>{% endif %}
+    {% if plan.applied_group_id %}<p class="small mb-0">Cycle group {{ plan.applied_group_id }} preserves its own membership history. {% if plan.applied_group.is_active %}<a href="{% url 'departmental_exams:equivalent_courses_group' cycle.id plan.applied_group_id %}">Review protected cycle mapping</a>{% endif %}</p>{% endif %}
+  </article>{% empty %}<p class="text-muted">This cycle has no saved-definition plan snapshot.</p>{% endfor %}
+</section>
+{% endif %}
+<section aria-labelledby="historical-equivalency-heading" class="mt-4">
+  <h2 class="h4" id="historical-equivalency-heading">Historical Midterm groups</h2>
+  <p class="small">These cycle records are reference only. Adoption creates a new saved definition after an explicit review; it does not change historical memberships.</p>
+  {% for row in historical %}<article class="border rounded p-3 mb-2"><h3 class="h6">{{ row.review.label }} · cycle {{ row.review.cycle_id }} · {% if row.review.active %}Active{% else %}Retired{% endif %}</h3>
+    <p class="mb-1">Primary: {{ row.review.primary_code }} · Review version {{ row.review.version }}</p>
+    <ul>{% for member in row.members %}<li>{{ member.code }} — {{ member.title }} ({% if member.active %}current member{% else %}historical member{% endif %})</li>{% endfor %}</ul>
+    {% if row.adoptable %}<button type="button" class="btn btn-sm btn-outline-primary" data-equivalency-action="adopt" data-id="{{ row.review.group_id }}" data-review-token="{{ row.review_token }}">Review adoption</button>{% endif %}
+  </article>{% empty %}<p class="text-muted">No historical Midterm groups are visible in your authorized scope.</p>{% endfor %}
+</section>

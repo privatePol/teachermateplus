@@ -558,7 +558,7 @@ class Stage6ReadinessService:
         blueprint = (
             None
             if automatic_flat_mode and not structured_automatic
-            else ExamBlueprint.objects.filter(cycle_course=cycle_course).first()
+            else ExamBlueprint.active_objects.filter(cycle_course=cycle_course).first()
         )
 
         if not question_pool_only and not automatic_correction_cycle_allowed(cycle_course, configuration):

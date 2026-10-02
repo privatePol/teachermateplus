@@ -12,9 +12,9 @@ function page(narrow=false) {
       <form><select data-bulk-question-filter><option value="all">All</option></select><input type="checkbox" data-bulk-select-all></form>
       <div data-qb-layout><main data-qb-question-list>
         <article class="qb-case-card" id="qb-case-7" data-qb-case-title="Accounting Case"><div class="tmp-case-collapse">
-          <article class="question-card" id="qb-question-11"><span class="question-position">1</span><div data-question-index-label>Linked stem</div><input type="checkbox" data-bulk-question></article>
+          <article class="question-card" id="qb-question-11"><span class="question-position">1</span><div data-question-index-label>1. Linked stem</div><input type="checkbox" data-bulk-question></article>
         </div></article>
-        <article class="question-card" id="qb-question-12"><span class="question-position">2</span><div data-question-index-label>Standalone stem</div><input type="checkbox" data-bulk-question></article>
+        <article class="question-card" id="qb-question-12"><span class="question-position">2</span><div data-question-index-label>Question 2: Standalone stem</div><input type="checkbox" data-bulk-question></article>
       </main><aside><section data-qb-index-panel><div class="qb-index-heading"><button data-qb-index-close>Close</button></div><div data-qb-index-list></div><p data-qb-index-empty hidden></p></section><button data-qb-index-reopen>Open</button></aside></div>
     </div></body></html>`,{url:'http://localhost/',pretendToBeVisual:true,runScripts:'outside-only'});
   const {window}=dom;
@@ -35,7 +35,8 @@ test('index navigates Case members without deleting, follows filter and reorder'
   try {
     const {document,Event}=dom.window;
     const entries=()=>[...document.querySelectorAll('[data-qb-index-target]')];
-    assert.deepEqual(entries().map(item=>item.textContent),['Accounting Case','Question 1: Linked stem','Question 2: Standalone stem']);
+    assert.deepEqual(entries().map(item=>item.textContent),['Accounting Case','Question 1. Linked stem','Question 2. Standalone stem']);
+    assert.equal(entries()[1].querySelector('.qb-index-number')?.textContent,'Question 1.');
     entries()[1].click();
     assert.equal(document.querySelector('.tmp-case-collapse').classList.contains('show'),true);
     assert.equal(dom.window.lastScroll.top,20);

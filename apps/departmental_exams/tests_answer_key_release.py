@@ -525,7 +525,7 @@ class AnswerKeyReleaseTests(AnswerKeyReleaseFixture):
             contribution.answer_key_releases[0]["expires_at"],
         )
         self.assertEqual(contribution.answer_key_releases[0]["release_id"], answer_key.id)
-        self.assertContains(released, '<h1 class="h3 mb-1">Question Bank</h1>', html=True)
+        self.assertContains(released, '<h1 class="h3 mb-1">My Questions</h1>', html=True)
         self.assertContains(released, "Questionnaire actions")
         self.assertContains(released, "Answer Key actions")
         self.assertContains(released, "Checking Master actions")

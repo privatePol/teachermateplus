@@ -15,6 +15,17 @@ _DEPARTMENTAL_EXAM_ACTIVE_ROUTES = {
             "departmental_exams:resources",
             "departmental_exams:answer_sheet",
         },
+        "DE_EXAM_MY_QUESTIONS": {
+            "departmental_exams:my_questions",
+            "departmental_exams:my_question_create",
+            "departmental_exams:my_question_edit",
+            "departmental_exams:my_historical_question_edit",
+            "departmental_exams:my_case_create",
+            "departmental_exams:my_case_edit",
+            "departmental_exams:my_historical_case_edit",
+            "departmental_exams:my_case_member_add",
+            "departmental_exams:my_case_member_edit",
+        },
         "DE_EXAM_FACULTY_CONTRIBUTIONS": {
             "departmental_exams:contribution_list",
             "departmental_exams:contribution_workspace",
@@ -90,6 +101,29 @@ def _add_departmental_exam_resources_menu(menu):
                     label="Resources",
                 ),
                 "url": reverse("departmental_exams:resources"),
+                "children": [],
+                "visible": True,
+            }
+        )
+        return
+
+
+def _add_my_questions_menu(menu):
+    for group in menu:
+        if group["group"].code != "DEPARTMENTAL_EXAMS":
+            continue
+        if any(
+            node["item"].code == "DE_EXAM_MY_QUESTIONS"
+            for node in group["items"]
+        ):
+            return
+        group["items"].append(
+            {
+                "item": SimpleNamespace(
+                    code="DE_EXAM_MY_QUESTIONS",
+                    label="My Questions",
+                ),
+                "url": reverse("departmental_exams:my_questions"),
                 "children": [],
                 "visible": True,
             }
@@ -185,12 +219,24 @@ def portal_menu(request):
         )
 
         if portal == "FACULTY":
+            from apps.departmental_exams.my_questions import authoring_scopes
+
+            tenant_id = scope.get("tenant_id") or getattr(
+                request.user, "default_tenant_id", None
+            )
+            campus_id = scope.get("campus_id")
             stage5_visible = ContributionSelector.faculty_navigation_visible(
                 user=request.user,
-                tenant_id=scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None),
-                campus_id=scope.get("campus_id"),
+                tenant_id=tenant_id,
+                campus_id=campus_id,
             )
             stage5_code = "DE_EXAM_FACULTY_CONTRIBUTIONS"
+            if tenant_id and campus_id and authoring_scopes(
+                user=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+            ):
+                _add_my_questions_menu(menu)
             if stage5_visible:
                 _add_departmental_exam_resources_menu(menu)
         else:

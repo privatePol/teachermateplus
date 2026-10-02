@@ -1,6 +1,6 @@
 {% extends "faculty_portal/base.html" %}
 {% load tz %}
-{% block title %}Question Bank | TeacherMate+{% endblock %}
+{% block title %}My Questions | TeacherMate+{% endblock %}
 {% block faculty_content %}
 <style>
   .qb-grid { --bs-gutter-x: .9rem; --bs-gutter-y: .9rem; }
@@ -57,9 +57,10 @@
 {% include "departmental_exams/_cycle_filter.html" with faculty_only=True %}
 <div class="d-flex justify-content-between align-items-start mb-3">
   <div>
-    <h1 class="h3 mb-1">Question Bank</h1>
-    <p class="text-muted mb-0">Open your assigned grouped course to prepare or review your own questions.</p>
+    <h1 class="h3 mb-1">My Questions</h1>
+    <p class="text-muted mb-0">Add or correct your own questions at any time, then use them in an open contribution Draft.</p>
   </div>
+  <a class="btn btn-primary" href="{% url 'departmental_exams:my_questions' %}">Manage My Questions</a>
 </div>
 {% if contributions %}
   <div class="row g-3 qb-grid">

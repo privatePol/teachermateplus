@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
-from apps.academics.models import AcademicYear, Term
+from apps.academics.models import AcademicYear, Course, CourseOffering, Term
 from apps.accounts.models import User
 from apps.core.decorators import portal_required
 from apps.core.services.audit import AuditService
@@ -794,12 +794,26 @@ def assigned_course_examinations_view(request):
             )
             automatic_summary_cycles.append(cycle)
             seen_automatic_cycle_ids.add(course.cycle_id)
+    equivalency_campuses = set(CourseOffering.objects.filter(
+        tenant_id=scope["tenant_id"], is_active=True,
+    ).values_list("campus_id", flat=True))
+    equivalency_campuses.update(Course.objects.filter(
+        tenant_id=scope["tenant_id"],
+    ).exclude(campus_id__isnull=True).values_list("campus_id", flat=True))
+    can_manage_saved_equivalency = any(
+        DepartmentalExamAuthorizationService._has_scoped_permission(
+            user=request.user,
+            permission=DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+            tenant_id=scope["tenant_id"], campus_id=campus_id,
+        ) for campus_id in (equivalency_campuses or {None})
+    )
     return render(
         request,
         "departmental_exams/admin/assigned_course_examination_list.html",
         {
             "courses": courses,
             "automatic_summary_cycles": automatic_summary_cycles,
+            "can_manage_saved_equivalency": can_manage_saved_equivalency,
             "structured_exam_lifecycle_enabled": (
                 FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
                     tenant_id=scope["tenant_id"]

@@ -116,7 +116,7 @@ class FacultyCasePolicy:
         )
         if manual and unit.primary.id != contribution.cycle_course_id:
             raise PermissionDenied("Faculty Case ownership must use the authoritative examination unit.")
-        queryset = ExamBlueprint.objects
+        queryset = ExamBlueprint.active_objects
         if for_update:
             queryset = queryset.select_for_update()
         blueprint = queryset.filter(cycle_course=unit.primary).first()

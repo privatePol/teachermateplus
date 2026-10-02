@@ -1370,8 +1370,8 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
 
                 self.assertEqual(
                     distribution["guidance"],
-                    "Difficulty distribution differs from the preferred target. "
-                    + expected_guidance,
+                    "Preferred difficulty target: advisory. You may Final Submit with a different mix "
+                    "once the required valid question count and other submission checks are satisfied.",
                 )
 
     def test_draft_guidance_generalizes_complex_reclassification(self):
@@ -1393,9 +1393,8 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
 
         self.assertEqual(
             distribution["guidance"],
-            "Difficulty distribution differs from the preferred target. Reclassify "
-            "your draft questions' difficulty levels to meet the preferred Easy, "
-            "Moderate, and Difficult counts if practical.",
+            "Preferred difficulty target: advisory. You may Final Submit with a different mix "
+            "once the required valid question count and other submission checks are satisfied.",
         )
         self.assertNotIn("Reclassify 2 excess Moderate", distribution["guidance"])
 

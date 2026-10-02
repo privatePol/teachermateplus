@@ -1,6 +1,8 @@
 from django.urls import path
 
 from . import (
+    equivalency_views,
+    persistent_equivalency_views,
     faculty_views,
     generation_readiness_views,
     monitoring_views,
@@ -14,6 +16,19 @@ from . import (
 app_name = "departmental_exams"
 
 urlpatterns = [
+    path("admin-portal/departmental-exams/equivalent-courses/", persistent_equivalency_views.saved_equivalency_landing, name="saved_equivalent_courses"),
+    path("admin-portal/departmental-exams/equivalent-courses/search/", persistent_equivalency_views.search_equivalent_courses, name="saved_equivalent_courses_search"),
+    path("admin-portal/departmental-exams/equivalent-courses/save/", persistent_equivalency_views.save_equivalent_definition, name="saved_equivalent_courses_save"),
+    path("admin-portal/departmental-exams/equivalent-courses/retire/", persistent_equivalency_views.retire_equivalent_definition, name="saved_equivalent_courses_retire"),
+    path("admin-portal/departmental-exams/equivalent-courses/adopt/", persistent_equivalency_views.adopt_historical_equivalency, name="saved_equivalent_courses_adopt"),
+    path("admin-portal/departmental-exams/equivalent-courses/exception/", persistent_equivalency_views.except_equivalency_plan, name="saved_equivalent_courses_exception"),
+    path("admin-portal/departmental-exams/equivalent-courses/apply/", persistent_equivalency_views.apply_equivalency_plan, name="saved_equivalent_courses_apply"),
+    path("admin-portal/departmental-exams/equivalent-courses/existing-cycle-review/", persistent_equivalency_views.review_existing_cycle_application, name="saved_equivalent_existing_cycle_review"),
+    path("admin-portal/departmental-exams/equivalent-courses/existing-cycle-apply/", persistent_equivalency_views.apply_existing_cycle_application, name="saved_equivalent_existing_cycle_apply"),
+    path("admin-portal/departmental-exams/equivalent-courses/blueprint-review/", persistent_equivalency_views.review_blueprint_recovery, name="saved_equivalent_blueprint_review"),
+    path("admin-portal/departmental-exams/equivalent-courses/blueprint-retain/", persistent_equivalency_views.retain_secondary_blueprint, name="saved_equivalent_blueprint_retain"),
+    path("admin-portal/departmental-exams/cycles/<int:cycle_id>/equivalent-courses/", equivalency_views.equivalent_courses_view, name="equivalent_courses"),
+    path("admin-portal/departmental-exams/cycles/<int:cycle_id>/equivalent-courses/<int:group_id>/", equivalency_views.equivalent_courses_view, name="equivalent_courses_group"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/setup/", setup_views.setup_view, name="course_setup"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/classification/", setup_views.classification_view, name="course_classification"),
     path(
@@ -30,6 +45,56 @@ urlpatterns = [
         "faculty/departmental-exams/contributions/",
         faculty_views.contribution_list_view,
         name="contribution_list",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/",
+        faculty_views.my_questions_view,
+        name="my_questions",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/campuses/<int:campus_id>/courses/<int:course_id>/preview/",
+        faculty_views.my_content_preview_view,
+        name="my_content_preview",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/campuses/<int:campus_id>/courses/<int:course_id>/questions/add/",
+        faculty_views.my_question_create_view,
+        name="my_question_create",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/questions/<int:item_id>/edit/",
+        faculty_views.my_question_edit_view,
+        name="my_question_edit",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/history/questions/<int:historical_question_id>/edit/",
+        faculty_views.my_question_edit_view,
+        name="my_historical_question_edit",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/campuses/<int:campus_id>/courses/<int:course_id>/cases/add/",
+        faculty_views.my_case_create_view,
+        name="my_case_create",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/cases/<int:item_id>/edit/",
+        faculty_views.my_case_edit_view,
+        name="my_case_edit",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/history/cases/<int:historical_scenario_id>/edit/",
+        faculty_views.my_case_edit_view,
+        name="my_historical_case_edit",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/cases/<int:item_id>/questions/add/",
+        faculty_views.my_case_member_view,
+        name="my_case_member_add",
+    ),
+    path(
+        "faculty/departmental-exams/my-questions/cases/<int:item_id>/questions/<int:position>/edit/",
+        faculty_views.my_case_member_view,
+        name="my_case_member_edit",
     ),
     path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/",

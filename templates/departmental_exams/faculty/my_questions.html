@@ -1,0 +1,39 @@
+{% extends "faculty_portal/base.html" %}
+{% load static %}
+{% load departmental_exam_content %}
+{% block title %}My Questions | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+  <div><h1 class="h3 mb-1">My Questions</h1><p class="text-muted mb-0">Add and correct your questions at any time. Changes apply to future exams only.</p></div>
+  <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_list' %}">Contribution workspaces</a>
+</div>
+
+{% if catalogue_changed %}<div class="alert alert-info" role="status">The catalogue changed while you were browsing, so My Questions restarted with the current results.</div>{% endif %}
+
+<div class="card shadow-sm mb-3"><div class="card-body">
+  <h2 class="h5">Add</h2>
+  {% for scope in scopes %}<div class="d-flex align-items-center justify-content-between gap-2 flex-wrap py-2{% if not forloop.last %} border-bottom{% endif %}"><span><strong>{{ scope.course_code }}</strong> &mdash; {{ scope.course_title }}</span><span class="d-flex gap-2"><a class="btn btn-sm btn-primary" href="{% url 'departmental_exams:my_question_create' scope.campus_id scope.course_id %}">Add question</a>{% if case_authoring_enabled %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:my_case_create' scope.campus_id scope.course_id %}">Create whole Case</a>{% endif %}</span></div>{% endfor %}
+</div></div>
+
+<form method="get" class="card shadow-sm mb-3"><div class="card-body row g-2 align-items-end">
+  <div class="col-12 col-md-4"><label class="form-label" for="myq-search">Search</label><input class="form-control" id="myq-search" name="search" value="{{ filters.search }}" maxlength="200"></div>
+  <div class="col-6 col-md-3"><label class="form-label" for="myq-course">Course</label><select class="form-select" id="myq-course" name="course"><option value="">All courses</option>{% for scope in scopes %}<option value="{{ scope.course_id }}"{% if filters.course == scope.course_id|stringformat:'s' %} selected{% endif %}>{{ scope.course_code }}</option>{% endfor %}</select></div>
+  <div class="col-6 col-md-3"><label class="form-label" for="myq-kind">Type</label><select class="form-select" id="myq-kind" name="content_type"><option value="">Questions and Cases</option><option value="question"{% if filters.content_type == 'question' %} selected{% endif %}>Questions</option><option value="case"{% if filters.content_type == 'case' %} selected{% endif %}>Whole Cases</option></select></div>
+  <div class="col-12 col-md-2"><button class="btn btn-outline-primary w-100">Apply</button></div>
+</div></form>
+
+<section data-myq-progressive data-next-url="{{ next_batch_url }}">
+  <div data-myq-list>{% include "departmental_exams/faculty/_my_question_cards.html" %}</div>
+  {% if not page.object_list %}<div class="alert alert-info">No questions match the current filters.</div>{% endif %}
+  <div class="text-center my-3" data-myq-controls>
+    <p class="text-muted mb-2" role="status" aria-live="polite" data-myq-status>{% if page.has_next %}More matching questions are available.{% elif page.paginator.count %}All matching questions are loaded.{% else %}No matching questions to load.{% endif %}</p>
+    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true" data-myq-spinner hidden></span>
+    <button type="button" class="btn btn-outline-primary" data-myq-load-more{% if not page.has_next %} hidden{% endif %}>Load more</button>
+    <a class="btn btn-outline-primary" href="{% url 'departmental_exams:my_questions' %}" data-myq-restart hidden>Restart updated results</a>
+    <div data-myq-sentinel aria-hidden="true"></div>
+  </div>
+</section>
+
+{% if page.paginator.num_pages > 1 %}<nav aria-label="My Questions pages" data-myq-pagination><ul class="pagination">{% if page.has_previous %}<li class="page-item"><a class="page-link" href="{{ previous_page_url }}">Previous</a></li>{% endif %}<li class="page-item disabled"><span class="page-link">Page {{ page.number }} of {{ page.paginator.num_pages }}</span></li>{% if page.has_next %}<li class="page-item"><a class="page-link" href="{{ next_page_url }}">Next</a></li>{% endif %}</ul></nav>{% endif %}
+{% endblock %}
+{% block extra_js %}{{ block.super }}<script src="{% static 'js/departmental_exam_my_questions.js' %}?v=20260927" defer></script>{% endblock %}
