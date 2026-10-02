@@ -240,7 +240,7 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
                     meeting_id=meeting.pk,
                     occurrence_key=occurrence.occurrence_key,
                     message=(
-                        f"{meeting.meeting_date} attendance faculty does not match its explicit meeting substitute. "
+                        f"{meeting.meeting_date} attendance faculty does not match its verified dated attribution. "
                         "Review and correct the attribution before publication."
                     ),
                 )
@@ -308,6 +308,9 @@ def _publication_entry_values(record):
         "sections": meeting.sections_snapshot,
         "faculty": meeting.faculty_snapshot,
     }
+    adoption = getattr(meeting, "coverage_adoption", None)
+    if adoption:
+        meeting_snapshot["coverage_adoption"] = {"id": adoption.pk, "decision": adoption.decision_snapshot}
     if record.closure:
         closure = record.closure
         meeting_snapshot["closure"] = {

@@ -686,7 +686,7 @@ def inspect_daily_occurrences(occurrences):
                 )
             )
         for meeting in matching_recorded:
-            if meeting.unresolved_coverage:
+            if meeting.unresolved_coverage and not hasattr(meeting, "coverage_adoption") and not hasattr(meeting, "substitution"):
                 issues.append(
                     DailyIssue(
                         code="UNRESOLVED_COVERAGE",

@@ -5,7 +5,7 @@ from uuid import uuid4
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch, Q
-from django.http import Http404, HttpResponseForbidden, HttpResponseNotAllowed, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseForbidden, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -59,6 +59,7 @@ from .models import (
 )
 from .observations import (
     FACULTY_ATTRIBUTION_MEETING,
+    FACULTY_ATTRIBUTION_ADOPTION,
     FACULTY_ATTRIBUTION_RESULT,
     FACULTY_ATTRIBUTION_SUBSTITUTION,
     AttendanceResultService,
@@ -66,6 +67,7 @@ from .observations import (
     ObservationService,
     StaleAttendanceReview,
     resolve_attendance_faculty,
+    require_confirmable_meeting_faculty,
 )
 from .permissions import (
     CORRECT_PERMISSION,
@@ -84,6 +86,7 @@ from .permissions import (
 )
 from .route_services import SavedRouteService, ordered_meetings
 from .monthly_checklists import DAY_GROUPS, MonthlyArrangementService, build_monthly_rows
+from .checklist_export import checklist_xlsx, print_settings
 from .combined_classes import RecurringCombinedClassService
 from .selectors import unresolved_meetings
 from .services import CoverageService, MeetingService, ReconciliationService, ScheduleService, SubstitutionService
@@ -346,6 +349,8 @@ def _monthly_checklist_context(request, *, require_print=False):
         "can_encode": _can_page(request, ENCODE_PERMISSION, department_ids),
         "can_manage_combined": _can_all_departments(request, MANAGE_MEETINGS_PERMISSION, department_ids),
         "can_manage_corrections": _can_all_departments(request, MANAGE_SCHEDULES_PERMISSION, department_ids),
+        "can_initialize_coverage": _can_page(request, MANAGE_COVERAGE_PERMISSION, department_ids)
+            and _can_page(request, RECONCILE_PERMISSION, department_ids),
         "tenant_name": Tenant.objects.filter(pk=tenant_id).values_list("name", flat=True).first() or str(tenant_id),
         "campus_name": Campus.objects.filter(pk=campus_id).values_list("name", flat=True).first() or str(campus_id),
         "filter_query": request.GET.urlencode(),
@@ -379,6 +384,7 @@ def _monthly_checklist_context(request, *, require_print=False):
     rows, corrections, date_columns = build_monthly_rows(
         offerings=offerings, year=selected_month.year, month=selected_month.month,
         day_group=day_group, arrangement=arrangement,
+        printable_only=require_print,
         combined_classes=_scoped_combined_classes(
             tenant_id=tenant_id, campus_id=campus_id, academic_year_id=academic_year.pk,
             term_id=term.pk, offering_ids={row.pk for row in offerings},
@@ -391,9 +397,14 @@ def _monthly_checklist_context(request, *, require_print=False):
             offering_links__offering__term=term,
         ).select_related("substitution__substitute_faculty").distinct()),
     )
+    settings = print_settings(form.cleaned_data)
+    batch_size = settings["dates_per_sheet"]
     context.update({
         "rows": rows, "corrections": corrections, "date_columns": date_columns,
-        "date_batches": [date_columns[start:start + 12] for start in range(0, len(date_columns), 12)],
+        "date_batches": [date_columns[start:start + batch_size] for start in range(0, len(date_columns), batch_size)],
+        "print_settings": settings,
+        "can_initialize_coverage": _can_all_departments(request, MANAGE_COVERAGE_PERMISSION, offering_department_ids)
+            and _can_all_departments(request, RECONCILE_PERMISSION, offering_department_ids),
         "arrangement": arrangement, "selected_academic_year": academic_year,
         "selected_term": term, "selected_month": selected_month,
         "selected_day_group": day_group, "selected_day_group_label": DAY_GROUPS[day_group][1],
@@ -677,6 +688,9 @@ def monthly_arrangement_save_view(request):
         "term": request.POST.get("term_id", ""),
         "month": request.POST.get("month", ""),
         "day_group": request.POST.get("day_group", ""),
+        "paper": request.POST.get("paper", "A4"),
+        "orientation": request.POST.get("orientation", "landscape"),
+        "text_size": request.POST.get("text_size", "11"),
     }
     if form.is_valid():
         try:
@@ -703,6 +717,18 @@ def monthly_print_view(request):
         return redirect("faculty_attendance:checklist")
     context["printed_at"] = timezone.localtime()
     return render(request, "faculty_attendance/monthly_print_checklist.html", context)
+
+
+@portal_required("ADMIN")
+def monthly_export_view(request):
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    context = _monthly_checklist_context(request, require_print=True)
+    if not context["monthly_form"].is_valid():
+        return HttpResponse("Select valid checklist and print settings before exporting.", status=400)
+    response = HttpResponse(checklist_xlsx(context), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response["Content-Disposition"] = 'attachment; filename="monthly-attendance-checklist.xlsx"'
+    return response
 
 
 @portal_required("ADMIN")
@@ -872,7 +898,12 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
         row.present_row_value = f"{row.meeting_id}:{result_revision}"
         row.expected_result_revision = result_revision
         row.default_submission_key = f"{checking_round.public_id}-{row.meeting_id}-{result_revision}"
-        row.can_confirm_present = not row.meeting.unresolved_coverage and (
+        try:
+            require_confirmable_meeting_faculty(row.meeting)
+            row.coverage_confirmable = True
+        except ValidationError:
+            row.coverage_confirmable = False
+        row.can_confirm_present = row.coverage_confirmable and (
             result is None or result.status == AttendanceResult.Status.UNVERIFIED
         )
         row.present_selected = row.present_row_value in selected_present_rows
@@ -884,6 +915,7 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
             FACULTY_ATTRIBUTION_RESULT: "Saved attendance attribution",
             FACULTY_ATTRIBUTION_SUBSTITUTION: "Explicit meeting substitute",
             FACULTY_ATTRIBUTION_MEETING: "Dated faculty coverage",
+            FACULTY_ATTRIBUTION_ADOPTION: "Checker-approved dated coverage (original history retained)",
         }.get(attribution_source, "")
         row.exception_values = _exception_values_from_result(result)
         row.legacy_period_absence_findings = _legacy_period_absence_findings(result)
@@ -1061,10 +1093,22 @@ def reconciliation_view(request):
         coverage_items = coverage_items.filter(department_id__in=department_ids)
         meeting_items = meeting_items.filter(meeting__department_id__in=department_ids)
         source_items = source_items.filter(department_id__in=department_ids)
+    adoption_items = _meeting_queryset(tenant_id, campus_id, department_ids).filter(
+        unresolved_coverage=True, faculty_user__isnull=True, coverage_adoption__isnull=True,
+        substitution__isnull=True,
+    ).filter(Q(attendance_result__isnull=True) | Q(attendance_result__revision=0))
     if request.method == "POST":
         kind = request.POST.get("kind")
         try:
-            if kind == "coverage":
+            if kind == "adoption":
+                if request.POST.get("confirmed") != "on":
+                    raise ValidationError("Confirm adoption of verified coverage before applying.")
+                item = get_object_or_404(adoption_items, pk=request.POST.get("meeting_id"))
+                from .coverage_initialization import CoverageAdoptionService
+                CoverageAdoptionService.adopt(actor=request.user, meeting=item, reason=request.POST.get("reason", ""))
+                messages.success(request, "Verified dated coverage adopted; original meeting and round snapshots retained.")
+                return redirect("faculty_attendance:reconciliation")
+            elif kind == "coverage":
                 item = get_object_or_404(coverage_items, pk=request.POST.get("item_id"))
                 form = CoverageReconciliationForm(request.POST)
                 if form.is_valid():
@@ -1093,6 +1137,8 @@ def reconciliation_view(request):
         "coverage_items": coverage_items,
         "source_items": source_items,
         "meeting_items": meeting_items,
+        "adoption_items": adoption_items,
+        "can_initialize_coverage": _can_page(request, MANAGE_COVERAGE_PERMISSION, department_ids),
         "coverage_form": CoverageReconciliationForm(),
         "source_form": SourceChangeReconciliationForm(),
         "meeting_form": ReconciliationForm(),

@@ -1,3 +1,11 @@
+## Scoped attendance activation/recovery and checklist output - 2026-10-02
+
+- Added signed scoped preview/apply for accepted legacy assignments, with explicit teaching start time, owning-offering NULL-scope handling, stale-preview rejection and idempotent interval creation. Conflicts/replacements are not inferred.
+- Added immutable `MeetingCoverageAdoption` (migration 0019 after 0018): audited initial dated attribution without rewriting frozen meeting/round snapshots. Saved/published findings remain under correction/republication guards; substitute decisions are preserved.
+- Restored the AY/Term normal Admin Portal shell while preserving AJAX fragments. Checklist print/export now share paper/orientation, 11pt-default readable sizes, date batches, saved order, combined rows and genuinely-unassigned exclusion; assigned unresolved rows remain visible.
+- Added scoped XLSX export with literal-string safety, blank attendance cells and print settings; `openpyxl==3.1.5` declared, installed only in external disposable test dependencies. Operational dependency installation, schema application and staging initialization are separate authorization gates.
+- Browser/PDF/Excel layout, real staging recovery, InnoDB race/contention and older-DB-baseline evidence remain separate from disposable source tests. No persistent DB or runtime action in this gate.
+
 ## Focused attendance monitoring remediation - 2026-10-02
 
 - Effective RBAC now matches explicit scope OR NULL, preserving global/tenant/campus direct-DENY over exact-campus allows. Attendance department checks use the same nullable-scope convention; exact-assignment contributor eligibility remains unchanged.

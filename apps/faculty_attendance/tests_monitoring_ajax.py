@@ -45,6 +45,10 @@ class TermMonitoringAjaxTests(TestCase):
         self.assertIn('0.97', data['html'])
         self.assertEqual(normal.context['report']['rows'][0]['actual'], Decimal('0.97'))
         self.assertContains(normal, 'term_monitoring.js')
+        self.assertContains(normal, 'admin-sidebar')
+        self.assertContains(normal, 'admin-topbar')
+        self.assertNotIn('admin-sidebar', data['html'])
+        self.assertNotIn('admin-topbar', data['html'])
 
     def test_ajax_details_and_direct_get_keep_dated_minutes_and_attribution(self):
         meeting = self.meeting()

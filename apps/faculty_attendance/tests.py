@@ -1114,6 +1114,8 @@ class FacultyAttendanceFoundationTests(TestCase):
             )
 
     def test_monthly_print_has_selected_dates_and_direct_deny_wins(self):
+        # Printable rows now require assignment/dated coverage/substitution evidence.
+        FacultyAssignment.objects.create(offering=self.offering, faculty_user=self.faculty, is_primary=True)
         self.offering.schedule_text = "F 08:00AM-11:00AM"
         self.offering.save(update_fields=["schedule_text"])
         self.client.force_login(self.actor)

@@ -3,11 +3,16 @@
 {% block extra_head %}
 {{ block.super }}
 <style>
-  @page{size:A4 landscape;margin:8mm}
   .monthly-print-wrap{max-width:1500px;margin:0 auto}.screen-toolbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.75rem;margin-bottom:1rem}.print-sheet{background:#fff;color:#111;padding:1rem;border:1px solid #d4ddd5;border-radius:.5rem}.print-heading{text-align:center;border-bottom:2px solid #111;padding-bottom:6px}.print-heading .school-name{font-size:16pt;font-weight:700}.print-heading .campus-name{font-size:10pt}.print-heading h1{font-size:18pt;margin:3px 0}.print-scope{display:flex;flex-wrap:wrap;justify-content:center;gap:.25rem 1rem;font-size:9pt}.paper-legend,.review-notice{border:1px solid #777;padding:5px 7px;margin:7px 0;font-size:8.5pt}.paper-legend span{display:inline-block;margin-right:12px}.time-group{break-inside:auto;margin-top:8px}.time-group-title{font-weight:700;background:#e9ece9;border:1px solid #555;border-bottom:0;padding:5px;font-size:9pt}.print-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:8pt}.print-table col.course{width:18%}.print-table col.section{width:12%}.print-table col.faculty{width:15%}.print-table col.room{width:8%}.print-table thead{display:table-header-group}.print-table tr{break-inside:avoid;page-break-inside:avoid}.print-table th,.print-table td{border:1px solid #555;padding:3px;vertical-align:top;overflow-wrap:anywhere}.print-table th{background:#f2f2f2;text-align:center}.print-table .identity{line-height:1.15}.print-table .course-title{display:block;font-size:7pt}.print-table .date-cell{text-align:center}.print-table .write{height:11mm;background:#fff}.print-table .na{background:#e8e8e8;color:#333;font-size:7pt;font-weight:700;vertical-align:middle}.combined-label{display:block;font-size:7pt;font-weight:700}.shared-notes{border:1px solid #555;margin-top:9px;padding:5px;font-size:8pt}.notes-lines{height:14mm;background:repeating-linear-gradient(to bottom,transparent 0,transparent 6mm,#aaa 6.2mm,#aaa 6.4mm)}.print-footer{font-size:8pt;margin-top:8px}.print-sheet :focus-visible,.screen-toolbar :focus-visible{outline:3px solid #1d63d5;outline-offset:2px}
   @media print{
     body,.admin-shell,.admin-main{background:#fff!important}.admin-sidebar,.admin-topbar,.admin-utility-footer,.screen-toolbar{display:none!important}.admin-shell>.row{display:block!important}.admin-shell>.row>.admin-main{display:block!important;flex:0 0 100%!important;max-width:100%!important;width:100%!important}.admin-main>section{padding:0!important}.monthly-print-wrap{max-width:none;margin:0}.print-sheet{padding:0;border:0;border-radius:0}.time-group{break-inside:auto}.print-table tr{break-inside:avoid;page-break-inside:avoid}
   }
+  @page{size:{{ print_settings.width_mm }}mm {{ print_settings.height_mm }}mm;margin:8mm}
+  .print-sheet{font-size:{{ print_settings.text_size }}pt}
+  .print-heading .campus-name,.print-scope,.paper-legend,.review-notice,.time-group-title,.print-table,.print-table .course-title,.print-table .na,.combined-label,.shared-notes,.print-footer{font-size:inherit}
+  .print-table th,.print-table td{padding:1.5mm;line-height:1.25}
+  .print-table col.course{width:18%}.print-table col.section{width:12%}.print-table col.faculty{width:15%}.print-table col.room{width:8%}
+  .print-table .write{height:14mm}.print-sheet{overflow-wrap:anywhere}
 </style>
 {% endblock %}
 {% block admin_content %}
@@ -15,6 +20,7 @@
   <div class="screen-toolbar" aria-label="Checklist print actions">
     <a class="btn btn-outline-success" href="{% url 'faculty_attendance:checklist' %}{% if filter_query %}?{{ filter_query }}{% endif %}">Back to Monthly Attendance Checklist</a>
     <button type="button" class="btn btn-warning" onclick="window.print()" aria-label="Print monthly attendance checklist">Print Checklist</button>
+    <span>{{ print_settings.paper }} &middot; {{ print_settings.orientation|title }} &middot; {{ print_settings.text_size }} pt</span>
   </div>
   <main class="print-sheet">
     <header class="print-heading">
@@ -31,10 +37,9 @@
     {% regroup rows by time_group_key as groups %}
     {% for group in groups %}
       <section class="time-group">
-        <div class="time-group-title">{{ group.list.0.start_time|time:"g:i A" }}&ndash;{{ group.list.0.end_time|time:"g:i A" }} &middot; {{ group.list.0.duration_hours }} scheduled hours</div>
         <table class="print-table">
           <colgroup><col class="course"><col class="section"><col class="faculty"><col class="room">{% for d in date_columns %}<col>{% endfor %}</colgroup>
-          <thead><tr><th>Course</th><th>Section</th><th>Faculty</th><th>Room</th>{% for d in date_columns %}<th class="date-cell">{{ d|date:"D" }}<br>{{ d|date:"M j" }}</th>{% endfor %}</tr></thead>
+          <thead><tr><th colspan="{{ date_columns|length|add:'4' }}" class="time-group-title">{{ group.list.0.start_time|time:"g:i A" }}&ndash;{{ group.list.0.end_time|time:"g:i A" }} &middot; {{ group.list.0.duration_hours }} scheduled hours</th></tr><tr><th>Course</th><th>Section</th><th>Faculty</th><th>Room</th>{% for d in date_columns %}<th class="date-cell">{{ d|date:"D" }}<br>{{ d|date:"M j" }}</th>{% endfor %}</tr></thead>
           <tbody>{% for row in group.list %}<tr><td class="identity">{% if row.is_combined %}<span class="combined-label">Sections Taught Together</span>{% endif %}{% for linked in row.linked_offerings %}<strong>{{ linked.course.code }}</strong><span class="course-title">{{ linked.course.title }}</span>{% if not forloop.last %}<br>{% endif %}{% endfor %}</td><td class="identity">{% for linked in row.linked_offerings %}<strong>{{ linked.section.code }}</strong>{% if linked.section.name %}<span class="course-title">{{ linked.section.name }}</span>{% endif %}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td><td class="identity">{{ row.faculty_label }}{% if row.historical_attribution_note %}<br><strong>Review faculty evidence</strong>{% endif %}</td><td class="identity">{{ row.room_label|default:"Not set" }}</td>{% for d in date_columns %}<td class="date-cell {% if d in row.applicable_dates %}write{% else %}na{% endif %}">{% if d not in row.applicable_dates %}N/A{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
         </table>
       </section>

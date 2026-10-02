@@ -171,8 +171,45 @@ class FacultyCoverage(TimeStampedModel):
                 raise ValidationError("Source assignment must belong to the covered offering.")
             if self.source_assignment.faculty_user_id != self.faculty_user_id:
                 raise ValidationError("Source assignment must belong to the covered faculty member.")
+            if (self.source_assignment.tenant_id not in (None, self.tenant_id)
+                    or self.source_assignment.campus_id not in (None, self.campus_id)):
+                raise ValidationError("Source assignment scope conflicts with its owning offering.")
         if self.effective_until and self.effective_until <= self.effective_from:
             raise ValidationError("Coverage uses a half-open interval and must end after it starts.")
+
+
+class MeetingCoverageAdoption(TimeStampedModel):
+    """One explicit initial attribution; the original meeting/manifest stays frozen."""
+
+    meeting = models.OneToOneField("TeachingMeeting", on_delete=models.PROTECT, related_name="coverage_adoption")
+    coverage = models.ForeignKey(FacultyCoverage, on_delete=models.PROTECT, related_name="adoptions")
+    faculty_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="attendance_coverage_adoptions")
+    adopted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="decided_attendance_coverage_adoptions")
+    reason = models.TextField(blank=True)
+    decision_snapshot = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "faculty_attendance_coverage_adoptions"
+
+    def clean(self):
+        super().clean()
+        if self.coverage_id and self.meeting_id:
+            if (self.coverage.tenant_id != self.meeting.tenant_id
+                    or self.coverage.campus_id != self.meeting.campus_id
+                    or self.coverage.department_id != self.meeting.department_id
+                    or self.coverage.faculty_user_id != self.faculty_user_id
+                    or self.coverage.effective_from > self.meeting.starts_at
+                    or (self.coverage.effective_until is not None and self.meeting.starts_at >= self.coverage.effective_until)
+                    or not self.meeting.offering_links.filter(offering_id=self.coverage.offering_id).exists()):
+                raise ValidationError("Adopted coverage must match the meeting and faculty scope.")
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Coverage adoption is immutable; use attendance correction revisions.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Coverage adoption history cannot be deleted.")
 
 
 class TeachingMeeting(TimeStampedModel):

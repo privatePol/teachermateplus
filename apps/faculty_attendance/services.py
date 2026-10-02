@@ -68,17 +68,18 @@ def _user_has_scope_evidence(*, user, tenant_id, campus_id, department_id, offer
         user=user,
         is_active=True,
         role__is_active=True,
-        tenant_id__in=[tenant_id, None],
-        campus_id__in=[campus_id, None],
-        department_id__in=[department_id, None],
-    ).exists():
+    ).filter(Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True),
+             Q(campus_id=campus_id) | Q(campus_id__isnull=True),
+             Q(department_id=department_id) | Q(department_id__isnull=True)).exists():
         return True
     if offering_ids and FacultyAssignment.objects.filter(
         faculty_user=user,
-        tenant_id=tenant_id,
-        campus_id=campus_id,
+        offering__tenant_id=tenant_id,
+        offering__campus_id=campus_id,
+        offering__department_id=department_id,
         offering_id__in=offering_ids,
-    ).exists():
+    ).filter(Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True),
+             Q(campus_id=campus_id) | Q(campus_id__isnull=True)).exists():
         return True
     return False
 

@@ -1,10 +1,11 @@
 from django.urls import path
 
-from . import dtr_views, monitoring_views, views
+from . import coverage_views, dtr_views, monitoring_views, views
 
 app_name = "faculty_attendance"
 
 urlpatterns = [
+    path('admin-portal/faculty-attendance/coverage/initialize/', coverage_views.coverage_initialization_view, name='coverage_initialize'),
     path('admin-portal/faculty-attendance/summary/', monitoring_views.term_monitoring_view, name='term_summary'),
     path('admin-portal/faculty-attendance/summary/faculty/<int:faculty_id>/', monitoring_views.term_monitoring_view, name='term_faculty_details'),
     path("admin-portal/faculty-attendance/setup/", views.setup_view, name="setup"),
@@ -14,6 +15,7 @@ urlpatterns = [
     path("admin-portal/faculty-attendance/checklists/corrections/", views.corrections_view, name="corrections"),
     path("admin-portal/faculty-attendance/checklists/arrangement/save/", views.monthly_arrangement_save_view, name="monthly_arrangement_save"),
     path("admin-portal/faculty-attendance/checklists/monthly/print/", views.monthly_print_view, name="monthly_print"),
+    path("admin-portal/faculty-attendance/checklists/monthly/export/", views.monthly_export_view, name="monthly_export"),
     path("admin-portal/faculty-attendance/checklists/sections-taught-together/", views.combined_classes_view, name="combined_classes"),
     path("admin-portal/faculty-attendance/routes/save/", views.route_save_view, name="route_create"),
     path("admin-portal/faculty-attendance/routes/<int:route_id>/save/", views.route_save_view, name="route_update"),

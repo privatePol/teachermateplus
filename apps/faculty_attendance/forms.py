@@ -11,6 +11,9 @@ from .monthly_checklists import DAY_GROUPS, WEEKDAY_NAMES, day_group_for_weekday
 
 
 class MonthlyChecklistForm(forms.Form):
+    paper = forms.ChoiceField(required=False, initial="A4", choices=[(p, p) for p in ("A4", "Letter", "Legal", "Long Bond")], label="Paper size")
+    orientation = forms.ChoiceField(required=False, initial="landscape", choices=[("portrait", "Portrait"), ("landscape", "Landscape")])
+    text_size = forms.ChoiceField(required=False, initial="11", choices=[(s, f"{s} pt") for s in ("11", "12", "14")], label="Print text size")
     academic_year = forms.ModelChoiceField(queryset=AcademicYear.objects.none(), label="Academic year")
     term = forms.ModelChoiceField(queryset=Term.objects.none(), label="Semester")
     month = forms.DateField(
@@ -26,6 +29,8 @@ class MonthlyChecklistForm(forms.Form):
     def __init__(self, *args, academic_year_queryset=None, term_queryset=None, **kwargs):
         if args and args[0] is not None:
             data = args[0].copy()
+            for key, value in (("paper", "A4"), ("orientation", "landscape"), ("text_size", "11")):
+                data.setdefault(key, value)
             if "weekdays" not in data and data.get("day_group") in DAY_GROUPS:
                 days = [str(day) for day in DAY_GROUPS[data["day_group"]][0]]
                 if hasattr(data, "setlist"):

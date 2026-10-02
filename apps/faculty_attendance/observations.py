@@ -70,6 +70,7 @@ def _pending_reconciliation_exists(meeting):
 FACULTY_ATTRIBUTION_RESULT = "SAVED_RESULT"
 FACULTY_ATTRIBUTION_SUBSTITUTION = "SUBSTITUTION"
 FACULTY_ATTRIBUTION_MEETING = "MEETING"
+FACULTY_ATTRIBUTION_ADOPTION = "COVERAGE_ADOPTION"
 FACULTY_ATTRIBUTION_UNRESOLVED = "UNRESOLVED"
 
 
@@ -83,6 +84,9 @@ def resolve_attendance_faculty(meeting, result=None):
         substitution = None
     if substitution is not None:
         return substitution.substitute_faculty, FACULTY_ATTRIBUTION_SUBSTITUTION
+    adoption = getattr(meeting, "coverage_adoption", None)
+    if adoption is not None:
+        return adoption.faculty_user, FACULTY_ATTRIBUTION_ADOPTION
     if meeting.faculty_user_id:
         return meeting.faculty_user, FACULTY_ATTRIBUTION_MEETING
     return None, FACULTY_ATTRIBUTION_UNRESOLVED
@@ -95,7 +99,7 @@ def require_confirmable_meeting_faculty(meeting):
         has_substitution = meeting.substitution is not None
     except MeetingSubstitution.DoesNotExist:
         has_substitution = False
-    if faculty is None or (meeting.unresolved_coverage and not has_substitution):
+    if faculty is None or (meeting.unresolved_coverage and not has_substitution and not hasattr(meeting, "coverage_adoption")):
         raise ValidationError("Meeting has no confirmed faculty coverage or explicit substitution.")
     if _pending_reconciliation_exists(meeting):
         raise ValidationError("Meeting has pending coverage or historical reconciliation and cannot be confirmed.")

@@ -3472,7 +3472,7 @@ class ConfigurableFeatureSettingForm(forms.Form):
     faculty_attendance_enabled = forms.BooleanField(
         required=False,
         label="Enable Faculty Attendance Stage 1",
-        help_text="Enables authorized setup, checker routes, classroom checklists, encoding, reconciliation and print. It does not enable payroll or DTR calculations.",
+        help_text="Enables scoped Attendance/DTR workflows. After first activation, use Monthly Attendance Checklist → Initialize existing faculty coverage to preview accepted assignments and confirm the actual teaching start time; activation alone does not infer coverage dates.",
     )
     faculty_attendance_faculty_visibility_enabled = forms.BooleanField(
         required=False,

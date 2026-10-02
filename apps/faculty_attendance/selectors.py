@@ -12,6 +12,7 @@ from .permissions import VIEW_PERMISSION, can_faculty_view_own_attendance, requi
 def faculty_meeting_history(*, tenant_id, faculty_user_id, start_date=None, end_date=None):
     queryset = TeachingMeeting.objects.filter(tenant_id=tenant_id).filter(
         Q(faculty_user_id=faculty_user_id) | Q(substitution__substitute_faculty_id=faculty_user_id)
+        | Q(coverage_adoption__faculty_user_id=faculty_user_id)
     )
     if start_date:
         queryset = queryset.filter(meeting_date__gte=start_date)
@@ -26,7 +27,8 @@ def coverage_history(*, tenant_id, faculty_user_id):
 
 def unresolved_meetings(*, tenant_id, campus_id=None, department_id=None):
     queryset = TeachingMeeting.objects.filter(tenant_id=tenant_id).filter(
-        Q(unresolved_coverage=True) | Q(reconciliations__status=MeetingReconciliation.Status.PENDING)
+        Q(unresolved_coverage=True, coverage_adoption__isnull=True, substitution__isnull=True)
+        | Q(reconciliations__status=MeetingReconciliation.Status.PENDING)
     )
     if campus_id is not None:
         queryset = queryset.filter(campus_id=campus_id)

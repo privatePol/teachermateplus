@@ -127,7 +127,7 @@ def _faculty_for_date(offering, meeting_date, start_time):
     return "Unassigned / review", "unresolved", "Faculty evidence is missing or conflicting."
 
 
-def build_monthly_rows(*, offerings, year: int, month: int, day_group: str, arrangement=None, combined_classes=(), dated_meetings=()):
+def build_monthly_rows(*, offerings, year: int, month: int, day_group: str, arrangement=None, combined_classes=(), dated_meetings=(), printable_only=False):
     wanted_days = set(DAY_GROUPS[day_group][0])
     dates = month_dates(year, month, day_group)
     rows = []
@@ -149,6 +149,22 @@ def build_monthly_rows(*, offerings, year: int, month: int, day_group: str, arra
             for meeting_date in dates:
                 if meeting_date.weekday() not in weekdays:
                     continue
+                if printable_only:
+                    at = timezone.make_aware(datetime.combine(meeting_date, start))
+                    assigned = any(a.is_active and a.tenant_id in (None, offering.tenant_id)
+                                   and a.campus_id in (None, offering.campus_id)
+                                   for a in offering.faculty_assignments.all())
+                    assigned = assigned or any(c.effective_from <= at and (c.effective_until is None or at < c.effective_until)
+                                               for c in offering.attendance_coverages.all())
+                    if not assigned:
+                        from .observations import resolve_attendance_faculty
+                        assigned = any(m.meeting_date == meeting_date and m.starts_at == at
+                            and timezone.localtime(m.ends_at).time().replace(tzinfo=None) == end
+                            and any(link.offering_id == offering.pk for link in m.offering_links.all())
+                            and resolve_attendance_faculty(m, getattr(m, "attendance_result", None))[0] is not None
+                            for m in dated_meetings)
+                    if not assigned:
+                        continue
                 label, faculty_key, note = _faculty_for_date(offering, meeting_date, start)
                 occurrences[(offering.pk, meeting_date, start, end)] = {
                     "offering": offering, "linked": (offering,), "date": meeting_date, "start": start, "end": end,
@@ -169,10 +185,13 @@ def build_monthly_rows(*, offerings, year: int, month: int, day_group: str, arra
         primary_link = next((link for link in links if link.is_primary), links[0])
         keys = [(offering.pk, meeting.meeting_date, start, end) for offering in linked]
         evidence = [occurrences.get(key) for key in keys]
+        from .observations import resolve_attendance_faculty
+        faculty, _ = resolve_attendance_faculty(meeting, getattr(meeting, "attendance_result", None))
+        if printable_only and faculty is None and not any(evidence):
+            continue
         for key in keys:
             occurrences.pop(key, None)
             exact_consumed.add(key)
-        faculty = getattr(getattr(meeting, "substitution", None), "substitute_faculty", None) or meeting.faculty_user
         label = faculty.full_name if faculty else "Unassigned / review"
         fallback = next((item for item in evidence if item is not None), None)
         room = meeting.location_snapshot.get("room") or meeting.location_snapshot.get("room_text") or (fallback["room"] if fallback else "")
