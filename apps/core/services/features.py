@@ -5,6 +5,10 @@ from apps.tenants.models import SystemSetting
 
 
 class FeatureSettingsService:
+    FACULTY_ATTENDANCE_ENABLED_KEY = "FEATURE_FACULTY_ATTENDANCE_ENABLED"
+    FACULTY_ATTENDANCE_FACULTY_VISIBILITY_ENABLED_KEY = (
+        "FEATURE_FACULTY_ATTENDANCE_FACULTY_VISIBILITY_ENABLED"
+    )
     DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY = "FEATURE_DEPARTMENTAL_EXAM_BUILDER_ENABLED"
     DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED_KEY = (
         "FEATURE_DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED"
@@ -869,6 +873,28 @@ class FeatureSettingsService:
     @classmethod
     def is_departmental_exam_builder_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
         return bool(SystemSettingService.get(cls.DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY, tenant_id=tenant_id, default=default))
+
+    @classmethod
+    def is_faculty_attendance_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_ATTENDANCE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_faculty_attendance_faculty_visibility_enabled(
+        cls, *, tenant_id: int | None, default: bool = False
+    ) -> bool:
+        return cls.is_faculty_attendance_enabled(tenant_id=tenant_id) and bool(
+            SystemSettingService.get(
+                cls.FACULTY_ATTENDANCE_FACULTY_VISIBILITY_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
 
     @classmethod
     def is_contribution_deadline_reminder_tenant_enabled(cls, *, tenant_id: int | None) -> bool:

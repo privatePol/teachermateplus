@@ -12,8 +12,10 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.auditlog.models import AuditLog
+from apps.core.services.features import FeatureSettingsService
+from apps.faculty_attendance.models import CoverageReconciliation, FacultyCoverage
 from apps.rbac.models import Permission, Role, RolePermission, UserPermission, UserRole
-from apps.tenants.models import Campus, Department, Program, Tenant
+from apps.tenants.models import Campus, Department, Program, SystemSetting, Tenant
 
 from .administrative_acceptance import AdministrativeFacultyAssignmentAcceptanceService
 from .models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
@@ -233,6 +235,21 @@ class AdministrativeFacultyAssignmentAcceptanceTests(TestCase):
         second = self._make_offering("SECOND")
         self._make_assignment(second)
         self.assertEqual(self._preview().candidate_count, 2)
+
+    def test_acceptance_with_attendance_enabled_records_pending_setup_without_using_acceptance_time(self):
+        SystemSetting.objects.create(
+            tenant=self.tenant,
+            setting_key=FeatureSettingsService.FACULTY_ATTENDANCE_ENABLED_KEY,
+            setting_value="true",
+            value_type=SystemSetting.ValueType.BOOL,
+        )
+        self._execute()
+        reconciliation = CoverageReconciliation.objects.get(
+            source_reference=f"assignment:{self.assignment.pk}:coverage-setup"
+        )
+        self.assertEqual(reconciliation.event_type, CoverageReconciliation.EventType.ASSIGNMENT_ACCEPTED)
+        self.assertIsNone(reconciliation.effective_at)
+        self.assertFalse(FacultyCoverage.objects.filter(source_assignment=self.assignment).exists())
 
     def test_candidate_hash_is_deterministic(self):
         self.assertEqual(self._preview().candidate_hash, self._preview().candidate_hash)

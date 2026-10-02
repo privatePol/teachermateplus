@@ -20,6 +20,7 @@ from apps.rbac.models import Permission, Role, RolePermission, UserPermission, U
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 from .models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from .services import record_attendance_assignment_event
 
 
 class AdministrativeAcceptanceError(ValidationError):
@@ -243,6 +244,15 @@ class AdministrativeFacultyAssignmentAcceptanceService:
                         },
                         request=None,
                     )
+                )
+                record_attendance_assignment_event(
+                    actor=actor,
+                    assignment=assignment,
+                    event_type="ASSIGNMENT_ACCEPTED",
+                    reason=(
+                        "Assignment accepted administratively; acceptance time is not teaching coverage start, "
+                        "so explicit coverage setup remains required."
+                    ),
                 )
                 changed += 1
 

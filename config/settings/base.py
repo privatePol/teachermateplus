@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "apps.imports.apps.ImportsConfig",
     "apps.grading.apps.GradingConfig",
     "apps.attendance.apps.AttendanceConfig",
+    "apps.faculty_attendance.apps.FacultyAttendanceConfig",
     "apps.notifications.apps.NotificationsConfig",
     "apps.predictions.apps.PredictionsConfig",
     "apps.interventions.apps.InterventionsConfig",

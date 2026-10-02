@@ -3,6 +3,29 @@ from __future__ import annotations
 
 FACULTY_HELP_SECTIONS = [
     {
+        "code": "my-attendance",
+        "title": "My Attendance",
+        "topics": [{
+            "code": "review-my-attendance",
+            "title": "Review My Teaching Attendance",
+            "purpose": "Shows only your own latest published cutoff attendance records and monthly late warning when both tenant switches and your own permission allow it.",
+            "how_to_open": ["From the Faculty Portal navigation, open My Attendance."],
+            "check_first": ["Choose the date range.", "The calendar-month warning uses published meetings only: 3/4 nearing, 4/4 reached, and 5+ exceeded. Partial publication coverage is shown separately and does not suppress a known warning.", "Published records can have a newer labelled publication version after a checker correction.", "A published holiday or suspension closure is no class, not Present or Absent; its pay basis is a dated checker decision.", "Review A/N decimal hours or periods separately from L/E minutes."],
+            "actions": [{"name": "Review published records", "does": "Shows the latest published status, findings snapshot, publication version/history and the 3/4/5+ monthly late warning.", "when": "After the checker explicitly publishes a complete campus cutoff.", "avoid": "Unpublished daily findings are intentionally not shown. Do not interpret the page as a peso computation or automatic absence threshold.", "result": "You can personally settle a concern with the checker, who records and republishes any authorized correction.", "editable": "Read-only; there is no online dispute/request workflow."}],
+            "avoid": "The page does not represent campus time-in/time-out or Accounting submission.",
+            "next_step": "Contact the checker personally for a correction concern.",
+        }, {
+            "code": "review-my-dtr",
+            "title": "Review My Final DTR",
+            "purpose": "Shows your own finalized teaching-hour DTR and its traceable revisions after checker review.",
+            "how_to_open": ["From Faculty Attendance, open My DTR."],
+            "check_first": ["Select the correct campus and cutoff.", "Compare the dated teaching grid, AC admin hours, separate deductions and leave, Basic Hours, and Net Payable Hours.", "L/E details are minutes; aggregate hours are rounded only for display."],
+            "actions": [{"name": "Print DTR", "does": "Opens the saved daily class grid and hour calculation for your finalized DTR, including older finals that saved hours without minute detail.", "when": "After the checker finalizes the published cutoff.", "avoid": "Net Payable Hours are hours, not a peso amount. Contact the checker personally about corrections.", "result": "A printable NCBA record with its campus, publication and DTR revision numbers, and DTR ID.", "editable": "Read-only; only your own DTR is visible."}],
+            "avoid": "An unfinalized draft is not shown as a final Accounting record.",
+            "next_step": "Settle any concern directly with the checker; authorized corrections result in a new publication and DTR revision.",
+        }],
+    },
+    {
         "code": "departmental-exam-contributions",
         "title": "Departmental Exam Builder",
         "topics": [

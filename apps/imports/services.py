@@ -17,6 +17,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.academics.services import record_attendance_assignment_event
 from apps.core.services.audit import AuditService
 from apps.core.services.settings import SystemSettingService
 from apps.accounts.faculty_provisioning import (
@@ -2667,10 +2668,17 @@ class BulkImportService:
         if import_type == ImportBatch.ImportType.COURSE_OFFERINGS:
             return cls._create_course_offering(normalized)
         if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:
-            return cls._create_faculty_assignment(
+            entity_type, assignment = cls._create_faculty_assignment(
                 normalized,
                 confirmation_runtime=confirmation_runtime,
             )
+            record_attendance_assignment_event(
+                actor=actor,
+                assignment=assignment,
+                event_type="ASSIGNMENT_IMPORTED",
+                reason="Imported assignment requires an explicit teaching-coverage effective boundary.",
+            )
+            return entity_type, assignment
         if import_type == ImportBatch.ImportType.ENROLLMENT:
             return cls._create_enrollment(
                 normalized,

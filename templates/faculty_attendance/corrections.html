@@ -1,0 +1,268 @@
+{% extends "admin_portal/base.html" %}
+{% block title %}Attendance Corrections{% endblock %}
+{% block admin_content %}
+<style>
+  .attendance-corrections {
+    --attendance-green: #0f6c3c;
+    --attendance-green-2: #2f8c4f;
+    --attendance-gold: #d6b23d;
+    --attendance-ink: #173b2b;
+    max-width: 1600px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .corrections-hero {
+    background:
+      radial-gradient(circle at top right, rgba(255, 237, 157, 0.3) 0%, rgba(255, 237, 157, 0) 36%),
+      linear-gradient(145deg, var(--attendance-green) 0%, var(--attendance-green-2) 56%, var(--attendance-gold) 100%);
+    border-radius: 1rem;
+    color: #fff;
+    padding: 1.25rem 1.4rem;
+    box-shadow: 0 0.75rem 1.35rem rgba(19, 61, 38, 0.12);
+  }
+  .corrections-hero-copy { max-width: 850px; }
+  .corrections-hero .btn { align-self: flex-start; white-space: normal; }
+  .corrections-alert { max-width: 100%; white-space: normal; }
+  .correction-card,
+  .history-card {
+    min-width: 0;
+    border: 1px solid #d8e3da;
+    border-radius: 0.9rem;
+    overflow: hidden;
+    box-shadow: 0 0.55rem 1.1rem rgba(20, 69, 42, 0.07);
+  }
+  .correction-card .card-header,
+  .history-card .card-header {
+    border-bottom: 1px solid #d8e3da;
+    background: linear-gradient(90deg, #e5f2e7 0%, #f5f7dd 72%, #f8eab7 100%);
+    color: var(--attendance-ink);
+    font-weight: 700;
+    padding: 0.8rem 1rem;
+  }
+  .correction-card .card-body { min-width: 0; padding: 1rem; }
+  .correction-card-copy,
+  .history-card-copy {
+    color: #5e7063;
+    line-height: 1.45;
+    margin-bottom: 1rem;
+    max-width: 75ch;
+  }
+  .correction-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem 1rem;
+  }
+  .correction-field { min-width: 0; }
+  .correction-field-wide,
+  .correction-form-errors,
+  .correction-form-actions { grid-column: 1 / -1; }
+  .correction-field label {
+    display: block;
+    color: #244a32;
+    font-size: 0.88rem;
+    font-weight: 700;
+    margin-bottom: 0.35rem;
+  }
+  .correction-required { color: #a13d2d; margin-left: 0.15rem; }
+  .attendance-corrections input:not([type="hidden"]),
+  .attendance-corrections select,
+  .attendance-corrections textarea {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-height: 2.45rem;
+    border: 1px solid #b8c9bc;
+    border-radius: 0.45rem;
+    background-color: #fff;
+    color: #1e3024;
+    padding: 0.48rem 0.65rem;
+  }
+  .attendance-corrections select[multiple] { min-height: 7.5rem; }
+  .attendance-corrections textarea { min-height: 5.5rem; resize: vertical; }
+  .attendance-corrections input:not([type="hidden"]):focus,
+  .attendance-corrections select:focus,
+  .attendance-corrections textarea:focus {
+    border-color: #277947;
+    box-shadow: 0 0 0 0.2rem rgba(39, 121, 71, 0.18);
+    outline: 0;
+  }
+  .attendance-corrections :focus-visible { outline: 3px solid #1d63d5 !important; outline-offset: 2px; }
+  .correction-field.has-errors input,
+  .correction-field.has-errors select,
+  .correction-field.has-errors textarea { border-color: #b02a37; }
+  .correction-field-errors,
+  .correction-form-errors { color: #842029; font-size: 0.84rem; }
+  .correction-form-errors {
+    border: 1px solid #f1aeb5;
+    border-radius: 0.45rem;
+    background: #f8d7da;
+    padding: 0.65rem 0.75rem;
+  }
+  .correction-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 0.15rem;
+  }
+  .history-card-copy {
+    margin: 0;
+    padding: 0.8rem 1rem;
+    max-width: none;
+    border-bottom: 1px solid #e4ebe5;
+    background: #fbfdfb;
+  }
+  .history-scroll { max-width: 100%; overflow-x: auto; }
+  .history-table { min-width: 850px; table-layout: fixed; color: #213428; }
+  .history-table th {
+    background: #f2f6f2;
+    color: #4c6151;
+    font-size: 0.78rem;
+    letter-spacing: 0.035em;
+    text-transform: uppercase;
+    white-space: normal;
+  }
+  .history-table th,
+  .history-table td {
+    border-color: #dbe5dc;
+    padding: 0.7rem 0.8rem;
+    vertical-align: top;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .history-table tbody tr:nth-child(even) td { background: #f8fbf8; }
+  .history-table tbody tr:hover td { background: #eef6ef; }
+  .history-offering { width: 16%; }
+  .history-source { width: 18%; }
+  .history-revision { width: 13%; }
+  .history-interpretation { width: 29%; }
+  .history-reason { width: 24%; }
+  @media (max-width: 767.98px) {
+    .corrections-hero { padding: 1rem; }
+    .correction-form-grid { grid-template-columns: minmax(0, 1fr); }
+    .correction-field-wide,
+    .correction-form-errors,
+    .correction-form-actions { grid-column: 1; }
+    .correction-form-actions .btn { width: 100%; }
+  }
+</style>
+<div class="container-fluid py-2 attendance-corrections">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb small mb-0">
+      <li class="breadcrumb-item"><a href="{% url 'faculty_attendance:checklist' %}">Monthly Attendance Checklist</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Attendance Corrections</li>
+    </ol>
+  </nav>
+
+  <header class="corrections-hero mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+      <div class="corrections-hero-copy">
+        <h1 class="h3 mb-2">Attendance Corrections</h1>
+        <p class="mb-0">Optional exception tools for a specific attendance schedule interpretation, faculty coverage period, dated meeting, or substitute. Ordinary monthly checklist printing does not require action here.</p>
+      </div>
+      <a class="btn btn-light" href="{% url 'faculty_attendance:checklist' %}">Back to Monthly Attendance Checklist</a>
+    </div>
+  </header>
+
+  {% if unresolved or coverage_reconciliations %}
+    <div class="alert alert-warning corrections-alert" role="alert">
+      <strong>Changes need review.</strong> An affected attendance record cannot be confirmed using guessed faculty or schedule details.
+      <a href="{% url 'faculty_attendance:reconciliation' %}">Open Changes Needing Review</a>.
+    </div>
+  {% endif %}
+
+  <div class="row g-3">
+    {% if can_manage_schedules %}
+      <div class="col-12 col-xxl-6">
+        <section class="card correction-card h-100" aria-labelledby="schedule-correction-title">
+          <div class="card-header" id="schedule-correction-title">Correct a schedule exception</div>
+          <div class="card-body">
+            <p class="correction-card-copy">Course Offerings remain the academic source. Use this only to preserve a dated attendance interpretation for an ambiguous schedule or exception; correct the Course Offering itself when its academic schedule or room is wrong.</p>
+            <form method="post" class="correction-form-grid">
+              {% csrf_token %}<input type="hidden" name="action" value="schedule">
+              {% include "faculty_attendance/_correction_form_fields.html" with form=schedule_form %}
+              <div class="correction-form-actions"><button type="submit" class="btn btn-success">Save Schedule Correction</button></div>
+            </form>
+          </div>
+        </section>
+      </div>
+    {% endif %}
+    {% if can_manage_coverage %}
+      <div class="col-12 col-xxl-6">
+        <section class="card correction-card h-100" aria-labelledby="coverage-correction-title">
+          <div class="card-header" id="coverage-correction-title">Correct faculty coverage</div>
+          <div class="card-body">
+            <p class="correction-card-copy">Use explicit effective dates to preserve outgoing and incoming faculty history without changing the Course Offering assignment.</p>
+            <form method="post" class="correction-form-grid">
+              {% csrf_token %}<input type="hidden" name="action" value="coverage">
+              {% include "faculty_attendance/_correction_form_fields.html" with form=coverage_form %}
+              <div class="correction-form-actions"><button type="submit" class="btn btn-success">Save Faculty Coverage</button></div>
+            </form>
+          </div>
+        </section>
+      </div>
+    {% endif %}
+    {% if can_manage_meetings %}
+      <div class="col-12 col-xxl-6">
+        <section class="card correction-card h-100" aria-labelledby="dated-meeting-title">
+          <div class="card-header" id="dated-meeting-title">Record one dated attendance meeting</div>
+          <div class="card-body">
+            <p class="correction-card-copy">Use only for a specific dated exception. Selecting sections here is explicit and is never inferred from matching faculty or time.</p>
+            <form method="post" class="correction-form-grid">
+              {% csrf_token %}<input type="hidden" name="action" value="meeting">
+              {% include "faculty_attendance/_correction_form_fields.html" with form=meeting_form %}
+              <div class="correction-form-actions"><button type="submit" class="btn btn-success">Save Dated Meeting</button></div>
+            </form>
+          </div>
+        </section>
+      </div>
+    {% endif %}
+    {% if can_manage_substitutions %}
+      <div class="col-12 col-xxl-6">
+        <section class="card correction-card h-100" aria-labelledby="substitution-title">
+          <div class="card-header" id="substitution-title">Record a one-meeting substitute</div>
+          <div class="card-body">
+            <p class="correction-card-copy">Use for one identified meeting only. This does not replace the permanent faculty assignment.</p>
+            <form method="post" class="correction-form-grid">
+              {% csrf_token %}<input type="hidden" name="action" value="substitution">
+              {% include "faculty_attendance/_correction_form_fields.html" with form=substitution_form %}
+              <div class="correction-form-actions"><button type="submit" class="btn btn-success">Save Substitution</button></div>
+            </form>
+          </div>
+        </section>
+      </div>
+    {% endif %}
+  </div>
+
+  <section class="card history-card mt-3" aria-labelledby="schedule-history-title">
+    <div class="card-header" id="schedule-history-title">Recorded attendance schedule interpretations</div>
+    <p class="history-card-copy">These dated attendance records preserve interpretation history. They do not update Course Offerings or automatically replace the schedule and room shown on the monthly checklist.</p>
+    <div class="table-responsive history-scroll">
+      <table class="table table-sm mb-0 history-table">
+        <thead><tr><th class="history-offering">Offering</th><th class="history-source">Course Offering text</th><th class="history-revision">Revision / effective dates</th><th class="history-interpretation">Attendance interpretation</th><th class="history-reason">Reason</th></tr></thead>
+        <tbody>
+          {% for version in versions %}
+            <tr><td>{{ version.offering }}</td><td>{{ version.original_text|default:"(blank)" }}</td><td><strong>Revision {{ version.version_number }}</strong><br>{{ version.effective_from }}{% if version.effective_until %}&ndash;{{ version.effective_until }}{% else %} onward{% endif %}</td><td>{% for slot in version.slots.all %}{{ slot.get_weekday_display }} {{ slot.start_time }}&ndash;{{ slot.end_time }} &middot; {{ slot.building }} {{ slot.floor }} {{ slot.room }}<br>{% empty %}No confirmed schedule details{% endfor %}</td><td>{{ version.correction_reason|default:"No reason recorded" }}</td></tr>
+          {% empty %}
+            <tr><td colspan="5" class="text-muted">No attendance schedule interpretations recorded.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card history-card mt-3" aria-labelledby="coverage-history-title">
+    <div class="card-header" id="coverage-history-title">Faculty coverage history</div>
+    <div class="table-responsive history-scroll">
+      <table class="table table-sm mb-0 history-table">
+        <thead><tr><th>Offering</th><th>Faculty</th><th>Effective coverage</th><th>Reason</th></tr></thead>
+        <tbody>
+          {% for row in coverages %}
+            <tr><td>{{ row.offering.course.code }}</td><td>{{ row.faculty_user.full_name }}</td><td>{{ row.effective_from }} to {{ row.effective_until|default:"open-ended" }}</td><td>{{ row.reason }}</td></tr>
+          {% empty %}
+            <tr><td colspan="4" class="text-muted">No faculty coverage history recorded.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -608,6 +608,38 @@ def _assignment_snapshot(instance):
     return json.loads(json.dumps(payload, cls=DjangoJSONEncoder))
 
 
+def record_attendance_assignment_event(
+    *,
+    actor,
+    assignment,
+    event_type,
+    reason,
+    source_reference=None,
+    prior_faculty=None,
+    proposed_faculty=None,
+    effective_at=None,
+    apply_when_authorized=False,
+    clear_coverage=False,
+):
+    tenant_id = assignment.tenant_id or assignment.offering.tenant_id
+    if not FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=tenant_id):
+        return None
+    from apps.faculty_attendance.academic_integration import AcademicCoverageIntegrationService
+
+    return AcademicCoverageIntegrationService.record_assignment_event(
+        actor=actor,
+        offering=assignment.offering,
+        event_type=event_type,
+        source_reference=source_reference or f"assignment:{assignment.pk}:coverage-setup",
+        reason=reason,
+        source_assignment=assignment,
+        prior_faculty=prior_faculty,
+        proposed_faculty=(None if clear_coverage else (proposed_faculty or assignment.faculty_user)),
+        effective_at=effective_at,
+        apply_when_authorized=apply_when_authorized,
+    )
+
+
 class FacultyAssignmentSafetyService:
     KEEP_OLD_ASSIGNMENT_TYPES = {
         FacultyAssignmentReplacementLog.ReplacementType.TEMPORARY,
@@ -668,6 +700,7 @@ class FacultyAssignmentSafetyService:
         remarks,
         processed_by_user,
         request=None,
+        attendance_effective_at=None,
     ):
         batch_reference = cls.generate_batch_reference()
         keep_old = replacement_type in cls.KEEP_OLD_ASSIGNMENT_TYPES
@@ -796,5 +829,17 @@ class FacultyAssignmentSafetyService:
                 metadata={"event": "faculty_replacement_processed", "batch_reference": batch_reference},
                 request=request,
             )
+            if not keep_old:
+                record_attendance_assignment_event(
+                    actor=processed_by_user,
+                    assignment=new_assignment,
+                    event_type="PERMANENT_REPLACEMENT",
+                    reason=remarks,
+                    source_reference=f"faculty-replacement:{log.pk}",
+                    prior_faculty=current.faculty_user,
+                    proposed_faculty=replacement_faculty,
+                    effective_at=attendance_effective_at,
+                    apply_when_authorized=True,
+                )
             logs.append(log)
         return logs

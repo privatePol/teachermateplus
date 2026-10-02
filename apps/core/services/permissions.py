@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable, Set
 
+from django.db.models import Q
+
 from apps.rbac.models import Permission, UserPermission, UserRole
 
 
@@ -10,18 +12,18 @@ class PermissionService:
     def _scoped_user_roles(user, tenant_id: int | None = None, campus_id: int | None = None):
         roles_qs = UserRole.objects.filter(user=user, is_active=True, role__is_active=True)
         if tenant_id is not None:
-            roles_qs = roles_qs.filter(tenant_id__in=[tenant_id, None])
+            roles_qs = roles_qs.filter(Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True))
         if campus_id is not None:
-            roles_qs = roles_qs.filter(campus_id__in=[campus_id, None])
+            roles_qs = roles_qs.filter(Q(campus_id=campus_id) | Q(campus_id__isnull=True))
         return roles_qs
 
     @staticmethod
     def _scoped_user_permissions(user, tenant_id: int | None = None, campus_id: int | None = None):
         perms_qs = UserPermission.objects.filter(user=user, permission__is_active=True)
         if tenant_id is not None:
-            perms_qs = perms_qs.filter(tenant_id__in=[tenant_id, None])
+            perms_qs = perms_qs.filter(Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True))
         if campus_id is not None:
-            perms_qs = perms_qs.filter(campus_id__in=[campus_id, None])
+            perms_qs = perms_qs.filter(Q(campus_id=campus_id) | Q(campus_id__isnull=True))
         return perms_qs
 
     @classmethod

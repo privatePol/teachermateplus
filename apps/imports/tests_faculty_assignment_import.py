@@ -17,10 +17,12 @@ from apps.academics.models import (
 )
 from apps.admin_portal.forms import FacultyAssignmentForm, FacultyAssignmentReplacementForm
 from apps.auditlog.models import AuditLog
+from apps.core.services.features import FeatureSettingsService
+from apps.faculty_attendance.models import CoverageReconciliation
 from apps.imports.models import ImportBatch, ImportBatchRow
 from apps.imports.services import BulkImportService, ImportTemplateService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
-from apps.tenants.models import Campus, Department, Program, Tenant
+from apps.tenants.models import Campus, Department, Program, SystemSetting, Tenant
 
 
 User = get_user_model()
@@ -190,6 +192,26 @@ class FacultyAssignmentImportStatusTests(TestCase):
                 entity_id=str(assignment.id),
             ).exists()
         )
+
+    def test_attendance_enabled_import_creates_pending_coverage_setup_without_guessing_date(self):
+        SystemSetting.objects.create(
+            tenant=self.tenant,
+            setting_key=FeatureSettingsService.FACULTY_ATTENDANCE_ENABLED_KEY,
+            setting_value="true",
+            value_type=SystemSetting.ValueType.BOOL,
+        )
+        batch = self._upload(self._row(self.active_faculty.username))
+        BulkImportService.confirm_batch(batch=batch, actor=self.actor)
+        assignment = FacultyAssignment.objects.get(
+            offering=self.offering,
+            faculty_user=self.active_faculty,
+        )
+        reconciliation = CoverageReconciliation.objects.get(
+            source_reference=f"assignment:{assignment.pk}:coverage-setup"
+        )
+        self.assertEqual(reconciliation.event_type, CoverageReconciliation.EventType.ASSIGNMENT_IMPORTED)
+        self.assertEqual(reconciliation.status, CoverageReconciliation.Status.PENDING)
+        self.assertIsNone(reconciliation.effective_at)
 
     def test_confirmation_rejects_offering_scope_drift_without_assignment_or_success_audit(self):
         batch = self._upload(self._row(self.active_faculty.username))

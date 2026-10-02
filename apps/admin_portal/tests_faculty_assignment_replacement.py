@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.conf import settings
@@ -16,7 +16,10 @@ from apps.academics.models import (
     Section,
     Term,
 )
+from apps.core.services.features import FeatureSettingsService
 from apps.enrollment.models import Enrollment
+from apps.faculty_attendance.models import CoverageReconciliation, FacultyCoverage
+from apps.faculty_attendance.permissions import MANAGE_COVERAGE_PERMISSION, RECONCILE_PERMISSION
 from apps.grading.models import (
     CourseTemplateAssignment,
     GradeActivity,
@@ -32,7 +35,7 @@ from apps.grading.models import (
 )
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
-from apps.tenants.models import Campus, Department, Program, Tenant
+from apps.tenants.models import Campus, Department, Program, SystemSetting, Tenant
 
 
 class FacultyAssignmentReplacementTests(TestCase):
@@ -396,6 +399,98 @@ class FacultyAssignmentReplacementTests(TestCase):
         self.assertContains(response, "Use Replace Faculty")
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.faculty_user, self.current_faculty)
+
+    def test_module_off_unassignment_preserves_existing_workflow_without_attendance_rows(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("admin_portal:faculty_assignment_unassign"),
+            {
+                "faculty_user_id": self.current_faculty.id,
+                "assignment_ids": [str(self.assignment.id)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assignment.refresh_from_db()
+        self.assertFalse(self.assignment.is_active)
+        self.assertFalse(CoverageReconciliation.objects.exists())
+
+    def test_unassignment_effective_boundary_closes_coverage_through_authorized_handler(self):
+        SystemSetting.objects.create(
+            tenant=self.tenant,
+            setting_key=FeatureSettingsService.FACULTY_ATTENDANCE_ENABLED_KEY,
+            setting_value="true",
+            value_type=SystemSetting.ValueType.BOOL,
+        )
+        admin_role = UserRole.objects.get(user=self.admin_user).role
+        for code in (MANAGE_COVERAGE_PERMISSION, RECONCILE_PERMISSION):
+            RolePermission.objects.get_or_create(role=admin_role, permission=Permission.objects.get(code=code))
+        coverage = FacultyCoverage.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            offering=self.offering,
+            faculty_user=self.current_faculty,
+            source_assignment=self.assignment,
+            effective_from=timezone.make_aware(datetime(2025, 11, 1, 8, 0)),
+            reason="Initial explicit coverage",
+            created_by=self.admin_user,
+        )
+        boundary = timezone.make_aware(datetime(2026, 2, 1, 8, 0))
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("admin_portal:faculty_assignment_unassign"),
+            {
+                "faculty_user_id": self.current_faculty.id,
+                "assignment_ids": [str(self.assignment.id)],
+                "attendance_effective_at": "2026-02-01T08:00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        coverage.refresh_from_db()
+        reconciliation = CoverageReconciliation.objects.get(source_assignment=self.assignment)
+        self.assertEqual(coverage.effective_until, boundary)
+        self.assertEqual(reconciliation.effective_at, boundary)
+        self.assertEqual(reconciliation.status, CoverageReconciliation.Status.RESOLVED)
+
+    def test_direct_reactivation_records_pending_attendance_setup_without_guessing_boundary(self):
+        SystemSetting.objects.create(
+            tenant=self.tenant,
+            setting_key=FeatureSettingsService.FACULTY_ATTENDANCE_ENABLED_KEY,
+            setting_value="true",
+            value_type=SystemSetting.ValueType.BOOL,
+        )
+        self.assignment.is_active = False
+        self.assignment.is_primary = False
+        self.assignment.save(update_fields=["is_active", "is_primary", "updated_at"])
+        create_permission, _ = Permission.objects.get_or_create(
+            code="faculty_assignments.create",
+            defaults={"module": "faculty_assignments", "action": "create"},
+        )
+        RolePermission.objects.get_or_create(
+            role=UserRole.objects.get(user=self.admin_user).role,
+            permission=create_permission,
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("admin_portal:faculty_assignment_assign"),
+            {
+                "faculty_user_id": self.current_faculty.id,
+                "offering_ids": [str(self.offering.id)],
+                "assignment_note": "Reactivated assignment",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        reconciliation = CoverageReconciliation.objects.get(source_assignment=self.assignment)
+        self.assertEqual(reconciliation.source_reference, f"assignment:{self.assignment.pk}:coverage-setup")
+        self.assertEqual(reconciliation.event_type, CoverageReconciliation.EventType.ASSIGNMENT_REACTIVATED)
+        self.assertEqual(reconciliation.status, CoverageReconciliation.Status.PENDING)
+        self.assertIsNone(reconciliation.effective_at)
 
     def test_audit_log_stores_before_after_and_batch_reference(self):
         self._post_replacement()

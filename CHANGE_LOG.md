@@ -1,3 +1,108 @@
+## Focused attendance monitoring remediation - 2026-10-02
+
+- Effective RBAC now matches explicit scope OR NULL, preserving global/tenant/campus direct-DENY over exact-campus allows. Attendance department checks use the same nullable-scope convention; exact-assignment contributor eligibility remains unchanged.
+- AY/term monitoring keeps legitimate disjoint same-day slots expected/unverified; overlapping changed times still require reconciliation. Latest authorized publication occurrence is selected before faculty ownership, so published A-to-B attribution corrections no longer leave A with an obsolete warning.
+- New migration 0018 adds a dedicated campus notice mutex. Result/closure writes acquire it before source locks; monthly recomputation uses current locking reads and shares the source transaction. Failure rolls back the source revision, rather than committing stale notice state. Campus-wide serialization is deliberately coarser than faculty/month.
+- One clean consolidated disposable run: 53 cases, 51 passed, zero failed, two real-InnoDB races skipped (no verified isolated InnoDB runtime). No persistent migration, visibility-switch change, runtime action or Git publication.
+
+## AY/Term attendance monitoring - 2026-10-02
+
+- Added scoped provisional faculty summary/details: expected schedule versus verified teaching, separate leave/admin/paid closures, latest verified meeting and unverified workload. Historical attribution and explicit combined meetings are preserved; summaries do not create meetings or payable finals.
+- Published faculty late warnings now show 3/4 and 4/4 during an ongoing calendar month; publication coverage remains a separate status. Campus-scoped staff A/N notices and four-count follow-up are correction-aware, deduplicated and reauthorized on delivery; no absence limit or automatic memo/penalty.
+- Additive migration 0017 creates notice state and an attendance-view-gated Admin menu; no role grants, historical backfill, persistent migration or runtime restart is included.
+
+## Monthly checklist contextual tips - 2026-10-02
+
+- Day-selection instructions now appear in a compact accessible tips disclosure. Selected-day feedback uses a green callout; semester validation uses a red callout beside the field. No form, schedule or attendance rules changed.
+
+## Checklist day selection UX correction - 2026-10-02
+
+- Day selection opens as an overlay with proper checkbox checkmarks and selected-row highlighting. Add selected days confirms/closes the list without loading schedules; Show Checklist submits the selection. Escape/outside click and normal JavaScript-free submission are supported.
+
+## Flexible monthly checklist weekdays - 2026-10-02
+
+- Monthly Checklist accepts any Monday–Sunday selection through accessible checkboxes and Add selected days / Show Checklist. Existing MW/TTH/F/S arrangements and links remain compatible; equivalent day sets reuse their saved order. Large print selections use date batches of at most 12 columns. Arrangement submission preserves multi-day row identities as a JSON list. No academic schedule or attendance/DTR calculation change; no schema migration.
+
+## Faculty Attendance DTR validation, stale-removal, and optional-note UX - 2026-10-01
+
+- Print final DTR now opens a new tab safely; successful AJAX Remove normalizes its query history, and stale removal GET links render a styled DTR recovery notice while stale POST remains revision-checked and denied.
+- Date-range and AC-assignment errors render beside their fields in high-contrast styling. An unchanged saved final is informational; Finalize is offered only after a reviewable change, while the finalization attestation remains required.
+- All Faculty Attendance/DTR reason and note fields may be blank and are stored as blank audit/revision metadata; no fabricated reason is inserted. Decision values, removal confirmation, finalization attestation, audit, CSRF, scope and revision guards remain.
+- Migrations 0015 and 0016 mark existing reason fields blank-allowed in model/form validation. No new columns or data backfill/conversion are intended; persistent DB application is not included.
+
+## Faculty Attendance checker-entry removal - 2026-10-01
+
+- The DTR checker can Remove the latest active scheduled AC hour, leave credit, or other deduction with an optional note and explicit confirmation. Remove saves an audited zero-hour entry revision, never hard-deletes history, labels the current logical entry Active or Removed, and puts earlier entry revisions in expandable history. A saved Final DTR remains immutable; checker review and a new final revision are required after removal.
+
+## Faculty Attendance checker DTR AJAX workflow - 2026-10-01
+
+- Checker cutoff-summary faculty selection, dated DTR entry save/correction, and finalization now progressively enhance with scoped AJAX responses. The same server-rendered forms remain available as normal submit fallbacks and retain CSRF, validation, direct-DENY, reasons, and revision safeguards.
+- The selected faculty card receives focus after an update; a keyboard-accessible floating return button restores focus to the checker summary. Date errors now appear beside the date field with the exact inclusive cutoff range and retained form values. No DTR schema, calculation, permission, or migration changed.
+- AJAX DTR forms now read their literal route attribute so hidden `name="action"` controls cannot produce an invalid request URL. A non-JSON or network failure is a visible no-save-confirmation error; it never reports that a record was saved.
+
+## Faculty Attendance final-DTR print compatibility - 2026-10-01
+
+- Historical final DTRs without newer minute/count fields print their saved class detail and hours instead of a false empty teaching schedule; print-only labels do not recalculate from current attendance or alter the saved snapshot.
+- L/E remain individually visible in minutes, while their combined minute deduction is rounded once for the printed gross-hours explanation (for example, 1 + 1 minutes = 0.03 hours). No DTR calculation, model, or migration changed.
+
+## Faculty Attendance DTR closure and overlap remediation - 2026-10-01
+
+- Added audited per-meeting holiday/suspension closure decisions with an explicit checker-verified regular or part-time pay basis. A closed class is published as a closure, never as Present or Absent. Regular faculty receive the scheduled teaching hours; part-time no-work classes receive zero credited hours while retaining the scheduled grid. Revocation/corrections retain decision revisions and require an updated publication.
+- Mixed A/N and other missed findings now block DTR finalization until the checker records dated, non-overlapping actual clock intervals with a reason. The original attendance finding and monthly lateness frequency remain unchanged; DTR deductions use only verified actual missed spans.
+- Empty-cutoff DTR GET and POST enforce effective `dtr_view` and direct-DENY. Individual print now separates teaching, dated AC office hours, and deductions/leave; L/E detail is in minutes and two-decimal aggregate display includes a labelled rounding bridge only when necessary. Additive migration 0014 adds closure and interval-decision history and a nullable publication closure link. No automatic role grant or persistent-data backfill.
+
+## Faculty Attendance teaching-hours DTR - 2026-10-01
+
+- Added scoped checker DTR preview, dated AC office hours, VL/SL/EL deduction offsets, other deductions, authoritative early-dismissal correction, individual print, whole-campus checker summary, AC department summary, and faculty-owned final DTR access.
+- Basic Hours are scheduled teaching plus dated admin hours. Gross deductions are A/N decimal hours, exact late/early minutes converted to hours, and authorized other hours; leave is allocated only against its dated deduction. Totals are displayed to two decimals, without peso rates. Combined meetings are counted once.
+- Finalization requires an exact published cutoff, no stale attendance or unresolved calculation blockers, an explicit checker review attestation and reason. Every final DTR and manual entry correction creates a new auditable revision; previous publications and DTRs remain intact. Legacy period-only findings block hours computation until authorized correction. Added migrations 0012 (two DTR models) and 0013 (scoped permissions/menu entries), with no automatic role grants.
+
+## Faculty Attendance historical coverage cutoff recovery - 2026-10-01
+
+- Cutoff readiness now shares the existing result-confirmation coverage check: an audited exact-meeting substitute can satisfy an immutable historical `unresolved_coverage` warning, but only with explicitly verified attendance attributed to that substitute. Substitution alone never confirms attendance.
+- Pending meeting/coverage reconciliation, absent dated coverage, conflicting result attribution, scoped authorization, and direct DENY still block. Original meeting warnings/snapshots, substitution audit, and all result revisions remain unchanged. No schema or ATT108 source/parser change.
+
+## Faculty Attendance exact-date combined-meeting reuse - 2026-10-01
+
+- Daily encoding and complete-campus cutoff review now recognize one existing explicit multi-section `TeachingMeeting` on its exact date/time without requiring or creating a recurring Sections Taught Together definition. Its linked sections appear once, and its existing meeting ID, snapshots, coverage/substitution state, results, observations, and revisions are reused unchanged.
+- Folding remains fail-closed: every linked offering must be inside the selected authorized scope and have matching recognizable date/time/room source evidence. Competing dated/recurring memberships, partial scope, room/source conflicts, unresolved coverage, and reconciliation remain visible blockers; other dates and separate same-day slots stay independent.
+
+## Faculty Attendance daily blocker presentation and compatible-source reuse - 2026-10-01
+
+- Replaced per-record daily-encoding warning flashes with one inline, responsive `Records needing attention` panel. Each item keeps its class or linked sections, affected date, readable reason, and only an authorized correction/review link; repeated validation errors are normalized and deduplicated without changing global portal messages.
+- Daily preview now performs a read-only materialization preflight. One effective confirmed attendance schedule may be reused only when its Course Offering text, complete parsed slot set, requested date, and room all match; exact existing dated meetings (including explicit combined meetings) are reused without rewriting their source or occurrence provenance. Competing, conflicting, ambiguous, unresolved-coverage, and pending-reconciliation evidence remains blocked. No schema change was made.
+
+## Faculty Attendance daily encoding and immutable cutoff publication - 2026-09-30
+
+- Added an authorized daily encoding path from a selected Monthly Attendance Checklist date. Recognizable Course Offering schedule/room evidence is materialized into dated, versioned attendance snapshots only when encoding starts; ambiguous text, unresolved source changes, and unresolved coverage remain visible blockers rather than being guessed. Existing paper checklist, route arrangement, corrections, and combined-section behavior are preserved.
+- Added complete-campus, inclusive date-range cutoff review and immutable publication snapshots. Publication requires every expected campus meeting to be materialized, explicitly verified, attributed, and reconciled, and requires publish authority for every included department. A correction never rewrites a prior publication: the checker republishes a versioned successor. Faculty My Attendance now shows only the latest published owned snapshot and its revision history, with separately calculated 3/4/5+ calendar-month late warnings.
+- Added migrations `0010_daily_encoding_cutoff_publication.py` and `0011_seed_cutoff_publication_permission.py`. They are additive, provide no feature enablement or role grant, and have been applied only to disposable test databases in this gate. DTR/payroll, leave/holiday/suspension treatment, exports, and online disputes remain out of scope.
+
+## Changes Needing Review styling - 2026-09-30
+
+- Restyled the permission-scoped Faculty Attendance Changes Needing Review page in the existing Admin Portal shell: it now uses the established green-to-yellow header and card accents, responsive labelled controls, keyboard-visible focus, wrapped reconciliation details, accessible snapshot disclosure, and clear empty states. Existing reconciliation actions, scope/permission enforcement, decisions, validation, audit behavior, and historical snapshots are unchanged.
+
+## Attendance Corrections presentation and schedule-source clarification - 2026-09-30
+
+- Restyled the permission-scoped Attendance Corrections page with the existing TMP Admin shell and green-to-yellow treatment, responsive two-column form grids, consistently sized controls, visible keyboard focus, full-width reason fields, contained explanatory text, and independently scrolling history tables with readable padding and wrapping. Existing POST actions, validation, CSRF, permissions, audit behavior, and submitted-value preservation are unchanged.
+- Clarified in the page and Admin guide that Course Offerings remain authoritative for current academic schedule and room. Stored attendance schedule versions are dated interpretations/history and do not automatically replace recognizable Course Offering values on monthly screen or print output. No schedule-precedence, checklist, print, arrangement, meeting, reconciliation, or database behavior changed in this gate.
+
+## Faculty Attendance monthly checklist consolidation - 2026-09-25
+
+- Made Monthly Attendance Checklist the primary attendance entry in the normal Admin Portal shell, with existing tenant/campus/academic filters, Course Offerings source wording, saved classroom order controls, clear Save Arrangement versus Print Checklist actions, and explicit blank-unverified versus `N/A` cells. Attendance Corrections and Changes Needing Review remain permission-scoped secondary pages; Sections Taught Together remains optional.
+- Added migration `0009_consolidate_attendance_navigation.py` to retire only the canonical legacy setup menu, relabel the canonical checklist and reconciliation entries, and preserve customized/unrelated navigation. Legacy setup GETs redirect to the monthly checklist with supported filters; POST returns 405 and never replays a mutation.
+- Reworked the monthly print view for tenant/campus identity, exact selected dates, concise A/N/L/E and L+E guidance, separate Course/Section/Faculty/Room columns, writing space, repeated table headings, shared notes, and landscape A4 printing without portal chrome. No DTR, cutoff/publication, payroll, or attendance-policy behavior changed.
+
+## Faculty Attendance checker and faculty UI - 2026-09-24
+
+- Added default-off, permission-backed attendance setup, classroom checklist preparation, owner-scoped saved checker routes, frozen checking rounds, print-specific checklists, A/N/L/E encoding, exact present confirmation, reconciliation, revision history, and read-only Faculty My Attendance. Route order is stored separately from academic schedules, retains hidden entries during filtered saves, appends unmatched future schedule slots deterministically, and is snapshotted into each round.
+- Added Configuration Management controls for the master module and separate faculty visibility, plus Admin/Faculty navigation and ungranted route/print permissions. No DTR/payroll, leave/admin/calendar credit, Accounting submission, general export, NFC/offline, or online dispute behavior is included.
+
+## Faculty Attendance reassignment and observations - 2026-09-24
+
+- Integrated the default-off attendance foundation with permanent replacement, assignment/reactivation, unassignment, administrative acceptance, and import paths through explicit pending/resolved coverage reconciliation. Effective boundaries are explicit Manila date-times; assignment and acceptance timestamps are never treated as teaching start dates. Historical meeting snapshots and inactive-faculty attribution remain intact.
+- Added frozen checking rounds, idempotent checker observations, partial A/N absence, simultaneous L/E findings, exact reviewed-row present confirmation, current authoritative results with correction revisions, explicit attribution reconciliation, and scoped date-range/monthly tardiness selectors. Added ungranted encode/correct permissions and migrations `0003`/`0004`. Checklist UI, DTR/payroll policy, reports, printing, navigation, and calendar/leave treatment remain out of scope.
+
 ## Release Center closed-cycle context follow-up - 2026-09-20
 
 - Restored authorized Answer Key View details for Past / Closed cycles: exact target lookup now skips the operational Open-cycle list filter while retaining every target permission and scope check. Details and review links keep the validated cycle, tab, and campus navigation context. Confirming a bulk release in either tab returns to the selected cycle. An invalid Answer Key review also keeps the posted campus in Back navigation when that campus is an authorized release target; unknown or unauthorized campuses are omitted. Access-denied detail modals now explain the denial instead of offering only Retry. No model or migration change is required.
@@ -1378,3 +1483,46 @@ For every merged change:
 - A campus-scoped request now shows only its own legacy Questionnaire coverage, effective status, history, and revoke control even when the old release snapshot includes other campuses. Individual review labels retired coverage as not currently released.
 - Signed Questionnaire and Answer Key confirmations now stamp newly created releases with a distinct confirmation ID. A genuine retry returns the original active rows without new audit writes; an intervening independent release with the same revision and window is rejected, including one by the same operator. Revoked or replaced rows cannot be revived by an old review.
 - Legacy Questionnaire coverage keeps immutable release/campus identity and permanent, immutable retirement provenance through ordinary model saves. The existing 0033 migration now adds nullable confirmation IDs to both release tables; existing rows retain their data.
+## 2026-09-24 - Faculty Attendance Stage 1 foundation
+
+- Added a default-off `faculty_attendance` app with separate tenant master and faculty-visibility switches, scoped/direct-DENY-aware service authorization, and six assignable permissions that are not granted automatically.
+- Added fail-closed structured schedule interpretation and explicit correction/versioning, effective faculty coverage, stable dated meeting snapshots, explicit combined offerings, meeting substitutions, unresolved coverage discovery, and auditable per-meeting reconciliation without changing existing academic schedule or assignment records.
+- Added additive schema and reversible permission-seed migrations plus focused disposable-database tests. Checklist screens, attendance results, DTR/payroll logic, reports, printing, navigation, and reassignment-workflow integration remain outside this foundation.
+## Faculty Attendance monthly checklist - 2026-09-25
+
+- Added a scoped monthly checklist built directly from active course offerings for an academic year, semester, month, and MW/TTH/F/S day group. Confirmed positional slash schedules are parsed without guessing; ambiguous or mismatched schedules are excluded with correction guidance.
+- Added revisioned checker-only ordering per tenant/campus/academic year/semester/owner/day group, accessible drag and Move Up/Down controls, explicit unsaved/success/error feedback, and a separate permission-controlled print matrix. The screen reuses the Admin Portal shell and official green-to-yellow palette; print removes navigation/gradients and preserves writable date cells. Academic schedules are never changed.
+- Added migration `faculty_attendance.0007_monthly_checklist_arrangements`. No non-test migration was applied.
+## Faculty Attendance recurring combined sections - 2026-09-25
+
+- Added explicit, effective-dated “Sections taught together” definitions for one exact recurring weekday/time. Definitions reference authoritative course offerings, require matching tenant/campus/AY/semester, schedule, room and faculty evidence, enforce scoped `manage_meetings` permission for every department, reject overlaps, and never auto-merge similar classes.
+- Monthly checklist composition is now date-specific: valid combined occurrences render once with every linked course/section; dates outside the effective interval remain independent. Existing dated combined meetings apply only to their exact dates, and dated substitutions are not promoted into recurring assignments. Saved arrangements accept stable recurring/dates-only combined identities without discarding unaffected hidden entries.
+- Added additive migration `faculty_attendance.0008_recurring_combined_classes`; no role grants, historical backfill, or non-test migration application.
+
+## Faculty Attendance daily encoding UX - 2026-10-01
+
+- The Monthly Attendance Checklist now exposes a permission-backed **Daily Attendance Encoding** action for an explicitly chosen checklist date. Daily preview rows show **Needs attention** with the applicable source, coverage, or reconciliation reason, including linked sections, or **Ready to encode** when clear.
+- The department encoding page now uses the Admin shell and attendance green-to-yellow styling, keeps scope and date visible, gives technical list identifiers secondary traceability placement, and requires explicit unchecked selection before present confirmation. Invalid exception entries retain submitted values and field errors; existing A/N/L/E, L+E, revision, audit, and scope checks remain intact.
+
+## Faculty Attendance per-class daily saving - 2026-10-01
+
+- Daily Attendance Encoding now saves one class finding asynchronously while retaining the normal POST fallback. The server returns the authoritative row status, A/N/L/E values, checker reason, revision history, and round counters; the browser replaces only that row and shows local saving/success/error feedback.
+- Saved findings are shown before correction fields. Corrections require the existing correction permission and current revision, and stale or direct-DENY requests are rejected before a new observation is recorded. No schema, cutoff, publication, payroll, or DTR behavior changed.
+- Corrected row-save routing when the form includes its required hidden `action` field: the client now reads the form's HTML action attribute instead of the shadowable DOM `form.action` property. This restores one-row correction saves without weakening CSRF, permission, or revision checks.
+
+## Daily Attendance faculty attribution - 2026-10-01
+
+- Each Daily Attendance Encoding class card now shows one authoritative faculty name using saved attendance attribution, exact meeting substitution, then dated meeting coverage. It never falls back to a mutable current Course Offering assignment; conflicting or missing dated coverage remains visibly unresolved.
+- Combined sections stay on one card with one faculty attribution. No absence, deduction, tardiness, publication, or DTR rule changed.
+
+## Daily Attendance hours-only absence entry - 2026-10-01
+
+- New A/N absence findings now require actual missed time in decimal hours. The daily card no longer presents missed periods as an alternative, and forged period-only submissions are rejected server-side.
+- Existing period-based attendance history is neither converted nor cleared. Its absence portion is shown as retained and remains locked during card corrections, while authorized L/E and reason corrections can create a new revision that preserves the legacy absence exactly.
+## Faculty Attendance final-DTR print and checker-card styling - 2026-10-01
+
+- Individual final DTR print uses the NCBA institution heading, saved final's campus scope, configured media logo, 12 pt scope metadata, spaced rows, and a DTR-ID-only footer. Its print layout retains natural page breaks. Checker DTR card headers use a scoped high-contrast violet-to-pink gradient; no hours, snapshot, permission, or schema behavior changed.
+## AY/Term summary AJAX presentation - 2026-10-02
+
+- Summary filters and View Details now load shared scoped GET content in place, retain filter/scope URLs and Back/Forward, announce loading/errors, reject stale responses and focus/scroll loaded faculty details. Normal GET fallback remains; no calculation or permission rule changed.
+- Clarified latest verified class date (not complete earlier coverage) and checker-approved paid closure hours (not actual teaching or leave). Focused validation and browser/restart limitations are recorded in HANDOFF.md.

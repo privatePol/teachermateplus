@@ -1,0 +1,45 @@
+<section class="card att-dtr-card mb-3" id="checker-entry">
+  <div class="card-header">{% if edit_item %}Correct entry R{{ edit_item.revision }}{% else %}Enter scheduled AC hours, leave credit or other deduction{% endif %}</div>
+  <div class="card-body">
+    <p class="small text-muted">Hours are decimal. For leave, choose VL/SL/EL and the dated deduction it offsets. Reason notes are optional; entry revisions are dated checker history, separate from immutable final DTR revisions.</p>
+    <form method="post" action="{% url 'faculty_attendance:dtr_review' %}" class="row g-3" data-dtr-ajax="adjustment">
+      {% csrf_token %}<input type="hidden" name="action" value="adjustment"><input type="hidden" name="publication" value="{{ publication.pk }}"><input type="hidden" name="faculty" value="{{ faculty.pk }}">{{ adjustment_form.previous_id }}{{ adjustment_form.expected_revision }}
+      <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.entry_date.id_for_label }}">Date</label>{{ adjustment_form.entry_date }}<p class="dtr-date-hint mb-1">Allowed cutoff date: {{ publication.start_date }} to {{ publication.end_date }}.</p>{% if adjustment_form.entry_date.errors %}<div class="dtr-date-error" role="alert">{{ adjustment_form.entry_date.errors }}</div>{% endif %}</div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.department.id_for_label }}">Department</label>{{ adjustment_form.department }}{{ adjustment_form.department.errors }}</div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.kind.id_for_label }}">Entry type</label>{{ adjustment_form.kind }}{{ adjustment_form.kind.errors }}</div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.hours.id_for_label }}">Decimal hours</label>{{ adjustment_form.hours }}{{ adjustment_form.hours.errors }}</div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.leave_type.id_for_label }}">Leave type (if leave)</label>{{ adjustment_form.leave_type }}{{ adjustment_form.leave_type.errors }}</div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.offset_kind.id_for_label }}">Deduction to offset</label>{{ adjustment_form.offset_kind }}{{ adjustment_form.offset_kind.errors }}</div>
+      <div class="col-lg-6"><label class="form-label" for="{{ adjustment_form.reason.id_for_label }}">Checker note (optional)</label>{{ adjustment_form.reason }}{{ adjustment_form.reason.errors }}</div>
+      <div class="col-12">{{ adjustment_form.non_field_errors }}<button class="btn btn-success">{% if edit_item %}Save entry revision{% else %}Save dated entry{% endif %}</button>{% if edit_item %}<a class="btn btn-outline-secondary ms-2" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}">Cancel edit</a>{% endif %}</div>
+    </form>
+    <div class="mt-3">
+      <h3 class="h6">Current checker entries</h3>
+      <p class="small text-muted">Each row is the current state of one logical entry. Open its history for earlier entry revisions.</p>
+      <ul class="list-group">
+        {% for item in adjustment_rows %}
+        <li class="list-group-item">
+          <div class="d-flex justify-content-between flex-wrap gap-2">
+            <span><strong>{{ item.entry_date }} &middot; {{ item.get_kind_display }}</strong>{% if item.is_removed %}<br><span class="badge text-bg-secondary">Removed</span> <span>Zero-hour reversal &middot; Entry R{{ item.revision }}</span>{% else %}<br><span class="badge text-bg-success">Active</span> <span>{{ item.hours }} hr &middot; Entry R{{ item.revision }}</span>{% endif %}<br><small>{{ item.reason|default:"No reason recorded" }}</small></span>
+            <span class="d-flex align-items-start gap-2">{% if item.can_edit_dtr %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}&amp;edit={{ item.pk }}#checker-entry">Correct</a>{% endif %}{% if item.can_remove_dtr %}<a class="btn btn-sm btn-outline-danger" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}&amp;remove={{ item.pk }}#remove-checker-entry">Remove</a>{% endif %}</span>
+          </div>
+          {% if item.prior_revisions %}<details class="mt-2"><summary>Entry revision history ({{ item.prior_revisions|length }} earlier)</summary><ul class="small mt-2 mb-0">{% for revision in item.prior_revisions %}<li>Entry R{{ revision.revision }} &middot; {% if revision.hours == 0 %}Removed{% else %}{{ revision.hours }} hr{% endif %} &middot; {{ revision.reason|default:"No reason recorded" }}</li>{% endfor %}</ul></details>{% endif %}
+        </li>
+        {% empty %}<li class="list-group-item text-muted">No manual entries yet.</li>{% endfor %}
+      </ul>
+    </div>
+    {% if show_removal_form and remove_item %}
+    <div class="alert alert-warning mt-3" id="remove-checker-entry">
+      <h3 class="h6">Confirm removal of active entry R{{ remove_item.revision }}</h3>
+      <p class="mb-2">This saves a zero-hour <strong>entry revision</strong> for {{ remove_item.entry_date }} {{ remove_item.get_kind_display }}. It does not delete history or alter{% if final %} Final DTR R{{ final.revision }}{% else %} any saved final DTR{% endif %}.</p>
+      {% if final %}<p class="mb-2">After removal, review the changed draft and finalize a new Final DTR revision.</p>{% endif %}
+      <form method="post" action="{% url 'faculty_attendance:dtr_review' %}" class="row g-3" data-dtr-ajax="remove_adjustment">
+        {% csrf_token %}<input type="hidden" name="action" value="remove_adjustment"><input type="hidden" name="publication" value="{{ publication.pk }}"><input type="hidden" name="faculty" value="{{ faculty.pk }}">{{ removal_form.entry_id }}{{ removal_form.expected_revision }}
+        <div class="col-lg-8"><label class="form-label" for="{{ removal_form.reason.id_for_label }}">Removal note (optional)</label>{{ removal_form.reason }}{{ removal_form.reason.errors }}</div>
+        <div class="col-12"><label class="d-flex align-items-start gap-2">{{ removal_form.confirm_removal }}<span>{{ removal_form.confirm_removal.label }}</span></label>{{ removal_form.confirm_removal.errors }}</div>
+        <div class="col-12">{{ removal_form.non_field_errors }}<button class="btn btn-danger">Confirm removal</button><a class="btn btn-outline-secondary ms-2" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}#checker-entry">Cancel</a></div>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</section>

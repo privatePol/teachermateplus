@@ -1295,6 +1295,19 @@ class SectionForm(forms.ModelForm):
 
 
 class CourseOfferingForm(forms.ModelForm):
+    attendance_effective_from = forms.DateField(
+        required=False,
+        label="Attendance schedule/room effective date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="For a changed schedule or room, record the first affected teaching date. Leave blank only when attendance review must establish the boundary.",
+    )
+    attendance_change_reason = forms.CharField(
+        required=False,
+        label="Attendance change note",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Optional source note for the checker reviewing a schedule or room change.",
+    )
+
     class Meta:
         model = CourseOffering
         fields = [
@@ -1323,9 +1336,13 @@ class CourseOfferingForm(forms.ModelForm):
         term_queryset=None,
         course_queryset=None,
         section_queryset=None,
+        track_attendance_source=False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        if not track_attendance_source:
+            self.fields.pop("attendance_effective_from")
+            self.fields.pop("attendance_change_reason")
         if tenant_queryset is not None:
             self.fields["tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
@@ -1594,6 +1611,14 @@ class FacultyAssignmentReplacementForm(forms.Form):
     replacement_type = forms.ChoiceField(choices=FacultyAssignmentReplacementLog.ReplacementType.choices)
     reason_category = forms.ChoiceField(choices=FacultyAssignmentReplacementLog.ReasonCategory.choices)
     remarks = forms.CharField(widget=forms.Textarea(attrs={"rows": 4}), min_length=5)
+    attendance_effective_at = forms.DateTimeField(
+        required=False,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        help_text=(
+            "Optional explicit Asia/Manila teaching-coverage boundary. If omitted or the operator lacks "
+            "attendance authority, replacement still completes but attendance coverage stays pending reconciliation."
+        ),
+    )
 
     def __init__(self, *args, assignment_queryset=None, faculty_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -3444,6 +3469,16 @@ class DocumentPrintSettingForm(forms.Form):
 
 
 class ConfigurableFeatureSettingForm(forms.Form):
+    faculty_attendance_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Faculty Attendance Stage 1",
+        help_text="Enables authorized setup, checker routes, classroom checklists, encoding, reconciliation and print. It does not enable payroll or DTR calculations.",
+    )
+    faculty_attendance_faculty_visibility_enabled = forms.BooleanField(
+        required=False,
+        label="Show My Attendance to faculty",
+        help_text="Requires the master Faculty Attendance switch and the faculty's own scoped permission. It does not affect authorized checker work.",
+    )
     departmental_exam_builder_enabled = forms.BooleanField(
         required=False,
         label="Enable Departmental Exam Builder",

@@ -319,6 +319,16 @@
         <input type="hidden" name="offering_q" value="{{ offering_q }}">
         <input type="hidden" name="section_id" value="{{ selected_section_id|default:'' }}">
 
+        {% if faculty_attendance_enabled %}
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-md-5">
+            <label class="form-label small fw-semibold" for="attendance-effective-at">Attendance coverage effective date/time</label>
+            <input class="form-control form-control-sm" type="datetime-local" id="attendance-effective-at" name="attendance_effective_at">
+            <div class="form-text">Optional Asia/Manila boundary. Without it, unassignment proceeds but attendance coverage is queued for reconciliation.</div>
+          </div>
+        </div>
+        {% endif %}
+
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div class="form-check">
             <input class="form-check-input" type="checkbox" id="select-all-assigned">

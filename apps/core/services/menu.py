@@ -48,6 +48,13 @@ class MenuService:
         for group in groups:
             if group.code == "DEPARTMENTAL_EXAMS" and not FeatureSettingsService.is_departmental_exam_builder_enabled(tenant_id=tenant_id):
                 continue
+            if group.code == "FACULTY_ATTENDANCE":
+                if not FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=tenant_id):
+                    continue
+                if portal == "FACULTY" and not FeatureSettingsService.is_faculty_attendance_faculty_visibility_enabled(
+                    tenant_id=tenant_id
+                ):
+                    continue
             items = list(getattr(group, "active_items", []))
             item_map = {}
             for item in items:

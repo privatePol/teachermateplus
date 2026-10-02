@@ -1,0 +1,51 @@
+{% load static %}{% get_media_prefix as media_prefix %}
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Faculty DTR - {{ snapshot.faculty_name }} - R{{ final.revision }}</title>
+<style>
+  @page{size:A4 landscape;margin:10mm}
+  body{font:10pt Arial,Helvetica,sans-serif;color:#111;background:#fff;margin:0}
+  .toolbar{display:flex;gap:.7rem;align-items:center;padding:1rem;background:#f4f8f4}
+  .toolbar button{background:#11683b;color:#fff;border:0;border-radius:.35rem;padding:.55rem 1rem;cursor:pointer}
+  .sheet{padding:10mm;max-width:310mm;margin:auto}.heading{text-align:center;border-bottom:2px solid #222;padding-bottom:4mm}
+  .heading .school{font-size:14pt;font-weight:bold}.heading h1{font-size:16pt;margin:2mm 0}.heading .logo{display:block;width:18mm;height:18mm;object-fit:contain;margin:0 auto 2mm}.heading .campus{font-size:12pt;font-weight:600;margin-top:1mm}
+  .scope{display:grid;grid-template-columns:1fr 1fr;gap:8mm;margin:7mm 0;font-size:12pt;line-height:1.45}.scope .meta-row+.meta-row{margin-top:3mm}
+  h2{font-size:11pt;margin:7mm 0 2mm;border-bottom:1px solid #666;padding-bottom:1mm}
+  table{border-collapse:collapse;width:100%;font-size:8.5pt;table-layout:fixed}
+  th,td{border:1px solid #555;padding:2mm;vertical-align:top;overflow-wrap:anywhere}
+  thead{display:table-header-group}th{background:#eee}tr{break-inside:avoid;page-break-inside:avoid}
+  .number{text-align:right;white-space:nowrap}.calculation{margin-top:6mm;display:grid;grid-template-columns:1fr 1fr;gap:5mm}
+  .box{border:1px solid #444;padding:3mm;break-inside:avoid}.box p{margin:1.5mm 0}
+  .signatures{display:flex;gap:10mm;margin-top:13mm}.signatures>div{flex:1;border-top:1px solid #444;padding-top:1.5mm;font-size:9pt}
+  .foot{margin-top:5mm;font-size:8pt;color:#444}
+  @media(max-width:700px){.scope{grid-template-columns:1fr;gap:4mm}.sheet{padding:5mm}}
+  @media print{.toolbar{display:none}.sheet{padding:0;max-width:none}table{font-size:8pt}.heading,.scope,.calculation,.signatures{break-inside:avoid;page-break-inside:avoid}.heading .logo{width:18mm;height:18mm}h2{break-after:avoid;page-break-after:avoid}}
+</style></head><body>
+<div class="toolbar"><button type="button" onclick="window.print()">Print DTR</button><span>Final DTR revision {{ final.revision }} - hours, not pesos</span></div>
+<main class="sheet">
+  <header class="heading"><img class="logo" src="{{ media_prefix }}logos/ncba-logo.png" alt="NCBA logo"><div class="school">NATIONAL COLLEGE OF BUSINESS AND ARTS</div><div class="campus">{{ final.campus.name }}</div><h1>Faculty Daily Time Record</h1><div>{{ snapshot.academic_year }} | {{ snapshot.term }}</div></header>
+  <div class="scope"><div><div class="meta-row"><strong>Faculty:</strong> {{ snapshot.faculty_name }}</div><div class="meta-row"><strong>Cutoff:</strong> {{ snapshot.start_date }} to {{ snapshot.end_date }}</div></div><div><div class="meta-row"><strong>Attendance publication:</strong> v{{ snapshot.publication_version }}</div><div class="meta-row"><strong>DTR:</strong> R{{ final.revision }} | finalized {{ final.finalized_at|date:"M j, Y g:i A" }}</div></div></div>
+
+  <h2>1. Dated teaching schedule</h2>
+  <table><thead><tr><th style="width:12%">Date</th><th style="width:35%">Scheduled class and linked sections</th><th style="width:17%">Time</th><th style="width:10%">Scheduled time</th><th style="width:10%">Credited time</th><th>Attendance or closure</th></tr></thead><tbody>
+  {% for line in snapshot.lines %}{% if line.kind == "CLASS" %}<tr><td>{{ line.date }}</td><td>{{ line.label }}</td><td>{{ line.time }}</td><td class="number">{{ line.print_scheduled }}</td><td class="number">{{ line.print_credited }}</td><td>{{ line.status }}{% if line.closure_revision %} | closure R{{ line.closure_revision }}{% endif %}</td></tr>{% endif %}{% endfor %}
+  {% if not snapshot.class_count %}<tr><td colspan="6">No scheduled teaching classes in this cutoff.</td></tr>{% endif %}
+  </tbody></table>
+
+  <h2>2. Dated AC administrative office hours</h2>
+  <table><thead><tr><th style="width:15%">Date</th><th style="width:22%">Department</th><th style="width:18%">Scheduled decimal hours</th><th>Checker reason / revision</th></tr></thead><tbody>
+  {% for line in snapshot.lines %}{% if line.kind == "ADMIN" %}<tr><td>{{ line.date }}</td><td>{{ line.department_label|default:line.department_id }}</td><td class="number">{{ line.admin }}</td><td>{{ line.status }} | entry R{{ line.adjustment_revision }}</td></tr>{% endif %}{% endfor %}
+  {% if not snapshot.admin_count %}<tr><td colspan="4">No AC administrative office hours were entered for this cutoff.</td></tr>{% endif %}
+  <tr><th colspan="2">Admin hours total</th><th class="number">{{ snapshot.admin_hours }}</th><td>Only checker-entered dated AC hours are included.</td></tr>
+  </tbody></table>
+
+  <h2>3. Dated deductions and VL / SL / EL offsets</h2>
+  <table><thead><tr><th style="width:10%">Date</th><th style="width:24%">Class or checker entry</th><th>A hours</th><th>N hours</th><th>L time</th><th>E time</th><th>Other hours</th><th>Leave hours</th><th style="width:18%">Reason / revision</th></tr></thead><tbody>
+  {% for line in snapshot.lines %}{% if line.kind != "ADMIN" %}<tr><td>{{ line.date }}</td><td>{{ line.label }}</td><td class="number">{{ line.a }}</td><td class="number">{{ line.n }}</td><td class="number">{{ line.print_late|default:"0 min" }}</td><td class="number">{{ line.print_early|default:"0 min" }}</td><td class="number">{{ line.other }}</td><td class="number">{{ line.leave }}</td><td>{{ line.status }}{% if line.mixed_decision_revision %} | interval R{{ line.mixed_decision_revision }}{% endif %}{% if line.adjustment_revision %} | entry R{{ line.adjustment_revision }}{% endif %}</td></tr>{% endif %}{% endfor %}
+  </tbody></table>
+
+  <section class="calculation" aria-label="Hours calculation"><div class="box"><strong>Basic Hours</strong><p>{{ snapshot.print_teaching_basis }}</p><p>Scheduled AC admin: {{ snapshot.admin_hours }} hours</p><p><strong>Basic Hours: {{ snapshot.basic_hours }}</strong></p><hr><strong>Gross Deductions</strong><p>A {{ snapshot.a_hours }} + N {{ snapshot.n_hours }} hours</p><p>{{ snapshot.print_late_early_basis }}</p><p>Other {{ snapshot.other_hours }} hours</p><p><strong>Gross Deductions: {{ snapshot.gross_deductions }}</strong></p></div>
+  <div class="box"><strong>Net Payable Hours</strong><p>Basic {{ snapshot.basic_hours }} - gross {{ snapshot.gross_deductions }} + applied VL/SL/EL {{ snapshot.leave_credit }}{% if snapshot.display_rounding_bridge and snapshot.display_rounding_bridge != "+0.00" %} {{ snapshot.display_rounding_bridge }} display-rounding bridge{% endif %}</p><p><strong>Net Payable Hours: {{ snapshot.net_payable_hours }}</strong></p><p>Totals use exact scheduled minutes, recorded decimal hours, and checker-verified actual missed intervals before one final two-decimal display rounding. A display-rounding bridge, if shown, only reconciles already-rounded figures; it does not change payable time.</p></div></section>
+  <div class="signatures"><div>Prepared / finalized by {{ final.finalized_by.full_name }}</div><div>Accounting acknowledgement</div></div>
+  <div class="foot">DTR ID {{ final.public_id }}</div>
+</main></body></html>
