@@ -1,3 +1,10 @@
+## College daily workflow and navigation - 2026-10-03
+
+- Attendance index now closes to a narrow side tab, releasing desktop width to cards; accessible reopen, mobile initial collapse, focus/scroll and print exclusion remain. Time and dated-faculty filters apply together to cards/index with matching count/empty state, retain unsaved values, clear hidden Present selections and survive AJAX saves.
+- Daily preview groups start times chronologically, keeps saved route/room order, and shows Room | Faculty | Course | Section before time/status. Dated/saved attribution prevents current assignment guesses; combined sections and unresolved diagnostics remain intact. Daily card headers follow the existing dark-green/green/yellow theme, with simpler prepare/resume/open instructions.
+- College cutoff removes routine closure controls. Staff manually encode Regular Present / Part-time A/N hours for holidays/suspensions using their external calendar; optional Present notes enter the existing audited revision trail. Historical closure/publication/final DTR records and all readiness/permission guards remain unchanged.
+- Focused disposable validation and remaining browser/print/CSV effective-date checks are recorded in HANDOFF. No model or migration change.
+
 ## Attendance rounds and checklist UI - 2026-10-03
 
 - Routine round cards, counts and the new schedule-grouped attendance index exclude meetings without safe dated faculty attribution. The secondary assignment details retain those classes; no meetings/history are deleted and cutoff readiness still includes them. Direct exception requests recheck dated eligibility before recording observations.

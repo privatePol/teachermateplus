@@ -159,6 +159,209 @@ class AttendanceRoundUITests(TestCase):
         self.assertIn('tabindex="-1"', payload["row_html"])
         self.assertEqual(payload["counts"], {"unverified": 1, "present": 0, "exception": 1})
 
+    def test_filter_options_use_sorted_dated_names_and_deduplicate_schedule_across_dates(self):
+        self.faculty.first_name, self.faculty.last_name = "Zoe", "Zulu"
+        self.faculty.save(update_fields=["first_name", "last_name"])
+        self.replacement.first_name, self.replacement.last_name = "Amy", "Alpha"
+        self.replacement.save(update_fields=["first_name", "last_name"])
+        first = self.meeting()
+        later = MeetingService.generate(actor=self.actor, schedule_slot=first.schedule_slot,
+            meeting_date=date(2026, 1, 12), offerings=[])
+        other = MeetingService.generate(actor=self.actor,
+            schedule_slot=self.schedule(offering=self.combined_offering).slots.get(),
+            meeting_date=first.meeting_date, offerings=[])
+        existing.SubstitutionService.assign(actor=self.actor, meeting=other,
+            substitute_faculty=self.replacement, reason="")
+        round_, url = self.round_for([first, later, other])
+        response = self.client.get(url)
+        self.assertEqual(response.context["faculty_filter_options"],
+            [(str(self.replacement.pk), "Alpha, Amy"), (str(self.faculty.pk), "Zulu, Zoe")])
+        self.assertEqual(len(response.context["time_filter_options"]), 1)
+        rows = response.context["rows"]
+        self.assertEqual(rows[0].filter_time_key, rows[1].filter_time_key)
+        self.assertEqual(rows[2].filter_faculty_id, str(self.replacement.pk))
+        payload = self.finding(url, first).json()
+        self.assertIn('data-filter-faculty="' + str(self.faculty.pk) + '"', payload["row_html"])
+        self.assertIn("Zulu, Zoe", payload["row_html"])
+        self.assertIn('data-filter-time="' + rows[0].filter_time_key + '"', payload["row_html"])
+
+    def test_present_optional_note_is_audited_only_for_selected_unverified_rows(self):
+        first = self.meeting()
+        other = MeetingService.generate(actor=self.actor, schedule_slot=first.schedule_slot,
+            meeting_date=date(2026, 1, 12), offerings=[])
+        round_, url = self.round_for([first, other])
+        response = self.client.post(url, {"action": "confirm_present", "manifest_revision": 1,
+            "present_rows": [f"{first.pk}:0"], f"present_note_{first.pk}": "Synthetic Regular holiday treatment",
+            f"present_note_{other.pk}": "Must not implicitly confirm"})
+        self.assertEqual(response.status_code, 302)
+        result = AttendanceResult.objects.get(meeting=first)
+        self.assertEqual(result.correction_reason, "Synthetic Regular holiday treatment")
+        self.assertEqual(result.history.get().change_reason, result.correction_reason)
+        self.assertFalse(AttendanceResult.objects.filter(meeting=other).exists())
+        self.assertFalse(existing.AttendanceClosureDecision.objects.exists())
+        self.assertFalse(AttendanceCutoffPublication.objects.exists())
+        self.assertFalse(FacultyDTR.objects.exists())
+        self.assertEqual(self.client.post(url, {"action": "confirm_present", "manifest_revision": 1,
+            "present_rows": [f"{other.pk}:0"]}).status_code, 302)
+        self.assertEqual(AttendanceResult.objects.get(meeting=other).correction_reason, "")
+
+    def test_present_note_redisplays_on_stale_selection_without_creating_results(self):
+        first = self.meeting()
+        round_, url = self.round_for([first])
+        response = self.client.post(url, {"action": "confirm_present", "manifest_revision": 99,
+            "present_rows": [f"{first.pk}:0"], f"present_note_{first.pk}": "Retain my checked note"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'value="Retain my checked note"')
+        self.assertFalse(AttendanceResult.objects.exists())
+
+    def test_direct_encode_deny_prevents_present_and_note_writes(self):
+        first = self.meeting()
+        round_, url = self.round_for([first])
+        existing.UserPermission.objects.create(user=self.actor,
+            permission=existing.Permission.objects.get(code=existing.ENCODE_PERMISSION),
+            tenant=self.tenant, campus=self.campus, grant_type="DENY")
+        response = self.client.post(url, {"action": "confirm_present", "manifest_revision": 1,
+            "present_rows": [f"{first.pk}:0"], f"present_note_{first.pk}": "Must not save"})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(AttendanceResult.objects.exists())
+
+
+class CollegeDailyUITests(TestCase):
+    permission_codes = existing.FacultyAttendanceFoundationTests.permission_codes
+    setUpTestData = classmethod(existing.FacultyAttendanceFoundationTests.setUpTestData.__func__)
+    setUp = existing.FacultyAttendanceFoundationTests.setUp
+    aware = existing.FacultyAttendanceFoundationTests.aware
+    schedule = existing.FacultyAttendanceFoundationTests.schedule
+    coverage = existing.FacultyAttendanceFoundationTests.coverage
+    meeting = existing.FacultyAttendanceFoundationTests.meeting
+
+    def daily(self, **extra):
+        self.client.force_login(self.actor)
+        return self.client.get(reverse("faculty_attendance:daily_encoding"), {
+            "academic_year": self.academic_year.pk, "term": self.term.pk,
+            "meeting_date": "2026-01-05", **extra})
+
+    def test_preview_groups_start_times_with_dated_names_and_room_order_without_writes(self):
+        existing.CourseOffering.objects.filter(pk=self.offering.pk).update(
+            schedule_text="M 13:00-14:00; M 08:00-10:00", room="R202")
+        self.faculty.first_name, self.faculty.last_name = "Zoe", "Zulu"
+        self.faculty.save(update_fields=["first_name", "last_name"])
+        self.coverage()
+        response = self.daily()
+        rows = response.context["occurrence_rows"]
+        self.assertEqual([r["start_time"] for r in rows], [time(8), time(8), time(13)])
+        self.assertEqual([r["occurrence"].source_room for r in rows[:2]], ["R101", "R202"])
+        self.assertEqual(rows[0]["faculty_name"], "Faculty unresolved")
+        self.assertEqual(rows[1]["faculty_name"], "Zulu, Zoe")
+        self.assertContains(response, "Start time: 8:00 AM", count=1)
+        self.assertContains(response, "Start time: 1:00 PM", count=1)
+        html = response.content.decode()
+        self.assertLess(html.index('scope="col">Room'), html.index('scope="col">Faculty'))
+        self.assertLess(html.index('scope="col">Faculty'), html.index('scope="col">Course'))
+        self.assertLess(html.index('scope="col">Course'), html.index('scope="col">Section'))
+        self.assertContains(response, "8:00 AM&ndash;10:00 AM")
+        self.assertContains(response, "You do not need to prepare again")
+        self.assertNotContains(response, "CSRF-protected")
+        self.assertFalse(existing.TeachingMeeting.objects.exists())
+        self.assertFalse(existing.ScheduleVersion.objects.exists())
+        self.assertFalse(AttendanceResult.objects.exists())
+
+    def test_combined_preview_keeps_saved_attribution_after_assignment_changes(self):
+        meeting = self.meeting(offerings=[self.combined_offering])
+        round_ = CheckingRoundService.create(actor=self.actor, meetings=[meeting], checking_date=meeting.meeting_date)
+        AttendanceResultService.confirm_present(actor=self.actor, checking_round=round_,
+            manifest_revision=1, reviewed_rows=[{"meeting_id": meeting.pk, "result_revision": 0}])
+        result = AttendanceResult.objects.get(meeting=meeting)
+        AttendanceResultService.reconcile_attribution(actor=self.actor, result=result,
+            expected_revision=1, faculty_user=self.replacement, reason="")
+        existing.FacultyAssignment.objects.create(tenant=self.tenant, campus=self.campus,
+            offering=self.offering, faculty_user=self.faculty, is_primary=True)
+        response = self.daily()
+        rows = response.context["occurrence_rows"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["faculty"], self.replacement)
+        self.assertEqual(len(rows[0]["occurrence"].linked_offerings), 2)
+        self.assertContains(response, "Sections taught together", count=1)
+        self.assertEqual(result.history.count(), 2)
+
+    def test_preview_keeps_saved_route_order_inside_start_time_groups(self):
+        first_slot = self.schedule().slots.get()
+        second_slot = self.schedule(offering=self.combined_offering).slots.get()
+        route = existing.SavedRouteService.save(actor=self.actor, tenant_id=self.tenant.pk,
+            campus_id=self.campus.pk, name="Synthetic reversed room route",
+            schedule_slot_ids=[second_slot.pk, first_slot.pk], expected_revision=None)
+        response = self.daily(route=route.pk)
+        rows = response.context["occurrence_rows"]
+        self.assertEqual([r["occurrence"].primary_offering.pk for r in rows],
+            [self.combined_offering.pk, self.offering.pk])
+        self.assertEqual([r["route_position"] for r in rows], [1, 2])
+        self.assertFalse(existing.TeachingMeeting.objects.exists())
+
+    def test_conflicting_combined_preview_does_not_guess_from_current_assignments(self):
+        version = self.schedule()
+        self.coverage()
+        self.coverage(self.combined_offering, faculty=self.replacement)
+        meeting = MeetingService.generate(actor=self.actor, schedule_slot=version.slots.get(),
+            meeting_date=date(2026, 1, 5), offerings=[self.combined_offering])
+        response = self.daily()
+        self.assertEqual(len(response.context["occurrence_rows"]), 1)
+        self.assertIsNone(response.context["occurrence_rows"][0]["faculty"])
+        self.assertContains(response, "Faculty unresolved")
+        self.assertContains(response, "Needs attention")
+        self.assertFalse(AttendanceResult.objects.filter(meeting=meeting).exists())
+
+    def test_cutoff_no_routine_closure_action_but_existing_decision_is_preserved(self):
+        meeting = self.meeting(offerings=[self.combined_offering])
+        closure = existing.save_closure(actor=self.actor, meeting=meeting, status="CLOSED",
+            kind="HOLIDAY", pay_basis="REGULAR", reason="Synthetic historical decision", expected_revision=0)
+        before = existing.AttendanceClosureDecision.objects.filter(pk=closure.pk).values().get()
+        self.client.force_login(self.actor)
+        response = self.client.get(reverse("faculty_attendance:cutoff_review"), {
+            "academic_year": self.academic_year.pk, "term": self.term.pk,
+            "start_date": "2026-01-05", "end_date": "2026-01-05", "closure": meeting.pk})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Dated holiday or suspension: no class")
+        self.assertNotContains(response, "Record closure")
+        self.assertNotContains(response, 'id="closure-decision"')
+        self.assertTrue(response.context["review"].ready)
+        self.assertContains(response, "Synthetic historical decision")
+        closure.refresh_from_db()
+        self.assertEqual(existing.AttendanceClosureDecision.objects.filter(pk=closure.pk).values().get(), before)
+        self.assertEqual(closure.revision, 1)
+
+    def test_manual_present_and_absence_office_practice_needs_no_closure_for_dtr(self):
+        regular = self.meeting()
+        self.coverage(self.combined_offering, faculty=self.replacement)
+        part_time = MeetingService.generate(actor=self.actor,
+            schedule_slot=self.schedule(offering=self.combined_offering).slots.get(),
+            meeting_date=regular.meeting_date, offerings=[])
+        round_ = CheckingRoundService.create(actor=self.actor, meetings=[regular, part_time],
+            checking_date=regular.meeting_date, academic_year=self.academic_year, term=self.term)
+        self.client.force_login(self.actor)
+        url = reverse("faculty_attendance:round", args=[round_.public_id])
+        present = self.client.post(url, {"action": "confirm_present", "manifest_revision": 1,
+            "present_rows": [f"{regular.pk}:0"],
+            f"present_note_{regular.pk}": "Synthetic office-calendar Regular treatment"})
+        self.assertEqual(present.status_code, 302)
+        absent = self.client.post(url, {"action": "exception", "meeting_id": part_time.pk,
+            "expected_revision": 0, "submission_key": "synthetic-no-work-absence", "absence_code": "N",
+            "missed_hours": "1.00", "reason": "Synthetic office-calendar Part-time treatment"})
+        self.assertEqual(absent.status_code, 302)
+        values = dict(actor=self.actor, tenant_id=self.tenant.pk, campus_id=self.campus.pk,
+            academic_year=self.academic_year, term=self.term,
+            start_date=regular.meeting_date, end_date=regular.meeting_date)
+        review = existing.review_cutoff(**values)
+        self.assertTrue(review.ready, review.blockers)
+        publication = existing.publish_cutoff(**values, expected_fingerprint=review.fingerprint,
+            submission_key="synthetic-office-practice", publication_reason="")
+        paid = existing.preview_dtr(actor=self.actor, publication=publication, faculty=self.faculty)
+        unpaid = existing.preview_dtr(actor=self.actor, publication=publication, faculty=self.replacement)
+        self.assertTrue(paid.ready, paid.blockers)
+        self.assertTrue(unpaid.ready, unpaid.blockers)
+        self.assertEqual((paid.snapshot["basic_hours"], paid.snapshot["net_payable_hours"]), ("1.00", "1.00"))
+        self.assertEqual((unpaid.snapshot["basic_hours"], unpaid.snapshot["net_payable_hours"]), ("1.00", "0.00"))
+        self.assertFalse(existing.AttendanceClosureDecision.objects.exists())
+
 
 class ChecklistSessionTests(TestCase):
     permission_codes = existing.FacultyAttendanceFoundationTests.permission_codes

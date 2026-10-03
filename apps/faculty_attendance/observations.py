@@ -518,7 +518,13 @@ class AttendanceResultService:
         )
         if manifest_revision != checking_round.manifest_revision:
             raise StaleAttendanceReview("Checking-round manifest changed; reload before confirming present rows.")
-        requested = {int(item["meeting_id"]): int(item["result_revision"]) for item in reviewed_rows}
+        requested = {
+            int(item["meeting_id"]): {
+                "revision": int(item["result_revision"]),
+                "note": (item.get("note") or "").strip(),
+            }
+            for item in reviewed_rows
+        }
         if len(requested) != len(reviewed_rows):
             raise ValidationError("Reviewed meeting IDs must be unique.")
         manifest_rows = {
@@ -534,14 +540,16 @@ class AttendanceResultService:
             row.meeting_id: row
             for row in AttendanceResult.objects.select_for_update().filter(meeting_id__in=requested).order_by('meeting_id')
         }
-        for meeting_id, expected in requested.items():
+        for meeting_id, request in requested.items():
+            expected = request["revision"]
             current = locked_results.get(meeting_id)
             current_revision = current.revision if current else 0
             if current_revision != expected:
                 raise StaleAttendanceReview("Attendance result changed; reload and review before confirming present rows.")
         confirmed = []
         skipped = []
-        for meeting_id, expected in requested.items():
+        for meeting_id, request in requested.items():
+            expected = request["revision"]
             manifest_row = manifest_rows[meeting_id]
             meeting = manifest_row.meeting
             result = locked_results.get(meeting_id)
@@ -557,7 +565,7 @@ class AttendanceResultService:
                 status=AttendanceResult.Status.PRESENT,
                 faculty=faculty,
                 findings=[],
-                reason="",
+                reason=request["note"],
             )
             confirmed.append(meeting_id)
         return {"confirmed_meeting_ids": confirmed, "skipped_meeting_ids": skipped}

@@ -95,9 +95,10 @@ from .daily_encoding import (
     expected_daily_occurrences,
     inspect_daily_occurrences,
     prepare_daily_encoding,
+    resolve_occurrence_faculty,
 )
 from .cutoffs import faculty_published_entries, publish_cutoff, published_tardiness_summary, review_cutoff
-from .closures import latest_closure, save_closure
+from .closures import save_closure
 
 
 def _scope(request):
@@ -490,9 +491,15 @@ def _scoped_combined_classes(*, tenant_id, campus_id, academic_year_id, term_id,
     return [group for group in groups if {link.offering_id for link in group.offering_links.all()} <= offering_ids]
 
 
-def _daily_preview_rows(occurrences, issues):
+def _daily_preview_rows(occurrences, issues, route=None):
     """Pair each preview occurrence with every relevant read-only blocker."""
     rows = []
+    route_positions = {}
+    if route is not None:
+        entries = route.entries.select_related("schedule_slot__schedule_version__offering").order_by("position")
+        for entry in entries:
+            slot = entry.schedule_slot
+            route_positions[(slot.schedule_version.offering_id, slot.weekday, slot.start_time, slot.end_time)] = entry.position
     for occurrence in occurrences:
         offering_ids = {item.pk for item in occurrence.linked_offerings}
         occurrence_issues = [
@@ -501,7 +508,38 @@ def _daily_preview_rows(occurrences, issues):
             if issue.meeting_date in (None, occurrence.meeting_date)
             and offering_ids.intersection(item.pk for item in issue.affected_offerings)
         ]
-        rows.append({"occurrence": occurrence, "issues": occurrence_issues})
+        faculty = resolve_occurrence_faculty(occurrence)
+        if faculty is None:
+            faculty_name = "Faculty unresolved"
+        else:
+            faculty_name = _last_first_name(faculty)
+        positions = [
+            route_positions[(offering.pk, occurrence.meeting_date.weekday(), occurrence.start_time, occurrence.end_time)]
+            for offering in occurrence.linked_offerings
+            if (offering.pk, occurrence.meeting_date.weekday(), occurrence.start_time, occurrence.end_time) in route_positions
+        ]
+        rows.append({
+            "occurrence": occurrence,
+            "issues": occurrence_issues,
+            "faculty": faculty,
+            "faculty_name": faculty_name,
+            "route_position": min(positions) if positions else None,
+            "start_time": occurrence.start_time,
+        })
+    if route is not None:
+        rows.sort(key=lambda row: (
+            row["start_time"],
+            0 if row["route_position"] is not None else 1,
+            row["route_position"] or 0,
+            (row["occurrence"].source_room or "").strip().casefold(),
+            row["occurrence"].end_time,
+        ))
+    else:
+        rows.sort(key=lambda row: (
+            row["start_time"],
+            (row["occurrence"].source_room or "").strip().casefold(),
+            row["occurrence"].end_time,
+        ))
     return rows
 
 
@@ -570,7 +608,6 @@ def daily_encoding_view(request):
             "campus_name": Campus.objects.filter(pk=campus_id).values_list("name", flat=True).first() or str(campus_id),
             "occurrences": occurrences,
             "issues": issues,
-            "occurrence_rows": _daily_preview_rows(occurrences, issues),
             "can_manage_corrections": _can_all_departments(request, MANAGE_SCHEDULES_PERMISSION, department_ids),
             "can_manage_combined": _can_all_departments(request, MANAGE_MEETINGS_PERMISSION, department_ids),
             "can_reconcile": _can_all_departments(request, RECONCILE_PERMISSION, department_ids),
@@ -610,7 +647,7 @@ def daily_encoding_view(request):
             daily_occurrence_date=meeting_date,
         ).filter(Q(department_id__in=department_ids) if department_ids else Q()).order_by("department_id")
     )
-    context["occurrence_rows"] = _daily_preview_rows(occurrences, context["issues"])
+    context["occurrence_rows"] = _daily_preview_rows(occurrences, context["issues"], form.cleaned_data.get("route"))
     return render(request, "faculty_attendance/daily_encoding.html", context)
 
 
@@ -719,33 +756,8 @@ def cutoff_review_view(request):
             ),
         }
     )
-    candidate_ids = {item.meeting.pk for item in review.records} | {
-        item.meeting_id for item in review.blockers
-        if item.code in {"UNVERIFIED_ATTENDANCE", "CLOSURE_REVIEW_PENDING"} and item.meeting_id
-    }
-    candidates = list(TeachingMeeting.objects.filter(
-        pk__in=candidate_ids, tenant_id=tenant_id, campus_id=campus_id,
-    ).order_by("meeting_date", "starts_at", "pk"))
-    for candidate in candidates:
-        candidate.current_closure = latest_closure(candidate)
-        candidate.can_decide_closure = _can_page(request, CORRECT_PERMISSION, [candidate.department_id])
-    context["closure_candidates"] = candidates
-    selected_id = request.POST.get("meeting_id") if action == "closure" else request.GET.get("closure")
-    try:
-        selected_id = int(selected_id) if selected_id else None
-    except (TypeError, ValueError):
-        selected_id = None
-    selected = next((item for item in candidates if item.pk == selected_id), None)
-    if selected:
-        context["selected_closure_meeting"] = selected
-        if context["closure_form"] is None:
-            previous = selected.current_closure
-            context["closure_form"] = AttendanceClosureForm(initial={
-                "meeting_id": selected.pk, "expected_revision": previous.revision if previous else 0,
-                "status": previous.status if previous else "CLOSED",
-                "kind": previous.kind if previous else "HOLIDAY",
-                "pay_basis": previous.pay_basis if previous else "REGULAR",
-            })
+    # College routine encoding uses manually checked Present/A/N findings.
+    # Retain existing closure services/history, without a routine closure action.
     return render(request, "faculty_attendance/cutoff_review.html", context)
 
 
@@ -947,6 +959,11 @@ def _result_summary(result):
     return summary or [result.get_status_display()]
 
 
+def _last_first_name(user):
+    name = ", ".join(part.strip() for part in (user.last_name, user.first_name) if part and part.strip())
+    return name or (user.full_name or "").strip() or user.username
+
+
 def _round_rows_context(request, checking_round, bound_form=None, selected_present_rows=None):
     from .college_sync import retired_meeting_ids
     selected_present_rows = selected_present_rows or set()
@@ -973,7 +990,12 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
             unresolved_rows.append(row)
             continue
         visible_rows.append(row)
-        row.index_group_key = (row.meeting.starts_at, row.meeting.ends_at)
+        local_start = timezone.localtime(row.meeting.starts_at)
+        local_end = timezone.localtime(row.meeting.ends_at)
+        row.index_group_key = (local_start.time(), local_end.time())
+        row.filter_time_key = f"{local_start.time().isoformat()}/{local_end.time().isoformat()}"
+        row.filter_faculty_id = str(row.attributed_faculty.pk)
+        row.filter_faculty_name = _last_first_name(row.attributed_faculty)
         status = result.status if result else AttendanceResult.Status.UNVERIFIED
         counts[status.lower()] += 1
         result_revision = result.revision if result else 0
@@ -991,6 +1013,7 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
             result is None or result.status == AttendanceResult.Status.UNVERIFIED
         )
         row.present_selected = row.present_row_value in selected_present_rows
+        row.present_note = request.POST.get(f"present_note_{row.meeting_id}", "") if request.method == "POST" else ""
         row.editing_is_correction = bool(result and result.revision)
         row.can_correct_result = can_correct
         row.result_summary = _result_summary(result)
@@ -1020,11 +1043,25 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
                     "absence_code": bound_form.data.get("absence_code", ""),
                     "missed_hours": bound_form.data.get("missed_hours", ""),
                 })
-    return visible_rows, counts, unresolved_rows
+    time_options = {}
+    faculty_options = {}
+    for row in visible_rows:
+        time_key = row.filter_time_key
+        if time_key not in time_options:
+            start = timezone.localtime(row.meeting.starts_at) if timezone.is_aware(row.meeting.starts_at) else row.meeting.starts_at
+            end = timezone.localtime(row.meeting.ends_at) if timezone.is_aware(row.meeting.ends_at) else row.meeting.ends_at
+            time_options[time_key] = (
+                start.time().isoformat(),
+                f"{start.strftime('%I:%M %p').lstrip('0')} – {end.strftime('%I:%M %p').lstrip('0')}",
+            )
+        faculty_options[row.filter_faculty_id] = row.filter_faculty_name
+    ordered_times = sorted(time_options.items(), key=lambda item: item[1][0])
+    ordered_faculty = sorted(faculty_options.items(), key=lambda item: (item[1].casefold(), item[0]))
+    return visible_rows, counts, unresolved_rows, ordered_times, ordered_faculty
 
 
 def _round_row_json_response(request, checking_round, meeting_id, *, bound_form=None, message, status=200):
-    rows, counts, _unresolved = _round_rows_context(request, checking_round, bound_form=bound_form)
+    rows, counts, _unresolved, _times, _faculty = _round_rows_context(request, checking_round, bound_form=bound_form)
     row = next((item for item in rows if item.meeting_id == meeting_id), None)
     if row is None:
         return JsonResponse({"ok": False, "message": "That class is not on this frozen daily list."}, status=400)
@@ -1128,7 +1165,12 @@ def round_view(request, public_id):
                 reviewed = []
                 for value in request.POST.getlist("present_rows"):
                     meeting_id, revision = value.split(":", 1)
-                    reviewed.append({"meeting_id": int(meeting_id), "result_revision": int(revision)})
+                    meeting_id = int(meeting_id)
+                    reviewed.append({
+                        "meeting_id": meeting_id,
+                        "result_revision": int(revision),
+                        "note": request.POST.get(f"present_note_{meeting_id}", ""),
+                    })
                     selected_present_rows.add(value)
                 AttendanceResultService.confirm_present(
                     actor=request.user,
@@ -1148,13 +1190,17 @@ def round_view(request, public_id):
                 bound_form.add_error(None, exc)
             else:
                 messages.error(request, f"Attendance changed or is unresolved: {exc}. Reload and review.")
-    rows, counts, unresolved_rows = _round_rows_context(request, checking_round, bound_form, selected_present_rows)
+    rows, counts, unresolved_rows, time_options, faculty_options = _round_rows_context(
+        request, checking_round, bound_form, selected_present_rows
+    )
     return render(request, "faculty_attendance/round.html", {
         "checking_round": checking_round,
         "rows": rows,
         "counts": counts,
         "index_rows": sorted(rows, key=lambda row: (*row.index_group_key, row.sequence)),
         "unresolved_rows": unresolved_rows,
+        "time_filter_options": time_options,
+        "faculty_filter_options": faculty_options,
         "exception_form": bound_form or ExceptionEncodingForm(),
         "selected_present_rows": selected_present_rows,
         "can_print": _can_page(request, PRINT_PERMISSION, [checking_round.department_id]),

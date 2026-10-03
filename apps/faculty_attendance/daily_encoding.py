@@ -14,6 +14,7 @@ from apps.academics.models import CourseOffering
 
 from .models import (
     CheckingRound,
+    FacultyCoverage,
     OfferingAttendanceSourceChange,
     RecurringCombinedClass,
     ScheduleSlot,
@@ -742,6 +743,48 @@ def _existing_meeting_for_occurrence(*, schedule_slot, occurrence, lock=False):
             code="DATED_MEETING_CONFLICT",
             action="combined",
         )
+    return None
+
+
+def resolve_occurrence_faculty(occurrence):
+    """Resolve the faculty for preview from dated records, never current assignments."""
+    from .observations import resolve_attendance_faculty
+
+    recorded = _recorded_meetings_for_occurrence(occurrence)
+    if recorded:
+        exact = [meeting for meeting in recorded if _meeting_matches_occurrence(meeting, occurrence)]
+        if len(recorded) != 1 or len(exact) != 1:
+            return None
+        # Preview-only related loading; do not add nullable outer joins to the
+        # shared materialization query which may acquire row locks.
+        meeting = TeachingMeeting.objects.select_related(
+            "faculty_user", "attendance_result__faculty_user",
+            "substitution__substitute_faculty", "coverage_adoption__faculty_user",
+        ).get(pk=exact[0].pk)
+        result = getattr(meeting, "attendance_result", None)
+        faculty, _source = resolve_attendance_faculty(meeting, result=result)
+        return faculty
+
+    starts_at = timezone.make_aware(datetime.combine(occurrence.meeting_date, occurrence.start_time))
+    resolved_ids = []
+    resolved_faculty = None
+    for offering in occurrence.linked_offerings:
+        coverages = list(
+            FacultyCoverage.objects.filter(
+                tenant_id=offering.tenant_id,
+                campus_id=offering.campus_id,
+                department_id=offering.department_id,
+                offering=offering,
+                effective_from__lte=starts_at,
+            ).filter(Q(effective_until__isnull=True) | Q(effective_until__gt=starts_at))
+            .select_related("faculty_user")
+        )
+        if len(coverages) != 1:
+            return None
+        resolved_ids.append(coverages[0].faculty_user_id)
+        resolved_faculty = coverages[0].faculty_user
+    if resolved_ids and len(set(resolved_ids)) == 1:
+        return resolved_faculty
     return None
 
 

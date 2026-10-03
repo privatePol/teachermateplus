@@ -169,7 +169,7 @@
     </div>
   {% endif %}
 
-  <details class="mb-3"><summary class="fw-semibold">Administrative diagnostics and historical recovery</summary><p class="mt-2">These tools are for exceptional historical data issues. They are not part of routine College attendance encoding. Holidays and suspensions use the existing closure decision; faculty absence is an attendance finding.</p><a href="{% url 'faculty_attendance:coverage_initialize' %}">Review legacy assignment data</a>
+  <details class="mb-3"><summary class="fw-semibold">Administrative diagnostics and historical recovery</summary><p class="mt-2">These tools are for exceptional historical data issues. They are not part of routine College attendance encoding. For holidays/suspensions follow the office calendar outside TMP: manually encode Regular faculty as Present and Part-time as Absent, with optional notes. Earlier saved closure decisions are retained; faculty absence remains an attendance finding.</p><a href="{% url 'faculty_attendance:coverage_initialize' %}">Review legacy assignment data</a>
   <div class="row g-3">
     {% if can_manage_schedules %}
       <div class="col-12 col-xxl-6">
