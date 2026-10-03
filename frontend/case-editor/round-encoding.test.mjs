@@ -23,7 +23,10 @@ function page({mobile = false, fetchImpl} = {}) {
     <div data-round-index-group><a data-round-index-link href="#meeting-row-2">Course (Section) — Room 202</a></div></nav></section>
     <button type="button" data-round-index-reopen aria-controls="attendance-class-index">Attendance index</button></aside>
     <span data-count="unverified">2</span><span data-count="exception">0</span><div id="daily-round-rows">${card(1)}${card(2, '17')}</div>
-    <form id="present-form" method="post"></form></div></main>`,
+    <form id="present-form" method="post" action="${route}" data-attendance-processing="Confirming reviewed classes…">
+      <input name="action" value="confirm_present" type="hidden"><input name="csrfmiddlewaretoken" value="bulk-csrf" type="hidden">
+      <input name="submission_key" value="stable-bulk-key" type="hidden"><button type="submit">Confirm selected rows present</button>
+    </form></div></main>`,
     {url: route, runScripts: 'outside-only'});
   const {window} = dom;
   const requests = [], scroll = [];
@@ -31,6 +34,7 @@ function page({mobile = false, fetchImpl} = {}) {
   window.matchMedia = query => query.includes('991.98px') ? media : {matches: false};
   window.HTMLElement.prototype.scrollIntoView = function (options) { scroll.push({id: this.id, options}); };
   window.fetch = fetchImpl ? async (...args) => {requests.push(args); return fetchImpl(...args);} : undefined;
+  window.eval(readFileSync(new URL('../../static/faculty_attendance/processing.js', import.meta.url), 'utf8'));
   window.eval(script);
   const submit = id => {
     const form = window.document.querySelector(`#meeting-row-${id} form`);
@@ -40,6 +44,120 @@ function page({mobile = false, fetchImpl} = {}) {
   };
   return {window, dom, requests, scroll, media, submit, document: window.document};
 }
+
+test('bulk AJAX shows indeterminate progress, prevents duplicates and updates only confirmed cards', async () => {
+  let complete;
+  const p = page({fetchImpl: () => new Promise(resolve => { complete = resolve; })});
+  const form = p.document.getElementById('present-form');
+  const selection = p.document.querySelector('#meeting-row-1 [name=present_rows]');
+  selection.checked = true;
+  form.dispatchEvent(new p.window.Event('submit', {bubbles: true, cancelable: true}));
+  form.dispatchEvent(new p.window.Event('submit', {bubbles: true, cancelable: true}));
+  assert.equal(p.requests.length, 1);
+  assert.equal(p.requests[0][0], route);
+  assert.equal(p.requests[0][1].body.get('action'), 'confirm_present');
+  assert.equal(p.requests[0][1].body.get('csrfmiddlewaretoken'), 'bulk-csrf');
+  assert.equal(p.requests[0][1].body.get('submission_key'), 'stable-bulk-key');
+  assert.equal(p.requests[0][1].body.get('present_rows'), '1:0');
+  assert.equal(form.getAttribute('aria-busy'), 'true');
+  assert.equal(form.querySelector('progress').hasAttribute('value'), false);
+  assert.equal(form.querySelector('button').disabled, true);
+  complete({ok: true, json: async () => ({ok: true, rows: [{meeting_id: 1, row_html: card(1)}],
+    counts: {unverified: 1, present: 1}, message: 'Reviewed classes confirmed present.', submission_key: 'next-key'})});
+  await flush();
+  assert.match(form.querySelector('[data-processing-status]').textContent, /confirmed present/);
+  assert.equal(form.querySelector('button').disabled, false);
+  assert.equal(form.querySelector('progress'), null);
+  assert.equal(form.querySelector('[name=submission_key]').value, 'next-key');
+  assert.equal(p.document.querySelector('#meeting-row-2 [name=late_minutes]').value, '17');
+  assert.equal(p.document.getElementById('meeting-row-1').id, 'meeting-row-1');
+  p.dom.window.close();
+});
+
+test('bulk server validation restores controls, selected rows and submission identity without false success', async () => {
+  const p = page({fetchImpl: async () => ({ok: false, json: async () => ({ok: false, message: 'Attendance changed; reload and review.'})})});
+  const form = p.document.getElementById('present-form');
+  p.document.querySelector('#meeting-row-1 [name=present_rows]').checked = true;
+  form.dispatchEvent(new p.window.Event('submit', {bubbles: true, cancelable: true}));
+  await flush();
+  const status = form.querySelector('[data-processing-status]');
+  assert.match(status.textContent, /reload and review/);
+  assert.equal(status.classList.contains('text-success'), false);
+  assert.equal(status.classList.contains('text-danger'), true);
+  assert.equal(form.querySelector('button').disabled, false);
+  assert.equal(form.querySelector('[name=submission_key]').value, 'stable-bulk-key');
+  assert.equal(p.document.querySelector('#meeting-row-1 [name=present_rows]').checked, true);
+  p.dom.window.close();
+});
+
+test('bulk timeout and non-JSON gateway errors explain unknown outcome, retain identity and never retry silently', async () => {
+  for (const fetchImpl of [async () => {throw new Error('timeout');},
+    async () => ({ok: false, json: async () => {throw new SyntaxError('gateway HTML');}})]) {
+    const p = page({fetchImpl});
+    const form = p.document.getElementById('present-form');
+    form.dispatchEvent(new p.window.Event('submit', {bubbles: true, cancelable: true}));
+    await flush();
+    const status = form.querySelector('[data-processing-status]');
+    assert.match(status.textContent, /outcome is unknown.*Reload/);
+    assert.equal(status.classList.contains('text-success'), false);
+    assert.equal(form.querySelector('button').disabled, false);
+    assert.equal(form.querySelector('[name=submission_key]').value, 'stable-bulk-key');
+    assert.equal(p.requests.length, 1);
+    p.dom.window.close();
+  }
+});
+
+test('normal navigation processing retains values, blocks duplicate submits and resets on browser return', () => {
+  const p = page();
+  for (const label of ['Loading checklist', 'Preparing daily list', 'Reviewing cutoff', 'Confirming present']) {
+    const form = p.document.createElement('form');
+    form.dataset.attendanceProcessing = label;
+    form.innerHTML = '<input name="selection" value="retained"><button type="submit">Continue</button>';
+    p.document.body.append(form);
+    const first = new p.window.Event('submit', {bubbles: true, cancelable: true});
+    form.dispatchEvent(first);
+    assert.equal(first.defaultPrevented, false);
+    assert.match(form.querySelector('[role=status]').textContent, new RegExp(label));
+    assert.equal(form.querySelector('input').value, 'retained');
+    const duplicate = new p.window.Event('submit', {bubbles: true, cancelable: true});
+    form.dispatchEvent(duplicate);
+    assert.equal(duplicate.defaultPrevented, true);
+    p.window.dispatchEvent(new p.window.Event('pageshow'));
+    assert.equal(form.querySelector('button').disabled, false);
+    assert.equal(form.querySelector('[role=status]').textContent, '');
+  }
+  p.dom.window.close();
+});
+
+test('normal navigation validation and connection failure restore controls without a saved claim', () => {
+  const p = page();
+  const form = p.document.getElementById('present-form');
+  form.innerHTML += '<input required name="date" type="date" value="">';
+  const invalid = new p.window.Event('submit', {bubbles: true, cancelable: true});
+  form.dispatchEvent(invalid);
+  assert.equal(invalid.defaultPrevented, true);
+  assert.equal(form.querySelector('button').disabled, false);
+  assert.match(form.querySelector('[role=status]').textContent, /highlighted fields/);
+  form.querySelector('[name=date]').value = '2026-10-03';
+  form.dispatchEvent(new p.window.Event('submit', {bubbles: true, cancelable: true}));
+  p.window.dispatchEvent(new p.window.Event('offline'));
+  assert.equal(form.querySelector('button').disabled, false);
+  assert.match(form.querySelector('[role=status]').textContent, /outcome is unknown/);
+  assert.equal(form.querySelector('[name=date]').value, '2026-10-03');
+  p.dom.window.close();
+});
+
+test('choosing No absence removes stale hours without touching late or early input', () => {
+  const p = page();
+  const form = p.document.querySelector('#meeting-row-2 form');
+  form.insertAdjacentHTML('beforeend', '<select name="absence_code"><option value="A">A</option><option value="">No absence</option></select><input name="missed_hours" value="1.00">');
+  const absence = form.querySelector('[name=absence_code]');
+  absence.value = '';
+  absence.dispatchEvent(new p.window.Event('change', {bubbles: true}));
+  assert.equal(form.querySelector('[name=missed_hours]').value, '');
+  assert.equal(form.querySelector('[name=late_minutes]').value, '17');
+  p.dom.window.close();
+});
 
 test('desktop index focuses the actual card and scrolls without covering a form', () => {
   const p = page();

@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import prefetch_related_objects
 from django.utils import timezone
 
 from apps.core.services.audit import AuditService
@@ -54,6 +55,8 @@ def _meeting_manifest_snapshot(meeting):
 
 
 def _pending_reconciliation_exists(meeting):
+    if hasattr(meeting, "_attendance_pending_review"):
+        return meeting._attendance_pending_review
     if meeting.reconciliations.filter(status=MeetingReconciliation.Status.PENDING).exists():
         return True
     offering_ids = meeting.offering_links.values_list("offering_id", flat=True)
@@ -72,6 +75,31 @@ FACULTY_ATTRIBUTION_SUBSTITUTION = "SUBSTITUTION"
 FACULTY_ATTRIBUTION_MEETING = "MEETING"
 FACULTY_ATTRIBUTION_ADOPTION = "COVERAGE_ADOPTION"
 FACULTY_ATTRIBUTION_UNRESOLVED = "UNRESOLVED"
+
+
+def prime_meeting_readiness(meetings):
+    """Load current readiness evidence once for a fresh, scoped batch of meetings.
+
+    Writers call this only after the campus/source locks. These ephemeral flags
+    are never persisted, shared between requests, or used to skip a permission.
+    """
+    from .college_sync import retired_meeting_ids
+    meetings = list(meetings)
+    ids = [m.pk for m in meetings]
+    prefetch_related_objects(meetings, "faculty_user", "substitution__substitute_faculty",
+                             "coverage_adoption__faculty_user", "offering_links")
+    retired = set(retired_meeting_ids().filter(meeting_id__in=ids))
+    pending = set(MeetingReconciliation.objects.filter(meeting_id__in=ids,
+        status=MeetingReconciliation.Status.PENDING).values_list("meeting_id", flat=True))
+    offering_ids = {link.offering_id for m in meetings for link in m.offering_links.all()}
+    coverage = list(CoverageReconciliation.objects.filter(offering_id__in=offering_ids,
+        status=CoverageReconciliation.Status.PENDING).values_list("offering_id", "effective_at"))
+    for meeting in meetings:
+        linked = {link.offering_id for link in meeting.offering_links.all()}
+        meeting._attendance_retired = meeting.pk in retired
+        meeting._attendance_pending_review = meeting.pk in pending or any(
+            offering_id in linked and (effective is None or effective <= meeting.starts_at)
+            for offering_id, effective in coverage)
 
 
 def resolve_attendance_faculty(meeting, result=None):
@@ -101,7 +129,9 @@ def resolve_attendance_faculty(meeting, result=None):
 def require_confirmable_meeting_faculty(meeting):
     """Validate current dated coverage without rewriting historical meeting warnings."""
     from .college_sync import retired_meeting_ids
-    if meeting.pk in retired_meeting_ids():
+    if getattr(meeting, "_attendance_retired", None) is True or (
+        not hasattr(meeting, "_attendance_retired") and meeting.pk in retired_meeting_ids()
+    ):
         raise ValidationError("This class was rescheduled in Course Offerings. Use the updated daily list.")
     if meeting.schedule_snapshot.get("college_source_waiting"):
         raise ValidationError("Save matching schedules and rooms for all linked sections in Course Offerings before encoding this combined class.")
@@ -309,7 +339,9 @@ class ObservationService:
         findings,
         note="",
         preserve_legacy_period_absence=False,
+        correction_revision=None,
     ):
+        lock_notice_campus(checking_round.campus_id)
         checking_round = CheckingRound.objects.select_for_update().get(pk=checking_round.pk)
         require_attendance_permission(
             user=actor,
@@ -328,6 +360,16 @@ class ObservationService:
         if row is None:
             raise StaleAttendanceReview("Meeting is not part of the frozen checking-round manifest.")
         normalized = _normalize_findings(findings, allow_legacy_periods=preserve_legacy_period_absence)
+        if correction_revision is not None:
+            saved = AttendanceResult.objects.select_for_update().filter(meeting_id=meeting_id).first()
+            require_attendance_permission(user=actor, permission_code=CORRECT_PERMISSION,
+                tenant_id=checking_round.tenant_id, campus_id=checking_round.campus_id,
+                department_id=checking_round.department_id)
+            if saved is None or not saved.revision or saved.revision != correction_revision:
+                raise StaleAttendanceReview("Attendance result changed; reload and review before saving.")
+            if (any(f.get("finding_type") == "ABSENCE" for f in saved.findings_snapshot)
+                    and not any(f["finding_type"] == "ABSENCE" for f in normalized) and not (note or "").strip()):
+                raise ValidationError("Enter a checker reason to remove the saved absence.")
         if preserve_legacy_period_absence:
             existing_result = AttendanceResult.objects.filter(meeting_id=meeting_id, revision__gt=0).first()
             if existing_result is None:
@@ -342,7 +384,7 @@ class ObservationService:
                 raise ValidationError("The saved attendance result has no legacy period-based absence to preserve.")
             if submitted_absences != existing_absences:
                 raise ValidationError("The saved period-based absence must remain unchanged in this correction.")
-        if not normalized:
+        if not normalized and correction_revision is None:
             return None
         serialized = _serialize_findings(normalized)
         payload_hash = _canonical_hash({"findings": serialized, "note": note.strip()})
@@ -409,7 +451,8 @@ class AttendanceResultService:
 
     @classmethod
     def _save_revision(
-        cls, *, result, expected_revision, actor, status, faculty, findings, reason, source_observation=None
+        cls, *, result, expected_revision, actor, status, faculty, findings, reason, source_observation=None,
+        refresh_notices=True, validated_present=False,
     ):
         if result.revision != expected_revision:
             raise StaleAttendanceReview("Attendance result changed; reload and review before saving.")
@@ -433,7 +476,17 @@ class AttendanceResultService:
         result.correction_reason = reason
         for field, value in summary.items():
             setattr(result, field, value)
-        result.full_clean()
+        if validated_present:
+            # Bulk callers already locked/validated the manifest, faculty and
+            # actor. Zero-valued Present has no arbitrary numeric payload.
+            # Keep local field validation and DB FK/unique/check enforcement,
+            # without repeating FK-existence and constraint SELECTs per row.
+            if status != AttendanceResult.Status.PRESENT or findings or source_observation:
+                raise ValidationError("Only validated bulk Present may use this write path.")
+            result.full_clean(exclude=["meeting", "faculty_user", "source_observation", "corrected_by"],
+                              validate_unique=False, validate_constraints=False)
+        else:
+            result.full_clean()
         result.save()
         AttendanceResultRevision.objects.create(
             result=result,
@@ -446,7 +499,8 @@ class AttendanceResultService:
             change_reason=reason,
         )
         from .staff_notices import refresh_for_meeting
-        refresh_for_meeting(result.meeting)
+        if refresh_notices:
+            refresh_for_meeting(result.meeting)
         return result
 
     @classmethod
@@ -480,11 +534,14 @@ class AttendanceResultService:
             for row in observation.findings.all()
         ]
         before_revision = result.revision
+        if (any(f.get("finding_type") == "ABSENCE" for f in result.findings_snapshot)
+                and not any(f["finding_type"] == "ABSENCE" for f in findings) and not (reason or "").strip()):
+            raise ValidationError("Enter a checker reason to remove the saved absence.")
         result = cls._save_revision(
             result=result,
             expected_revision=expected_revision,
             actor=actor,
-            status=AttendanceResult.Status.EXCEPTION,
+            status=AttendanceResult.Status.EXCEPTION if findings else AttendanceResult.Status.PRESENT,
             faculty=faculty,
             findings=findings,
             reason=reason,
@@ -506,7 +563,7 @@ class AttendanceResultService:
 
     @classmethod
     @transaction.atomic
-    def confirm_present(cls, *, actor, checking_round, manifest_revision, reviewed_rows):
+    def confirm_present(cls, *, actor, checking_round, manifest_revision, reviewed_rows, submission_key=""):
         lock_notice_campus(checking_round.campus_id)
         checking_round = CheckingRound.objects.select_for_update().get(pk=checking_round.pk)
         require_attendance_permission(
@@ -518,6 +575,8 @@ class AttendanceResultService:
         )
         if manifest_revision != checking_round.manifest_revision:
             raise StaleAttendanceReview("Checking-round manifest changed; reload before confirming present rows.")
+        if checking_round.status != CheckingRound.Status.OPEN:
+            raise ValidationError("Checking round is closed.")
         requested = {
             int(item["meeting_id"]): {
                 "revision": int(item["result_revision"]),
@@ -527,6 +586,22 @@ class AttendanceResultService:
         }
         if len(requested) != len(reviewed_rows):
             raise ValidationError("Reviewed meeting IDs must be unique.")
+        if not requested:
+            raise ValidationError("Select the reviewed present classes first.")
+        if len(submission_key) > 64:
+            raise ValidationError("Invalid confirmation submission identity.")
+        payload_hash = _canonical_hash({"manifest_revision": manifest_revision, "rows": requested})
+        from apps.auditlog.models import AuditLog
+        prior = None
+        if submission_key:
+            # A current locking read is needed after the campus mutex, including
+            # when an InnoDB repeatable-read snapshot predates another retry.
+            prior = AuditLog.objects.select_for_update().filter(action="FACULTY_ATTENDANCE_BULK_PRESENT",
+                entity_type="CheckingRound", entity_id=str(checking_round.pk), actor_user=actor,
+                tenant_id=checking_round.tenant_id, campus_id=checking_round.campus_id,
+                metadata_json__submission_key=submission_key).first()
+            if prior and prior.metadata_json["payload_hash"] != payload_hash:
+                raise StaleAttendanceReview("Submission key was already used with different selected classes or notes.")
         manifest_rows = {
             row.meeting_id: row
             for row in CheckingRoundMeeting.objects.select_for_update()
@@ -540,6 +615,12 @@ class AttendanceResultService:
             row.meeting_id: row
             for row in AttendanceResult.objects.select_for_update().filter(meeting_id__in=requested).order_by('meeting_id')
         }
+        if prior:
+            for meeting_id, revision in prior.after_json["result_revisions"]:
+                if meeting_id not in locked_results or locked_results[meeting_id].revision != revision:
+                    raise StaleAttendanceReview("A confirmed class changed afterward. Reload and review its current status.")
+            return {"confirmed_meeting_ids": prior.after_json["confirmed_meeting_ids"],
+                    "skipped_meeting_ids": prior.after_json["skipped_meeting_ids"], "replayed": True}
         for meeting_id, request in requested.items():
             expected = request["revision"]
             current = locked_results.get(meeting_id)
@@ -548,6 +629,22 @@ class AttendanceResultService:
                 raise StaleAttendanceReview("Attendance result changed; reload and review before confirming present rows.")
         confirmed = []
         skipped = []
+        prime_meeting_readiness([row.meeting for row in manifest_rows.values()])
+        faculties = {}
+        for meeting_id, row in manifest_rows.items():
+            result = locked_results.get(meeting_id)
+            if result is None or result.status == AttendanceResult.Status.UNVERIFIED:
+                faculties[meeting_id] = require_confirmable_meeting_faculty(row.meeting)
+        # New Present rows cannot change absence/late notices: no exception,
+        # previous attribution or historical notice exists. Corrections retain
+        # normal notice recomputation and its existing rollback/lock semantics.
+        new_ids = set(manifest_rows) - set(locked_results)
+        AttendanceResult.objects.bulk_create([
+            AttendanceResult(meeting=row.meeting) for meeting_id, row in manifest_rows.items()
+            if meeting_id in new_ids])
+        for result in AttendanceResult.objects.filter(meeting_id__in=new_ids):
+            result.meeting = manifest_rows[result.meeting_id].meeting
+            locked_results[result.meeting_id] = result
         for meeting_id, request in requested.items():
             expected = request["revision"]
             manifest_row = manifest_rows[meeting_id]
@@ -556,8 +653,8 @@ class AttendanceResultService:
             if result and result.status != AttendanceResult.Status.UNVERIFIED:
                 skipped.append(meeting_id)
                 continue
-            faculty = require_confirmable_meeting_faculty(meeting)
-            result = result or AttendanceResult.objects.create(meeting=meeting)
+            faculty = faculties[meeting_id]
+            had_history = result.revision > 0
             cls._save_revision(
                 result=result,
                 expected_revision=expected,
@@ -566,9 +663,17 @@ class AttendanceResultService:
                 faculty=faculty,
                 findings=[],
                 reason=request["note"],
+                validated_present=True,
+                refresh_notices=had_history,
             )
             confirmed.append(meeting_id)
-        return {"confirmed_meeting_ids": confirmed, "skipped_meeting_ids": skipped}
+        outcome = {"confirmed_meeting_ids": confirmed, "skipped_meeting_ids": skipped}
+        AuditService.log_event(action="FACULTY_ATTENDANCE_BULK_PRESENT", portal="ADMIN",
+            entity_type="CheckingRound", entity_id=checking_round.pk, actor=actor,
+            tenant=checking_round.tenant_id, campus=checking_round.campus_id,
+            after_data={**outcome, "result_revisions": [[mid, locked_results[mid].revision] for mid in sorted(requested)]},
+            metadata={"submission_key": submission_key, "payload_hash": payload_hash})
+        return outcome
 
     @classmethod
     @transaction.atomic

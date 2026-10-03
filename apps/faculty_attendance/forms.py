@@ -229,7 +229,7 @@ class SubstitutionForm(forms.Form):
 class ExceptionEncodingForm(forms.Form):
     meeting_id = forms.IntegerField(widget=forms.HiddenInput)
     expected_revision = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
-    absence_code = forms.ChoiceField(choices=[("", "None"), ("A", "A - without notice"), ("N", "N - with notice")], required=False)
+    absence_code = forms.ChoiceField(choices=[("", "No absence"), ("A", "A - without notice"), ("N", "N - with notice")], required=False)
     missed_hours = forms.DecimalField(required=False, min_value=0, max_digits=7, decimal_places=2)
     late_flag = forms.BooleanField(required=False)
     late_minutes = forms.IntegerField(required=False, min_value=0)
@@ -237,9 +237,16 @@ class ExceptionEncodingForm(forms.Form):
     early_minutes = forms.IntegerField(required=False, min_value=0)
     reason = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Checker reason (optional)")
 
-    def __init__(self, *args, preserve_legacy_period_absence=False, **kwargs):
+    def __init__(self, *args, preserve_legacy_period_absence=False, correcting_saved_result=False, saved_absence=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.preserve_legacy_period_absence = preserve_legacy_period_absence
+        self.removable_saved_absence = saved_absence and not preserve_legacy_period_absence
+        # A saved hours-based finding can be removed explicitly. Ignore its old
+        # hours before DecimalField validation, including a stale invalid value.
+        # Initial blank submissions and legacy-period compatibility stay strict.
+        if self.is_bound and correcting_saved_result and not preserve_legacy_period_absence and not self.data.get("absence_code"):
+            self.data = self.data.copy()
+            self.data["missed_hours"] = ""
 
     def clean(self):
         cleaned = super().clean()
@@ -254,6 +261,8 @@ class ExceptionEncodingForm(forms.Form):
             self.add_error("missed_hours", "A/N requires actual missed decimal hours.")
         elif not code and hours is not None:
             self.add_error("absence_code", "Select A or N for an absence segment.")
+        if self.removable_saved_absence and not code and not (cleaned.get("reason") or "").strip():
+            self.add_error("reason", "Enter a checker reason to remove the saved absence.")
         if cleaned.get("late_flag") and cleaned.get("late_minutes") is None:
             self.add_error("late_minutes", "Enter late minutes; zero is allowed.")
         if cleaned.get("early_flag") and cleaned.get("early_minutes") is None:

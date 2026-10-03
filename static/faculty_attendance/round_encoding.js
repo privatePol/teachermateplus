@@ -82,6 +82,37 @@
     current.replaceWith(replacement); return replacement;
   }
   function updateCounts(counts) { if (!counts) return; Object.keys(counts).forEach(function (name) { var element = document.querySelector('[data-count="' + name + '"]'); if (element) element.textContent = counts[name]; }); }
+  var presentForm = document.getElementById("present-form");
+  if (presentForm && window.fetch && window.AttendanceProcessing) presentForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (!window.AttendanceProcessing.begin(presentForm)) return;
+    fetch(presentForm.getAttribute("action") || window.location.href, {
+      method: "POST", body: new FormData(presentForm), credentials: "same-origin",
+      headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+    }).then(function (response) {
+      return response.json().then(function (data) {
+        if (!response.ok || data.ok !== true) {
+          window.AttendanceProcessing.end(presentForm, data.message || "Confirmation was not completed. Reload and review the current class statuses.", true);
+          return;
+        }
+        (data.rows || []).forEach(function (row) { replaceRow(row.row_html, row.meeting_id); });
+        updateCounts(data.counts); applyRoundFilters();
+        var key = presentForm.querySelector('[name="submission_key"]');
+        if (key && data.submission_key) key.value = data.submission_key;
+        window.AttendanceProcessing.end(presentForm, data.message, false);
+      });
+    }).catch(function () {
+      // A timeout/HTML gateway response is an unknown outcome, not proof of a
+      // failed save. Keep the original submission identity for an explicit retry.
+      window.AttendanceProcessing.end(presentForm, "Connection or server problem: the save outcome is unknown. Reload this daily list and check the class statuses before retrying. Do not assume the classes were saved.", true);
+    });
+  });
+  document.addEventListener("change", function (event) {
+    if (!event.target.matches('form[data-row-save] [name="absence_code"]')) return;
+    var form = event.target.form;
+    var hours = form.querySelector('[name="missed_hours"]');
+    if (hours && !event.target.value) hours.value = "";
+  });
   function feedback(form, message, isError) { var element = form.closest("[data-meeting-row]").querySelector("[data-row-feedback]"); if (!element) return; element.textContent = message; element.classList.toggle("text-danger", Boolean(isError)); element.classList.toggle("text-success", !isError); }
   document.addEventListener("submit", function (event) {
     var form = event.target.closest("form[data-row-save]"); if (!form || !window.fetch) return;

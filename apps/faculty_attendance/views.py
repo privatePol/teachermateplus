@@ -68,6 +68,7 @@ from .observations import (
     StaleAttendanceReview,
     resolve_attendance_faculty,
     require_confirmable_meeting_faculty,
+    prime_meeting_readiness,
 )
 from .permissions import (
     CORRECT_PERMISSION,
@@ -758,7 +759,45 @@ def cutoff_review_view(request):
     )
     # College routine encoding uses manually checked Present/A/N findings.
     # Retain existing closure services/history, without a routine closure action.
+    context.update(_cutoff_display_context(request, review))
     return render(request, "faculty_attendance/cutoff_review.html", context)
+
+
+def _cutoff_display_context(request, review):
+    """Labels/links only; use the review's scoped dated evidence, not live faculty."""
+    from urllib.parse import urlencode
+    labels = {
+        "MEETING_RECONCILIATION_PENDING": "Faculty or historical attendance needs review",
+        "UNVERIFIED_ATTENDANCE": "Class attendance has not been verified",
+        "UNMATERIALIZED_OCCURRENCE": "Class has not been prepared or encoded",
+        "COVERAGE_CHANGE_PENDING": "Assigned faculty needs review",
+        "FACULTY_ATTRIBUTION_MISSING": "Faculty attribution is missing",
+        "FACULTY_ATTRIBUTION_CONFLICT": "Dated faculty and saved attendance disagree",
+        "CLOSURE_REVIEW_PENDING": "Saved no-class decision needs review",
+        "RECORDED_MEETING_SOURCE_MISMATCH": "Recorded class and schedule need review",
+    }
+    can_view = {}
+    def daily_link(day, department_id):
+        if not day or not department_id:
+            return ""
+        if department_id not in can_view:
+            can_view[department_id] = _can_page(request, VIEW_PERMISSION, [department_id])
+        if not can_view[department_id]:
+            return ""
+        return reverse("faculty_attendance:daily_encoding") + "?" + urlencode({
+            "academic_year": review.academic_year_id, "term": review.term_id, "meeting_date": day.isoformat()})
+    blockers = [{"blocker": b, "title": labels.get(b.code, b.code.replace("_", " ").capitalize()),
+        "details": b.details, "url": daily_link(b.details.get("date"), b.details.get("department_id"))}
+        for b in review.blockers]
+    records = []
+    for record in review.records:
+        sections = record.meeting.sections_snapshot
+        courses = list(dict.fromkeys((s.get("course_code", ""), s.get("course_title", "")) for s in sections))
+        records.append({"record": record, "courses": courses, "sections": sections,
+            "url": daily_link(record.meeting.meeting_date, record.meeting.department_id),
+            "history": list(record.result.history.order_by("revision")) if record.result else [],
+            "closure_history": sorted(record.meeting.closure_decisions.all(), key=lambda c: c.revision)})
+    return {"cutoff_blockers": blockers, "supporting_records": records}
 
 
 @portal_required("ADMIN")
@@ -983,6 +1022,7 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
     counts = {"unverified": 0, "present": 0, "exception": 0}
     visible_rows, unresolved_rows = [], []
     can_correct = _can_page(request, CORRECT_PERMISSION, [checking_round.department_id])
+    prime_meeting_readiness([row.meeting for row in rows])
     for row in rows:
         result = getattr(row.meeting, "attendance_result", None)
         row.attributed_faculty, attribution_source = resolve_attendance_faculty(row.meeting, result=result)
@@ -1015,6 +1055,7 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
         row.present_selected = row.present_row_value in selected_present_rows
         row.present_note = request.POST.get(f"present_note_{row.meeting_id}", "") if request.method == "POST" else ""
         row.editing_is_correction = bool(result and result.revision)
+        row.has_saved_absence = bool(result and any(f.get("finding_type") == "ABSENCE" for f in result.findings_snapshot))
         row.can_correct_result = can_correct
         row.result_summary = _result_summary(result)
         row.faculty_attribution_label = {
@@ -1106,6 +1147,8 @@ def round_view(request, public_id):
                 bound_form = ExceptionEncodingForm(
                     request.POST,
                     preserve_legacy_period_absence=bool(legacy_period_absences),
+                    correcting_saved_result=bool(existing and existing.revision),
+                    saved_absence=bool(existing and any(f.get("finding_type") == "ABSENCE" for f in existing.findings_snapshot)),
                 )
                 if bound_form.is_valid():
                     cleaned = bound_form.cleaned_data
@@ -1138,7 +1181,9 @@ def round_view(request, public_id):
                         manifest_revision=checking_round.manifest_revision,
                         submission_key=request.POST.get("submission_key") or str(uuid4()),
                         findings=findings,
+                        note=cleaned["reason"],
                         preserve_legacy_period_absence=bool(legacy_period_absences),
+                        correction_revision=cleaned["expected_revision"] if existing and existing.revision else None,
                     )
                     if observation is None:
                         bound_form.add_error(None, "Blank findings remain unverified; no result was created.")
@@ -1172,15 +1217,28 @@ def round_view(request, public_id):
                         "note": request.POST.get(f"present_note_{meeting_id}", ""),
                     })
                     selected_present_rows.add(value)
-                AttendanceResultService.confirm_present(
+                outcome = AttendanceResultService.confirm_present(
                     actor=request.user,
                     checking_round=checking_round,
                     manifest_revision=int(request.POST.get("manifest_revision", 0)),
                     reviewed_rows=reviewed,
+                    submission_key=request.POST.get("submission_key", ""),
                 )
+                if is_ajax:
+                    rows, counts, _hidden, _times, _faculty = _round_rows_context(request, checking_round)
+                    changed = set(outcome["confirmed_meeting_ids"])
+                    return JsonResponse({"ok": True, "message": "Selected reviewed classes confirmed present. Saved findings were preserved; attendance was not published or finalized.",
+                        "counts": counts, "rows": [{"meeting_id": row.meeting_id, "row_html": render_to_string(
+                            "faculty_attendance/_round_meeting_row.html", {"checking_round": checking_round,
+                            "row": row, "exception_form": ExceptionEncodingForm()}, request=request)}
+                            for row in rows if row.meeting_id in changed], "replayed": outcome.get("replayed", False),
+                        "submission_key": str(uuid4())})
                 messages.success(request, "Selected reviewed classes confirmed present. Saved findings were preserved; attendance was not published or finalized.")
                 return redirect("faculty_attendance:round", public_id=public_id)
         except (ValidationError, PermissionDenied, ValueError, StaleAttendanceReview) as exc:
+            if is_ajax and action == "confirm_present":
+                return JsonResponse({"ok": False, "message": f"Confirmation was not completed: {exc}. Reload and review the current statuses before retrying."},
+                    status=409 if isinstance(exc, StaleAttendanceReview) else 403 if isinstance(exc, PermissionDenied) else 400)
             if is_ajax and action == "exception":
                 return _round_row_json_response(
                     request, checking_round, int(request.POST.get("meeting_id", 0)), bound_form=bound_form,
@@ -1203,6 +1261,7 @@ def round_view(request, public_id):
         "faculty_filter_options": faculty_options,
         "exception_form": bound_form or ExceptionEncodingForm(),
         "selected_present_rows": selected_present_rows,
+        "present_submission_key": request.POST.get("submission_key") or str(uuid4()),
         "can_print": _can_page(request, PRINT_PERMISSION, [checking_round.department_id]),
     })
 

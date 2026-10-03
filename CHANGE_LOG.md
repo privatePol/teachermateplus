@@ -1,3 +1,10 @@
+## Attendance save/correction feedback - 2026-10-03
+
+- Removed redundant per-row bulk Present readiness/validation queries and notice recomputation for brand-new Present results; atomicity, permissions, protected findings, audit/revisions and correction notices remain. Existing audit storage records submission identities for safe retries. A timeout is explicitly an unknown outcome, not a failed-save assertion.
+- No absence can remove a saved hours-based A/N finding with a checker reason, retaining original history and selected L/E; otherwise the correction is Present. Initial blank and legacy-period protections remain.
+- Added indeterminate processing/duplicate prevention with error recovery and native fallback for the four checker actions; daily accordions start collapsed with visible counts. Cutoff warnings identify affected scoped classes and supporting records group date/time with readable saved history.
+- Focused disposable evidence, exact manifest and GE109 legacy recovery diagnosis are in HANDOFF. No schema, dependency, runtime or persistent-data change; staging/browser/InnoDB acceptance is separate.
+
 ## College daily workflow and navigation - 2026-10-03
 
 - Attendance index now closes to a narrow side tab, releasing desktop width to cards; accessible reopen, mobile initial collapse, focus/scroll and print exclusion remain. Time and dated-faculty filters apply together to cards/index with matching count/empty state, retain unsaved values, clear hidden Present selections and survive AJAX saves.

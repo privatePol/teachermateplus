@@ -1,3 +1,13 @@
+## Attendance processing and correction safety (2026-10-03)
+
+Bulk Present validates the complete selected set before writing and remains atomic. Fresh batch readiness and batched initial inserts avoid repeated FK/readiness queries; only new initial Present skips notice recomputation because it cannot change an absence or monthly late count. Saved/corrected records retain normal notice handling. An audited request identity permits an identical committed retry without extra revisions, but payload/manifest/later-result changes require reload and review. Network/gateway failures mean outcome unknown; never silently resend or assume a save.
+
+For a saved hours-based A/N finding, No absence discards stale hours and removes the current absence only. This removal requires a checker reason and correction permission/current revision. Selected L/E remain; no remaining finding yields Present. Old revisions, immutable publications/final DTRs and legacy period compatibility are preserved. Other optional-note policies stay unchanged.
+
+All four checker actions display accessible indeterminate processing with duplicate prevention and retained fields. AJAX bulk updates only confirmed cards; normal navigation returns/reset controls on browser return. Daily attention and expected-class disclosures start closed with counts. Cutoff class labels use scoped dated evidence, not current assignment guesses; supporting attendance/closure records sort date/time and retain revision history. These labels do not change readiness fingerprints or calculations.
+
+GE109 supplied staging evidence is a legacy frozen unresolved row crossing two contiguous **same-faculty** intervals. Existing services select coverage at class start; neither a new coverage interval nor guessed backdating is required for that rule. A separate authorized targeted audited adoption can preserve both intervals and frozen snapshots. Verify the actual primary link/snapshot sync marker and pending reviews first; diagnosis/disposable reproduction does not authorize or prove a staging repair. No generic campus initialization or unassignment/reassignment is recommended.
+
 ## College daily navigation and manual calendar practice (2026-10-03)
 
 Rounds use a Question Bank-style desktop side rail: Close releases index width to class cards; Attendance index reopens it. Mobile starts closed. Filters combine actual local class time ranges and stable faculty IDs with sorted Lastname, Firstname labels. They affect both cards and index, show matching counts/empty state, retain typed attendance values, clear hidden Reviewed present selections and remain effective after AJAX card replacement. Without JavaScript, ordinary forms/navigation remain available.

@@ -18,7 +18,7 @@
   <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small mb-0"><li class="breadcrumb-item"><a href="{% url 'admin_portal:dashboard' %}">Dashboard</a></li><li class="breadcrumb-item active" aria-current="page">Monthly Attendance Checklist</li></ol></nav>
   <header class="attendance-hero mb-3"><div class="d-flex flex-wrap justify-content-between gap-3"><div><h1 class="h3 mb-1">Monthly Attendance Checklist</h1><p class="mb-2">Load current Course Offerings, arrange the classroom route within each time group, and print the paper checklist.</p>{% if can_manage_combined %}<a class="btn btn-sm btn-light" href="{% url 'faculty_attendance:combined_classes' %}">Sections Taught Together</a>{% endif %}</div>{% if selected_academic_year %}<div aria-label="Selected checklist scope"><span class="scope-chip">Tenant: {{ tenant_name }}</span><span class="scope-chip">Campus: {{ campus_name }}</span><span class="scope-chip">AY: {{ selected_academic_year.code }}</span><span class="scope-chip">Semester: {{ selected_term.name }}</span></div>{% endif %}</div></header>
   <div class="workflow-steps mb-3"><div class="workflow-step"><strong>1. Select scope</strong><br><span class="text-muted">Choose the academic year, semester, month, and day group.</span></div><div class="workflow-step"><strong>2. Arrange classroom order</strong><br><span class="text-muted">Drag rows or use Move Up and Move Down.</span></div><div class="workflow-step"><strong>3. Preview and print</strong><br><span class="text-muted">Review any correction message, then open the paper checklist.</span></div></div>
-  <form method="get" class="card card-body mb-3">
+  <form method="get" data-attendance-processing="Loading checklist… Please wait." class="card card-body mb-3">
     <div class="row g-3 align-items-end">
       <div class="col-lg-3"><label class="form-label" for="{{ monthly_form.academic_year.id_for_label }}">Academic year</label>{{ monthly_form.academic_year }}{{ monthly_form.academic_year.errors }}</div>
       <div class="col-lg-3"><label class="form-label" for="{{ monthly_form.term.id_for_label }}">Semester</label>{{ monthly_form.term }}{% for error in monthly_form.term.errors %}<div class="checklist-callout checklist-callout-error" role="alert">{{ error }}</div>{% endfor %}</div>
@@ -48,4 +48,5 @@
   {% else %}<div class="card card-body text-center">Select the checklist scope to begin.</div>{% endif %}
 </div>
 <script src="{% static 'faculty_attendance/checklist_route.js' %}?v=20261002-days-picker"></script>
+<script src="{% static 'faculty_attendance/processing.js' %}"></script>
 {% endblock %}

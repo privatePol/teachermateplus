@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -12,7 +12,7 @@ from django.utils import timezone
 from apps.academics.models import CourseOffering
 from apps.core.services.audit import AuditService
 
-from .daily_encoding import _combined_groups, expected_daily_occurrences
+from .daily_encoding import _combined_groups, expected_daily_occurrences, resolve_occurrence_faculty
 from .models import (
     AttendanceClosureDecision,
     AttendanceCutoffPublication,
@@ -22,7 +22,7 @@ from .models import (
     CoverageReconciliation,
     TeachingMeeting,
 )
-from .observations import StaleAttendanceReview, require_confirmable_meeting_faculty
+from .observations import StaleAttendanceReview, require_confirmable_meeting_faculty, resolve_attendance_faculty, prime_meeting_readiness
 from .permissions import PUBLISH_PERMISSION, can_faculty_view_own_attendance, require_attendance_permission
 
 
@@ -32,6 +32,9 @@ class CutoffBlocker:
     message: str
     occurrence_key: str = ""
     meeting_id: int | None = None
+    offering_ids: tuple[int, ...] = ()
+    meeting_date: date | None = None
+    details: dict = field(default_factory=dict, compare=False)
 
 
 @dataclass(frozen=True)
@@ -148,7 +151,8 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
         end_date=end_date,
         combined_classes=combined,
     )
-    blockers = [CutoffBlocker(code=item.code, message=item.message, occurrence_key=item.occurrence_key) for item in occurrence_issues]
+    blockers = [CutoffBlocker(code=item.code, message=item.message, occurrence_key=item.occurrence_key,
+        offering_ids=tuple(o.pk for o in item.affected_offerings), meeting_date=item.meeting_date) for item in occurrence_issues]
 
     from .college_sync import retired_meeting_ids
     meeting_queryset = TeachingMeeting.objects.exclude(pk__in=retired_meeting_ids()).filter(
@@ -163,6 +167,7 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
     meetings = list(
         meeting_queryset.prefetch_related("offering_links", "reconciliations", "closure_decisions")
     )
+    prime_meeting_readiness(meetings)
     meetings_by_key = {item.occurrence_key: item for item in meetings if item.occurrence_key}
     meetings_by_signature = {_meeting_signature(item): item for item in meetings}
     revisions = {
@@ -282,11 +287,46 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
         blockers.append(
             CutoffBlocker(
                 code="COVERAGE_CHANGE_PENDING",
+                offering_ids=(item.offering_id,),
                 message=f"{item.offering.course.code} / {item.offering.section.code} has an unresolved faculty coverage change.",
             )
         )
     records = tuple(sorted(records, key=lambda item: (item.meeting.meeting_date, item.meeting.starts_at, item.occurrence_key)))
-    blockers = tuple(sorted(blockers, key=lambda item: (item.code, item.message, item.occurrence_key)))
+    # Presentation metadata is scoped to the authorized review. It is excluded
+    # from the readiness fingerprint and never changes saved source evidence.
+    meeting_map = {m.pk: m for m in meetings}
+    occurrence_map = {o.occurrence_key: o for o in occurrences}
+    offering_map = {o.pk: o for o in offerings}
+    decorated = []
+    for blocker in blockers:
+        meeting = meeting_map.get(blocker.meeting_id)
+        occurrence = occurrence_map.get(blocker.occurrence_key)
+        details = {}
+        if meeting:
+            result = getattr(meeting, "attendance_result", None)
+            faculty, _source = resolve_attendance_faculty(meeting, result)
+            if not result:
+                try:
+                    faculty = require_confirmable_meeting_faculty(meeting)
+                except ValidationError:
+                    faculty = None
+            details = {"date": meeting.meeting_date, "start": timezone.localtime(meeting.starts_at).time(),
+                "end": timezone.localtime(meeting.ends_at).time(), "faculty": faculty,
+                "sections": meeting.sections_snapshot, "room": meeting.location_snapshot.get("room") or meeting.location_snapshot.get("room_text"),
+                "department_id": meeting.department_id}
+        elif occurrence:
+            details = {"date": occurrence.meeting_date, "start": occurrence.start_time, "end": occurrence.end_time,
+                "faculty": resolve_occurrence_faculty(occurrence), "room": occurrence.source_room,
+                "sections": [{"course_code": o.course.code, "course_title": o.course.title, "section_code": o.section.code}
+                             for o in occurrence.linked_offerings], "department_id": occurrence.primary_offering.department_id}
+        elif blocker.offering_ids:
+            sources = [offering_map[oid] for oid in blocker.offering_ids if oid in offering_map]
+            details = {"date": blocker.meeting_date, "sections": [{"course_code": o.course.code,
+                "course_title": o.course.title, "section_code": o.section.code} for o in sources],
+                "source_schedules": [o.schedule_text for o in sources],
+                "department_id": sources[0].department_id if sources else None}
+        decorated.append(replace(blocker, details=details))
+    blockers = tuple(sorted(decorated, key=lambda item: (item.code, item.message, item.occurrence_key)))
     return CutoffReview(
         tenant_id=tenant_id,
         campus_id=campus_id,
