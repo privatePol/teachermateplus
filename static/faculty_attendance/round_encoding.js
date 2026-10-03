@@ -1,5 +1,23 @@
 (function () {
   "use strict";
+  var index = document.querySelector("[data-round-index]");
+  var mobileIndex = window.matchMedia ? window.matchMedia("(max-width: 991.98px)") : null;
+  if (index && mobileIndex) {
+    function fitIndex() { index.open = !mobileIndex.matches; }
+    fitIndex();
+    if (mobileIndex.addEventListener) mobileIndex.addEventListener("change", fitIndex);
+  }
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest("[data-round-index-link]");
+    if (!link) return;
+    var target = document.getElementById((link.getAttribute("href") || "").slice(1));
+    if (!target) return;
+    event.preventDefault();
+    if (index && mobileIndex && mobileIndex.matches) index.open = false;
+    target.focus({preventScroll: true});
+    var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({behavior: reducedMotion ? "auto" : "smooth", block: "start"});
+  });
   function replaceRow(markup, meetingId) {
     var current = document.querySelector('[data-meeting-row][data-meeting-id="' + meetingId + '"]');
     if (!current || !markup) return null;

@@ -5,7 +5,7 @@ from uuid import uuid4
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch, Q
-from django.http import Http404, HttpResponse, HttpResponseForbidden, HttpResponseNotAllowed, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseForbidden, HttpResponseNotAllowed, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -320,13 +320,75 @@ def checklist_view(request):
     })
 
 
+CHECKLIST_SESSION_KEY = "faculty_attendance_checklist_settings"
+CHECKLIST_SETTING_FIELDS = ("academic_year", "term", "month", "weekdays", "paper", "orientation", "text_size")
+
+
+def _checklist_request_data(request, *, tenant_id, campus_id, academic_years, terms):
+    """Restore only still-authorized selections from this authenticated session."""
+    saved = request.session.get(CHECKLIST_SESSION_KEY, {})
+    remembered = {}
+    if isinstance(saved, dict) and saved.get("scope") == [tenant_id, campus_id]:
+        validator = MonthlyChecklistForm(academic_year_queryset=academic_years, term_queryset=terms)
+        values = saved.get("values", {})
+        if isinstance(values, dict):
+            for name in CHECKLIST_SETTING_FIELDS:
+                if name not in values:
+                    continue
+                try:
+                    validator.fields[name].clean(values[name])
+                except (ValidationError, ValueError, TypeError):
+                    continue
+                remembered[name] = values[name]
+            year = remembered.get("academic_year")
+            if not year or not terms.filter(pk=remembered.get("term"), academic_year_id=year).exists():
+                remembered.pop("term", None)
+    data = QueryDict(mutable=True)
+    for name, value in remembered.items():
+        if name == "weekdays":
+            data.setlist(name, [str(day) for day in value])
+        else:
+            data[name] = str(value)
+    # A changed year cannot inherit an old semester. An explicitly supplied
+    # semester is still checked by the form against the new year and scope.
+    if "academic_year" in request.GET and request.GET["academic_year"] != str(remembered.get("academic_year", "")):
+        if "term" not in request.GET:
+            data.pop("term", None)
+    if "day_group" in request.GET and "weekdays" not in request.GET:
+        data.pop("weekdays", None)
+    for name in (*CHECKLIST_SETTING_FIELDS, "day_group"):
+        if name in request.GET:
+            data.setlist(name, request.GET.getlist(name))
+    return data or None
+
+
+def _checklist_session_values(form):
+    values = {}
+    for name in CHECKLIST_SETTING_FIELDS:
+        if name not in form.cleaned_data:
+            continue
+        value = form.cleaned_data[name]
+        if name in ("academic_year", "term"):
+            value = value.pk if value else None
+        elif name == "month":
+            value = value.strftime("%Y-%m") if value else None
+        elif name == "weekdays":
+            value = sorted(set(value))
+        else:
+            value = value or {"paper": "A4", "orientation": "landscape", "text_size": "11"}[name]
+        if value not in (None, "", []):
+            values[name] = value
+    return values
+
+
 def _monthly_checklist_context(request, *, require_print=False):
     tenant_id, campus_id, department_ids = _scope(request)
     _page_permission(request, PRINT_PERMISSION if require_print else VIEW_PERMISSION, department_ids)
     academic_years = AdminScopeService.active_scoped_academic_years(request).filter(tenant_id=tenant_id)
     terms = AdminScopeService.active_scoped_terms(request).filter(tenant_id=tenant_id)
     form = MonthlyChecklistForm(
-        request.GET or None,
+        _checklist_request_data(request, tenant_id=tenant_id, campus_id=campus_id,
+                                academic_years=academic_years, terms=terms),
         academic_year_queryset=academic_years,
         term_queryset=terms,
         initial={"month": timezone.localdate().replace(day=1), "day_group": "MW"},
@@ -347,12 +409,29 @@ def _monthly_checklist_context(request, *, require_print=False):
         "campus_name": Campus.objects.filter(pk=campus_id).values_list("name", flat=True).first() or str(campus_id),
         "filter_query": request.GET.urlencode(),
     }
-    if not form.is_valid():
+    valid = form.is_valid()
+    if form.is_bound:
+        # Only cleaned values survive a validation error or a scope change.
+        # Django logout flushes this session, including these selections.
+        request.session[CHECKLIST_SESSION_KEY] = {
+            "scope": [tenant_id, campus_id], "values": _checklist_session_values(form),
+        }
+    elif CHECKLIST_SESSION_KEY in request.session:
+        request.session.pop(CHECKLIST_SESSION_KEY)
+    if not valid:
         return context
     academic_year = form.cleaned_data["academic_year"]
     term = form.cleaned_data["term"]
     selected_month = form.cleaned_data["month"]
     day_group = form.cleaned_data["day_group"]
+    query = QueryDict(mutable=True)
+    for name, value in _checklist_session_values(form).items():
+        if name != "weekdays":
+            query[name] = str(value)
+    query["day_group"] = day_group
+    query["scope_tenant_id"] = str(tenant_id)
+    query["scope_campus_id"] = str(campus_id)
+    context["filter_query"] = query.urlencode()
     arrangement = MonthlyChecklistArrangement.objects.filter(
         tenant_id=tenant_id, campus_id=campus_id, academic_year=academic_year,
         term=term, owner=request.user, day_group=day_group,
@@ -879,14 +958,22 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
             "meeting__substitution__substitute_faculty",
             "meeting__attendance_result",
             "meeting__attendance_result__faculty_user",
+            "meeting__coverage_adoption__faculty_user",
         )
         .prefetch_related("meeting__attendance_result__history")
         .order_by("sequence")
     )
     counts = {"unverified": 0, "present": 0, "exception": 0}
+    visible_rows, unresolved_rows = [], []
     can_correct = _can_page(request, CORRECT_PERMISSION, [checking_round.department_id])
     for row in rows:
         result = getattr(row.meeting, "attendance_result", None)
+        row.attributed_faculty, attribution_source = resolve_attendance_faculty(row.meeting, result=result)
+        if row.attributed_faculty is None:
+            unresolved_rows.append(row)
+            continue
+        visible_rows.append(row)
+        row.index_group_key = (row.meeting.starts_at, row.meeting.ends_at)
         status = result.status if result else AttendanceResult.Status.UNVERIFIED
         counts[status.lower()] += 1
         result_revision = result.revision if result else 0
@@ -907,7 +994,6 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
         row.editing_is_correction = bool(result and result.revision)
         row.can_correct_result = can_correct
         row.result_summary = _result_summary(result)
-        row.attributed_faculty, attribution_source = resolve_attendance_faculty(row.meeting, result=result)
         row.faculty_attribution_label = {
             FACULTY_ATTRIBUTION_RESULT: "Saved attendance attribution",
             FACULTY_ATTRIBUTION_SUBSTITUTION: "Explicit meeting substitute",
@@ -934,11 +1020,11 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
                     "absence_code": bound_form.data.get("absence_code", ""),
                     "missed_hours": bound_form.data.get("missed_hours", ""),
                 })
-    return rows, counts
+    return visible_rows, counts, unresolved_rows
 
 
 def _round_row_json_response(request, checking_round, meeting_id, *, bound_form=None, message, status=200):
-    rows, counts = _round_rows_context(request, checking_round, bound_form=bound_form)
+    rows, counts, _unresolved = _round_rows_context(request, checking_round, bound_form=bound_form)
     row = next((item for item in rows if item.meeting_id == meeting_id), None)
     if row is None:
         return JsonResponse({"ok": False, "message": "That class is not on this frozen daily list."}, status=400)
@@ -996,6 +1082,9 @@ def round_view(request, public_id):
                         )
                         if existing.revision != cleaned["expected_revision"]:
                             raise StaleAttendanceReview("Attendance result changed; reload and review before saving.")
+                    # Recheck dated eligibility before recording any observation,
+                    # including direct requests for cards omitted from the page.
+                    require_confirmable_meeting_faculty(manifest_row.meeting)
                     findings = []
                     if legacy_period_absences:
                         findings.extend(legacy_period_absences)
@@ -1047,7 +1136,7 @@ def round_view(request, public_id):
                     manifest_revision=int(request.POST.get("manifest_revision", 0)),
                     reviewed_rows=reviewed,
                 )
-                messages.success(request, "Exact reviewed remaining rows confirmed present.")
+                messages.success(request, "Selected reviewed classes confirmed present. Saved findings were preserved; attendance was not published or finalized.")
                 return redirect("faculty_attendance:round", public_id=public_id)
         except (ValidationError, PermissionDenied, ValueError, StaleAttendanceReview) as exc:
             if is_ajax and action == "exception":
@@ -1059,11 +1148,13 @@ def round_view(request, public_id):
                 bound_form.add_error(None, exc)
             else:
                 messages.error(request, f"Attendance changed or is unresolved: {exc}. Reload and review.")
-    rows, counts = _round_rows_context(request, checking_round, bound_form, selected_present_rows)
+    rows, counts, unresolved_rows = _round_rows_context(request, checking_round, bound_form, selected_present_rows)
     return render(request, "faculty_attendance/round.html", {
         "checking_round": checking_round,
         "rows": rows,
         "counts": counts,
+        "index_rows": sorted(rows, key=lambda row: (*row.index_group_key, row.sequence)),
+        "unresolved_rows": unresolved_rows,
         "exception_form": bound_form or ExceptionEncodingForm(),
         "selected_present_rows": selected_present_rows,
         "can_print": _can_page(request, PRINT_PERMISSION, [checking_round.department_id]),

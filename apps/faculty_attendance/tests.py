@@ -2604,12 +2604,13 @@ class FacultyAttendanceFoundationTests(TestCase):
         response = self.client.get(reverse("faculty_attendance:round", args=[checking_round.public_id]))
 
         self.assertEqual(response.status_code, 200)
-        row = response.context["rows"][0]
         self.assertTrue(meeting.unresolved_coverage)
-        self.assertIsNone(row.attributed_faculty)
-        self.assertEqual(row.faculty_attribution_label, "")
-        self.assertContains(response, "Faculty unresolved")
-        self.assertContains(response, "Needs coverage attention")
+        self.assertEqual(response.context["rows"], [])
+        self.assertEqual(response.context["index_rows"], [])
+        self.assertEqual(response.context["counts"], {"unverified": 0, "present": 0, "exception": 0})
+        self.assertEqual(response.context["unresolved_rows"][0].meeting_id, meeting.pk)
+        self.assertContains(response, "Classes awaiting faculty assignment (1)")
+        self.assertNotContains(response, f'id="meeting-row-{meeting.pk}"')
         self.assertNotContains(response, f"<strong>{self.faculty.username}</strong>")
         self.assertNotContains(response, f"<strong>{self.replacement.username}</strong>")
 

@@ -1,3 +1,10 @@
+## Attendance rounds and checklist UI - 2026-10-03
+
+- Routine round cards, counts and the new schedule-grouped attendance index exclude meetings without safe dated faculty attribution. The secondary assignment details retain those classes; no meetings/history are deleted and cutoff readiness still includes them. Direct exception requests recheck dated eligibility before recording observations.
+- Checklist academic year, semester, month, selected days and paper/orientation/text settings persist in the authenticated server session until logout. Restored choices are revalidated; tenant/campus changes clear them and academic-year changes clear incompatible semesters. Print/export links carry the displayed scope and effective settings.
+- The index stays beside desktop cards, collapses initially on mobile, moves focus/scroll to stable class anchors, survives row AJAX replacement, and is hidden in print. Class details show `Course (Section)`, every linked section, distinct faculty/room text and the existing faculty-card green/yellow gradient with a contrast-safe heading.
+- Bulk Present guidance now explains saving exceptions first, selecting only Reviewed present classes, and confirming those selections. Existing revision/readiness/direct-DENY safeguards, protected exceptions and permitted later corrections remain in use. Confirmation does not publish or finalize. Focused evidence and pending browser acceptance are recorded in HANDOFF; no schema changes.
+
 ## College remaining unmatched-slot correction - 2026-10-03
 
 - Cross-weekday matching now uses the remaining unmatched slots after every exact/same-weekday match, not total original slot count. Moving an explicitly combined Monday to Tuesday while retaining Wednesday preserves one combined Tuesday occurrence and earlier Monday evidence.
