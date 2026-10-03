@@ -15,6 +15,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.academics.services import record_attendance_assignment_event
@@ -223,6 +224,7 @@ class ImportTemplateService:
                 "section_code",
                 "faculty_username",
                 "is_primary",
+                "attendance_effective_at",
             ],
             "sample_row": [
                 "DEMO",
@@ -233,6 +235,7 @@ class ImportTemplateService:
                 "BSIT-1A",
                 "faculty1",
                 "TRUE",
+                "2025-06-01T00:00",
             ],
         },
         ImportBatch.ImportType.FACULTY_USERS: {
@@ -330,6 +333,7 @@ class ImportTemplateService:
             "relationships": [
                 "offering reference = tenant + campus + academic year + term + course + section",
                 "faculty_username must belong to an active user with FACULTY role",
+                "attendance_effective_at: actual teaching start, e.g. YYYY-MM-DDTHH:MM in Asia/Manila; required when Faculty Attendance is enabled. Do not use the import/acceptance timestamp. Attendance updates on confirmation.",
             ],
             "code_rules": [
                 "faculty_username: accepts username or email, exact match recommended",
@@ -1563,6 +1567,25 @@ class BulkImportService:
             )
 
         is_primary = cls._parse_bool(cls._normalize_value(row["is_primary"]), "is_primary", errors, default=False)
+        effective_at = None
+        raw_effective = cls._normalize_value(row.get("attendance_effective_at", ""))
+        if raw_effective:
+            try:
+                effective_at = parse_datetime(raw_effective)
+            except ValueError:
+                effective_at = None
+            if effective_at is None:
+                errors.append("Effective from must be a valid date and time.")
+            if effective_at and timezone.is_naive(effective_at):
+                effective_at = timezone.make_aware(effective_at)
+        if offering:
+            from apps.core.services.features import FeatureSettingsService
+            if FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=offering.tenant_id):
+                from apps.faculty_attendance.college_sync import validate_boundary
+                try:
+                    validate_boundary(offering, effective_at)
+                except ValidationError as exc:
+                    errors.extend(exc.messages)
         if offering and faculty_user:
             if FacultyAssignment.objects.filter(offering=offering, faculty_user=faculty_user).exists():
                 errors.append("Faculty assignment already exists for this offering and faculty user.")
@@ -1574,6 +1597,7 @@ class BulkImportService:
             "faculty_user_id": faculty_user.id if faculty_user else None,
             "is_primary": bool(is_primary),
             "is_active": True,
+            "attendance_effective_at": effective_at.isoformat() if effective_at else None,
         }
         unique_key = f"{offering.id}:{faculty_user.id}" if offering and faculty_user else None
         return normalized, errors, unique_key
@@ -1884,6 +1908,12 @@ class BulkImportService:
 
         actual_headers = [cell.strip() for cell in csv_rows[0]]
         batch.actual_headers_json = actual_headers
+        # Older templates remain accepted when attendance is disabled. When it
+        # is enabled the row validator requires the explicit boundary, never a
+        # guessed import/acceptance timestamp.
+        if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS and actual_headers == [
+                h for h in expected_headers if h != "attendance_effective_at"]:
+            expected_headers = actual_headers
         if actual_headers != expected_headers:
             batch.status = ImportBatch.Status.VALIDATION_FAILED
             batch.error_summary_json = {
@@ -2676,7 +2706,9 @@ class BulkImportService:
                 actor=actor,
                 assignment=assignment,
                 event_type="ASSIGNMENT_IMPORTED",
-                reason="Imported assignment requires an explicit teaching-coverage effective boundary.",
+                reason="",
+                effective_at=parse_datetime(normalized.get("attendance_effective_at") or ""),
+                academic_permission="faculty_assignments.import",
             )
             return entity_type, assignment
         if import_type == ImportBatch.ImportType.ENROLLMENT:

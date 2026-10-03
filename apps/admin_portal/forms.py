@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from django import forms
@@ -1297,15 +1298,15 @@ class SectionForm(forms.ModelForm):
 class CourseOfferingForm(forms.ModelForm):
     attendance_effective_from = forms.DateField(
         required=False,
-        label="Attendance schedule/room effective date",
+        label="Effective from",
         widget=forms.DateInput(attrs={"type": "date"}),
-        help_text="For a changed schedule or room, record the first affected teaching date. Leave blank only when attendance review must establish the boundary.",
+        help_text="First date this class schedule or room applies. Attendance updates automatically; earlier recorded classes stay unchanged.",
     )
     attendance_change_reason = forms.CharField(
         required=False,
         label="Attendance change note",
         widget=forms.Textarea(attrs={"rows": 2}),
-        help_text="Optional source note for the checker reviewing a schedule or room change.",
+        help_text="Optional note retained with this academic change and its automatic attendance update.",
     )
 
     class Meta:
@@ -1527,6 +1528,30 @@ class CourseOfferingForm(forms.ModelForm):
         course = cleaned.get("course")
         section = cleaned.get("section")
 
+        if self.instance.pk and "attendance_effective_from" in self.fields and (
+                "schedule_text" in self.changed_data or "room" in self.changed_data):
+            from apps.faculty_attendance.college_sync import validate_boundary
+            from apps.faculty_attendance.schedule_parsing import parse_schedule_text
+            boundary = cleaned.get("attendance_effective_from")
+            try:
+                validate_boundary(self.instance, boundary, old_schedule_text=self.instance.schedule_text,
+                    new_schedule_text=cleaned.get("schedule_text"), room_changed=self.instance.room != cleaned.get("room"))
+            except DjangoValidationError as exc:
+                self.add_error("attendance_effective_from", exc)
+            if boundary:
+                from apps.faculty_attendance.models import ScheduleVersion
+                if ScheduleVersion.objects.filter(offering=self.instance, effective_from__gt=boundary).exists():
+                    self.add_error("attendance_effective_from", "A later class schedule already exists. Keep its effective dates or correct this change date.")
+            parsed_schedule = parse_schedule_text(cleaned.get("schedule_text"))
+            if not parsed_schedule.confirmed:
+                self.add_error("schedule_text", "Enter a clear class day and start/end time before saving.")
+            else:
+                from apps.faculty_attendance.college_sync import map_schedule_slots
+                try:
+                    map_schedule_slots(parse_schedule_text(self.instance.schedule_text).slots, parsed_schedule.slots)
+                except DjangoValidationError as exc:
+                    self.add_error("schedule_text", exc)
+
         if not department:
             if section:
                 department = section.department
@@ -1575,6 +1600,9 @@ class CourseOfferingForm(forms.ModelForm):
 
 
 class FacultyAssignmentForm(forms.ModelForm):
+    attendance_effective_at = forms.DateTimeField(required=False, label="Effective from",
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        help_text="First date/time this faculty teaches the class (Asia/Manila). Attendance updates automatically.")
     class Meta:
         model = FacultyAssignment
         fields = ["offering", "faculty_user", "assignment_note", "is_primary", "is_active"]
@@ -1593,6 +1621,15 @@ class FacultyAssignmentForm(forms.ModelForm):
         cleaned = super().clean()
         offering = cleaned.get("offering")
         faculty_user = cleaned.get("faculty_user")
+        if offering and FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=offering.tenant_id):
+            changed = (not self.instance.pk or cleaned.get("attendance_effective_at") is not None
+                       or any(field in self.changed_data for field in ("offering", "faculty_user", "is_active")))
+            if changed:
+                from apps.faculty_attendance.college_sync import validate_boundary
+                try:
+                    validate_boundary(offering, cleaned.get("attendance_effective_at"))
+                except DjangoValidationError as exc:
+                    self.add_error("attendance_effective_at", exc)
         if offering and faculty_user and self.instance and self.instance.pk:
             try:
                 FacultyAssignmentSafetyService.validate_direct_assignment_change(
@@ -1613,10 +1650,11 @@ class FacultyAssignmentReplacementForm(forms.Form):
     remarks = forms.CharField(widget=forms.Textarea(attrs={"rows": 4}), min_length=5)
     attendance_effective_at = forms.DateTimeField(
         required=False,
+        label="Effective from",
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
         help_text=(
-            "Optional explicit Asia/Manila teaching-coverage boundary. If omitted or the operator lacks "
-            "attendance authority, replacement still completes but attendance coverage stays pending reconciliation."
+            "First date/time the replacement teaches (Asia/Manila). Attendance updates automatically. "
+            "Use Replace Faculty again when the original faculty returns."
         ),
     )
 
@@ -1625,6 +1663,9 @@ class FacultyAssignmentReplacementForm(forms.Form):
         assignment_queryset = assignment_queryset or FacultyAssignment.objects.none()
         faculty_queryset = faculty_queryset or get_user_model().objects.none()
         self.assignment_queryset = assignment_queryset
+        if any(FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=a.offering.tenant_id) for a in assignment_queryset):
+            self.fields["replacement_type"].choices = [(value, "Temporary replacement" if value == "TEMPORARY" else label)
+                                                      for value, label in self.fields["replacement_type"].choices]
         self.fields["assignment_ids"].choices = [(str(row.id), str(row.id)) for row in assignment_queryset]
         self.fields["replacement_faculty"].queryset = faculty_queryset
         _set_choice_label(self.fields.get("replacement_faculty"), _faculty_label)
@@ -1644,6 +1685,15 @@ class FacultyAssignmentReplacementForm(forms.Form):
         cleaned = super().clean()
         replacement_faculty = cleaned.get("replacement_faculty")
         assignment_ids = cleaned.get("assignment_ids") or []
+        if assignment_ids:
+            from apps.faculty_attendance.college_sync import validate_boundary
+            for assignment in self.assignment_queryset.filter(pk__in=assignment_ids):
+                if FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=assignment.offering.tenant_id):
+                    try:
+                        validate_boundary(assignment.offering, cleaned.get("attendance_effective_at"))
+                    except DjangoValidationError as exc:
+                        self.add_error("attendance_effective_at", exc)
+                        break
         if replacement_faculty and assignment_ids:
             same_faculty_count = self.assignment_queryset.filter(
                 id__in=assignment_ids,

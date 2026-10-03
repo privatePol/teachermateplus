@@ -1,3 +1,24 @@
+## College remaining unmatched-slot correction - 2026-10-03
+
+- Cross-weekday matching now uses the remaining unmatched slots after every exact/same-weekday match, not total original slot count. Moving an explicitly combined Monday to Tuesday while retaining Wednesday preserves one combined Tuesday occurrence and earlier Monday evidence.
+- Multiple unmatched cross-weekday possibilities are rejected rather than guessed; the Course Offering form displays the schedule error before saving. Removal-only changes still archive unmatched old slots. Focused disposable results and remaining acceptance limits are recorded in HANDOFF; no schema/migration/runtime changes.
+
+## College Verdict C focused corrections - 2026-10-03
+
+- Reactivation identities use the assignment and explicit UTC teaching boundary; retries reuse the same audited transition, later returns open distinct coverage without backdating.
+- Schedule reconciliation maps slots one-to-one, retaining exact matches before changed slots. Removing an unencoded sibling archives it without moving two meetings onto one slot; recorded/publication evidence remains saved.
+- Explicit recurring combinations follow agreed, effective audited academic source changes, retaining their original definition and earlier evidence. Conflicting sources remain blocked rather than splitting the class.
+- Prepared lists extend only from scoped audited academic creation/assignment/schedule evidence; a retired sibling does not bypass stale-list protection. Original manifest snapshots stay frozen and added rows invalidate review by revision.
+- Date-only schedule edits validate affected class times against the verified activation time. Same-day changes after the boundary are allowed; preceding classes/coverage are not rewritten. No schema migration, persistent-data or runtime action.
+
+## College academic-to-attendance workflow - 2026-10-03
+
+- College assignment/create/reactivation/unassignment/replacement (including temporary replacement and original-faculty return) now updates dated Attendance within the academic transaction. Effective from belongs to that operation; imports use explicit `attendance_effective_at`. Acceptance/import timestamps never supply teaching dates.
+- Course Offering schedule/room edits use an explicit effective date and versioned source history. Unrecorded prepared classes update with audit; removed weekday occurrences retain historical evidence and leave the live encoding/cutoff list. Saved findings, closure decisions and publication snapshots are preserved.
+- Routine checker screens no longer offer initial coverage/adoption or a one-meeting substitute. Legacy recovery stays under secondary administrative diagnostics. Faculty absence remains an attendance finding; existing holiday/suspension handling remains unchanged.
+- Sequential linked-section source saves wait for matching schedules/rooms before encoding, then update one combined meeting. Added daily slots resume existing lists automatically; later acceptance retains verified dates. Legacy substitution evidence and repeated saved/publication history stay protected.
+- No schema change or persistent migration/runtime operation. Focused disposable validation is recorded in HANDOFF; authenticated staging/browser acceptance remains separate.
+
 ## Scoped attendance activation/recovery and checklist output - 2026-10-02
 
 - Added signed scoped preview/apply for accepted legacy assignments, with explicit teaching start time, owning-offering NULL-scope handling, stale-preview rejection and idempotent interval creation. Conflicts/replacements are not inferred.

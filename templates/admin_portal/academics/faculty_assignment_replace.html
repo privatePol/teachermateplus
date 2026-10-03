@@ -4,7 +4,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h2 class="h5 mb-1">Replace Faculty</h2>
-    <div class="text-muted">Use this only for approved faculty replacement, substitution, or co-faculty assignment.</div>
+    <div class="text-muted">Use for approved temporary or permanent replacement, return of the original faculty, or co-faculty assignment. College teaching changes update Attendance automatically.</div>
   </div>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_assignment_list' %}">Back to Faculty Assignments</a>
 </div>
@@ -126,7 +126,7 @@
         {% if form.remarks.errors %}<div class="text-danger small">{{ form.remarks.errors }}</div>{% endif %}
       </div>
       <div class="col-md-6">
-        <label class="form-label">Attendance coverage effective date/time</label>
+        <label class="form-label" for="{{ form.attendance_effective_at.id_for_label }}">Effective from (Asia/Manila)</label>
         {{ form.attendance_effective_at }}
         {% if form.attendance_effective_at.errors %}<div class="text-danger small">{{ form.attendance_effective_at.errors }}</div>{% endif %}
         <div class="form-text">{{ form.attendance_effective_at.help_text }}</div>

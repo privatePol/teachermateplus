@@ -620,8 +620,9 @@ def record_attendance_assignment_event(
     effective_at=None,
     apply_when_authorized=False,
     clear_coverage=False,
+    academic_permission=None,
 ):
-    tenant_id = assignment.tenant_id or assignment.offering.tenant_id
+    tenant_id = assignment.offering.tenant_id
     if not FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=tenant_id):
         return None
     from apps.faculty_attendance.academic_integration import AcademicCoverageIntegrationService
@@ -637,6 +638,7 @@ def record_attendance_assignment_event(
         proposed_faculty=(None if clear_coverage else (proposed_faculty or assignment.faculty_user)),
         effective_at=effective_at,
         apply_when_authorized=apply_when_authorized,
+        academic_permission=academic_permission,
     )
 
 
@@ -678,6 +680,9 @@ class FacultyAssignmentSafetyService:
             return
         if int(new_offering_id) == assignment.offering_id and int(new_faculty_user_id) == assignment.faculty_user_id:
             return
+        from apps.faculty_attendance.models import FacultyCoverage
+        if FacultyCoverage.objects.filter(source_assignment=assignment).exists():
+            raise ValueError("This assignment has dated attendance history. Use Replace Faculty so earlier teaching records stay correct.")
         if cls.assignment_has_academic_dependencies(assignment):
             raise ValueError(
                 "This faculty assignment is already in use. Use Replace Faculty so existing activities, scores, "
@@ -704,6 +709,16 @@ class FacultyAssignmentSafetyService:
     ):
         batch_reference = cls.generate_batch_reference()
         keep_old = replacement_type in cls.KEEP_OLD_ASSIGNMENT_TYPES
+        attendance_enabled = any(FeatureSettingsService.is_faculty_attendance_enabled(
+            tenant_id=a.offering.tenant_id) for a in assignments)
+        if attendance_enabled and replacement_type != FacultyAssignmentReplacementLog.ReplacementType.SECONDARY:
+            from apps.faculty_attendance.college_sync import validate_boundary
+            for assignment in assignments:
+                if FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=assignment.offering.tenant_id):
+                    validate_boundary(assignment.offering, attendance_effective_at)
+            # College temporary replacement changes teaching coverage just like a
+            # permanent replacement. Returning faculty use this same operation.
+            keep_old = False
         logs = []
         for assignment in assignments:
             current = (
@@ -840,6 +855,7 @@ class FacultyAssignmentSafetyService:
                     proposed_faculty=replacement_faculty,
                     effective_at=attendance_effective_at,
                     apply_when_authorized=True,
+                    academic_permission="faculty_replacement.process",
                 )
             logs.append(log)
         return logs

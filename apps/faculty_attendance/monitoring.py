@@ -129,7 +129,8 @@ def term_summary(*, actor, tenant_id, campus_id, academic_year, term, as_of):
     occurrences, issues = expected_daily_occurrences(offerings=offerings, term=term,
                                                     start_date=term.start_date, end_date=end,
                                                     combined_classes=groups)
-    meetings = list(TeachingMeeting.objects.filter(
+    from .college_sync import retired_meeting_ids
+    meetings = list(TeachingMeeting.objects.exclude(pk__in=retired_meeting_ids()).filter(
         tenant_id=tenant_id, campus_id=campus_id, department_id__in=departments,
         meeting_date__range=(term.start_date, end),
         offering_links__offering__academic_year=academic_year, offering_links__offering__term=term,

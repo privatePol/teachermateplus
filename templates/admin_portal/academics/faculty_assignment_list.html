@@ -237,6 +237,9 @@
         <input type="hidden" name="offering_q" value="{{ offering_q }}">
         <input type="hidden" name="section_id" value="{{ selected_section_id|default:'' }}">
 
+        {% if faculty_attendance_enabled %}
+        <div class="mb-3"><label class="form-label" for="assignment-effective-from">Effective from (Asia/Manila)</label><input class="form-control" id="assignment-effective-from" type="datetime-local" name="attendance_effective_at" required><div class="form-text">First date/time this faculty teaches. Attendance updates with this assignment.</div></div>
+        {% endif %}
         <div class="mb-3">
           <label class="form-label">Assignment Instructions / Notes</label>
           <textarea class="form-control" name="assignment_note" rows="3" placeholder="Optional instructions for the faculty member. Example: Please confirm schedule conflict resolution before accepting this load.">{{ assignment_note }}</textarea>
@@ -322,9 +325,9 @@
         {% if faculty_attendance_enabled %}
         <div class="row g-2 align-items-end mb-3">
           <div class="col-md-5">
-            <label class="form-label small fw-semibold" for="attendance-effective-at">Attendance coverage effective date/time</label>
+            <label class="form-label small fw-semibold" for="attendance-effective-at">Effective from (Asia/Manila)</label>
             <input class="form-control form-control-sm" type="datetime-local" id="attendance-effective-at" name="attendance_effective_at">
-            <div class="form-text">Optional Asia/Manila boundary. Without it, unassignment proceeds but attendance coverage is queued for reconciliation.</div>
+            <div class="form-text">Required for unassignment. Attendance updates automatically from this date/time.</div>
           </div>
         </div>
         {% endif %}

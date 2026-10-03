@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import timedelta, timezone as datetime_timezone
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -39,12 +39,32 @@ class AcademicCoverageIntegrationService:
         proposed_faculty=None,
         effective_at=None,
         apply_when_authorized=False,
+        academic_permission=None,
     ):
         if not cls.module_enabled(tenant_id=offering.tenant_id):
             return None
         offering = CourseOffering.objects.select_for_update().select_related(
             "tenant", "campus", "department"
         ).get(pk=offering.pk)
+        if academic_permission:
+            from .college_sync import require_academic_authority
+            require_academic_authority(actor, offering, academic_permission)
+        if academic_permission and event_type == "ASSIGNMENT_REACTIVATED" and source_assignment:
+            # The explicitly supplied teaching boundary identifies the transition,
+            # not a retry's save/acceptance timestamp. Normalize equivalent instants.
+            if effective_at is None or timezone.is_naive(effective_at):
+                raise ValidationError("Enter Effective from for this faculty return.")
+            source_reference = (f"assignment:{source_assignment.pk}:reactivated:"
+                f"{effective_at.astimezone(datetime_timezone.utc).isoformat()}")
+        if event_type == "ASSIGNMENT_ACCEPTED" and effective_at is None and source_assignment:
+            from .models import FacultyCoverage
+            # Acceptance is not a new teaching event. Existing explicitly dated
+            # source coverage stays intact; do not reopen a routine setup queue.
+            if FacultyCoverage.objects.filter(offering=offering, source_assignment=source_assignment,
+                    faculty_user=source_assignment.faculty_user, tenant=offering.tenant,
+                    campus=offering.campus, department=offering.department).exists():
+                return CoverageReconciliation.objects.filter(source_reference=source_reference,
+                    status="RESOLVED").first()
         reconciliation, created = CoverageReconciliation.objects.get_or_create(
             source_reference=source_reference,
             defaults={
@@ -62,6 +82,10 @@ class AcademicCoverageIntegrationService:
             },
         )
         if not created:
+            if academic_permission and reconciliation.status == "PENDING":
+                from .college_sync import sync_assignment
+                return sync_assignment(actor=actor, assignment=source_assignment,
+                    effective_at=effective_at, permission=academic_permission, reconciliation=reconciliation)
             return reconciliation
         reconciliation.full_clean()
         reconciliation.save()
@@ -83,6 +107,10 @@ class AcademicCoverageIntegrationService:
                 "status": reconciliation.status,
             },
         )
+        if academic_permission:
+            from .college_sync import sync_assignment
+            return sync_assignment(actor=actor, assignment=source_assignment,
+                effective_at=effective_at, permission=academic_permission, reconciliation=reconciliation)
         if apply_when_authorized and effective_at is not None:
             try:
                 return cls.resolve(
@@ -191,6 +219,7 @@ class AcademicOfferingSourceIntegrationService:
         old_room,
         effective_from=None,
         reason="",
+        synchronize=False,
     ):
         if not FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=offering.tenant_id):
             return None
@@ -204,6 +233,8 @@ class AcademicOfferingSourceIntegrationService:
         if old_schedule_text == new_schedule_text and old_room == new_room:
             return None
         reference = f"course-offering:{offering.pk}:{offering.updated_at.isoformat()}"
+        if synchronize:
+            reference = f"college-{reference}"
         change = OfferingAttendanceSourceChange(
             tenant=offering.tenant,
             campus=offering.campus,
@@ -221,6 +252,9 @@ class AcademicOfferingSourceIntegrationService:
         change.full_clean()
         change.save()
         meetings = TeachingMeeting.objects.filter(offering_links__offering=offering).distinct()
+        if synchronize:
+            from .college_sync import retired_meeting_ids
+            meetings = meetings.exclude(pk__in=retired_meeting_ids())
         if effective_from:
             meetings = meetings.filter(meeting_date__gte=effective_from)
         for meeting in meetings:
@@ -262,6 +296,9 @@ class AcademicOfferingSourceIntegrationService:
                 "new_room": new_room,
             },
         )
+        if synchronize:
+            from .college_sync import sync_schedule
+            return sync_schedule(actor=actor, change=change)
         return change
 
     @classmethod

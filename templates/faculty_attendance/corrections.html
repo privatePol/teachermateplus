@@ -156,7 +156,7 @@
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
       <div class="corrections-hero-copy">
         <h1 class="h3 mb-2">Attendance Corrections</h1>
-        <p class="mb-0">Optional exception tools for a specific attendance schedule interpretation, faculty coverage period, dated meeting, or substitute. Ordinary monthly checklist printing does not require action here.</p>
+        <p class="mb-0">Edit and save a faculty attendance finding from its daily class card. Regular class schedules and faculty replacements are saved in Course Offerings and Faculty Assignments; Attendance updates automatically.</p>
       </div>
       <a class="btn btn-light" href="{% url 'faculty_attendance:checklist' %}">Back to Monthly Attendance Checklist</a>
     </div>
@@ -169,6 +169,7 @@
     </div>
   {% endif %}
 
+  <details class="mb-3"><summary class="fw-semibold">Administrative diagnostics and historical recovery</summary><p class="mt-2">These tools are for exceptional historical data issues. They are not part of routine College attendance encoding. Holidays and suspensions use the existing closure decision; faculty absence is an attendance finding.</p><a href="{% url 'faculty_attendance:coverage_initialize' %}">Review legacy assignment data</a>
   <div class="row g-3">
     {% if can_manage_schedules %}
       <div class="col-12 col-xxl-6">
@@ -215,22 +216,8 @@
         </section>
       </div>
     {% endif %}
-    {% if can_manage_substitutions %}
-      <div class="col-12 col-xxl-6">
-        <section class="card correction-card h-100" aria-labelledby="substitution-title">
-          <div class="card-header" id="substitution-title">Record a one-meeting substitute</div>
-          <div class="card-body">
-            <p class="correction-card-copy">Use for one identified meeting only. This does not replace the permanent faculty assignment.</p>
-            <form method="post" class="correction-form-grid">
-              {% csrf_token %}<input type="hidden" name="action" value="substitution">
-              {% include "faculty_attendance/_correction_form_fields.html" with form=substitution_form %}
-              <div class="correction-form-actions"><button type="submit" class="btn btn-success">Save Substitution</button></div>
-            </form>
-          </div>
-        </section>
-      </div>
-    {% endif %}
   </div>
+  </details>
 
   <section class="card history-card mt-3" aria-labelledby="schedule-history-title">
     <div class="card-header" id="schedule-history-title">Recorded attendance schedule interpretations</div>

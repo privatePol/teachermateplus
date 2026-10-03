@@ -9113,6 +9113,7 @@ def offering_create_view(request):
 
 @portal_required("ADMIN")
 @permission_required("offerings.update")
+@transaction.atomic
 def offering_update_view(request, offering_id: int):
     row = get_object_or_404(AdminScopeService.scoped_course_offerings(request), id=offering_id)
     before = model_before_after(row)
@@ -9155,6 +9156,7 @@ def offering_update_view(request, offering_id: int):
                 old_room=before.get("room") or "",
                 effective_from=form.cleaned_data.get("attendance_effective_from"),
                 reason=form.cleaned_data.get("attendance_change_reason") or "",
+                synchronize=True,
             )
         messages.success(request, "Course offering updated.")
         return _redirect_back_or_default(request, "admin_portal:offering_list")
@@ -10346,6 +10348,7 @@ def faculty_assignment_renew_window_view(request, assignment_id: int):
 
 @portal_required("ADMIN")
 @permission_required("faculty_assignments.create")
+@transaction.atomic
 def faculty_assignment_assign_view(request):
     if request.method != "POST":
         return HttpResponseForbidden("Invalid request method.")
@@ -10365,6 +10368,12 @@ def faculty_assignment_assign_view(request):
     offering_q = (request.POST.get("offering_q") or "").strip()
     selected_section_id = _safe_int(request.POST.get("section_id"))
     assignment_note = (request.POST.get("assignment_note") or "").strip()
+    try:
+        attendance_effective_at = parse_datetime((request.POST.get("attendance_effective_at") or "").strip())
+    except ValueError:
+        attendance_effective_at = None
+    if attendance_effective_at and timezone.is_naive(attendance_effective_at):
+        attendance_effective_at = timezone.make_aware(attendance_effective_at)
 
     redirect_params = {"assign": "1"}
     if faculty_user_id:
@@ -10400,6 +10409,15 @@ def faculty_assignment_assign_view(request):
     created_count = 0
     reactivated_count = 0
     skipped_count = 0
+
+    from apps.faculty_attendance.college_sync import validate_boundary
+    for offering in offerings_map.values():
+        if FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=offering.tenant_id):
+            try:
+                validate_boundary(offering, attendance_effective_at)
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages))
+                return redirect(f"{reverse('admin_portal:faculty_assignment_list')}?{urlencode(redirect_params)}")
 
     for offering_id in selected_ids:
         offering = offerings_map.get(offering_id)
@@ -10451,7 +10469,9 @@ def faculty_assignment_assign_view(request):
                 actor=request.user,
                 assignment=existing,
                 event_type="ASSIGNMENT_REACTIVATED",
-                reason="Faculty assignment reactivated; teaching coverage requires an explicit effective boundary.",
+                reason=assignment_note,
+                effective_at=attendance_effective_at,
+                academic_permission="faculty_assignments.create",
             )
             reactivated_count += 1
             continue
@@ -10499,7 +10519,9 @@ def faculty_assignment_assign_view(request):
             actor=request.user,
             assignment=created,
             event_type="ASSIGNMENT_CREATED",
-            reason="Faculty assignment created; teaching coverage requires an explicit effective boundary.",
+            reason=assignment_note,
+            effective_at=attendance_effective_at,
+            academic_permission="faculty_assignments.create",
         )
         created_count += 1
 
@@ -10549,7 +10571,10 @@ def faculty_assignment_unassign_view(request):
     attendance_effective_at = None
     raw_attendance_effective_at = (request.POST.get("attendance_effective_at") or "").strip()
     if raw_attendance_effective_at:
-        attendance_effective_at = parse_datetime(raw_attendance_effective_at)
+        try:
+            attendance_effective_at = parse_datetime(raw_attendance_effective_at)
+        except ValueError:
+            attendance_effective_at = None
         if attendance_effective_at is None:
             messages.error(request, "Attendance coverage effective date/time is invalid; no assignment was changed.")
             return redirect(f"{reverse('admin_portal:faculty_assignment_list')}?{urlencode(redirect_params)}")
@@ -10566,6 +10591,14 @@ def faculty_assignment_unassign_view(request):
     )
 
     unassigned_count = 0
+    from apps.faculty_attendance.college_sync import validate_boundary
+    for assignment in assignments:
+        if FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=assignment.offering.tenant_id):
+            try:
+                validate_boundary(assignment.offering, attendance_effective_at)
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages))
+                return redirect(f"{reverse('admin_portal:faculty_assignment_list')}?{urlencode(redirect_params)}")
     with transaction.atomic():
         for assignment in assignments.select_for_update():
             before = model_before_after(assignment)
@@ -10592,6 +10625,7 @@ def faculty_assignment_unassign_view(request):
                 effective_at=attendance_effective_at,
                 apply_when_authorized=True,
                 clear_coverage=True,
+                academic_permission="faculty_assignments.update",
             )
             unassigned_count += 1
 
@@ -10782,6 +10816,7 @@ def faculty_assignment_toggle_primary_view(request):
 
 @portal_required("ADMIN")
 @permission_required("faculty_assignments.create")
+@transaction.atomic
 def faculty_assignment_create_view(request):
     faculty_ids = AdminScopeService.scoped_faculty_users(request)
     faculty_queryset = User.objects.filter(id__in=faculty_ids).order_by("username")
@@ -10815,7 +10850,9 @@ def faculty_assignment_create_view(request):
             actor=request.user,
             assignment=row,
             event_type="ASSIGNMENT_CREATED",
-            reason="Faculty assignment created; teaching coverage requires an explicit effective boundary.",
+            reason=row.assignment_note or "",
+            effective_at=form.cleaned_data.get("attendance_effective_at"),
+            academic_permission="faculty_assignments.create",
         )
         messages.success(request, "Faculty assignment created.")
         return _redirect_back_or_default(request, "admin_portal:faculty_assignment_list")
@@ -10826,6 +10863,7 @@ def faculty_assignment_create_view(request):
 
 @portal_required("ADMIN")
 @permission_required("faculty_assignments.update")
+@transaction.atomic
 def faculty_assignment_update_view(request, assignment_id: int):
     row = get_object_or_404(AdminScopeService.scoped_faculty_assignments(request), id=assignment_id)
     before = model_before_after(row)
@@ -10871,6 +10909,7 @@ def faculty_assignment_update_view(request, assignment_id: int):
             before.get("offering") != row.offering_id
             or before.get("faculty_user") != row.faculty_user_id
             or before.get("is_active") != row.is_active
+            or form.cleaned_data.get("attendance_effective_at") is not None
         ):
             if row.is_active and not before.get("is_active"):
                 event_type = "ASSIGNMENT_REACTIVATED"
@@ -10885,6 +10924,8 @@ def faculty_assignment_update_view(request, assignment_id: int):
                 reason="Faculty assignment changed; attendance coverage requires explicit reconciliation.",
                 source_reference=f"assignment:{row.pk}:direct-update:{row.updated_at.isoformat()}",
                 clear_coverage=not row.is_active,
+                effective_at=form.cleaned_data.get("attendance_effective_at"),
+                academic_permission="faculty_assignments.update",
             )
         messages.success(request, "Faculty assignment updated.")
         return _redirect_back_or_default(request, "admin_portal:faculty_assignment_list")

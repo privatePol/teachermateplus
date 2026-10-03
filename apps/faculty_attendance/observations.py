@@ -84,6 +84,12 @@ def resolve_attendance_faculty(meeting, result=None):
         substitution = None
     if substitution is not None:
         return substitution.substitute_faculty, FACULTY_ATTRIBUTION_SUBSTITUTION
+    if meeting.faculty_snapshot.get("college_academic_sync"):
+        # A later authoritative assignment supersedes an old initial adoption
+        # only while the meeting has no saved attendance.
+        if meeting.faculty_user_id:
+            return meeting.faculty_user, FACULTY_ATTRIBUTION_MEETING
+        return None, FACULTY_ATTRIBUTION_UNRESOLVED
     adoption = getattr(meeting, "coverage_adoption", None)
     if adoption is not None:
         return adoption.faculty_user, FACULTY_ATTRIBUTION_ADOPTION
@@ -94,13 +100,18 @@ def resolve_attendance_faculty(meeting, result=None):
 
 def require_confirmable_meeting_faculty(meeting):
     """Validate current dated coverage without rewriting historical meeting warnings."""
+    from .college_sync import retired_meeting_ids
+    if meeting.pk in retired_meeting_ids():
+        raise ValidationError("This class was rescheduled in Course Offerings. Use the updated daily list.")
+    if meeting.schedule_snapshot.get("college_source_waiting"):
+        raise ValidationError("Save matching schedules and rooms for all linked sections in Course Offerings before encoding this combined class.")
     faculty, _source = resolve_attendance_faculty(meeting)
     try:
         has_substitution = meeting.substitution is not None
     except MeetingSubstitution.DoesNotExist:
         has_substitution = False
     if faculty is None or (meeting.unresolved_coverage and not has_substitution and not hasattr(meeting, "coverage_adoption")):
-        raise ValidationError("Meeting has no confirmed faculty coverage or explicit substitution.")
+        raise ValidationError("Meeting has no confirmed faculty coverage. Save the assigned faculty and Effective from in Faculty Assignments; linked sections must have the same dated faculty.")
     if _pending_reconciliation_exists(meeting):
         raise ValidationError("Meeting has pending coverage or historical reconciliation and cannot be confirmed.")
     return faculty

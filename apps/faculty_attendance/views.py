@@ -145,7 +145,8 @@ def _can_all_departments(request, code, department_ids):
 
 
 def _meeting_queryset(tenant_id, campus_id, department_ids):
-    queryset = TeachingMeeting.objects.filter(tenant_id=tenant_id, campus_id=campus_id)
+    from .college_sync import retired_meeting_ids
+    queryset = TeachingMeeting.objects.exclude(pk__in=retired_meeting_ids()).filter(tenant_id=tenant_id, campus_id=campus_id)
     if department_ids:
         queryset = queryset.filter(department_id__in=department_ids)
     return queryset.select_related("schedule_slot", "faculty_user", "coverage").prefetch_related("offering_links")
@@ -252,17 +253,8 @@ def corrections_view(request):
                     messages.success(request, "Teaching meeting generated with explicit linked sections.")
                     return redirect("faculty_attendance:corrections")
             elif action == "substitution":
-                form = SubstitutionForm(request.POST, meeting_queryset=meetings, faculty_queryset=faculty)
-                forms["substitution_form"] = form
-                if form.is_valid():
-                    SubstitutionService.assign(
-                        actor=request.user,
-                        meeting=form.cleaned_data["meeting"],
-                        substitute_faculty=form.cleaned_data["substitute_faculty"],
-                        reason=form.cleaned_data["reason"],
-                    )
-                    messages.success(request, "Meeting-specific substitution saved.")
-                    return redirect("faculty_attendance:corrections")
+                messages.error(request, "Use Faculty Assignments to replace faculty, including temporary replacements and returns.")
+                return redirect("faculty_attendance:corrections")
         except (ValidationError, PermissionDenied) as exc:
             target = forms.get(f"{action}_form")
             if target:
@@ -503,6 +495,8 @@ def daily_encoding_view(request):
             "can_manage_corrections": _can_all_departments(request, MANAGE_SCHEDULES_PERMISSION, department_ids),
             "can_manage_combined": _can_all_departments(request, MANAGE_MEETINGS_PERMISSION, department_ids),
             "can_reconcile": _can_all_departments(request, RECONCILE_PERMISSION, department_ids),
+            "can_view_faculty_assignments": PermissionService.has_permission(request.user, "faculty_assignments.read", tenant_id=tenant_id, campus_id=campus_id),
+            "can_view_course_offerings": PermissionService.has_permission(request.user, "offerings.view", tenant_id=tenant_id, campus_id=campus_id),
         }
     )
     if request.method == "POST":
@@ -875,9 +869,10 @@ def _result_summary(result):
 
 
 def _round_rows_context(request, checking_round, bound_form=None, selected_present_rows=None):
+    from .college_sync import retired_meeting_ids
     selected_present_rows = selected_present_rows or set()
     rows = list(
-        checking_round.manifest_rows.select_related(
+        checking_round.manifest_rows.exclude(meeting_id__in=retired_meeting_ids()).select_related(
             "meeting",
             "meeting__faculty_user",
             "meeting__substitution",
@@ -901,8 +896,10 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
         try:
             require_confirmable_meeting_faculty(row.meeting)
             row.coverage_confirmable = True
-        except ValidationError:
+            row.coverage_message = ""
+        except ValidationError as exc:
             row.coverage_confirmable = False
+            row.coverage_message = "; ".join(exc.messages)
         row.can_confirm_present = row.coverage_confirmable and (
             result is None or result.status == AttendanceResult.Status.UNVERIFIED
         )

@@ -728,7 +728,7 @@ class FacultyAttendanceFoundationTests(TestCase):
             ).exists()
         )
 
-    def test_academic_permanent_replacement_without_boundary_creates_pending_reconciliation(self):
+    def test_academic_permanent_replacement_without_boundary_rejects_before_mutation(self):
         assignment = FacultyAssignment.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -736,20 +736,20 @@ class FacultyAttendanceFoundationTests(TestCase):
             faculty_user=self.faculty,
             is_primary=True,
         )
-        logs = FacultyAssignmentSafetyService.process_replacement(
-            assignments=[assignment],
-            replacement_faculty=self.replacement,
-            replacement_type="PERMANENT",
-            reason_category="RESIGNATION",
-            remarks="Approved permanent replacement",
-            processed_by_user=self.actor,
-        )
-        reconciliation = CoverageReconciliation.objects.get(source_reference=f"faculty-replacement:{logs[0].pk}")
-        self.assertEqual(reconciliation.status, CoverageReconciliation.Status.PENDING)
-        self.assertIsNone(reconciliation.effective_at)
-        self.assertEqual(reconciliation.proposed_faculty_id, self.replacement.pk)
+        with self.assertRaisesMessage(ValidationError, "Effective from"):
+            FacultyAssignmentSafetyService.process_replacement(
+                assignments=[assignment], replacement_faculty=self.replacement,
+                replacement_type="PERMANENT", reason_category="RESIGNATION",
+                remarks="Approved permanent replacement", processed_by_user=self.actor)
+        assignment.refresh_from_db()
+        self.assertTrue(assignment.is_active)
+        self.assertFalse(CoverageReconciliation.objects.exists())
+        self.assertFalse(FacultyAssignment.objects.filter(faculty_user=self.replacement).exists())
 
     def test_academic_replacement_with_authorized_boundary_splits_coverage(self):
+        permission, _ = Permission.objects.get_or_create(code="faculty_replacement.process",
+            defaults={"module": "faculty_replacement", "action": "process"})
+        RolePermission.objects.get_or_create(role=self.role, permission=permission)
         assignment = FacultyAssignment.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -3101,6 +3101,10 @@ class FacultyAttendanceFoundationTests(TestCase):
         self.assertIn("DATED_COMBINED_CONFLICT", {item.code for item in issues})
 
     def test_daily_encoding_renders_contextual_deduplicated_blockers_inline(self):
+        source_permission, _ = Permission.objects.get_or_create(code="offerings.view",
+            defaults={"module": "offerings", "action": "view"})
+        UserPermission.objects.create(user=self.actor, permission=source_permission,
+            grant_type="ALLOW", tenant=self.tenant, campus=self.campus)
         ScheduleService.create_version(
             actor=self.actor,
             offering=self.offering,
@@ -3154,7 +3158,7 @@ class FacultyAttendanceFoundationTests(TestCase):
         self.assertContains(response, "Monday, January 5, 2026")
         self.assertContains(response, "conflicts with the Course Offering source")
         self.assertContains(response, "Correct the Course Offering schedule")
-        self.assertContains(response, reverse("faculty_attendance:corrections"))
+        self.assertContains(response, reverse("admin_portal:offering_list"))
         self.assertNotContains(response, "['")
         self.assertEqual(response.context["form"]["academic_year"].value(), str(self.academic_year.pk))
         self.assertEqual(response.context["form"]["term"].value(), str(self.term.pk))
@@ -3170,14 +3174,14 @@ class FacultyAttendanceFoundationTests(TestCase):
         )
         UserPermission.objects.create(
             user=self.actor,
-            permission=Permission.objects.get(code=MANAGE_SCHEDULES_PERMISSION),
+            permission=source_permission,
             grant_type=UserPermission.GrantType.DENY,
             tenant=self.tenant,
             campus=self.campus,
         )
         denied_link = self.client.get(url, payload)
         self.assertContains(denied_link, "Records needing attention")
-        self.assertNotContains(denied_link, reverse("faculty_attendance:corrections"))
+        self.assertNotContains(denied_link, reverse("admin_portal:offering_list"))
 
     def test_daily_encoding_preview_honors_direct_view_deny(self):
         UserPermission.objects.create(

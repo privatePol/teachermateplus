@@ -5,6 +5,7 @@ from django.contrib.auth import authenticate, get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.academics.models import (
     AcademicYear,
@@ -149,6 +150,7 @@ class FacultyAssignmentImportStatusTests(TestCase):
             "section_code": self.section.code,
             "faculty_username": faculty_username,
             "is_primary": "TRUE",
+            "attendance_effective_at": "",
         }
         values.update(overrides)
         headers = ImportTemplateService.get_headers(ImportBatch.ImportType.FACULTY_ASSIGNMENTS)
@@ -193,15 +195,23 @@ class FacultyAssignmentImportStatusTests(TestCase):
             ).exists()
         )
 
-    def test_attendance_enabled_import_creates_pending_coverage_setup_without_guessing_date(self):
+    def test_attendance_enabled_import_syncs_explicit_boundary_without_setup_queue(self):
+        permission, _ = Permission.objects.get_or_create(code="faculty_assignments.import",
+            defaults={"module": "faculty_assignments", "action": "import"})
+        role = Role.objects.create(code="COLLEGE_IMPORT_TEST", name="College importer")
+        RolePermission.objects.create(role=role, permission=permission)
+        UserRole.objects.create(user=self.actor, role=role, tenant=self.tenant, campus=self.campus, department=self.department)
         SystemSetting.objects.create(
             tenant=self.tenant,
             setting_key=FeatureSettingsService.FACULTY_ATTENDANCE_ENABLED_KEY,
             setting_value="true",
             value_type=SystemSetting.ValueType.BOOL,
         )
-        batch = self._upload(self._row(self.active_faculty.username))
+        self.term.start_date, self.term.end_date = date(2026, 6, 1), date(2026, 10, 31)
+        self.term.save()
+        batch = self._upload(self._row(self.active_faculty.username, attendance_effective_at="2026-10-02T00:00"))
         BulkImportService.confirm_batch(batch=batch, actor=self.actor)
+        self.assertEqual(batch.imported_rows, 1, batch.rows.get().errors_json)
         assignment = FacultyAssignment.objects.get(
             offering=self.offering,
             faculty_user=self.active_faculty,
@@ -210,8 +220,10 @@ class FacultyAssignmentImportStatusTests(TestCase):
             source_reference=f"assignment:{assignment.pk}:coverage-setup"
         )
         self.assertEqual(reconciliation.event_type, CoverageReconciliation.EventType.ASSIGNMENT_IMPORTED)
-        self.assertEqual(reconciliation.status, CoverageReconciliation.Status.PENDING)
-        self.assertIsNone(reconciliation.effective_at)
+        self.assertEqual(reconciliation.status, CoverageReconciliation.Status.RESOLVED)
+        self.assertEqual(timezone.localtime(reconciliation.effective_at).date(), date(2026, 10, 2))
+        from apps.faculty_attendance.models import FacultyCoverage
+        self.assertEqual(FacultyCoverage.objects.get(source_assignment=assignment).effective_from, reconciliation.effective_at)
 
     def test_confirmation_rejects_offering_scope_drift_without_assignment_or_success_audit(self):
         batch = self._upload(self._row(self.active_faculty.username))

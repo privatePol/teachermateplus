@@ -150,7 +150,8 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
     )
     blockers = [CutoffBlocker(code=item.code, message=item.message, occurrence_key=item.occurrence_key) for item in occurrence_issues]
 
-    meeting_queryset = TeachingMeeting.objects.filter(
+    from .college_sync import retired_meeting_ids
+    meeting_queryset = TeachingMeeting.objects.exclude(pk__in=retired_meeting_ids()).filter(
         tenant_id=tenant_id,
         campus_id=campus_id,
         meeting_date__range=(start_date, end_date),

@@ -456,7 +456,7 @@ class FacultyAssignmentReplacementTests(TestCase):
         self.assertEqual(reconciliation.effective_at, boundary)
         self.assertEqual(reconciliation.status, CoverageReconciliation.Status.RESOLVED)
 
-    def test_direct_reactivation_records_pending_attendance_setup_without_guessing_boundary(self):
+    def test_direct_reactivation_syncs_explicit_boundary_in_original_operation(self):
         SystemSetting.objects.create(
             tenant=self.tenant,
             setting_key=FeatureSettingsService.FACULTY_ATTENDANCE_ENABLED_KEY,
@@ -482,15 +482,19 @@ class FacultyAssignmentReplacementTests(TestCase):
                 "faculty_user_id": self.current_faculty.id,
                 "offering_ids": [str(self.offering.id)],
                 "assignment_note": "Reactivated assignment",
+                "attendance_effective_at": "2026-02-01T08:00",
             },
         )
 
         self.assertEqual(response.status_code, 302)
         reconciliation = CoverageReconciliation.objects.get(source_assignment=self.assignment)
-        self.assertEqual(reconciliation.source_reference, f"assignment:{self.assignment.pk}:coverage-setup")
+        self.assertEqual(reconciliation.source_reference,
+            f"assignment:{self.assignment.pk}:reactivated:2026-02-01T00:00:00+00:00")
         self.assertEqual(reconciliation.event_type, CoverageReconciliation.EventType.ASSIGNMENT_REACTIVATED)
-        self.assertEqual(reconciliation.status, CoverageReconciliation.Status.PENDING)
-        self.assertIsNone(reconciliation.effective_at)
+        self.assertEqual(reconciliation.status, CoverageReconciliation.Status.RESOLVED)
+        self.assertEqual(reconciliation.effective_at, timezone.make_aware(datetime(2026, 2, 1, 8)))
+        self.assertTrue(FacultyCoverage.objects.filter(source_assignment=self.assignment,
+            effective_from=reconciliation.effective_at).exists())
 
     def test_audit_log_stores_before_after_and_batch_reference(self):
         self._post_replacement()
