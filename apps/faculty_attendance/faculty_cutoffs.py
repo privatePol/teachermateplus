@@ -1,7 +1,8 @@
 """Complete faculty slices built from one campus evidence scan.
 
-Assignments identify possible reviewers, never dated attendance attribution.
-Missing dated evidence is campus-wide unless a finite candidate set is proved.
+Assignments identify possible reviewers, never historical teaching boundaries.
+Missing dated evidence stays in a separate queue; identified teachers retain
+every relevant blocker and saved historical occurrence.
 """
 import hashlib
 import json
@@ -133,10 +134,13 @@ def review_faculty_cutoff(*, actor, tenant_id, campus_id, academic_year, term, s
         publication__tenant_id=tenant_id, publication__campus_id=campus_id,
         publication__academic_year=academic_year, publication__term=term,
         publication__start_date=start_date, publication__end_date=end_date).select_related("meeting")
+    history_by_meeting, history_by_key = defaultdict(set), defaultdict(set)
     for entry in historical_entries.select_for_update() if lock else historical_entries:
         if entry.faculty_user_id:
             historical_teachers.add(entry.faculty_user_id)
             roster[entry.faculty_user_id].add(entry.meeting.department_id)
+            history_by_meeting[entry.meeting_id].add(entry.faculty_user_id)
+            history_by_key[entry.occurrence_key].add(entry.faculty_user_id)
 
     def at_start(offering_ids, at):
         ids = set()
@@ -167,7 +171,6 @@ def review_faculty_cutoff(*, actor, tenant_id, campus_id, academic_year, term, s
 
     per_faculty = defaultdict(list)
     unattributed = []
-    global_blockers = []
     for blocker in evidence.blockers:
         meeting = meeting_map.get(blocker.meeting_id)
         occurrence = occurrence_map.get(blocker.occurrence_key)
@@ -193,6 +196,9 @@ def review_faculty_cutoff(*, actor, tenant_id, campus_id, academic_year, term, s
         else:
             ids, complete = throughout(offering_ids)
             when, start, end = blocker.meeting_date or start_date, None, None
+        if meeting:
+            ids.update(history_by_meeting[meeting.pk])
+        ids.update(history_by_key[blocker.occurrence_key])
         details = {"date": when, "start": start, "end": end, "departments": sorted(departments),
             "sections": [{"course_code": o.course.code, "course_title": o.course.title, "section_code": o.section.code} for o in sources],
             "candidate_ids": sorted(ids), "scope_unproven": not complete,
@@ -200,11 +206,8 @@ def review_faculty_cutoff(*, actor, tenant_id, campus_id, academic_year, term, s
         decorated = replace(blocker, details=details)
         for faculty_id in ids:
             roster[faculty_id].update(departments)
-        if not complete:
-            global_blockers.append(decorated)
-        else:
-            for faculty_id in ids:
-                per_faculty[faculty_id].append(decorated)
+        for faculty_id in ids:
+            per_faculty[faculty_id].append(decorated)
         if not complete or len(ids) != 1:
             if departments and departments <= allowed:
                 unattributed.append(decorated)
@@ -218,7 +221,7 @@ def review_faculty_cutoff(*, actor, tenant_id, campus_id, academic_year, term, s
         departments = roster[faculty.pk]
         if not departments or not departments <= allowed:
             continue  # A partial department grant cannot publish a partial faculty.
-        blockers = tuple(per_faculty[faculty.pk] + global_blockers)
+        blockers = tuple(per_faculty[faculty.pk])
         snapshot = {"faculty_user_id": faculty.pk, "departments": sorted(departments),
             "occurrences": [{"key": r.occurrence_key, "meeting_id": r.meeting.pk,
                 "result_revision": r.result.revision if r.result else None,

@@ -12,11 +12,11 @@ from django.urls import reverse
 from apps.admin_portal.services import AdminScopeService
 from apps.core.decorators import portal_required
 
-from .dtr import _finalize_dtr, latest_publication, preview_dtr
+from .dtr import _finalize_dtr, latest_publication, preview_dtr, batch_preview_evidence
 from .faculty_cutoffs import publish_faculty_cutoffs, review_faculty_cutoff
 from .forms import CutoffScopeForm, FacultyCutoffActionForm
 from .notice_locking import lock_notice_campus
-from .permissions import DTR_FINALIZE_PERMISSION, DTR_VIEW_PERMISSION, ENCODE_PERMISSION, RECONCILE_PERMISSION, require_attendance_permission
+from .permissions import DTR_FINALIZE_PERMISSION, DTR_VIEW_PERMISSION, ENCODE_PERMISSION, RECONCILE_PERMISSION, require_attendance_permission, attendance_read_permissions
 
 
 def _publication(row, scope, *, lock=False):
@@ -39,17 +39,32 @@ def processing_rows(*, actor, review):
     # The source scan is shared by every DTR preview. No per-faculty campus scan.
     from .models import AttendanceCutoffPublication, FacultyDTR
     publications = list(AttendanceCutoffPublication.objects.filter(**review.scope)
-        .select_related("faculty_scope").order_by("-published_at", "-pk"))
+        .select_related("faculty_scope", "academic_year", "term").order_by("-published_at", "-pk"))
     finals = list(FacultyDTR.objects.filter(**review.scope).order_by("-revision", "-pk"))
+    latest_finals, latest_publications = {}, {}
+    campus_publication = next((p for p in publications if p.faculty_scope_id is None), None)
+    for publication in publications:
+        if publication.faculty_scope_id:
+            latest_publications.setdefault(publication.faculty_scope_id, publication)
+    for final in finals:
+        latest_finals.setdefault(final.faculty_user_id, final)
+    selected_publications = {}
+    for row in review.slices:
+        choices = [p for p in (campus_publication, latest_publications.get(row.faculty.pk)) if p]
+        if choices:
+            selected_publications[row.faculty.pk] = max(choices, key=lambda p: (p.published_at, p.pk))
+    evidence = batch_preview_evidence(list({p.pk: p for p in selected_publications.values()}.values()),
+        set(selected_publications), review.scope) if selected_publications else {}
     rows = []
     for row in review.slices:
-        publication = next((p for p in publications if p.faculty_scope_id in (None, row.faculty.pk)), None)
-        final = next((f for f in finals if f.faculty_user_id == row.faculty.pk), None)
+        publication = selected_publications.get(row.faculty.pk)
+        final = latest_finals.get(row.faculty.pk)
         preview = None
         status = "Pending with blockers" if row.blockers else "Ready to publish" if row.requires_dtr else "No DTR required"
         if publication and _allowed(actor, DTR_VIEW_PERMISSION, row, review.scope):
             try:
-                preview = preview_dtr(actor=actor, publication=publication, faculty=row.faculty, source_slice=row)
+                preview = preview_dtr(actor=actor, publication=publication, faculty=row.faculty, source_slice=row,
+                    _preview_evidence=evidence[(publication.pk, row.faculty.pk)])
             except ValidationError:
                 status = "Published; record/review AC office hours" if row.requires_dtr else "No DTR required"
             if preview:
@@ -108,6 +123,13 @@ def finalize_ready_faculty(*, actor, review_scope, faculty_ids, expected_fingerp
 
 @portal_required("ADMIN")
 def faculty_cutoff_review_view(request):
+    if request.method == "GET":
+        with attendance_read_permissions():
+            return _faculty_cutoff_review_view(request)
+    return _faculty_cutoff_review_view(request)
+
+
+def _faculty_cutoff_review_view(request):
     scope = getattr(request, "scope", {})
     tenant_id, campus_id = scope.get("tenant_id"), scope.get("campus_id")
     if not tenant_id or not campus_id:
@@ -128,37 +150,39 @@ def faculty_cutoff_review_view(request):
             department_ids=set(AdminScopeService.scoped_departments(request).filter(
                 tenant_id=tenant_id, campus_id=campus_id).values_list("pk", flat=True)), **values)
         try:
-            review = review_faculty_cutoff(actor=request.user, **review_scope)
-            rows = processing_rows(actor=request.user, review=review)
-            publication_choices = [(r["slice"].faculty.pk, r["slice"].faculty.full_name) for r in rows if r["slice"].ready]
-            final_choices = [(r["slice"].faculty.pk, r["slice"].faculty.full_name) for r in rows if r["preview"] and r["preview"].ready]
-            publication_initial = {"submission_key": str(uuid4()), "expected_fingerprints": {
-                str(r["slice"].faculty.pk): r["slice"].fingerprint for r in rows if r["slice"].ready}}
-            final_initial = {"submission_key": str(uuid4()), "expected_fingerprints": {
-                str(r["slice"].faculty.pk): r["preview"].fingerprint for r in rows if r["preview"] and r["preview"].ready}}
-            publication_form = FacultyCutoffActionForm(faculty_choices=publication_choices, initial=publication_initial, auto_id="publication-%s")
-            final_form = FacultyCutoffActionForm(faculty_choices=final_choices, initial=final_initial, auto_id="finalize-%s")
+            action_form = None
+            finalizing = False
             if request.method == "POST":
                 action = request.POST.get("action")
                 finalizing = action in ("finalize_selected", "finalize_ready")
-                action_form = FacultyCutoffActionForm(request.POST, faculty_choices=final_choices if finalizing else publication_choices)
+                # The posted frozen fingerprints name the batch reviewed by the
+                # checker. Services recheck scope/readiness under fresh locks.
+                try:
+                    import json
+                    submitted = json.loads(request.POST.get("expected_fingerprints", "{}"))
+                    posted_choices = [(pk, pk) for pk in submitted if str(pk).isdigit()] if isinstance(submitted, dict) else []
+                except (ValueError, TypeError):
+                    posted_choices = []
+                action_form = FacultyCutoffActionForm(request.POST, faculty_choices=posted_choices)
                 action_form.auto_id = "finalize-%s" if finalizing else "publication-%s"
-                if finalizing:
-                    final_form = action_form
-                else:
-                    publication_form = action_form
                 if action not in ("publish_selected", "publish_ready", "finalize_selected", "finalize_ready"):
                     action_form.add_error(None, "Choose a supported faculty cutoff action.")
                 elif action_form.is_valid():
                     selected = action_form.cleaned_data["faculty_ids"]
                     if action.endswith("_ready"):
-                        flag = "can_finalize" if finalizing else "can_publish"
-                        selected = [r["slice"].faculty.pk for r in rows if r[flag]]
+                        selected = action_form.cleaned_data["ready_faculty_ids"]
+                        # Compatibility for an already-open pre-update form.
+                        if not selected and "ready_faculty_ids" not in request.POST:
+                            selected = list(action_form.cleaned_data["expected_fingerprints"])
                     try:
+                        if not selected:
+                            raise ValidationError("No eligible faculty selected. Review the pending items or select a ready faculty.")
+                        if any(str(pk) not in action_form.cleaned_data["expected_fingerprints"] for pk in selected):
+                            raise ValidationError("Faculty review evidence is missing. Reload and review saved statuses before submitting.")
                         if finalizing:
                             finals = finalize_ready_faculty(actor=request.user, review_scope=review_scope, faculty_ids=selected,
                                 expected_fingerprints=action_form.cleaned_data["expected_fingerprints"],
-                                faculty_review_complete=action_form.cleaned_data["faculty_review_complete"], reason=action_form.cleaned_data["reason"])
+                                faculty_review_complete=True, reason=action_form.cleaned_data["reason"])
                             messages.success(request, f"{len(finals)} faculty DTR(s) finalized after published attendance review.")
                         else:
                             publications = publish_faculty_cutoffs(actor=request.user, **review_scope, faculty_ids=selected,
@@ -170,7 +194,33 @@ def faculty_cutoff_review_view(request):
                     else:
                         query = {k: v.pk if hasattr(v, "pk") else v.isoformat() for k, v in values.items()}
                         return redirect(f"{reverse('faculty_attendance:faculty_cutoff_review')}?{urlencode(query)}")
-            context.update(review=review, rows=rows, publication_form=publication_form, final_form=final_form)
+            # GET or rejected POST: batch-load the dashboard once. Read caches
+            # start only AFTER any write transaction and never survive its wait.
+            with attendance_read_permissions():
+                review = review_faculty_cutoff(actor=request.user, **review_scope)
+                rows = processing_rows(actor=request.user, review=review)
+            publication_choices = [(r["slice"].faculty.pk, r["slice"].faculty.full_name) for r in rows if r["can_publish"]]
+            final_choices = [(r["slice"].faculty.pk, r["slice"].faculty.full_name) for r in rows if r["can_finalize"]]
+            publication_initial = {"submission_key": str(uuid4()), "ready_faculty_ids": [pk for pk, _ in publication_choices],
+                "expected_fingerprints": {str(r["slice"].faculty.pk): r["slice"].fingerprint for r in rows if r["can_publish"]}}
+            final_initial = {"submission_key": str(uuid4()), "ready_faculty_ids": [pk for pk, _ in final_choices],
+                "expected_fingerprints": {str(r["slice"].faculty.pk): r["preview"].fingerprint for r in rows if r["can_finalize"]}}
+            publication_form = FacultyCutoffActionForm(faculty_choices=publication_choices, initial=publication_initial, auto_id="publication-%s")
+            final_form = FacultyCutoffActionForm(faculty_choices=final_choices, initial=final_initial, auto_id="finalize-%s")
+            if action_form is not None:
+                # Retain attempted selection/note/identity even if eligibility
+                # changed; a retry is never silently transformed into a new batch.
+                names = {str(r["slice"].faculty.pk): r["slice"].faculty.full_name for r in rows}
+                action_form.fields["faculty_ids"].choices = [(pk, names.get(str(pk), label)) for pk, label in posted_choices]
+                if finalizing:
+                    final_form = action_form
+                else:
+                    publication_form = action_form
+            context.update(review=review, rows=rows, publication_form=publication_form, final_form=final_form,
+                publish_count=len(publication_choices), finalize_count=len(final_choices),
+                counts={"ready": len(publication_choices), "pending": sum(bool(r["slice"].blockers) for r in rows),
+                    "published": sum(bool(r["publication"] and r["status"] != "Finalized / current") for r in rows),
+                    "finalized": sum(r["status"] == "Finalized / current" for r in rows), "unassigned": len(review.unattributed)})
             diagnostics = []
             from types import SimpleNamespace
             for blocker in review.unattributed:

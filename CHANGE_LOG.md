@@ -1,3 +1,10 @@
+## Faculty cutoff simplification and runtime optimization - 2026-10-04
+
+- Ready faculty can publish their complete attributed records beside unrelated unassigned offerings. Missing attribution stays in a visible separate queue; concrete dated/history conflicts block identified faculty only. Saved attendance, publications and finals remain protected after current unassignment.
+- Batched dashboard DTR evidence, request-local scoped permission decisions, prefetched source histories and reused schedule parsing replace repeated queries. POST dispatch does not first build the dashboard; writes retain current locked evidence. Future-effective pending changes do not block earlier cutoffs.
+- Counts and eligible lists explain pending/empty states and disable unavailable actions. All five actions show accessible indeterminate processing, preserve the clicked action and frozen batch/request identity, and prevent duplicate submissions. Errors retain inputs; unknown outcomes require inspection of saved status before retry. No additional cutoff-page attestation or approval control.
+- Focused SQLite/Node results and measured 76-faculty performance are recorded in HANDOFF; staging/browser and InnoDB acceptance remain separate. No schema or migration0020 change.
+
 ## DTR finalization evidence and empty correction printing - 2026-10-04
 
 - Finalization calculates from current locked source, attendance, closure, adjustment and mixed-decision evidence, with current publication/final lineage; no reliance on a pre-wait InnoDB consistent snapshot. Stale reviewed inputs still require reload.

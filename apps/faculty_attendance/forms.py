@@ -356,8 +356,12 @@ class CutoffPublicationForm(CutoffScopeForm):
 
 class FacultyCutoffActionForm(forms.Form):
     faculty_ids = forms.MultipleChoiceField(required=False, widget=forms.CheckboxSelectMultiple)
-    expected_fingerprints = forms.JSONField(widget=forms.HiddenInput)
-    submission_key = forms.CharField(max_length=40, widget=forms.HiddenInput)
+    expected_fingerprints = forms.JSONField(required=False, widget=forms.HiddenInput,
+        error_messages={"invalid": "Faculty review evidence is invalid. Reload this cutoff before submitting."})
+    ready_faculty_ids = forms.JSONField(required=False, widget=forms.HiddenInput,
+        error_messages={"invalid": "The reviewed faculty batch is invalid. Reload this cutoff before submitting."})
+    submission_key = forms.CharField(max_length=40, widget=forms.HiddenInput,
+        error_messages={"required": "Request identity is missing. Reload this cutoff and review saved statuses before submitting."})
     reason = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Note (optional)")
     faculty_review_complete = forms.BooleanField(required=False,
         label="Published attendance was available for faculty review; checker concerns were settled")
@@ -368,7 +372,17 @@ class FacultyCutoffActionForm(forms.Form):
 
     def clean_expected_fingerprints(self):
         values = self.cleaned_data["expected_fingerprints"]
+        if values is None:
+            values = {}
         if not isinstance(values, dict) or any(not isinstance(v, str) or len(v) != 64 for v in values.values()):
+            raise forms.ValidationError("Reload the faculty cutoff review before submitting.")
+        return values
+
+    def clean_ready_faculty_ids(self):
+        values = self.cleaned_data["ready_faculty_ids"]
+        if values is None:
+            values = []
+        if not isinstance(values, list) or any(type(pk) is not int or pk <= 0 for pk in values):
             raise forms.ValidationError("Reload the faculty cutoff review before submitting.")
         return values
 

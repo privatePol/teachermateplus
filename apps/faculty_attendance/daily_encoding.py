@@ -154,6 +154,17 @@ def _source_for_date(*, offering, term, meeting_date, changes):
     """Return the recorded Course Offering source snapshot applicable on one date."""
     resolved = [item for item in changes if item.status == OfferingAttendanceSourceChange.Status.RESOLVED]
     if not resolved:
+        future_pending = [item for item in changes
+                          if item.status == OfferingAttendanceSourceChange.Status.PENDING
+                          and item.effective_from and meeting_date < item.effective_from]
+        if future_pending:
+            # Live values already include these edits. Before their earliest
+            # boundary use the first recorded pre-edit evidence, not an
+            # intermediate edit selected by its (possibly earlier) boundary.
+            # Missing saved text stays missing: the parser must block, not guess.
+            first = min(future_pending, key=lambda item: item.pk)
+            boundary = min(item.effective_from for item in future_pending)
+            return first.old_schedule_text, first.old_room, term.start_date, boundary - timedelta(days=1)
         return offering.schedule_text or "", offering.room or "", term.start_date, term.end_date
     resolved.sort(key=lambda item: (item.effective_from, item.pk))
     first = resolved[0]
@@ -250,10 +261,14 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
     offerings = list(offerings)
     issues = []
     ordinary = {}
+    parsed_sources = {}
     for offering in offerings:
-        changes = offering.attendance_source_changes.all().order_by("effective_from", "pk")
-        changes = list(changes.select_for_update() if lock else changes)
-        pending = [item for item in changes if item.status == OfferingAttendanceSourceChange.Status.PENDING]
+        if lock:
+            changes = list(offering.attendance_source_changes.select_for_update().order_by("effective_from", "pk"))
+        else:
+            changes = sorted(offering.attendance_source_changes.all(), key=lambda item: (item.effective_from or date.min, item.pk))
+        pending = [item for item in changes if item.status == OfferingAttendanceSourceChange.Status.PENDING
+                   and (item.effective_from is None or item.effective_from <= end_date)]
         if pending:
             issues.append(
                 DailyIssue(
@@ -273,7 +288,9 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
                 meeting_date=meeting_date,
                 changes=changes,
             )
-            parsed = parse_schedule_text(source_text)
+            if source_text not in parsed_sources:
+                parsed_sources[source_text] = parse_schedule_text(source_text)
+            parsed = parsed_sources[source_text]
             if not parsed.confirmed:
                 issues.append(
                     DailyIssue(

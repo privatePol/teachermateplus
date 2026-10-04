@@ -171,6 +171,9 @@ def _published_entries(publication, faculty, *, lock=False):
 
 def _validated_departments(publication, department_ids, *, lock=False):
     ids = set(department_ids)
+    known = getattr(publication, "_read_department_ids", None) if not lock else None
+    if known is not None and all(type(pk) is int and pk > 0 for pk in ids) and ids <= known:
+        return ids
     rows = Department.objects.filter(pk__in=ids, tenant_id=publication.tenant_id, campus_id=publication.campus_id)
     if any(type(pk) is not int or pk <= 0 for pk in ids) or ids != set(
         (rows.select_for_update() if lock else rows).values_list("pk", flat=True)):
@@ -236,6 +239,39 @@ def _locked_dtr_evidence(publication, faculty):
         mixed.setdefault(row.meeting_id, row)
     pending = frozenset(MeetingReconciliation.objects.select_for_update().filter(meeting_id__in=ids, status="PENDING").values_list("meeting_id", flat=True))
     return _CurrentDTREvidence(tuple(entries), tuple(adjustments), mixed, results, closures, pending)
+
+
+def batch_preview_evidence(publications, faculty_ids, scope):
+    """Fresh read-only dashboard evidence; never passed into finalization."""
+    from .models import AttendanceCutoffPublicationEntry
+    publication_ids = {p.pk for p in publications}
+    entries = list(AttendanceCutoffPublicationEntry.objects.filter(publication_id__in=publication_ids,
+        faculty_user_id__in=faculty_ids).select_related("meeting__department", "result_revision", "closure_decision")
+        .order_by("meeting_date", "starts_at", "pk"))
+    meeting_ids = {e.meeting_id for e in entries}
+    results = {r.meeting_id: r for r in AttendanceResult.objects.filter(meeting_id__in=meeting_ids)}
+    closures = {}
+    for row in AttendanceClosureDecision.objects.filter(meeting_id__in=meeting_ids).order_by("meeting_id", "-revision", "-pk"):
+        closures.setdefault(row.meeting_id, row)
+    pending = frozenset(MeetingReconciliation.objects.filter(meeting_id__in=meeting_ids, status="PENDING").values_list("meeting_id", flat=True))
+    mixed = defaultdict(dict)
+    for row in DTRMixedFindingDecision.objects.filter(publication_id__in=publication_ids, faculty_user_id__in=faculty_ids).order_by("meeting_id", "-revision", "-pk"):
+        mixed[(row.publication_id, row.faculty_user_id)].setdefault(row.meeting_id, row)
+    adjustments = defaultdict(list)
+    seen = set()
+    for row in DTRAdjustment.objects.filter(**scope, faculty_user_id__in=faculty_ids).select_related("department").order_by("entry_key", "-revision", "-pk"):
+        if row.entry_key not in seen:
+            adjustments[row.faculty_user_id].append(row)
+            seen.add(row.entry_key)
+    grouped = defaultdict(list)
+    for entry in entries:
+        grouped[(entry.publication_id, entry.faculty_user_id)].append(entry)
+    departments = frozenset(Department.objects.filter(tenant_id=scope["tenant_id"], campus_id=scope["campus_id"]).values_list("pk", flat=True))
+    for publication in publications:
+        publication._read_department_ids = departments
+    return {(p.pk, fid): _CurrentDTREvidence(tuple(grouped[(p.pk, fid)]),
+        tuple(sorted(adjustments[fid], key=lambda a: (a.entry_date, a.kind, a.pk))), mixed[(p.pk, fid)],
+        results, closures, pending) for p in publications for fid in faculty_ids if p.faculty_scope_id in (None, fid)}
 
 
 @dataclass(frozen=True)
@@ -426,13 +462,14 @@ def _calculate(publication, faculty, entries, adjustments, mixed_decisions, curr
     return snapshot, tuple(dict.fromkeys(blockers))
 
 
-def preview_dtr(*, actor, publication, faculty, permission_code=DTR_VIEW_PERMISSION, source_slice=None, _current=None):
-    if _current is None:
+def preview_dtr(*, actor, publication, faculty, permission_code=DTR_VIEW_PERMISSION, source_slice=None, _current=None, _preview_evidence=None):
+    evidence = _current if _current is not None else _preview_evidence
+    if evidence is None:
         publication = AttendanceCutoffPublication.objects.get(pk=publication.pk)
     if publication.faculty_scope_id and publication.faculty_scope_id != faculty.pk:
         raise PermissionDenied("This publication belongs to another faculty.")
-    entries = _current.entries if _current is not None else _published_entries(publication, faculty)
-    adjustments = _current.adjustments if _current is not None else current_adjustments(publication=publication, faculty=faculty)
+    entries = evidence.entries if evidence is not None else _published_entries(publication, faculty)
+    adjustments = evidence.adjustments if evidence is not None else current_adjustments(publication=publication, faculty=faculty)
     departments = _faculty_departments(publication, faculty, entries, adjustments, lock=_current is not None)
     _require(actor, permission_code, publication, departments)
     missing_hours = not entries and not any(
@@ -440,8 +477,8 @@ def preview_dtr(*, actor, publication, faculty, permission_code=DTR_VIEW_PERMISS
     )
     if missing_hours and not publication.faculty_scope_id:
         raise ValidationError("This faculty has no published teaching meetings or scheduled AC office hours for the cutoff.")
-    mixed_decisions = _current.mixed if _current is not None else current_mixed_decisions(publication=publication, faculty=faculty)
-    snapshot, blockers = _calculate(publication, faculty, entries, adjustments, mixed_decisions, current=_current)
+    mixed_decisions = evidence.mixed if evidence is not None else current_mixed_decisions(publication=publication, faculty=faculty)
+    snapshot, blockers = _calculate(publication, faculty, entries, adjustments, mixed_decisions, current=evidence)
     if missing_hours and publication.faculty_scope_id and not (
         publication.scope_snapshot.get("revises_teaching_to_empty") and not publication.scope_snapshot.get("ac_role")
     ):

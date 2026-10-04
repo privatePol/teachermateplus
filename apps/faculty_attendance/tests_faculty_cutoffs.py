@@ -113,18 +113,17 @@ class FacultyCutoffTests(TestCase):
         self.assertTrue(self.slice(self.replacement).ready)
         self.publish(self.replacement)
 
-    def test_missing_attribution_blocks_all_slices_without_omitting_occurrence(self):
+    def test_missing_attribution_stays_in_queue_without_blocking_known_faculty(self):
         self.coverage()
         prepare_daily_encoding(actor=self.actor, offerings=[self.offering], academic_year=self.academic_year,
             term=self.term, meeting_date=date(2026, 1, 5))
         self.confirm(fixtures.TeachingMeeting.objects.get())
         review = self.review()
         self.assertTrue(review.unattributed)
-        self.assertFalse(self.slice().ready)
-        self.assertTrue(any(b.details["scope_unproven"] for b in self.slice().blockers))
+        self.assertTrue(self.slice().ready)
+        self.assertFalse(self.slice().blockers)
         self.assertEqual(review.unattributed[0].details["sections"][0]["section_code"], "S2")
-        with self.assertRaises(ValidationError):
-            self.publish()
+        self.assertEqual(self.publish().entries.count(), 1)
 
     def test_conflicting_combined_coverage_blocks_every_dated_candidate(self):
         version = self.schedule()
@@ -279,9 +278,8 @@ class FacultyCutoffTests(TestCase):
         final_form = response.context["final_form"]
         final_values = {**self.query(), "action": "finalize_ready", "submission_key": final_form.initial["submission_key"],
             "expected_fingerprints": __import__("json").dumps(final_form.initial["expected_fingerprints"])}
-        self.assertEqual(self.client.post(url, final_values).status_code, 200)
-        self.assertFalse(FacultyDTR.objects.exists())
-        final_values["faculty_review_complete"] = "on"
+        # Clicking this separate finalization action records the reviewed
+        # decision without introducing a second attestation control.
         self.assertEqual(self.client.post(url, final_values).status_code, 302)
         self.assertEqual(FacultyDTR.objects.count(), 2)
         finals = finalize_ready_faculty(actor=self.actor, review_scope=self.scope(),

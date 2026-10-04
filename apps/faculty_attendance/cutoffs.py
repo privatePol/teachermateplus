@@ -4,11 +4,11 @@ import hashlib
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering
@@ -332,7 +332,8 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
         campus_id=campus_id,
         offering_id__in=[item.pk for item in offerings],
         status=CoverageReconciliation.Status.PENDING,
-    )
+    ).filter(Q(effective_at__isnull=True) | Q(effective_at__lt=timezone.make_aware(
+        datetime.combine(end_date + timedelta(days=1), time.min))))
     if faculty_review and lock:
         pending_coverage = pending_coverage.select_for_update()
     for item in pending_coverage:
