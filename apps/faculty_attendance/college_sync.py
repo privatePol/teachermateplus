@@ -76,12 +76,13 @@ def map_schedule_slots(old_slots, new_slots):
     return result
 
 
-def combined_source_slot(group, offering, meeting_date):
+def combined_source_slot(group, offering, meeting_date, *, lock=False):
     """Project an explicit combination through audited academic changes only."""
     key = (group.weekday, group.start_time, group.end_time)
-    for change in offering.attendance_source_changes.filter(status="RESOLVED",
+    changes = offering.attendance_source_changes.filter(status="RESOLVED",
             source_reference__startswith="college-course-offering:",
-            effective_from__lte=meeting_date).order_by("effective_from", "pk"):
+            effective_from__lte=meeting_date).order_by("effective_from", "pk")
+    for change in changes.select_for_update() if lock else changes:
         mapping = map_schedule_slots(parse_schedule_text(change.old_schedule_text).slots,
                                      parse_schedule_text(change.new_schedule_text).slots)
         if key in mapping:
@@ -91,8 +92,8 @@ def combined_source_slot(group, offering, meeting_date):
     return key
 
 
-def effective_combined_slot(group, meeting_date):
-    slots = {combined_source_slot(group, link.offering, meeting_date)
+def effective_combined_slot(group, meeting_date, *, lock=False):
+    slots = {combined_source_slot(group, link.offering, meeting_date, lock=lock)
              for link in group.offering_links.all()}
     if len(slots) == 1:
         return next(iter(slots))
@@ -125,9 +126,15 @@ def validate_boundary(offering, effective_at, *, old_schedule_text=None, new_sch
     return effective_at
 
 
-def retired_meeting_ids():
-    return MeetingReconciliation.objects.filter(status="RESOLVED",
+def retired_meeting_ids(*, lock=False, tenant_id=None, campus_id=None):
+    rows = MeetingReconciliation.objects.filter(status="RESOLVED",
         proposed_snapshot__college_retired=True).values_list("meeting_id", flat=True)
+    if lock:
+        # A current read rather than a consistent-read exclusion subquery.
+        if tenant_id is None or campus_id is None:
+            raise ValueError("Current retirement evidence requires tenant and campus scope.")
+        return list(rows.filter(meeting__tenant_id=tenant_id, meeting__campus_id=campus_id).select_for_update())
+    return rows
 
 
 def _protected(meeting):

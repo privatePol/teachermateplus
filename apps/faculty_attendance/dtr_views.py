@@ -17,8 +17,8 @@ from apps.core.services.features import FeatureSettingsService
 from apps.tenants.models import Campus, Department, Tenant
 
 from .dtr import (
-    _faculty_is_ac, _require, ac_department_summary, adjustment_revision_history, checker_summary, current_adjustments, faculty_final_dtr,
-    finalize_dtr, latest_dtr, preview_dtr, printable_final_snapshot, save_adjustment,
+    _faculty_departments, _faculty_is_ac, _require, ac_department_summary, adjustment_revision_history, checker_summary, current_adjustments, faculty_final_dtr,
+    final_dtr_departments, finalize_dtr, latest_dtr, preview_dtr, printable_final_snapshot, save_adjustment,
 )
 from .forms import DTRAdjustmentForm, DTRAdjustmentRemovalForm, DTREarlyCorrectionForm, DTRFinalizationForm, DTRMixedFindingForm
 from .dtr_intervals import current_mixed_decisions, needs_interval_reconciliation, save_mixed_decision
@@ -40,10 +40,10 @@ def _scope(request):
 def _publications(tenant_id, campus_id):
     publications = AttendanceCutoffPublication.objects.filter(
         tenant_id=tenant_id, campus_id=campus_id,
-    ).select_related("academic_year", "term").order_by("-end_date", "-start_date", "-version")
+    ).select_related("academic_year", "term", "faculty_scope").order_by("-end_date", "-start_date", "-version")
     latest = {}
     for publication in publications:
-        key = (publication.academic_year_id, publication.term_id, publication.start_date, publication.end_date)
+        key = (publication.academic_year_id, publication.term_id, publication.start_date, publication.end_date, publication.faculty_scope_id)
         latest.setdefault(key, publication)
     return list(latest.values())
 
@@ -154,11 +154,11 @@ def _detail_context(*, request, publication, faculty, editable_departments, depa
         "can_edit": bool(editable_departments),
         "can_finalize": bool(preview and _allowed(
             request, publication, DTR_FINALIZE_PERMISSION,
-            {line["department_id"] for line in preview.snapshot["lines"]},
+            _faculty_departments(publication, faculty),
         )),
         "can_print": bool(final and _allowed(
             request, publication, DTR_PRINT_PERMISSION,
-            {line["department_id"] for line in final.snapshot["lines"]},
+            final_dtr_departments(final),
         )),
     }
 
@@ -185,6 +185,10 @@ def dtr_review_view(request):
     if not FeatureSettingsService.is_faculty_attendance_enabled(tenant_id=tenant_id):
         return HttpResponseForbidden("Faculty Attendance is disabled for this tenant.")
     publications = _publications(tenant_id, campus_id)
+    # Faculty publications are exposed only where every saved department is
+    # authorized. Complete-campus publications retain their existing gate.
+    publications = [p for p in publications if not p.faculty_scope_id or _allowed(
+        request, p, DTR_VIEW_PERMISSION, set(p.scope_snapshot.get("departments", [])))]
     if not publications:
         department_ids = set(CourseOffering.objects.filter(
             tenant_id=tenant_id, campus_id=campus_id,
@@ -458,7 +462,7 @@ def dtr_review_view(request):
         "publications": publications, "publication": publication, "summary": summary,
         **detail,
         "can_summary_print": _allowed(request, publication, DTR_PRINT_PERMISSION,
-                                      {line["department_id"] for row in summary for line in row["preview"].snapshot["lines"]}),
+                                      set().union(*(_faculty_departments(publication, row["faculty"]) for row in summary))),
         "ac_departments": [item for item in AdminScopeService.scoped_departments(request).filter(
             tenant_id=tenant_id, campus_id=campus_id,
         ) if _faculty_is_ac(faculty=request.user, publication=publication, department_id=item.pk)
@@ -490,7 +494,7 @@ def dtr_cutoff_summary_view(request):
         raise Http404("Select the latest version of this cutoff.")
     try:
         rows = checker_summary(actor=request.user, publication=publication)
-        departments = {line["department_id"] for row in rows for line in row["preview"].snapshot["lines"]}
+        departments = set().union(*(_faculty_departments(publication, row["faculty"]) for row in rows))
         _require(request.user, DTR_PRINT_PERMISSION, publication, departments)
     except PermissionDenied:
         return HttpResponseForbidden("Complete-campus DTR printing authority is required.")
@@ -518,9 +522,7 @@ def dtr_print_view(request, public_id):
     tenant_id, campus_id = _scope(request)
     final = get_object_or_404(FacultyDTR, public_id=public_id, tenant_id=tenant_id, campus_id=campus_id)
     try:
-        _require(request.user, DTR_PRINT_PERMISSION, final.publication, {
-            item["department_id"] for item in final.snapshot["lines"]
-        })
+        _require(request.user, DTR_PRINT_PERMISSION, final.publication, final_dtr_departments(final))
     except PermissionDenied:
         return HttpResponseForbidden("DTR printing authority is required for every included department.")
     return render(request, "faculty_attendance/dtr_print.html", {

@@ -1,3 +1,16 @@
+## DTR current evidence and empty correction provenance - 2026-10-04
+
+Faculty-scoped finalization hands current locked evidence into its calculation instead of expecting row locks to refresh subsequent InnoDB REPEATABLE READ consistent reads. This includes source/combined/history membership, current attendance/closures, adjustments, mixed decisions, latest publication and latest final/supersedes lineage. Single and batch paths keep campus-first serialization and existing fingerprint, attestation, scope/audit guards; no isolation or calculation policy is changed. Actual MariaDB interleaving remains explicitly unexecuted pending an authorized disposable runtime.
+
+A dated reattribution can legitimately remove the last teaching occurrence and produce an empty zero-hour correction final. Saved faculty-publication departments provide its review/print scope, validated against immutable owner, exact saved cutoff and tenant/campus department provenance. Individual historical print reads saved final/publication evidence, not current attendance or assignment. Missing or foreign provenance denies rather than granting campus access. Prior finals and nonempty/legacy campus behavior remain protected. See HANDOFF for exact remediation manifest and focused evidence; no new migration or persistent action.
+
+## Faculty-scoped cutoff publication and partial DTR processing - 2026-10-04
+
+- Added explicitly authorized faculty cutoff publication, separate faculty review and DTR finalization, selected/all-ready processing, immutable faculty lineage and occurrence/revision snapshots, audit attribution and safe request retries. Existing complete-campus publication remains separately authorized and keeps its lineage.
+- Complete dated evidence is required: known faculty blockers stay with that faculty, conflicting finite dated candidates block all candidates, and missing/unbounded attribution prevents every unproved slice from proceeding. Unmaterialized expected occurrences remain blockers. Current assignments identify possible reviewers only, never dated attendance attribution.
+- New additive migration 0020 adds nullable faculty ownership, CAMPUS-default scope identity, immutable scope evidence, expanded per-scope uniqueness and a scope-kind check; seeds an explicit permission/navigation entry without granting any roles/users. Faculty-scoped publications integrate with existing DTR adjustments, closures, revisions, print and faculty-only visibility.
+- Validation, exact manifest, migration/deployment risks and outstanding browser/MariaDB acceptance are recorded in HANDOFF. No persistent migration, staging repair, commit, push, deployment or restart.
+
 ## Exceptional legacy meeting recovery access (2026-10-04)
 
 Changes Needing Review now exposes its existing audited meeting adoption handler in the collapsed Administrative diagnostics and legacy recovery panel, not a campus-coverage initialization link. Authorized administrators see meeting ID, saved course/linked sections, Asia/Manila date/time and only a candidate accepted by the adoption service's read-only eligibility preview. Missing or conflicting evidence is explicitly not verified and has no recovery form. Both scoped manage_coverage and reconcile remain required; direct DENY applies to GET actions and POST processing.

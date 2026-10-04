@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Max, Q
+from django.db.models import Max, Prefetch, Q
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering
@@ -16,6 +16,8 @@ from .models import (
     CheckingRound,
     FacultyCoverage,
     OfferingAttendanceSourceChange,
+    MeetingOffering,
+    RecurringCombinedClassOffering,
     RecurringCombinedClass,
     ScheduleSlot,
     ScheduleVersion,
@@ -167,13 +169,18 @@ def _source_for_date(*, offering, term, meeting_date, changes):
     )
 
 
-def _combined_groups(*, tenant_id, campus_id, academic_year_id, term_id, offering_ids):
+def _combined_groups(*, tenant_id, campus_id, academic_year_id, term_id, offering_ids, lock=False):
     groups = RecurringCombinedClass.objects.filter(
         tenant_id=tenant_id,
         campus_id=campus_id,
         academic_year_id=academic_year_id,
         term_id=term_id,
-    ).prefetch_related("offering_links__offering__course", "offering_links__offering__section")
+    )
+    if lock:
+        groups = groups.select_for_update().prefetch_related(Prefetch("offering_links",
+            queryset=RecurringCombinedClassOffering.objects.select_for_update().select_related("offering__course", "offering__section")))
+    else:
+        groups = groups.prefetch_related("offering_links__offering__course", "offering_links__offering__section")
     return [
         group
         for group in groups
@@ -181,25 +188,26 @@ def _combined_groups(*, tenant_id, campus_id, academic_year_id, term_id, offerin
     ]
 
 
-def _dated_combined_meetings(*, offerings, start_date, end_date):
+def _dated_combined_meetings(*, offerings, start_date, end_date, lock=False):
     """Return candidate dated shared meetings without widening the selected offering scope."""
     if not offerings:
         return []
     first = offerings[0]
     offering_ids = {item.pk for item in offerings}
     from .college_sync import retired_meeting_ids
-    return list(
+    rows = (
         TeachingMeeting.objects.filter(
             tenant_id=first.tenant_id,
             campus_id=first.campus_id,
             meeting_date__range=(start_date, end_date),
             offering_links__offering_id__in=offering_ids,
         )
-        .exclude(pk__in=retired_meeting_ids()).distinct()
+        .exclude(pk__in=retired_meeting_ids(lock=lock, tenant_id=first.tenant_id, campus_id=first.campus_id)).distinct()
         .select_related("schedule_slot")
-        .prefetch_related("offering_links")
         .order_by("meeting_date", "starts_at", "pk")
     )
+    links = Prefetch("offering_links", queryset=MeetingOffering.objects.select_for_update()) if lock else "offering_links"
+    return list((rows.select_for_update() if lock else rows).prefetch_related(links))
 
 
 def _dated_combination_issue(*, meeting, primary, linked, code, message):
@@ -214,9 +222,9 @@ def _dated_combination_issue(*, meeting, primary, linked, code, message):
     )
 
 
-def _recurring_definition_conflicts_with_dated(*, group, meeting_date, linked_ids, start_time, end_time):
+def _recurring_definition_conflicts_with_dated(*, group, meeting_date, linked_ids, start_time, end_time, lock=False):
     from .college_sync import effective_combined_slot
-    slot = effective_combined_slot(group, meeting_date)
+    slot = effective_combined_slot(group, meeting_date, lock=lock)
     if (
         slot is None or meeting_date.weekday() != slot[0]
         or meeting_date < group.effective_from
@@ -233,7 +241,7 @@ def _recurring_definition_conflicts_with_dated(*, group, meeting_date, linked_id
     )
 
 
-def expected_daily_occurrences(*, offerings, term, start_date, end_date, combined_classes=()):
+def expected_daily_occurrences(*, offerings, term, start_date, end_date, combined_classes=(), lock=False):
     """Read-only expected-occurrence builder shared by daily encoding and cutoff review."""
     start_date = max(start_date, term.start_date)
     end_date = min(end_date, term.end_date)
@@ -243,9 +251,8 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
     issues = []
     ordinary = {}
     for offering in offerings:
-        changes = list(
-            offering.attendance_source_changes.all().order_by("effective_from", "pk")
-        )
+        changes = offering.attendance_source_changes.all().order_by("effective_from", "pk")
+        changes = list(changes.select_for_update() if lock else changes)
         pending = [item for item in changes if item.status == OfferingAttendanceSourceChange.Status.PENDING]
         if pending:
             issues.append(
@@ -302,12 +309,16 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
         meeting_date__range=(start_date, end_date), reconciliations__status="RESOLVED",
         reconciliations__proposed_snapshot__college_preserved=True).distinct()
     historical_consumed = {}
-    for meeting in preserved.select_related("schedule_slot__schedule_version").prefetch_related("offering_links__offering"):
+    if lock:
+        preserved = preserved.select_for_update()
+    links_prefetch = Prefetch("offering_links", queryset=MeetingOffering.objects.select_for_update().select_related("offering")) if lock else "offering_links__offering"
+    for meeting in preserved.select_related("schedule_slot__schedule_version").prefetch_related(links_prefetch):
         links = list(meeting.offering_links.all())
         if not {l.offering_id for l in links} <= {o.pk for o in offerings}:
             continue
         primary = next(l.offering for l in links if l.is_primary)
-        for review in meeting.reconciliations.filter(proposed_snapshot__college_preserved=True):
+        reviews = meeting.reconciliations.filter(proposed_snapshot__college_preserved=True)
+        for review in reviews.select_for_update() if lock else reviews:
             old = parse_schedule_text(review.before_snapshot.get("schedule_text", ""))
             new = parse_schedule_text(review.proposed_snapshot.get("schedule_text", ""))
             from .college_sync import map_schedule_slots
@@ -341,6 +352,7 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
         offerings=offerings,
         start_date=start_date,
         end_date=end_date,
+        lock=lock,
     ):
         if any(o.historical_meeting_id == meeting.pk for o in ordinary.values()):
             continue
@@ -401,7 +413,7 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
             dated_meeting_id=meeting.pk,
         )
         try:
-            slot = _existing_source_slot_for_occurrence(occurrence=occurrence)
+            slot = _existing_source_slot_for_occurrence(occurrence=occurrence, lock=lock)
         except (ValidationError, PermissionDenied) as exc:
             blocked_dated_keys.update(keys)
             issues.append(
@@ -462,11 +474,12 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
                 linked_ids=candidate["linked_ids"],
                 start_time=candidate["occurrence"].start_time,
                 end_time=candidate["occurrence"].end_time,
+                lock=lock,
             ):
                 continue
             conflicting_dated_ids.add(candidate["meeting"].pk)
             from .college_sync import effective_combined_slot
-            slot = effective_combined_slot(group, candidate["meeting"].meeting_date)
+            slot = effective_combined_slot(group, candidate["meeting"].meeting_date, lock=lock)
             blocked_dated_keys.update(
                 (link.offering_id, candidate["meeting"].meeting_date, slot[1], slot[2])
                 for link in group.offering_links.all()
@@ -505,7 +518,7 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
         primary = next((link.offering for link in links if link.is_primary), linked[0])
         for meeting_date in _date_range(start_date, end_date):
             from .college_sync import effective_combined_slot, combined_source_slot
-            slot = effective_combined_slot(group, meeting_date)
+            slot = effective_combined_slot(group, meeting_date, lock=lock)
             if slot is None or meeting_date.weekday() != slot[0]:
                 continue
             if meeting_date < group.effective_from or (
@@ -543,7 +556,7 @@ def expected_daily_occurrences(*, offerings, term, start_date, end_date, combine
                 # Do not split an explicit combination into independent classes
                 # while linked academic edits are awaiting agreement.
                 for item in linked:
-                    source_slot = combined_source_slot(group, item, meeting_date)
+                    source_slot = combined_source_slot(group, item, meeting_date, lock=lock)
                     if source_slot and source_slot[0] == meeting_date.weekday():
                         ordinary.pop((item.pk, meeting_date, source_slot[1], source_slot[2]), None)
                 issues.append(
@@ -647,7 +660,8 @@ def _existing_source_slot_for_occurrence(*, occurrence, lock=False):
     ).filter(Q(effective_until__isnull=True) | Q(effective_until__gte=occurrence.source_effective_from))
     if lock:
         versions = versions.select_for_update()
-    versions = list(versions.prefetch_related("slots").order_by("effective_from", "version_number", "pk"))
+    slots = Prefetch("slots", queryset=ScheduleSlot.objects.select_for_update()) if lock else "slots"
+    versions = list(versions.prefetch_related(slots).order_by("effective_from", "version_number", "pk"))
     if not versions:
         return None
     effective = [item for item in versions if _is_effective_on(item, occurrence.meeting_date)]
@@ -661,7 +675,8 @@ def _existing_source_slot_for_occurrence(*, occurrence, lock=False):
         automatic = OfferingAttendanceSourceChange.objects.filter(offering_id=occurrence.primary_offering.pk,
             status="RESOLVED", effective_from=occurrence.source_effective_from,
             source_reference__startswith="college-course-offering:",
-            new_schedule_text=occurrence.source_schedule_text, new_room=occurrence.source_room).exists()
+            new_schedule_text=occurrence.source_schedule_text, new_room=occurrence.source_room)
+        automatic = (automatic.select_for_update() if lock else automatic).exists()
         exact = [v for v in effective if v.source_kind == "COURSE_OFFERING" and v.source_fingerprint == fingerprint]
         if automatic and exact:
             effective = [max(exact, key=lambda v: (v.version_number, v.pk))]

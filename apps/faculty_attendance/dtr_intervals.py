@@ -83,6 +83,8 @@ def current_mixed_decisions(*, publication, faculty):
 
 @transaction.atomic
 def save_mixed_decision(*, actor, publication, faculty, meeting, intervals_text, reason, expected_revision):
+    from .notice_locking import lock_notice_campus
+    lock_notice_campus(publication.campus_id)
     publication = AttendanceCutoffPublication.objects.select_for_update().get(pk=publication.pk)
     entry = AttendanceCutoffPublicationEntry.objects.select_for_update().select_related(
         "meeting", "result_revision",

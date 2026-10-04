@@ -1,0 +1,51 @@
+{% extends "admin_portal/base.html" %}
+{% block title %}Faculty cutoff processing{% endblock %}
+{% block admin_content %}
+<style>
+  .faculty-cutoff {max-width:1600px;min-width:0;overflow-wrap:anywhere;color:#213428}
+  .faculty-cutoff header {background:linear-gradient(120deg,#145832,#34894a 60%,#d6b23d);color:white;border-radius:1rem;padding:1.4rem}
+  .faculty-cutoff header h1 {color:white}.faculty-cutoff :focus-visible {outline:3px solid #185abd;outline-offset:3px}
+  .faculty-cutoff .card-header {background:linear-gradient(90deg,#e5f2e7,#f8eab7);color:#173b2b;font-weight:700}
+  .faculty-cutoff .errorlist {color:#842029}.faculty-cutoff .blocker {border-left:4px solid #b02a37;padding:.6rem;background:#fff8f6;margin:.5rem 0}
+  @media print {.faculty-cutoff form,.faculty-cutoff a {display:none}.faculty-cutoff header,.faculty-cutoff .card-header {background:white!important;color:black!important}}
+</style>
+<div class="container-fluid py-2 faculty-cutoff">
+  <header class="mb-3"><h1 class="h3">Faculty cutoff processing</h1><p class="mb-0">Review complete faculty attendance, publish ready faculty, allow faculty review, then finalize eligible DTRs separately. Resume pending faculty as their blockers are resolved.</p></header>
+  <section class="card mb-3"><div class="card-header">Select cutoff</div><div class="card-body"><form method="get" class="row g-3">
+    {% for field in form %}<div class="col-md-3"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}
+    <div class="col-12">{{ form.non_field_errors }}<button class="btn btn-outline-success">Review faculty cutoff</button></div>
+  </form></div></section>
+  {% if review %}
+  <section class="card mb-3"><div class="card-header">Faculty readiness — {{ rows|length }}</div><div class="card-body"><div class="table-responsive">
+    <table class="table table-sm"><thead><tr><th>Faculty</th><th>Status</th><th>Publication / final</th><th>Blockers and next action</th></tr></thead><tbody>
+    {% for row in rows %}<tr><td>{{ row.slice.faculty.full_name }}<br><small>{{ row.slice.records|length }} verified occurrence(s)</small></td><td>{{ row.status }}</td>
+      <td>{% if row.publication %}Published v{{ row.publication.version }}{% endif %}{% if row.final %}<br>Final revision {{ row.final.revision }}{% endif %}</td>
+      <td>{% for warning in row.warnings %}<div class="blocker"><strong>{{ warning.blocker.details.date }}{% if warning.blocker.details.start %} {{ warning.blocker.details.start|time:"g:i A" }}–{{ warning.blocker.details.end|time:"g:i A" }} Manila{% endif %}</strong>
+        {% for section in warning.blocker.details.sections %}<div>{{ section.course_code }} — {{ section.course_title }} ({{ section.section_code }})</div>{% endfor %}
+        <div>{{ warning.blocker.message }}</div>{% if warning.daily_url %}<a href="{{ warning.daily_url }}">Open dated daily list</a>{% endif %} {% if warning.recovery_url %}<a href="{{ warning.recovery_url }}">Review diagnostics / recovery</a>{% endif %}</div>{% endfor %}
+        {% if row.preview.blockers %}{% for blocker in row.preview.blockers %}<div class="blocker">{{ blocker }}</div>{% endfor %}{% endif %}
+        {% if row.can_review %}<a class="btn btn-sm btn-outline-success" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ row.publication.pk }}&amp;faculty={{ row.slice.faculty.pk }}">Review published attendance and DTR</a>{% endif %}
+      </td></tr>{% empty %}<tr><td colspan="4">No faculty evidence or AC assignments require a DTR in this authorized scope.</td></tr>{% endfor %}
+    </tbody></table></div></div></section>
+  {% if review.unattributed %}<section class="card mb-3"><div class="card-header">Unattributed / conflicting evidence — {{ review.unattributed|length }}</div><div class="card-body">
+    <p>These occurrences remain visible. A finite dated candidate set blocks those candidates; missing attribution blocks every faculty whose complete slice cannot be proved.</p>
+    {% for item in diagnostics %}<div class="blocker"><strong>{{ item.blocker.details.date }} {% if item.blocker.details.start %}{{ item.blocker.details.start|time:"g:i A" }}–{{ item.blocker.details.end|time:"g:i A" }} Manila{% endif %}</strong>
+      {% for section in item.blocker.details.sections %}<div>{{ section.course_code }} — {{ section.course_title }} ({{ section.section_code }})</div>{% endfor %}<div>Faculty unresolved / conflicting: {{ item.blocker.message }}</div>{% if item.recovery_url %}<a href="{{ item.recovery_url }}">Review diagnostics / recovery</a>{% endif %}</div>{% endfor %}
+  </div></section>{% endif %}
+  <section class="card mb-3"><div class="card-header">1. Publish ready faculty attendance</div><div class="card-body"><p>Publication freezes the faculty's complete dated attendance for review. It does not finalize their DTR.</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="academic_year" value="{{ review.scope.academic_year.pk }}"><input type="hidden" name="term" value="{{ review.scope.term.pk }}"><input type="hidden" name="start_date" value="{{ review.scope.start_date|date:'Y-m-d' }}"><input type="hidden" name="end_date" value="{{ review.scope.end_date|date:'Y-m-d' }}">
+      {{ publication_form.non_field_errors }}{{ publication_form.submission_key }}{{ publication_form.expected_fingerprints }}{{ publication_form.expected_fingerprints.errors }}
+      <fieldset><legend class="h6">Ready faculty</legend>{{ publication_form.faculty_ids }}{{ publication_form.faculty_ids.errors }}</fieldset><label for="{{ publication_form.reason.id_for_label }}">{{ publication_form.reason.label }}</label>{{ publication_form.reason }}
+      <div class="mt-2"><button class="btn btn-success" name="action" value="publish_selected">Publish selected ready faculty</button> <button class="btn btn-outline-success" name="action" value="publish_ready">Publish all ready faculty</button></div>
+    </form></div></section>
+  <section class="card"><div class="card-header">2. Finalize after published faculty review</div><div class="card-body"><p>Allow faculty to review their published attendance first. Review corrections and checker entries, then explicitly confirm the review opportunity before finalization.</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="academic_year" value="{{ review.scope.academic_year.pk }}"><input type="hidden" name="term" value="{{ review.scope.term.pk }}"><input type="hidden" name="start_date" value="{{ review.scope.start_date|date:'Y-m-d' }}"><input type="hidden" name="end_date" value="{{ review.scope.end_date|date:'Y-m-d' }}">
+      {{ final_form.non_field_errors }}{{ final_form.submission_key }}{{ final_form.expected_fingerprints }}{{ final_form.expected_fingerprints.errors }}
+      <fieldset><legend class="h6">Published eligible faculty DTRs</legend>{{ final_form.faculty_ids }}{{ final_form.faculty_ids.errors }}</fieldset>
+      <label for="{{ final_form.faculty_review_complete.id_for_label }}">{{ final_form.faculty_review_complete }} {{ final_form.faculty_review_complete.label }}</label>{{ final_form.faculty_review_complete.errors }}<br>
+      <label for="{{ final_form.reason.id_for_label }}">{{ final_form.reason.label }}</label>{{ final_form.reason }}
+      <div class="mt-2"><button class="btn btn-success" name="action" value="finalize_selected">Finalize selected reviewed DTRs</button> <button class="btn btn-outline-success" name="action" value="finalize_ready">Finalize all eligible reviewed DTRs</button></div>
+    </form></div></section>
+  {% endif %}
+</div>
+{% endblock %}

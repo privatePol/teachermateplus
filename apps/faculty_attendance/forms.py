@@ -354,6 +354,25 @@ class CutoffPublicationForm(CutoffScopeForm):
     publication_reason = forms.CharField(required=False, label="Publication note (optional)", widget=forms.Textarea(attrs={"rows": 3}))
 
 
+class FacultyCutoffActionForm(forms.Form):
+    faculty_ids = forms.MultipleChoiceField(required=False, widget=forms.CheckboxSelectMultiple)
+    expected_fingerprints = forms.JSONField(widget=forms.HiddenInput)
+    submission_key = forms.CharField(max_length=40, widget=forms.HiddenInput)
+    reason = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Note (optional)")
+    faculty_review_complete = forms.BooleanField(required=False,
+        label="Published attendance was available for faculty review; checker concerns were settled")
+
+    def __init__(self, *args, faculty_choices=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["faculty_ids"].choices = faculty_choices
+
+    def clean_expected_fingerprints(self):
+        values = self.cleaned_data["expected_fingerprints"]
+        if not isinstance(values, dict) or any(not isinstance(v, str) or len(v) != 64 for v in values.values()):
+            raise forms.ValidationError("Reload the faculty cutoff review before submitting.")
+        return values
+
+
 class SourceChangeReconciliationForm(forms.Form):
     effective_from = forms.DateField(label="Effective date", widget=forms.DateInput(attrs={"type": "date"}))
     reason = forms.CharField(required=False, label="Resolution note (optional)", widget=forms.Textarea(attrs={"rows": 3}))

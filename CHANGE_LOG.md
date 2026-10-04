@@ -1,3 +1,16 @@
+## DTR finalization evidence and empty correction printing - 2026-10-04
+
+- Finalization calculates from current locked source, attendance, closure, adjustment and mixed-decision evidence, with current publication/final lineage; no reliance on a pre-wait InnoDB consistent snapshot. Stale reviewed inputs still require reload.
+- Legitimate empty faculty correction finals retain review/finalize/individual-print/checker-summary authority through validated saved faculty-publication departments, never guessed assignments or blanket access. Historical final snapshots remain unchanged.
+- Focused disposable results and explicit unexecuted InnoDB interleavings are in HANDOFF. No remediation schema change, persistent DB migration, release or runtime action.
+
+## Faculty-scoped cutoff publication and partial DTR processing - 2026-10-04
+
+- Added explicitly authorized faculty cutoff publication, separate faculty review and DTR finalization, selected/all-ready processing, immutable faculty lineage and occurrence/revision snapshots, audit attribution and safe request retries. Existing complete-campus publication remains separately authorized and keeps its lineage.
+- Complete dated evidence is required: known faculty blockers stay with that faculty, conflicting finite dated candidates block all candidates, and missing/unbounded attribution prevents every unproved slice from proceeding. Unmaterialized expected occurrences remain blockers. Current assignments identify possible reviewers only, never dated attendance attribution.
+- New additive migration 0020 adds nullable faculty ownership, CAMPUS-default scope identity, immutable scope evidence, expanded per-scope uniqueness and a scope-kind check; seeds an explicit permission/navigation entry without granting any roles/users. Faculty-scoped publications integrate with existing DTR adjustments, closures, revisions, print and faculty-only visibility.
+- Validation, exact manifest, migration/deployment risks and outstanding browser/MariaDB acceptance are recorded in HANDOFF. No persistent migration, staging repair, commit, push, deployment or restart.
+
 ## Exceptional legacy meeting recovery access - 2026-10-04
 
 - Restored the existing targeted adoption action inside Changes Needing Review's collapsed Administrative diagnostics and legacy recovery panel, replacing its campus-initialization link. Shows saved class/section evidence, meeting ID, Manila time and a service-verified faculty candidate; ineligible evidence stays diagnostic, not verified.

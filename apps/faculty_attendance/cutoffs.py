@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering
@@ -20,6 +22,9 @@ from .models import (
     AttendanceResult,
     AttendanceResultRevision,
     CoverageReconciliation,
+    MeetingReconciliation,
+    MeetingOffering,
+    OfferingAttendanceSourceChange,
     TeachingMeeting,
 )
 from .observations import StaleAttendanceReview, require_confirmable_meeting_faculty, resolve_attendance_faculty, prime_meeting_readiness
@@ -57,6 +62,9 @@ class CutoffReview:
     records: tuple[CutoffRecord, ...]
     blockers: tuple[CutoffBlocker, ...]
     fingerprint: str
+    offerings: tuple = field(default=(), repr=False, compare=False)
+    occurrences: tuple = field(default=(), repr=False, compare=False)
+    meetings: tuple = field(default=(), repr=False, compare=False)
 
     @property
     def ready(self):
@@ -125,8 +133,18 @@ def _occurrence_signature(occurrence):
 
 
 def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_date, end_date, lock=False):
+    return _review_cutoff(actor=actor, tenant_id=tenant_id, campus_id=campus_id,
+        academic_year=academic_year, term=term, start_date=start_date, end_date=end_date, lock=lock)
+
+
+def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_date, end_date,
+                   lock=False, faculty_review=False):
+    # Internal evidence builder. Faculty callers authorize/filter each complete
+    # slice before exposing it; the public campus path keeps its original gate.
     if end_date < start_date:
         raise ValidationError("Cutoff end date cannot precede start date.")
+    if academic_year.tenant_id != tenant_id or term.tenant_id != tenant_id or term.academic_year_id != academic_year.pk:
+        raise ValidationError("Select a semester in this tenant and academic year.")
     offering_queryset = CourseOffering.objects.filter(
         tenant_id=tenant_id,
         campus_id=campus_id,
@@ -135,14 +153,17 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
     ).select_related("course", "section", "department")
     if lock:
         offering_queryset = offering_queryset.select_for_update()
-    offerings = list(offering_queryset.prefetch_related("attendance_source_changes"))
-    _complete_campus_permission(actor=actor, offerings=offerings)
+    source_prefetch = Prefetch("attendance_source_changes", queryset=OfferingAttendanceSourceChange.objects.select_for_update()) if faculty_review and lock else "attendance_source_changes"
+    offerings = list(offering_queryset.prefetch_related(source_prefetch))
+    if not faculty_review:
+        _complete_campus_permission(actor=actor, offerings=offerings)
     combined = _combined_groups(
         tenant_id=tenant_id,
         campus_id=campus_id,
         academic_year_id=academic_year.pk,
         term_id=term.pk,
         offering_ids={item.pk for item in offerings},
+        lock=faculty_review and lock,
     )
     occurrences, occurrence_issues = expected_daily_occurrences(
         offerings=offerings,
@@ -150,12 +171,14 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
         start_date=start_date,
         end_date=end_date,
         combined_classes=combined,
+        lock=faculty_review and lock,
     )
     blockers = [CutoffBlocker(code=item.code, message=item.message, occurrence_key=item.occurrence_key,
         offering_ids=tuple(o.pk for o in item.affected_offerings), meeting_date=item.meeting_date) for item in occurrence_issues]
 
     from .college_sync import retired_meeting_ids
-    meeting_queryset = TeachingMeeting.objects.exclude(pk__in=retired_meeting_ids()).filter(
+    meeting_queryset = TeachingMeeting.objects.exclude(pk__in=retired_meeting_ids(
+        lock=faculty_review and lock, tenant_id=tenant_id, campus_id=campus_id)).filter(
         tenant_id=tenant_id,
         campus_id=campus_id,
         meeting_date__range=(start_date, end_date),
@@ -164,15 +187,42 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
     ).distinct().select_related("attendance_result", "substitution")
     if lock:
         meeting_queryset = meeting_queryset.select_for_update()
-    meetings = list(
-        meeting_queryset.prefetch_related("offering_links", "reconciliations", "closure_decisions")
-    )
-    prime_meeting_readiness(meetings)
+    if faculty_review and lock:
+        meeting_queryset = meeting_queryset.select_related("coverage_adoption__faculty_user", "faculty_user",
+            "attendance_result__faculty_user", "substitution__substitute_faculty").prefetch_related(
+            Prefetch("offering_links", queryset=MeetingOffering.objects.select_for_update()),
+            Prefetch("reconciliations", queryset=MeetingReconciliation.objects.select_for_update()),
+            Prefetch("closure_decisions", queryset=AttendanceClosureDecision.objects.select_for_update()))
+    else:
+        meeting_queryset = meeting_queryset.prefetch_related("offering_links", "reconciliations", "closure_decisions")
+    if faculty_review:
+        meeting_queryset = meeting_queryset.prefetch_related("faculty_user", "attendance_result__faculty_user",
+            "substitution__substitute_faculty", "coverage_adoption__faculty_user")
+    meetings = list(meeting_queryset)
+    if not (faculty_review and lock):
+        prime_meeting_readiness(meetings)
+    if faculty_review and lock:
+        # Current locking reads after the campus mutex, also under InnoDB
+        # REPEATABLE READ. A waiting writer cannot validate an older snapshot.
+        pending_meetings = set(MeetingReconciliation.objects.select_for_update().filter(
+            meeting_id__in=[m.pk for m in meetings], status="PENDING").values_list("meeting_id", flat=True))
+        pending_sources = list(CoverageReconciliation.objects.select_for_update().filter(
+            offering_id__in=[o.pk for o in offerings], status="PENDING").values_list("offering_id", "effective_at"))
+        closures = defaultdict(list)
+        for closure in AttendanceClosureDecision.objects.select_for_update().filter(meeting_id__in=[m.pk for m in meetings]):
+            closures[closure.meeting_id].append(closure)
+        for meeting in meetings:
+            # Current retirement evidence already excluded retired rows above.
+            meeting._attendance_retired = False
+            linked_ids = {l.offering_id for l in meeting.offering_links.all()}
+            meeting._attendance_pending_review = meeting.pk in pending_meetings or any(
+                oid in linked_ids and (effective is None or effective <= meeting.starts_at) for oid, effective in pending_sources)
+            meeting._prefetched_objects_cache["closure_decisions"] = closures[meeting.pk]
     meetings_by_key = {item.occurrence_key: item for item in meetings if item.occurrence_key}
     meetings_by_signature = {_meeting_signature(item): item for item in meetings}
     revisions = {
         (item.result_id, item.revision): item
-        for item in AttendanceResultRevision.objects.filter(
+        for item in (AttendanceResultRevision.objects.select_for_update() if faculty_review and lock else AttendanceResultRevision.objects).filter(
             result_id__in=[item.attendance_result.pk for item in meetings if hasattr(item, "attendance_result")],
         )
     }
@@ -239,7 +289,7 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
                 )
             )
             continue
-        if meeting.unresolved_coverage and result.faculty_user_id != dated_faculty.pk:
+        if (faculty_review or meeting.unresolved_coverage) and result.faculty_user_id != dated_faculty.pk:
             blockers.append(
                 CutoffBlocker(
                     code="FACULTY_ATTRIBUTION_CONFLICT",
@@ -277,12 +327,14 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
                     ),
                 )
             )
-    pending_coverage = CoverageReconciliation.objects.filter(
+    pending_coverage = CoverageReconciliation.objects.select_related("offering__course", "offering__section").filter(
         tenant_id=tenant_id,
         campus_id=campus_id,
         offering_id__in=[item.pk for item in offerings],
         status=CoverageReconciliation.Status.PENDING,
     )
+    if faculty_review and lock:
+        pending_coverage = pending_coverage.select_for_update()
     for item in pending_coverage:
         blockers.append(
             CutoffBlocker(
@@ -302,6 +354,9 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
         meeting = meeting_map.get(blocker.meeting_id)
         occurrence = occurrence_map.get(blocker.occurrence_key)
         details = {}
+        if faculty_review:
+            decorated.append(blocker)
+            continue
         if meeting:
             result = getattr(meeting, "attendance_result", None)
             faculty, _source = resolve_attendance_faculty(meeting, result)
@@ -337,6 +392,7 @@ def review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_dat
         records=records,
         blockers=blockers,
         fingerprint=_fingerprint(records=records, blockers=blockers),
+        offerings=tuple(offerings), occurrences=tuple(occurrences), meetings=tuple(meetings),
     )
 
 
@@ -437,6 +493,7 @@ def publish_cutoff(
             term=term,
             start_date=start_date,
             end_date=end_date,
+            faculty_scope__isnull=True,
         )
         .order_by("-version", "-pk")
         .first()
@@ -485,9 +542,13 @@ def publish_cutoff(
     return publication
 
 
-def _latest_publications(*, tenant_id, campus_id):
+def _latest_publications(*, tenant_id, campus_id, faculty_user=None):
+    from django.db.models import Q
+    queryset = AttendanceCutoffPublication.objects.filter(tenant_id=tenant_id, campus_id=campus_id)
+    if faculty_user is not None:
+        queryset = queryset.filter(Q(faculty_scope__isnull=True) | Q(faculty_scope=faculty_user))
     publications = list(
-        AttendanceCutoffPublication.objects.filter(tenant_id=tenant_id, campus_id=campus_id).order_by(
+        queryset.order_by(
             "lineage_key", "-version", "-published_at"
         )
     )
@@ -500,7 +561,7 @@ def _latest_publications(*, tenant_id, campus_id):
 def faculty_published_entries(*, faculty_user, tenant_id, campus_id, start_date, end_date, include_history=False):
     if not can_faculty_view_own_attendance(user=faculty_user, tenant_id=tenant_id, campus_id=campus_id):
         raise PermissionDenied("My Attendance is disabled or unavailable for this account.")
-    publications = _latest_publications(tenant_id=tenant_id, campus_id=campus_id)
+    publications = _latest_publications(tenant_id=tenant_id, campus_id=campus_id, faculty_user=faculty_user)
     publication_ids = [item.pk for item in publications]
     entries = list(
         AttendanceCutoffPublicationEntry.objects.filter(
@@ -509,11 +570,23 @@ def faculty_published_entries(*, faculty_user, tenant_id, campus_id, start_date,
         ).select_related("publication")
     )
     deduped = {}
+    latest_by_day = {}
+    ordered_publications = sorted(publications, key=lambda item: (item.published_at, item.pk), reverse=True)
     for entry in entries:
+        # A complete newer publication replaces membership for its date scope,
+        # including an explicitly empty faculty slice. Otherwise old campus
+        # entries could reappear after a dated attribution correction.
+        day_key = (entry.publication.academic_year_id, entry.publication.term_id, entry.meeting_date)
+        if day_key not in latest_by_day:
+            latest_by_day[day_key] = next((item.pk for item in ordered_publications
+                if (item.academic_year_id, item.term_id) == day_key[:2]
+                and item.start_date <= entry.meeting_date <= item.end_date), None)
+        if entry.publication_id != latest_by_day[day_key]:
+            continue
         current = deduped.get(entry.occurrence_key)
-        if current is None or (entry.publication.published_at, entry.publication.version, entry.pk) > (
+        if current is None or (entry.publication.published_at, entry.publication_id, entry.pk) > (
             current.publication.published_at,
-            current.publication.version,
+            current.publication_id,
             current.pk,
         ):
             deduped[entry.occurrence_key] = entry

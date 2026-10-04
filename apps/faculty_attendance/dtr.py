@@ -8,14 +8,16 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.core.services.audit import AuditService
 from apps.rbac.models import UserRole
+from apps.tenants.models import Department
 
 from .models import (
     AttendanceClosureDecision, AttendanceCutoffPublication, AttendanceResult, DTRAdjustment,
-    DTRMixedFindingDecision, FacultyDTR,
+    DTRMixedFindingDecision, FacultyDTR, MeetingReconciliation,
 )
 from .closures import latest_closure
 from .dtr_intervals import current_mixed_decisions, needs_interval_reconciliation
@@ -107,9 +109,9 @@ def printable_final_snapshot(saved):
 def _faculty_is_ac(*, faculty, publication, department_id):
     return UserRole.objects.filter(
         user=faculty, is_active=True, role__is_active=True, role__code__in=AC_CODES,
-        tenant_id__in=[publication.tenant_id, None], campus_id__in=[publication.campus_id, None],
-        department_id__in=[department_id, None],
-    ).exists()
+    ).filter(Q(tenant_id=publication.tenant_id) | Q(tenant_id__isnull=True),
+        Q(campus_id=publication.campus_id) | Q(campus_id__isnull=True),
+        Q(department_id=department_id) | Q(department_id__isnull=True)).exists()
 
 
 def _require(actor, code, publication, department_ids):
@@ -122,11 +124,18 @@ def _require(actor, code, publication, department_ids):
         )
 
 
-def latest_publication(*, tenant_id, campus_id, academic_year_id, term_id, start_date, end_date):
-    return AttendanceCutoffPublication.objects.filter(
+def latest_publication(*, tenant_id, campus_id, academic_year_id, term_id, start_date, end_date, faculty_id=None, lock=False):
+    queryset = AttendanceCutoffPublication.objects.filter(
         tenant_id=tenant_id, campus_id=campus_id, academic_year_id=academic_year_id,
         term_id=term_id, start_date=start_date, end_date=end_date,
-    ).order_by("-version", "-pk").first()
+    )
+    if faculty_id is None:
+        queryset = queryset.filter(faculty_scope__isnull=True)
+    else:
+        queryset = queryset.filter(Q(faculty_scope__isnull=True) | Q(faculty_scope_id=faculty_id))
+    if lock:
+        queryset = queryset.select_for_update()
+    return queryset.order_by("-published_at", "-pk").first()
 
 
 def _adjustment_rows(*, publication, faculty):
@@ -145,26 +154,88 @@ def adjustment_revision_history(*, publication, faculty):
     return history
 
 
-def current_adjustments(*, publication, faculty):
+def current_adjustments(*, publication, faculty, rows=None):
     latest = {}
-    for row in _adjustment_rows(publication=publication, faculty=faculty):
+    for row in rows if rows is not None else _adjustment_rows(publication=publication, faculty=faculty):
         latest.setdefault(row.entry_key, row)
     return sorted(latest.values(), key=lambda item: (item.entry_date, item.kind, item.pk))
 
 
-def _published_entries(publication, faculty):
-    return list(publication.entries.filter(faculty_user=faculty).select_related(
+def _published_entries(publication, faculty, *, lock=False):
+    rows = publication.entries.filter(faculty_user=faculty).select_related(
         "meeting", "meeting__department", "result_revision",
         "closure_decision",
-    ).order_by("meeting_date", "starts_at", "pk"))
+    ).order_by("meeting_date", "starts_at", "pk")
+    return list(rows.select_for_update() if lock else rows)
 
 
-def _faculty_departments(publication, faculty, entries=None, adjustments=None):
+def _validated_departments(publication, department_ids, *, lock=False):
+    ids = set(department_ids)
+    rows = Department.objects.filter(pk__in=ids, tenant_id=publication.tenant_id, campus_id=publication.campus_id)
+    if any(type(pk) is not int or pk <= 0 for pk in ids) or ids != set(
+        (rows.select_for_update() if lock else rows).values_list("pk", flat=True)):
+        raise PermissionDenied("DTR department evidence is outside its saved campus scope.")
+    return ids
+
+
+def _saved_faculty_departments(publication, faculty, *, lock=False):
+    if not publication.faculty_scope_id:
+        return set()
+    saved = publication.scope_snapshot
+    if (publication.faculty_scope_id != faculty.pk or publication.scope_key != f"FACULTY:{faculty.pk}"
+            or saved.get("faculty_user_id") != faculty.pk or not isinstance(saved.get("departments"), list)
+            or not saved["departments"]):
+        raise PermissionDenied("The faculty publication has no valid saved department provenance.")
+    return _validated_departments(publication, saved["departments"], lock=lock)
+
+
+def _faculty_departments(publication, faculty, entries=None, adjustments=None, *, lock=False):
     entries = entries if entries is not None else _published_entries(publication, faculty)
     adjustments = adjustments if adjustments is not None else current_adjustments(publication=publication, faculty=faculty)
-    return {item.meeting.department_id for item in entries if item.meeting_id} | {
+    return _validated_departments(publication, _saved_faculty_departments(publication, faculty, lock=lock) | {item.meeting.department_id for item in entries if item.meeting_id} | {
         item.department_id for item in adjustments
-    }
+    }, lock=lock)
+
+
+def final_dtr_departments(final):
+    """Authorize historical printing from saved lines/publication, never live attendance."""
+    publication = final.publication
+    if (publication.tenant_id, publication.campus_id, publication.academic_year_id, publication.term_id,
+            publication.start_date, publication.end_date) != (final.tenant_id, final.campus_id,
+            final.academic_year_id, final.term_id, final.start_date, final.end_date):
+        raise PermissionDenied("Final DTR publication provenance does not match its saved scope.")
+    for key, value in (("tenant_id", final.tenant_id), ("campus_id", final.campus_id), ("faculty_user_id", final.faculty_user_id)):
+        if final.snapshot.get(key, value) != value:
+            raise PermissionDenied("Final DTR snapshot provenance does not match its saved scope.")
+    return _validated_departments(publication, {line["department_id"] for line in final.snapshot.get("lines", [])}
+        | _saved_faculty_departments(publication, final.faculty_user))
+
+
+@dataclass(frozen=True)
+class _CurrentDTREvidence:
+    entries: tuple
+    adjustments: tuple
+    mixed: dict
+    results: dict
+    closures: dict
+    pending: frozenset
+
+
+def _locked_dtr_evidence(publication, faculty):
+    """Current reads after the campus/source locks; no later consistent-read reloads."""
+    entries = _published_entries(publication, faculty, lock=True)
+    ids = [e.meeting_id for e in entries if e.meeting_id]
+    results = {r.meeting_id: r for r in AttendanceResult.objects.select_for_update().filter(meeting_id__in=ids).order_by("pk")}
+    closures = {}
+    for row in AttendanceClosureDecision.objects.select_for_update().filter(meeting_id__in=ids).order_by("meeting_id", "-revision", "-pk"):
+        closures.setdefault(row.meeting_id, row)
+    adjustments = current_adjustments(publication=publication, faculty=faculty,
+        rows=list(_adjustment_rows(publication=publication, faculty=faculty).select_for_update()))
+    mixed = {}
+    for row in DTRMixedFindingDecision.objects.select_for_update().filter(publication=publication, faculty_user=faculty).order_by("meeting_id", "-revision", "-pk"):
+        mixed.setdefault(row.meeting_id, row)
+    pending = frozenset(MeetingReconciliation.objects.select_for_update().filter(meeting_id__in=ids, status="PENDING").values_list("meeting_id", flat=True))
+    return _CurrentDTREvidence(tuple(entries), tuple(adjustments), mixed, results, closures, pending)
 
 
 @dataclass(frozen=True)
@@ -180,7 +251,7 @@ class DTRPreview:
         return not self.blockers
 
 
-def _calculate(publication, faculty, entries, adjustments, mixed_decisions):
+def _calculate(publication, faculty, entries, adjustments, mixed_decisions, current=None):
     blockers = []
     lines = []
     seen_meetings = set()
@@ -194,7 +265,7 @@ def _calculate(publication, faculty, entries, adjustments, mixed_decisions):
         if not entry.meeting_id:
             blockers.append(f"{entry.meeting_date}: published class is missing its dated meeting.")
             continue
-        if entry.meeting.reconciliations.filter(status="PENDING").exists():
+        if (entry.meeting_id in current.pending if current is not None else entry.meeting.reconciliations.filter(status="PENDING").exists()):
             blockers.append(f"{entry.meeting_date}: dated meeting reconciliation is pending; resolve and republish before DTR finalization.")
         department_id = entry.meeting.department_id
         scheduled = Decimal(entry.scheduled_minutes) / 60
@@ -205,8 +276,8 @@ def _calculate(publication, faculty, entries, adjustments, mixed_decisions):
         decision_revision = None
         if closed:
             closure = entry.closure_decision
-            current_closure = latest_closure(entry.meeting)
-            current_result = AttendanceResult.objects.filter(meeting=entry.meeting).first()
+            current_closure = current.closures.get(entry.meeting_id) if current is not None else latest_closure(entry.meeting)
+            current_result = current.results.get(entry.meeting_id) if current is not None else AttendanceResult.objects.filter(meeting=entry.meeting).first()
             if not closure or not current_closure or current_closure.pk != closure.pk or (
                 current_result.revision if current_result else 0
             ) != closure.result_revision_at_decision or closure.faculty_user_id != faculty.pk:
@@ -220,14 +291,14 @@ def _calculate(publication, faculty, entries, adjustments, mixed_decisions):
             )
             decision_revision = closure.revision if closure else None
         else:
-            new_closure = latest_closure(entry.meeting)
+            new_closure = current.closures.get(entry.meeting_id) if current is not None else latest_closure(entry.meeting)
             if new_closure and new_closure.status == AttendanceClosureDecision.Status.CLOSED:
                 blockers.append(f"{entry.meeting_date}: a new class closure exists; republish this cutoff before DTR finalization.")
             if not entry.result_revision_id:
                 blockers.append(f"{entry.meeting_date}: published class is missing its attendance result revision.")
                 continue
-            current = AttendanceResult.objects.filter(meeting_id=entry.meeting_id).first()
-            if current is None or current.revision != entry.result_revision_number or current.faculty_user_id != faculty.pk:
+            result = current.results.get(entry.meeting_id) if current is not None else AttendanceResult.objects.filter(meeting_id=entry.meeting_id).first()
+            if result is None or result.revision != entry.result_revision_number or result.faculty_user_id != faculty.pk:
                 blockers.append(f"{entry.meeting_date}: attendance changed after publication; republish the cutoff before finalization.")
             if entry.status == AttendanceResult.Status.UNVERIFIED:
                 blockers.append(f"{entry.meeting_date}: attendance remains unverified.")
@@ -355,18 +426,42 @@ def _calculate(publication, faculty, entries, adjustments, mixed_decisions):
     return snapshot, tuple(dict.fromkeys(blockers))
 
 
-def preview_dtr(*, actor, publication, faculty, permission_code=DTR_VIEW_PERMISSION):
-    publication = AttendanceCutoffPublication.objects.get(pk=publication.pk)
-    entries = _published_entries(publication, faculty)
-    adjustments = current_adjustments(publication=publication, faculty=faculty)
-    departments = _faculty_departments(publication, faculty, entries, adjustments)
+def preview_dtr(*, actor, publication, faculty, permission_code=DTR_VIEW_PERMISSION, source_slice=None, _current=None):
+    if _current is None:
+        publication = AttendanceCutoffPublication.objects.get(pk=publication.pk)
+    if publication.faculty_scope_id and publication.faculty_scope_id != faculty.pk:
+        raise PermissionDenied("This publication belongs to another faculty.")
+    entries = _current.entries if _current is not None else _published_entries(publication, faculty)
+    adjustments = _current.adjustments if _current is not None else current_adjustments(publication=publication, faculty=faculty)
+    departments = _faculty_departments(publication, faculty, entries, adjustments, lock=_current is not None)
     _require(actor, permission_code, publication, departments)
-    if not entries and not any(
+    missing_hours = not entries and not any(
         item.kind == DTRAdjustment.Kind.ADMIN and item.hours > ZERO for item in adjustments
-    ):
+    )
+    if missing_hours and not publication.faculty_scope_id:
         raise ValidationError("This faculty has no published teaching meetings or scheduled AC office hours for the cutoff.")
-    mixed_decisions = current_mixed_decisions(publication=publication, faculty=faculty)
-    snapshot, blockers = _calculate(publication, faculty, entries, adjustments, mixed_decisions)
+    mixed_decisions = _current.mixed if _current is not None else current_mixed_decisions(publication=publication, faculty=faculty)
+    snapshot, blockers = _calculate(publication, faculty, entries, adjustments, mixed_decisions, current=_current)
+    if missing_hours and publication.faculty_scope_id and not (
+        publication.scope_snapshot.get("revises_teaching_to_empty") and not publication.scope_snapshot.get("ac_role")
+    ):
+        blockers += ("Record and review the dated AC office hours before DTR finalization; no teaching hours were inferred.",)
+    if publication.faculty_scope_id or source_slice is not None:
+        if source_slice is None:
+            from .faculty_cutoffs import review_faculty_cutoff
+            review = review_faculty_cutoff(actor=actor, tenant_id=publication.tenant_id,
+                campus_id=publication.campus_id, academic_year=publication.academic_year,
+                term=publication.term, start_date=publication.start_date, end_date=publication.end_date,
+                permission_code=permission_code)
+            source_slice = next((row for row in review.slices if row.faculty.pk == faculty.pk), None)
+        membership = [{"key": e.occurrence_key, "meeting_id": e.meeting_id,
+            "result_revision": e.result_revision_number if not e.closure_decision_id else None,
+            "closure_revision": e.closure_decision.revision if e.closure_decision_id else None} for e in entries]
+        source_changed = (source_slice is None or source_slice.faculty.pk != faculty.pk or source_slice.blockers
+            or (source_slice.fingerprint != publication.review_fingerprint if publication.faculty_scope_id else
+                source_slice.scope_snapshot["occurrences"] != membership))
+        if source_changed:
+            blockers += ("Faculty attendance membership or source revisions changed; resolve blockers and republish this faculty before finalization.",)
     payload = json.dumps({"snapshot": snapshot, "blockers": blockers}, sort_keys=True, separators=(",", ":"))
     return DTRPreview(publication, faculty, snapshot, blockers, hashlib.sha256(payload.encode()).hexdigest())
 
@@ -374,7 +469,11 @@ def preview_dtr(*, actor, publication, faculty, permission_code=DTR_VIEW_PERMISS
 @transaction.atomic
 def save_adjustment(*, actor, publication, faculty, department, entry_date, kind, hours, reason,
                     leave_type="", offset_kind="", previous=None, expected_revision=0):
+    from .notice_locking import lock_notice_campus
+    lock_notice_campus(publication.campus_id)
     publication = AttendanceCutoffPublication.objects.select_for_update().get(pk=publication.pk)
+    if publication.faculty_scope_id and publication.faculty_scope_id != faculty.pk:
+        raise PermissionDenied("This publication belongs to another faculty.")
     _require(actor, DTR_EDIT_PERMISSION, publication, {department.pk})
     if department.tenant_id != publication.tenant_id or department.campus_id != publication.campus_id:
         raise ValidationError({"department": "Choose a department in this campus."})
@@ -449,17 +548,39 @@ def save_adjustment(*, actor, publication, faculty, department, entry_date, kind
     return item
 
 
-def latest_dtr(*, publication, faculty):
-    return FacultyDTR.objects.filter(
+def latest_dtr(*, publication, faculty, lock=False):
+    rows = FacultyDTR.objects.filter(
         tenant_id=publication.tenant_id, campus_id=publication.campus_id,
         academic_year_id=publication.academic_year_id, term_id=publication.term_id,
         start_date=publication.start_date, end_date=publication.end_date, faculty_user=faculty,
-    ).order_by("-revision", "-pk").first()
+    ).order_by("-revision", "-pk")
+    return (rows.select_for_update() if lock else rows).first()
+
+
+def finalize_dtr(*, actor, publication, faculty, expected_fingerprint, reason, faculty_review_complete):
+    # Public service always rechecks source membership. Only the private batch
+    # path can reuse evidence already read under the same campus/source locks.
+    return _finalize_dtr(actor=actor, publication=publication, faculty=faculty,
+        expected_fingerprint=expected_fingerprint, reason=reason,
+        faculty_review_complete=faculty_review_complete)
 
 
 @transaction.atomic
-def finalize_dtr(*, actor, publication, faculty, expected_fingerprint, reason, faculty_review_complete):
-    publication = AttendanceCutoffPublication.objects.select_for_update().get(pk=publication.pk)
+def _finalize_dtr(*, actor, publication, faculty, expected_fingerprint, reason, faculty_review_complete, source_slice=None):
+    from .notice_locking import lock_notice_campus
+    lock_notice_campus(publication.campus_id)
+    if source_slice is None:
+        from .faculty_cutoffs import review_faculty_cutoff
+        source = review_faculty_cutoff(actor=actor, tenant_id=publication.tenant_id, campus_id=publication.campus_id,
+            academic_year=publication.academic_year, term=publication.term,
+            start_date=publication.start_date, end_date=publication.end_date,
+            permission_code=DTR_FINALIZE_PERMISSION, lock=True)
+        source_slice = next((row for row in source.slices if row.faculty.pk == faculty.pk), None)
+    # Source/offering locks precede publication/evidence locks on every writer.
+    publication = AttendanceCutoffPublication.objects.select_for_update().select_related(
+        "academic_year", "term", "tenant", "campus").get(pk=publication.pk)
+    if source_slice is None or source_slice.blockers:
+        raise ValidationError("This faculty's complete dated cutoff is blocked; resolve its evidence before finalizing.")
     if not faculty_review_complete:
         raise ValidationError("Confirm that the published attendance was available for faculty review before finalizing.")
     reason = (reason or "").strip()
@@ -467,27 +588,24 @@ def finalize_dtr(*, actor, publication, faculty, expected_fingerprint, reason, f
         tenant_id=publication.tenant_id, campus_id=publication.campus_id,
         academic_year_id=publication.academic_year_id, term_id=publication.term_id,
         start_date=publication.start_date, end_date=publication.end_date,
+        faculty_id=faculty.pk,
+        lock=True,
     )
-    if latest.pk != publication.pk:
+    if latest is None or latest.pk != publication.pk:
         raise ValidationError("A newer cutoff publication exists; reload its DTR before finalizing.")
-    entries = _published_entries(publication, faculty)
-    result_ids = [item.result_revision.result_id for item in entries if item.result_revision_id]
-    list(AttendanceResult.objects.select_for_update().filter(pk__in=result_ids))
-    list(AttendanceClosureDecision.objects.select_for_update().filter(
-        pk__in=[item.closure_decision_id for item in entries if item.closure_decision_id],
-    ))
-    list(DTRAdjustment.objects.select_for_update().filter(
-        tenant_id=publication.tenant_id, campus_id=publication.campus_id,
-        start_date=publication.start_date, end_date=publication.end_date, faculty_user=faculty,
-    ))
-    list(DTRMixedFindingDecision.objects.select_for_update().filter(publication=publication, faculty_user=faculty))
-    preview = preview_dtr(actor=actor, publication=publication, faculty=faculty, permission_code=DTR_FINALIZE_PERMISSION)
+    current = _locked_dtr_evidence(publication, faculty)
+    preview = preview_dtr(actor=actor, publication=publication, faculty=faculty, permission_code=DTR_FINALIZE_PERMISSION,
+                          source_slice=source_slice, _current=current)
     if preview.fingerprint != expected_fingerprint:
         raise ValidationError("DTR inputs changed after review; reload before finalizing.")
     if preview.blockers:
         raise ValidationError("Resolve DTR blockers before finalizing: " + "; ".join(preview.blockers))
-    previous = latest_dtr(publication=publication, faculty=faculty)
+    previous = latest_dtr(publication=publication, faculty=faculty, lock=True)
     if previous and previous.review_fingerprint == preview.fingerprint:
+        if publication.faculty_scope_id:
+            if previous.finalization_reason != reason:
+                raise ValidationError("This finalized DTR retry has a changed note; reload its saved revision.")
+            return previous
         raise ValidationError("This DTR is already final at the reviewed version.")
     final = FacultyDTR(
         tenant_id=publication.tenant_id, campus_id=publication.campus_id,
@@ -517,10 +635,13 @@ def checker_summary(*, actor, publication):
         start_date=publication.start_date, end_date=publication.end_date,
         academic_year_id=publication.academic_year_id, term_id=publication.term_id,
     ))
+    if publication.faculty_scope_id:
+        adjustments = [a for a in adjustments if a.faculty_user_id == publication.faculty_scope_id]
+        faculty_ids.add(publication.faculty_scope_id)
     faculty_ids.update(item.faculty_user_id for item in adjustments if item.kind == DTRAdjustment.Kind.ADMIN)
     _require(actor, DTR_VIEW_PERMISSION, publication, {item.meeting.department_id for item in entries if item.meeting_id} | {
         item.department_id for item in adjustments
-    })
+    } | set(publication.scope_snapshot.get("departments", [])))
     from apps.accounts.models import User
     rows = []
     for faculty in User.objects.filter(pk__in=faculty_ids).order_by("last_name", "first_name", "pk"):

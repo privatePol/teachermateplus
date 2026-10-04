@@ -1027,7 +1027,7 @@ class OfferingAttendanceSourceChange(TimeStampedModel):
 
 
 class AttendanceCutoffPublication(TimeStampedModel):
-    """An immutable, campus-complete attendance publication version."""
+    """A campus-complete or explicitly faculty-scoped publication version."""
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     lineage_key = models.UUIDField(default=uuid.uuid4, editable=False)
@@ -1039,6 +1039,12 @@ class AttendanceCutoffPublication(TimeStampedModel):
     term = models.ForeignKey("academics.Term", on_delete=models.PROTECT, related_name="attendance_cutoff_publications")
     start_date = models.DateField()
     end_date = models.DateField()
+    faculty_scope = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, blank=True, null=True,
+        related_name="faculty_cutoff_publications",
+    )
+    scope_key = models.CharField(max_length=40, default="CAMPUS", editable=False)
+    scope_snapshot = models.JSONField(default=dict, blank=True)
     version = models.PositiveIntegerField(default=1)
     review_fingerprint = models.CharField(max_length=64)
     submission_key = models.CharField(max_length=64, unique=True)
@@ -1056,10 +1062,15 @@ class AttendanceCutoffPublication(TimeStampedModel):
         ordering = ["-published_at", "-id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "campus", "academic_year", "term", "start_date", "end_date", "version"],
+                fields=["tenant", "campus", "academic_year", "term", "start_date", "end_date", "scope_key", "version"],
                 name="uq_att_cutoff_scope_version",
             ),
             models.CheckConstraint(condition=Q(end_date__gte=models.F("start_date")), name="ck_att_cutoff_dates"),
+            models.CheckConstraint(
+                condition=Q(faculty_scope__isnull=True, scope_key="CAMPUS")
+                | (Q(faculty_scope__isnull=False) & ~Q(scope_key="CAMPUS")),
+                name="ck_att_cutoff_scope_kind",
+            ),
         ]
         indexes = [
             models.Index(fields=["tenant", "campus", "academic_year", "term", "start_date", "end_date"], name="idx_att_cutoff_scope"),
@@ -1069,6 +1080,8 @@ class AttendanceCutoffPublication(TimeStampedModel):
     def clean(self):
         super().clean()
         _validate_scope(tenant_id=self.tenant_id, campus=self.campus)
+        if self.scope_key != (f"FACULTY:{self.faculty_scope_id}" if self.faculty_scope_id else "CAMPUS"):
+            raise ValidationError("Publication scope must identify exactly its faculty or the complete campus.")
         if self.academic_year_id and self.academic_year.tenant_id != self.tenant_id:
             raise ValidationError("Cutoff academic year must match its tenant.")
         if self.term_id and (
@@ -1079,6 +1092,24 @@ class AttendanceCutoffPublication(TimeStampedModel):
             raise ValidationError("Cutoff end date cannot precede start date.")
         if self.supersedes_id and self.supersedes.lineage_key != self.lineage_key:
             raise ValidationError("A cutoff publication may supersede only its own lineage.")
+        if self.supersedes_id and (
+            self.supersedes.faculty_scope_id != self.faculty_scope_id
+            or self.supersedes.tenant_id != self.tenant_id or self.supersedes.campus_id != self.campus_id
+            or self.supersedes.academic_year_id != self.academic_year_id or self.supersedes.term_id != self.term_id
+            or self.supersedes.start_date != self.start_date or self.supersedes.end_date != self.end_date
+            or self.version != self.supersedes.version + 1
+        ):
+            raise ValidationError("Publication revisions must follow the same faculty/campus cutoff.")
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk, faculty_scope__isnull=False).exists():
+            raise ValidationError("Faculty publications are immutable; publish a new revision.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.faculty_scope_id:
+            raise ValidationError("Faculty publication history cannot be deleted.")
+        return super().delete(*args, **kwargs)
 
 
 class AttendanceCutoffPublicationEntry(TimeStampedModel):
@@ -1139,6 +1170,8 @@ class AttendanceCutoffPublicationEntry(TimeStampedModel):
 
     def clean(self):
         super().clean()
+        if self.publication_id and self.publication.faculty_scope_id and self.faculty_user_id != self.publication.faculty_scope_id:
+            raise ValidationError("A faculty publication may contain only its owner's occurrences.")
         if self.ends_at <= self.starts_at:
             raise ValidationError("Published meeting end must be later than its start.")
         if self.scheduled_minutes <= 0:
@@ -1155,6 +1188,16 @@ class AttendanceCutoffPublicationEntry(TimeStampedModel):
                 raise ValidationError("Published closure must belong to its dated meeting.")
         elif self.closure_decision_id:
             raise ValidationError("Only a closed class may reference a closure decision.")
+
+    def save(self, *args, **kwargs):
+        if self.pk and self.publication.faculty_scope_id:
+            raise ValidationError("Faculty publication membership is immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.publication.faculty_scope_id:
+            raise ValidationError("Faculty publication membership cannot be deleted.")
+        return super().delete(*args, **kwargs)
 
 
 class AttendanceClosureDecision(TimeStampedModel):
@@ -1312,6 +1355,8 @@ class FacultyDTR(TimeStampedModel):
             or self.publication.start_date != self.start_date or self.publication.end_date != self.end_date
         ):
             raise ValidationError("DTR must use a publication for its exact campus cutoff.")
+        if self.publication_id and self.publication.faculty_scope_id and self.publication.faculty_scope_id != self.faculty_user_id:
+            raise ValidationError("DTR must belong to its faculty publication's owner.")
         if self.supersedes_id and (
             self.supersedes.faculty_user_id != self.faculty_user_id
             or self.supersedes.campus_id != self.campus_id
@@ -1320,6 +1365,16 @@ class FacultyDTR(TimeStampedModel):
             raise ValidationError("DTR revision must follow this faculty's prior cutoff snapshot.")
         if not self.supersedes_id and self.revision != 1:
             raise ValidationError("A new DTR starts at revision one.")
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk, publication__faculty_scope__isnull=False).exists():
+            raise ValidationError("Faculty-scoped final DTR snapshots are immutable; finalize a new revision.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.publication.faculty_scope_id:
+            raise ValidationError("Faculty-scoped final DTR history cannot be deleted.")
+        return super().delete(*args, **kwargs)
 
 
 class DTRMixedFindingDecision(TimeStampedModel):

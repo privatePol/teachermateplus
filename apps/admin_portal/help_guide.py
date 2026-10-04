@@ -7,6 +7,15 @@ from apps.core.services.permissions import PermissionService
 
 ADMIN_HELP_SECTIONS = [
     {
+        "code": "attendance-faculty-cutoff",
+        "title": "Faculty Cutoff Processing",
+        "purpose": "Publish complete ready faculty attendance and finalize reviewed DTRs while other faculty remain pending.",
+        "how_to_open": ["Open Faculty Attendance > Faculty Cutoff Processing after explicit scoped publication authorization.", "If dated reattribution removes the last class, the authorized empty correction DTR can still be reviewed, finalized and printed using its saved faculty-publication department scope. Earlier final revisions remain unchanged.", "Finalization rechecks current source and checker entries. If inputs changed while saving, reload and review the latest evidence; do not assume the earlier version was finalized."],
+        "check_first": ["Choose campus, academic year, semester and cutoff dates.", "Review every pending and unattributed occurrence. Missing dated attribution can block all faculty; conflicting dated candidates block the affected candidates.", "A department grant cannot publish only part of a faculty's campus attendance."],
+        "actions": [{"name": "Publish selected / all ready faculty", "does": "Freezes complete dated attendance in a faculty-owned immutable publication.", "when": "Only for faculty whose cutoff slice is complete and ready.", "avoid": "Do not infer faculty from current assignments or omit unprepared classes. Publication does not finalize a DTR.", "result": "Faculty can review their own published records. Earlier completed faculty remain intact while pending faculty are processed.", "editable": "Requires the explicit faculty_attendance.publish_faculty_cutoff permission. The new permission is seeded without automatic role or user grants; direct DENY applies."}, {"name": "Review and finalize eligible DTRs", "does": "Uses the faculty's immutable publication, dated findings, closures and checker entries.", "when": "Separately, after published attendance was available for faculty review and concerns were settled.", "avoid": "Do not finalize immediately as an automatic consequence of publishing.", "result": "Corrections require republication and a new DTR revision; original publications/finals remain printable history.", "editable": "Existing scoped DTR view/edit/finalize/print permissions and review attestation still apply."}],
+        "next_step": "Resume the remaining pending faculty after resolving their dated blockers. Complete-campus publication remains available under its existing separate authority.",
+    },
+    {
         "code": "faculty-attendance",
         "title": "Faculty Attendance",
         "topics": [{
