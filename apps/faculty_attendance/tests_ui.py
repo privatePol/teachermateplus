@@ -205,13 +205,13 @@ class AttendanceRoundUITests(TestCase):
             "present_rows": [f"{other.pk}:0"]}).status_code, 302)
         self.assertEqual(AttendanceResult.objects.get(meeting=other).correction_reason, "")
 
-    def test_present_note_redisplays_on_stale_selection_without_creating_results(self):
+    def test_legacy_present_post_rejects_stale_selection_without_restoring_optional_controls(self):
         first = self.meeting()
         round_, url = self.round_for([first])
         response = self.client.post(url, {"action": "confirm_present", "manifest_revision": 99,
             "present_rows": [f"{first.pk}:0"], f"present_note_{first.pk}": "Retain my checked note"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'value="Retain my checked note"')
+        self.assertNotContains(response, 'id="present-form"')
         self.assertFalse(AttendanceResult.objects.exists())
 
     def test_direct_encode_deny_prevents_present_and_note_writes(self):

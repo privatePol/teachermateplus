@@ -778,8 +778,8 @@ def _existing_meeting_for_occurrence(*, schedule_slot, occurrence, lock=False):
     return None
 
 
-def resolve_occurrence_faculty(occurrence):
-    """Resolve the faculty for preview from dated records, never current assignments."""
+def resolve_occurrence_faculty(occurrence, *, assignment_evidence=None):
+    """Resolve dated records first, then a proved established assignment baseline."""
     from .observations import resolve_attendance_faculty
 
     recorded = _recorded_meetings_for_occurrence(occurrence)
@@ -793,36 +793,24 @@ def resolve_occurrence_faculty(occurrence):
             "faculty_user", "attendance_result__faculty_user",
             "substitution__substitute_faculty", "coverage_adoption__faculty_user",
         ).get(pk=exact[0].pk)
+        if assignment_evidence is not None:
+            meeting._attendance_assignment_evidence = assignment_evidence
         result = getattr(meeting, "attendance_result", None)
         faculty, _source = resolve_attendance_faculty(meeting, result=result)
         return faculty
 
     starts_at = timezone.make_aware(datetime.combine(occurrence.meeting_date, occurrence.start_time))
-    resolved_ids = []
-    resolved_faculty = None
-    for offering in occurrence.linked_offerings:
-        coverages = list(
-            FacultyCoverage.objects.filter(
-                tenant_id=offering.tenant_id,
-                campus_id=offering.campus_id,
-                department_id=offering.department_id,
-                offering=offering,
-                effective_from__lte=starts_at,
-            ).filter(Q(effective_until__isnull=True) | Q(effective_until__gt=starts_at))
-            .select_related("faculty_user")
-        )
-        if len(coverages) != 1:
-            return None
-        resolved_ids.append(coverages[0].faculty_user_id)
-        resolved_faculty = coverages[0].faculty_user
-    if resolved_ids and len(set(resolved_ids)) == 1:
-        return resolved_faculty
-    return None
+    from .assignment_attribution import AssignmentEvidence
+    evidence = assignment_evidence or AssignmentEvidence(occurrence.linked_offerings)
+    return evidence.linked_at(occurrence.linked_offerings, starts_at)
 
 
-def inspect_daily_occurrences(occurrences):
+def inspect_daily_occurrences(occurrences, *, assignment_evidence=None):
     """Return read-only blockers that materialization would encounter."""
     issues = []
+    from .assignment_attribution import AssignmentEvidence
+    assignment_evidence = assignment_evidence or AssignmentEvidence(
+        [o for occurrence in occurrences for o in occurrence.linked_offerings])
     for occurrence in occurrences:
         if occurrence.historical_meeting_id:
             continue
@@ -841,11 +829,13 @@ def inspect_daily_occurrences(occurrences):
                 )
             )
         for meeting in matching_recorded:
-            if meeting.unresolved_coverage and not hasattr(meeting, "coverage_adoption") and not hasattr(meeting, "substitution"):
+            meeting._attendance_assignment_evidence = assignment_evidence
+            from .observations import resolve_attendance_faculty
+            if resolve_attendance_faculty(meeting)[0] is None:
                 issues.append(
                     DailyIssue(
                         code="UNRESOLVED_COVERAGE",
-                        message="Save the assigned faculty and Effective from in Faculty Assignments. Linked sections must have the same dated faculty before encoding.",
+                        message="No reliable faculty attribution for this date. Review existing assignments and dated changes for the linked sections.",
                         offering=occurrence.primary_offering,
                         linked_offerings=occurrence.linked_offerings,
                         meeting_date=occurrence.meeting_date,

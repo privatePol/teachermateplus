@@ -61,6 +61,7 @@ from .models import (
 from .observations import (
     FACULTY_ATTRIBUTION_MEETING,
     FACULTY_ATTRIBUTION_ADOPTION,
+    FACULTY_ATTRIBUTION_ASSIGNMENT,
     FACULTY_ATTRIBUTION_RESULT,
     FACULTY_ATTRIBUTION_SUBSTITUTION,
     AttendanceResultService,
@@ -493,7 +494,7 @@ def _scoped_combined_classes(*, tenant_id, campus_id, academic_year_id, term_id,
     return [group for group in groups if {link.offering_id for link in group.offering_links.all()} <= offering_ids]
 
 
-def _daily_preview_rows(occurrences, issues, route=None):
+def _daily_preview_rows(occurrences, issues, route=None, *, assignment_evidence=None):
     """Pair each preview occurrence with every relevant read-only blocker."""
     rows = []
     route_positions = {}
@@ -510,7 +511,7 @@ def _daily_preview_rows(occurrences, issues, route=None):
             if issue.meeting_date in (None, occurrence.meeting_date)
             and offering_ids.intersection(item.pk for item in issue.affected_offerings)
         ]
-        faculty = resolve_occurrence_faculty(occurrence)
+        faculty = resolve_occurrence_faculty(occurrence, assignment_evidence=assignment_evidence)
         if faculty is None:
             faculty_name = "Faculty unresolved"
         else:
@@ -600,7 +601,9 @@ def daily_encoding_view(request):
         end_date=meeting_date,
         combined_classes=combined,
     )
-    issues = deduplicate_daily_issues([*issues, *inspect_daily_occurrences(occurrences)])
+    from .assignment_attribution import AssignmentEvidence
+    assignment_evidence = AssignmentEvidence(offerings)
+    issues = deduplicate_daily_issues([*issues, *inspect_daily_occurrences(occurrences, assignment_evidence=assignment_evidence)])
     context.update(
         {
             "selected_academic_year": academic_year,
@@ -649,7 +652,8 @@ def daily_encoding_view(request):
             daily_occurrence_date=meeting_date,
         ).filter(Q(department_id__in=department_ids) if department_ids else Q()).order_by("department_id")
     )
-    context["occurrence_rows"] = _daily_preview_rows(occurrences, context["issues"], form.cleaned_data.get("route"))
+    context["occurrence_rows"] = _daily_preview_rows(occurrences, context["issues"], form.cleaned_data.get("route"),
+                                                   assignment_evidence=assignment_evidence)
     return render(request, "faculty_attendance/daily_encoding.html", context)
 
 
@@ -1071,6 +1075,7 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
             FACULTY_ATTRIBUTION_SUBSTITUTION: "Explicit meeting substitute",
             FACULTY_ATTRIBUTION_MEETING: "Dated faculty coverage",
             FACULTY_ATTRIBUTION_ADOPTION: "Checker-approved dated coverage (original history retained)",
+            FACULTY_ATTRIBUTION_ASSIGNMENT: "Existing accepted faculty assignment",
         }.get(attribution_source, "")
         row.exception_values = _exception_values_from_result(result)
         row.legacy_period_absence_findings = _legacy_period_absence_findings(result)

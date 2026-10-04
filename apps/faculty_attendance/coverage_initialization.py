@@ -186,6 +186,12 @@ class CoverageInitializationService:
                 row["coverage"] = CoverageService.create(actor=scope["actor"], offering=offering,
                     faculty_user=assignment.faculty_user, source_assignment=assignment,
                     effective_from=scope["effective_from"], effective_until=plan["effective_until"], reason=reason)
+                from .assignment_attribution import INITIALIZED
+                _audit(action=INITIALIZED, entity=row["coverage"], actor=scope["actor"],
+                       after={"source_assignment_id": assignment.pk,
+                              "attendance_setup_from": scope["effective_from"],
+                              "exclusive_term_end": plan["effective_until"]},
+                       metadata={"supplementary_initialization": True})
                 created += 1
             for pending in row["pending"]:
                 pending.status = "RESOLVED"

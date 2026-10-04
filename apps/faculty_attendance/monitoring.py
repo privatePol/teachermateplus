@@ -15,7 +15,7 @@ from .closures import latest_closure
 from .cutoffs import _meeting_signature, _occurrence_signature
 from .daily_encoding import _combined_groups, expected_daily_occurrences
 from .dtr_intervals import needs_interval_reconciliation
-from .models import AttendanceClosureDecision, AttendanceResult, DTRAdjustment, DTRMixedFindingDecision, FacultyCoverage, TeachingMeeting
+from .models import AttendanceClosureDecision, AttendanceResult, DTRAdjustment, DTRMixedFindingDecision, TeachingMeeting
 from .observations import require_confirmable_meeting_faculty, resolve_attendance_faculty
 from .permissions import VIEW_PERMISSION, require_attendance_permission
 
@@ -143,9 +143,10 @@ def term_summary(*, actor, tenant_id, campus_id, academic_year, term, as_of):
                     .prefetch_related('offering_links', 'reconciliations'))
     signatures = {_meeting_signature(m): m for m in meetings}
     keys = {m.occurrence_key: m for m in meetings if m.occurrence_key}
-    coverage_by_offering = defaultdict(list)
-    for coverage in FacultyCoverage.objects.filter(offering_id__in=[o.pk for o in offerings]).select_related('faculty_user').order_by('effective_from', 'pk'):
-        coverage_by_offering[coverage.offering_id].append(coverage)
+    from .assignment_attribution import AssignmentEvidence
+    evidence = AssignmentEvidence(offerings)
+    for meeting in meetings:
+        meeting._attendance_assignment_evidence = evidence
     rows = [_recorded_row(m) for m in meetings]
     for occurrence in occurrences:
         if occurrence.dated_meeting_id or keys.get(occurrence.occurrence_key) or signatures.get(_occurrence_signature(occurrence)):
@@ -158,10 +159,7 @@ def term_summary(*, actor, tenant_id, campus_id, academic_year, term, as_of):
             continue
         at = timezone.make_aware(datetime.combine(occurrence.meeting_date, occurrence.start_time))
         # Same half-open effective interval as CoverageService; batch-loaded for a whole semester.
-        coverage = [next((c for c in coverage_by_offering[o.pk] if c.effective_from <= at
-                          and (c.effective_until is None or c.effective_until > at)), None)
-                    for o in occurrence.linked_offerings]
-        faculty = coverage[0].faculty_user if all(coverage) and len({c.faculty_user_id for c in coverage}) == 1 else None
+        faculty = evidence.linked_at(occurrence.linked_offerings, at)
         minutes = (datetime.combine(occurrence.meeting_date, occurrence.end_time)
                    - datetime.combine(occurrence.meeting_date, occurrence.start_time)).total_seconds() / 60
         rows.append({'meeting': None, 'meeting_id': None, 'date': occurrence.meeting_date,

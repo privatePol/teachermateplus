@@ -1233,7 +1233,10 @@ class AttendanceClosureDecision(TimeStampedModel):
 
     def clean(self):
         super().clean()
+        from .observations import resolve_attendance_faculty
+        attributed, _source = resolve_attendance_faculty(self.meeting) if self.meeting_id else (None, "")
         if self.meeting_id and self.faculty_user_id and self.faculty_user_id not in {
+            attributed.pk if attributed else None,
             self.meeting.faculty_user_id,
             getattr(getattr(self.meeting, "substitution", None), "substitute_faculty_id", None),
         }:

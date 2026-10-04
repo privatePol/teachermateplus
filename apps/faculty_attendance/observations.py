@@ -75,9 +75,10 @@ FACULTY_ATTRIBUTION_SUBSTITUTION = "SUBSTITUTION"
 FACULTY_ATTRIBUTION_MEETING = "MEETING"
 FACULTY_ATTRIBUTION_ADOPTION = "COVERAGE_ADOPTION"
 FACULTY_ATTRIBUTION_UNRESOLVED = "UNRESOLVED"
+FACULTY_ATTRIBUTION_ASSIGNMENT = "ESTABLISHED_ASSIGNMENT"
 
 
-def prime_meeting_readiness(meetings):
+def prime_meeting_readiness(meetings, *, assignment_evidence=None):
     """Load current readiness evidence once for a fresh, scoped batch of meetings.
 
     Writers call this only after the campus/source locks. These ephemeral flags
@@ -88,6 +89,17 @@ def prime_meeting_readiness(meetings):
     ids = [m.pk for m in meetings]
     prefetch_related_objects(meetings, "faculty_user", "substitution__substitute_faculty",
                              "coverage_adoption__faculty_user", "offering_links")
+    legacy = [m for m in meetings if m.unresolved_coverage and not m.faculty_snapshot]
+    if legacy:
+        from .assignment_attribution import AssignmentEvidence
+        from django.db import connection
+        prefetch_related_objects(legacy, "reconciliations")
+        if assignment_evidence is None:
+            prefetch_related_objects(legacy, "offering_links__offering__term")
+        evidence = assignment_evidence or AssignmentEvidence(
+            [l.offering for m in legacy for l in m.offering_links.all()], lock=connection.in_atomic_block)
+        for meeting in legacy:
+            meeting._attendance_assignment_evidence = evidence
     retired = set(retired_meeting_ids().filter(meeting_id__in=ids))
     pending = set(MeetingReconciliation.objects.filter(meeting_id__in=ids,
         status=MeetingReconciliation.Status.PENDING).values_list("meeting_id", flat=True))
@@ -123,10 +135,14 @@ def resolve_attendance_faculty(meeting, result=None):
         return adoption.faculty_user, FACULTY_ATTRIBUTION_ADOPTION
     if meeting.faculty_user_id:
         return meeting.faculty_user, FACULTY_ATTRIBUTION_MEETING
+    from .assignment_attribution import legacy_meeting_faculty
+    faculty = legacy_meeting_faculty(meeting)
+    if faculty:
+        return faculty, FACULTY_ATTRIBUTION_ASSIGNMENT
     return None, FACULTY_ATTRIBUTION_UNRESOLVED
 
 
-def require_confirmable_meeting_faculty(meeting):
+def require_confirmable_meeting_faculty(meeting, *, result=None, result_revision=None):
     """Validate current dated coverage without rewriting historical meeting warnings."""
     from .college_sync import retired_meeting_ids
     if getattr(meeting, "_attendance_retired", None) is True or (
@@ -135,13 +151,20 @@ def require_confirmable_meeting_faculty(meeting):
         raise ValidationError("This class was rescheduled in Course Offerings. Use the updated daily list.")
     if meeting.schedule_snapshot.get("college_source_waiting"):
         raise ValidationError("Save matching schedules and rooms for all linked sections in Course Offerings before encoding this combined class.")
-    faculty, _source = resolve_attendance_faculty(meeting)
+    faculty, source = resolve_attendance_faculty(meeting)
+    if faculty is None and result is not None:
+        from .assignment_attribution import legacy_meeting_faculty
+        faculty = legacy_meeting_faculty(meeting, result=result, result_revision=result_revision)
+        if faculty is not None:
+            faculty, source = resolve_attendance_faculty(meeting, result)
     try:
         has_substitution = meeting.substitution is not None
     except MeetingSubstitution.DoesNotExist:
         has_substitution = False
-    if faculty is None or (meeting.unresolved_coverage and not has_substitution and not hasattr(meeting, "coverage_adoption")):
-        raise ValidationError("Meeting has no confirmed faculty coverage. Save the assigned faculty and Effective from in Faculty Assignments; linked sections must have the same dated faculty.")
+    if faculty is None or (meeting.unresolved_coverage and not has_substitution
+            and not hasattr(meeting, "coverage_adoption")
+            and source not in (FACULTY_ATTRIBUTION_ASSIGNMENT, FACULTY_ATTRIBUTION_RESULT)):
+        raise ValidationError("No reliable faculty attribution for this class date. Review the existing assignment and dated changes for the linked sections.")
     if _pending_reconciliation_exists(meeting):
         raise ValidationError("Meeting has pending coverage or historical reconciliation and cannot be confirmed.")
     return faculty

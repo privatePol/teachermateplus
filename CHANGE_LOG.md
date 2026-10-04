@@ -1,3 +1,11 @@
+## Existing assignment attribution before supplementary attendance setup - 2026-10-04
+
+- Narrow follow-up completed through both authorized integration paths: validated saved exceptions remain ready after later unassignment, including `AcademicCoverageIntegrationService.resolve` -> `CoverageService.close`. Closure origin is accepted only with correlated scope, actor, effective boundary and reconciliation lifetime; other origins remain binding. The prior 18-pass evidence covered the College bridge only. Current focused disposable run: 22/22 passed (42.193s); immutable finals/history/manifests and zero-query primed readiness preserved. Exact evidence is in HANDOFF and the focused report.
+- Corrected the October 1 NULL-faculty existing-list failure with one shared established-assignment reader. Missing supplementary coverage alone is not an unassignment; saved ownership, explicit dated changes, conflicts and exclusive ends stay authoritative. Assignment/acceptance timestamps are prior-existence evidence, not invented teaching starts.
+- Existing OPEN rows, exception saves, cutoff publication, DTR and term monitoring now agree without rewriting meetings/manifests or old published/final snapshots. Combined classes count once; initialization records its supplementary origin for future diagnostics. No schema migration or normal checker approval step.
+- Daily encoding shows assigned faculty and exception controls; removed optional Present controls, corrected excluded/empty explanations, and kept attribution details optional. Existing DTR selection/printing, multi-date admin entries, green/yellow styling and processing scripts remain intact.
+- Local disposable verification and staging-origin limits are documented in `docs/faculty-attendance-legacy-assignment-correction.md`. Staging acceptance of the deployed base failed; corrected staging browser acceptance remains pending. No persistent repair, migration, permission grant, staging/commit/push or deployment was performed.
+
 ## Exceptions-only attendance and multi-date admin hours - 2026-10-04
 
 - Confirmed policy replaces blank-means-unverified: dated assigned scheduled classes are Present by default; encode exceptions only. Cutoff publication and DTR include normal scheduled hours without a Present checkbox or invented checker finding. Unassigned classes do not add hours or block unrelated faculty. Combined classes, dated boundaries, closures/leave and recorded exceptions remain protected.
@@ -1670,3 +1678,8 @@ For every merged change:
 - Opened intake, frozen or incompatible structures, generation or release history, changed review evidence, incomplete campus authority, and direct DENY block the action. No existing cycle is backfilled automatically. No schema change.
 - The existing-cycle review action now appears only when the manager can administer every frozen member-offering campus, including an inactive offering's retained snapshot; direct DENY hides the action.
 - Fixed the existing-cycle review button being silently ignored when a browser or static cache retained the pre-feature equivalency JavaScript. The page now requests a versioned script URL; its delegated list handler continues to cover buttons inserted by AJAX refresh.
+## Saved legacy exception after later unassignment - 2026-10-04
+
+- Fixed readiness losing a saved October 1 lateness exception after an October 10 unassignment. Pass existing current result/revision evidence into the shared ownership check; preserve scoped, dated history without changing snapshots or coverage boundaries.
+- An earlier 90-minute class with 15 minutes late remains 1.25 hours. Existing final records, result history and frozen manifests remain unchanged; later classes, conflicting ownership, pending review and foreign scope stay protected.
+- Focused disposable validation: 18/18 passed, with nine new cases; previous overlapping runs are not added. No schema migration, approval workflow or permission expansion. Staging/browser/InnoDB acceptance remains pending.

@@ -26,7 +26,6 @@ from .models import (
     MeetingOffering,
     OfferingAttendanceSourceChange,
     TeachingMeeting,
-    FacultyCoverage,
 )
 from .observations import StaleAttendanceReview, require_confirmable_meeting_faculty, resolve_attendance_faculty, prime_meeting_readiness
 from .permissions import PUBLISH_PERMISSION, can_faculty_view_own_attendance, require_attendance_permission
@@ -237,8 +236,12 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
         meeting_queryset = meeting_queryset.prefetch_related("faculty_user", "attendance_result__faculty_user",
             "substitution__substitute_faculty", "coverage_adoption__faculty_user")
     meetings = list(meeting_queryset)
+    from .assignment_attribution import AssignmentEvidence
+    assignment_evidence = AssignmentEvidence(offerings, lock=lock)
+    for meeting in meetings:
+        meeting._attendance_assignment_evidence = assignment_evidence
     if not (faculty_review and lock):
-        prime_meeting_readiness(meetings)
+        prime_meeting_readiness(meetings, assignment_evidence=assignment_evidence)
     if faculty_review and lock:
         # Current locking reads after the campus mutex, also under InnoDB
         # REPEATABLE READ. A waiting writer cannot validate an older snapshot.
@@ -265,10 +268,6 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
         )
     }
     matched_meeting_ids = set()
-    coverage_query = FacultyCoverage.objects.filter(offering_id__in=[o.pk for o in offerings]).select_related("faculty_user")
-    coverages = defaultdict(list)
-    for coverage in coverage_query.select_for_update() if lock else coverage_query:
-        coverages[coverage.offering_id].append(coverage)
     records = []
     for occurrence in occurrences:
         meeting = meetings_by_key.get(occurrence.occurrence_key) or meetings_by_signature.get(
@@ -276,10 +275,8 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
         )
         if meeting is None:
             at = timezone.make_aware(datetime.combine(occurrence.meeting_date, occurrence.start_time))
-            dated = [[c for c in coverages[o.pk] if c.effective_from <= at
-                and (c.effective_until is None or at < c.effective_until)] for o in occurrence.linked_offerings]
-            if dated and all(len(rows) == 1 for rows in dated) and len({rows[0].faculty_user_id for rows in dated}) == 1:
-                faculty = dated[0][0].faculty_user
+            faculty = assignment_evidence.linked_at(occurrence.linked_offerings, at)
+            if faculty:
                 records.append(CutoffRecord(occurrence.occurrence_key, _normal_meeting(occurrence, faculty),
                     None, None, normal_faculty=faculty, occurrence=occurrence))
                 continue
@@ -295,8 +292,11 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
             )
             continue
         matched_meeting_ids.add(meeting.pk)
+        result = getattr(meeting, "attendance_result", None)
+        revision = revisions.get((result.pk, result.revision)) if result else None
         try:
-            dated_faculty = require_confirmable_meeting_faculty(meeting)
+            dated_faculty = require_confirmable_meeting_faculty(meeting,
+                result=result, result_revision=revision)
         except ValidationError:
             blockers.append(
                 CutoffBlocker(
@@ -307,7 +307,6 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
                 )
             )
             continue
-        result = getattr(meeting, "attendance_result", None)
         closure = max(meeting.closure_decisions.all(), key=lambda item: (item.revision, item.pk), default=None)
         if closure and closure.status == AttendanceClosureDecision.Status.CLOSED:
             if closure.faculty_user_id != dated_faculty.pk or closure.result_revision_at_decision != (result.revision if result else 0):
@@ -461,6 +460,8 @@ def _publication_entry_values(record):
     adoption = getattr(meeting, "coverage_adoption", None)
     if adoption:
         meeting_snapshot["coverage_adoption"] = {"id": adoption.pk, "decision": adoption.decision_snapshot}
+    if getattr(meeting, "_legacy_assignment_snapshot", None):
+        meeting_snapshot["assignment_attribution"] = meeting._legacy_assignment_snapshot
     if record.normal_faculty:
         meeting_snapshot["attendance_basis"] = "ASSIGNED_DEFAULT"
         return {"occurrence_key": record.occurrence_key, "meeting": meeting,
