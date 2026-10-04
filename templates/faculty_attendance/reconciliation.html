@@ -1,4 +1,5 @@
 {% extends "admin_portal/base.html" %}
+{% load tz %}
 {% block title %}Changes Needing Review{% endblock %}
 {% block admin_content %}
 <style>
@@ -36,6 +37,8 @@
   .reconciliation-field-errors, .reconciliation-form-errors, .attendance-reconciliation .correction-field-errors, .attendance-reconciliation .correction-form-errors { color: #842029; font-size: 0.84rem; }
   .reconciliation-form-errors, .attendance-reconciliation .correction-form-errors { background: #f8d7da; border: 1px solid #f1aeb5; border-radius: 0.45rem; padding: 0.65rem 0.75rem; }
   .reconciliation-form-actions { display: flex; justify-content: flex-end; padding-top: 0.15rem; }
+  .attendance-reconciliation .recovery-confirmation label { display: flex; align-items: flex-start; gap: 0.6rem; }
+  .attendance-reconciliation .recovery-confirmation input[type="checkbox"] { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; min-height: 1.1rem; margin-top: 0.15rem; padding: 0; }
   .reconciliation-empty { border: 1px dashed #b8c9bc; border-radius: 0.7rem; color: #5e7063; margin: 0; padding: 1rem; text-align: center; }
   @media (max-width: 767.98px) { .reconciliation-hero { padding: 1rem; } .reconciliation-details, .snapshot-grid, .reconciliation-form-grid { grid-template-columns: minmax(0, 1fr); } .reconciliation-field-wide, .attendance-reconciliation .correction-field-wide, .attendance-reconciliation .correction-form-errors, .reconciliation-form-errors, .reconciliation-form-actions { grid-column: 1; } .reconciliation-form-actions .btn { width: 100%; } }
 </style>
@@ -48,6 +51,39 @@
   <section class="card reconciliation-card mb-3" aria-labelledby="coverage-reconciliation-title"><div class="card-header" id="coverage-reconciliation-title">Faculty coverage changes</div><div class="card-body"><p class="reconciliation-card-copy">Choose the approved effective coverage time and record why it applies. An unassigned gap stays explicit; resolving this review does not change the academic Course Offering assignment.</p>{% for item in coverage_items %}<article class="reconciliation-item" aria-labelledby="coverage-item-{{ item.id }}"><h2 class="reconciliation-item-title h6 mb-1" id="coverage-item-{{ item.id }}">{{ item.offering.course.code }} · {{ item.get_event_type_display }}</h2><dl class="reconciliation-details"><div><dt>Current faculty</dt><dd>{{ item.prior_faculty|default:"Not assigned" }}</dd></div><div><dt>Proposed faculty</dt><dd>{{ item.proposed_faculty|default:"Unassigned gap" }}</dd></div><div class="reconciliation-field-wide"><dt>Change reason</dt><dd>{{ item.reason }}</dd></div></dl><form method="post" class="reconciliation-form-grid">{% csrf_token %}<input type="hidden" name="kind" value="coverage"><input type="hidden" name="item_id" value="{{ item.id }}">{% include "faculty_attendance/_correction_form_fields.html" with form=coverage_form %}<div class="reconciliation-form-actions"><button type="submit" class="btn btn-success">Resolve Faculty Coverage</button></div></form></article>{% empty %}<p class="reconciliation-empty">No faculty coverage changes need review.</p>{% endfor %}</div></section>
 
   <section class="card reconciliation-card" aria-labelledby="meeting-reconciliation-title"><div class="card-header" id="meeting-reconciliation-title">Affected attendance meetings</div><div class="card-body"><p class="reconciliation-card-copy">Review the recorded meeting and proposed impact, then select the appropriate decision. Historical meeting snapshots remain identifiable and are not silently rewritten.</p>{% for item in meeting_items %}<article class="reconciliation-item" aria-labelledby="meeting-item-{{ item.id }}"><h2 class="reconciliation-item-title h6 mb-1" id="meeting-item-{{ item.id }}">{{ item.meeting.meeting_date }} · {{ item.meeting.starts_at|time:"g:i A" }}</h2><p class="reconciliation-item-meta mb-0"><strong>Why review is needed:</strong> {{ item.reason }}</p>{% if item.meeting.attendance_result %}<dl class="reconciliation-details"><div><dt>Recorded status</dt><dd>{{ item.meeting.attendance_result.get_status_display }}</dd></div><div><dt>Recorded revision</dt><dd>{{ item.meeting.attendance_result.revision }}</dd></div><div class="reconciliation-field-wide"><dt>Recorded faculty</dt><dd>{{ item.meeting.attendance_result.faculty_user }}</dd></div></dl>{% endif %}<details class="reconciliation-snapshot"><summary>Show recorded and proposed details</summary><div class="snapshot-grid"><div><span class="snapshot-label">Recorded details</span><div class="snapshot-value">{{ item.before_snapshot }}</div></div><div><span class="snapshot-label">Proposed details</span><div class="snapshot-value">{{ item.proposed_snapshot }}</div></div></div></details><form method="post" class="reconciliation-form-grid">{% csrf_token %}<input type="hidden" name="kind" value="meeting"><input type="hidden" name="item_id" value="{{ item.id }}">{% include "faculty_attendance/_correction_form_fields.html" with form=meeting_form %}<div class="reconciliation-form-actions"><button type="submit" class="btn btn-success">Resolve Attendance Impact</button></div></form></article>{% empty %}<p class="reconciliation-empty">No attendance meetings need review.</p>{% endfor %}</div></section>
-  {% if can_initialize_coverage %}<details class="mt-3"><summary class="fw-semibold">Administrative diagnostics and legacy recovery</summary><p class="mt-2">Routine College changes update automatically through Course Offerings and Faculty Assignments. Review exceptional older records here.</p><a href="{% url 'faculty_attendance:coverage_initialize' %}">Review legacy assignment data</a></details>{% endif %}
+  {% if can_initialize_coverage %}
+  <details class="reconciliation-snapshot mt-3" id="legacy-meeting-recovery"{% if adoption_error %} open{% endif %}>
+    <summary>Administrative diagnostics and legacy recovery</summary>
+    <p class="reconciliation-card-copy mt-2">Routine College changes update automatically through Course Offerings and Faculty Assignments. This exceptional recovery attaches verified dated faculty evidence to an older unresolved meeting. It does not create coverage, change its dates, rewrite snapshots or record attendance.</p>
+    {% if adoption_form_errors %}<div class="reconciliation-form-errors mb-3" role="alert">Recovery was not saved. {{ adoption_form_errors }}</div>{% endif %}
+    {% timezone "Asia/Manila" %}
+    {% for item in adoption_items %}
+    <article class="reconciliation-item" aria-labelledby="adoption-title-{{ item.pk }}">
+      <h2 class="reconciliation-item-title h6" id="adoption-title-{{ item.pk }}">Meeting {{ item.pk }}</h2>
+      <dl class="reconciliation-details">
+        <div><dt>Course and section(s)</dt><dd>{% for section in item.recovery_sections %}{{ section.course_code }} ({{ section.section_code }}){% if not forloop.last %}<br>{% endif %}{% empty %}Recorded section evidence unavailable{% endfor %}</dd></div>
+        <div><dt>Dated class (Asia/Manila)</dt><dd>{{ item.starts_at|date:"F j, Y" }} · {{ item.starts_at|time:"g:i A" }}–{{ item.ends_at|time:"g:i A" }}</dd></div>
+        <div class="reconciliation-field-wide"><dt>Faculty evidence</dt><dd>{% if item.recovery_candidate %}<strong>Verified candidate: {{ item.recovery_candidate.full_name }}</strong>{% else %}<strong>Candidate not verified — recovery unavailable.</strong> {{ item.recovery_error }}{% endif %}</dd></div>
+      </dl>
+      {% if item.recovery_candidate %}
+      <form method="post" action="{% url 'faculty_attendance:reconciliation' %}" class="reconciliation-form-grid" data-legacy-adoption="{{ item.pk }}">
+        {% csrf_token %}<input type="hidden" name="kind" value="adoption">{{ item.recovery_form.meeting_id }}
+        {% if item.recovery_form.non_field_errors %}<div class="reconciliation-form-errors" role="alert">{{ item.recovery_form.non_field_errors }}</div>{% endif %}
+        <div class="reconciliation-field reconciliation-field-wide{% if item.recovery_form.reason.errors %} has-errors{% endif %}">
+          <label for="{{ item.recovery_form.reason.id_for_label }}">Recovery reason <span class="reconciliation-required">(required)</span></label>{{ item.recovery_form.reason }}
+          {% if item.recovery_form.reason.errors %}<div class="reconciliation-field-errors" role="alert">{{ item.recovery_form.reason.errors }}</div>{% endif %}
+        </div>
+        <div class="reconciliation-field reconciliation-field-wide recovery-confirmation{% if item.recovery_form.confirmed.errors %} has-errors{% endif %}">
+          <label for="{{ item.recovery_form.confirmed.id_for_label }}">{{ item.recovery_form.confirmed }} {{ item.recovery_form.confirmed.label }}</label>
+          {% if item.recovery_form.confirmed.errors %}<div class="reconciliation-field-errors" role="alert">{{ item.recovery_form.confirmed.errors }}</div>{% endif %}
+        </div>
+        <div class="reconciliation-form-actions"><button type="submit" class="btn btn-success">Adopt verified dated faculty</button></div>
+      </form>
+      {% endif %}
+    </article>
+    {% empty %}<p class="reconciliation-empty">No unresolved legacy meetings are available in your authorized scope.</p>{% endfor %}
+    {% endtimezone %}
+  </details>
+  {% endif %}
 </div>
 {% endblock %}

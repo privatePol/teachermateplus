@@ -280,6 +280,17 @@ class CoverageReconciliationForm(forms.Form):
     reason = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}), label="Resolution note (optional)")
 
 
+class CoverageAdoptionForm(forms.Form):
+    meeting_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    confirmed = forms.BooleanField(label="I confirm the verified candidate is the assigned faculty for this dated class.")
+    reason = forms.CharField(label="Recovery reason", widget=forms.Textarea(attrs={"rows": 3}))
+
+    def clean_confirmed(self):
+        if self.data.get("confirmed") != "on":
+            raise forms.ValidationError("Confirm adoption of verified coverage before applying.")
+        return self.cleaned_data["confirmed"]
+
+
 class FacultyAttendanceFilterForm(forms.Form):
     start_date = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
     end_date = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))

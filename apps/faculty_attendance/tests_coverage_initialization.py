@@ -13,7 +13,8 @@ from apps.rbac.models import Permission, UserPermission
 from . import tests as existing
 from .coverage_initialization import CoverageAdoptionService, CoverageInitializationService
 from .cutoffs import review_cutoff, publish_cutoff
-from .models import AttendanceResult, FacultyCoverage, MeetingCoverageAdoption, CoverageReconciliation
+from .models import (AttendanceResult, FacultyCoverage, MeetingCoverageAdoption, CoverageReconciliation,
+                     AttendanceClosureDecision, AttendanceCutoffPublication, AttendanceCutoffPublicationEntry)
 from .monthly_checklists import MonthlyArrangementService
 from .observations import AttendanceResultService, CheckingRoundService, ObservationService, require_confirmable_meeting_faculty
 from .permissions import MANAGE_COVERAGE_PERMISSION, RECONCILE_PERMISSION, PRINT_PERMISSION
@@ -248,7 +249,8 @@ class CoverageInitializationTests(TestCase):
             require_confirmable_meeting_faculty(meeting)
         self.client.force_login(self.actor)
         url = reverse('faculty_attendance:reconciliation')
-        response = self.client.post(url, {'kind': 'adoption', 'meeting_id': meeting.pk, 'confirmed': 'on'})
+        response = self.client.post(url, {'kind': 'adoption', 'meeting_id': meeting.pk, 'confirmed': 'on',
+                                         'reason': 'Synthetic verified legacy attribution'})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(MeetingCoverageAdoption.objects.count(), 1)
         adoption = MeetingCoverageAdoption.objects.get()
@@ -292,6 +294,299 @@ class CoverageInitializationTests(TestCase):
             'action': 'apply', 'confirmed': 'on', 'preview_token': 'invented'})
         self.assertEqual(response.status_code, 403)
         self.assertFalse(FacultyCoverage.objects.exists())
+
+
+class LegacyMeetingRecoveryUITests(TestCase):
+    """Exceptional recovery UI; every record below is disposable synthetic data."""
+    permission_codes = CoverageInitializationTests.permission_codes
+    setUpTestData = classmethod(CoverageInitializationTests.setUpTestData.__func__)
+    setUp = CoverageInitializationTests.setUp
+    aware = CoverageInitializationTests.aware
+    schedule = CoverageInitializationTests.schedule
+    coverage = CoverageInitializationTests.coverage
+    unresolved = CoverageInitializationTests.unresolved
+
+    def ready(self, combined=False):
+        meeting = self.unresolved(combined=combined)
+        self.coverage()
+        if combined:
+            self.coverage(offering=self.combined_offering)
+        for item in meeting.reconciliations.filter(status='PENDING'):
+            ReconciliationService.resolve(actor=self.actor, reconciliation=item,
+                decision='KEEP_SNAPSHOT', reason='Synthetic legacy history preserved')
+        self.client.force_login(self.actor)
+        return meeting
+
+    def post(self, meeting, **changes):
+        values = dict(kind='adoption', meeting_id=meeting.pk, confirmed='on',
+                      reason='Synthetic verified legacy recovery')
+        values.update(changes)
+        return self.client.post(reverse('faculty_attendance:reconciliation'), values)
+
+    def test_collapsed_panel_shows_verified_dated_candidate_and_all_linked_sections_read_only(self):
+        meeting = self.ready(combined=True)
+        before = deepcopy(_meeting_snapshot(meeting))
+        audits = existing.AuditLog.objects.count()
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertContains(response, 'id="legacy-meeting-recovery">')
+        self.assertContains(response, f'Meeting {meeting.pk}')
+        self.assertContains(response, 'MATH101 (S1)')
+        self.assertContains(response, 'MATH101 (S2)')
+        self.assertContains(response, 'January 5, 2026')
+        self.assertContains(response, '8:00 AM–9:00 AM')
+        self.assertContains(response, 'Asia/Manila')
+        self.assertEqual(response.context['adoption_items'][0].recovery_candidate, self.faculty)
+        self.assertContains(response, 'Verified candidate:')
+        self.assertContains(response, f'data-legacy-adoption="{meeting.pk}"')
+        self.assertContains(response, 'name="confirmed"')
+        self.assertContains(response, 'name="reason"')
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertNotContains(response, reverse('faculty_attendance:coverage_initialize'))
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+        self.assertEqual(existing.AuditLog.objects.count(), audits)
+        meeting.refresh_from_db()
+        self.assertEqual(_meeting_snapshot(meeting), before)
+
+    def test_missing_or_conflicting_evidence_is_not_presented_as_verified(self):
+        meeting = self.unresolved(combined=True)
+        self.client.force_login(self.actor)
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertContains(response, 'Candidate not verified')
+        self.assertNotContains(response, 'Verified candidate:')
+        self.assertNotContains(response, 'data-legacy-adoption=')
+        self.assertContains(self.post(meeting), 'one verified coverage interval at class start')
+        self.coverage()
+        self.coverage(offering=self.combined_offering, faculty=self.replacement)
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertContains(response, 'conflicting dated faculty coverage')
+        self.assertNotContains(response, 'data-legacy-adoption=')
+        self.assertContains(self.post(meeting), 'conflicting dated faculty coverage')
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+
+    def test_manage_coverage_and_reconciliation_direct_denies_hide_or_reject_recovery(self):
+        meeting = self.ready()
+        deny = UserPermission.objects.create(user=self.actor,
+            permission=Permission.objects.get(code=MANAGE_COVERAGE_PERMISSION),
+            grant_type='DENY', tenant=None, campus=None)
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'id="legacy-meeting-recovery"')
+        self.assertEqual(self.post(meeting).status_code, 403)
+        with self.assertRaises(PermissionDenied):
+            CoverageAdoptionService.preview(actor=self.actor, meeting=meeting)
+        deny.delete()
+        UserPermission.objects.create(user=self.actor, permission=Permission.objects.get(code=RECONCILE_PERMISSION),
+            grant_type='DENY', tenant=self.tenant, campus=self.campus)
+        self.assertEqual(self.client.get(reverse('faculty_attendance:reconciliation')).status_code, 403)
+        self.assertEqual(self.post(meeting).status_code, 403)
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+
+    def test_linked_offering_department_scope_and_cross_campus_meeting_cannot_be_recovered(self):
+        meeting = self.ready(combined=True)
+        self.combined_offering.department = self.other_department
+        self.combined_offering.save(update_fields=['department'])
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertNotContains(response, f'data-legacy-adoption="{meeting.pk}"')
+        self.assertEqual(self.post(meeting).status_code, 403)
+        other_campus = existing.Campus.objects.create(tenant=self.tenant, code='OTHER', name='Other')
+        # Disposable legacy anomaly must not widen the scoped view's lookup.
+        type(meeting).objects.filter(pk=meeting.pk).update(campus=other_campus)
+        self.assertEqual(self.post(meeting).status_code, 404)
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+
+    def test_csrf_required_even_for_confirmed_authorized_recovery(self):
+        meeting = self.ready()
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.actor)
+        url = reverse('faculty_attendance:reconciliation')
+        values = dict(kind='adoption', meeting_id=meeting.pk, confirmed='on', reason='Synthetic CSRF recovery')
+        self.assertEqual(client.post(url, values).status_code, 403)
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+        self.assertEqual(client.get(url).status_code, 200)
+        values['csrfmiddlewaretoken'] = client.cookies['csrftoken'].value
+        self.assertEqual(client.post(url, values).status_code, 302)
+        self.assertEqual(MeetingCoverageAdoption.objects.get().reason, 'Synthetic CSRF recovery')
+        self.assertTrue(existing.AuditLog.objects.filter(action='FACULTY_ATTENDANCE_COVERAGE_ADOPTED').exists())
+
+    def test_reason_and_explicit_confirmation_required_with_retained_input(self):
+        meeting = self.ready()
+        for values, field in (({'reason': ''}, 'reason'), ({'reason': '   '}, 'reason'),
+                              ({'confirmed': ''}, 'confirmed'), ({'confirmed': 'true'}, 'confirmed')):
+            with self.subTest(values=values):
+                response = self.post(meeting, **values)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(field, response.context['adoption_form_errors'])
+                self.assertContains(response, 'id="legacy-meeting-recovery" open')
+                self.assertContains(response, 'Recovery was not saved.')
+                if field == 'confirmed':
+                    self.assertContains(response, 'Synthetic verified legacy recovery')
+                self.assertFalse(MeetingCoverageAdoption.objects.exists())
+
+    def test_ge109_http_adoption_retains_boundaries_frozen_evidence_and_keep_snapshot(self):
+        self.academic_year.start_date, self.academic_year.end_date = date(2026, 6, 1), date(2027, 5, 31)
+        self.academic_year.save(update_fields=['start_date', 'end_date'])
+        self.term.start_date, self.term.end_date = date(2026, 9, 1), date(2026, 12, 31)
+        self.term.save(update_fields=['start_date', 'end_date'])
+        self.offering.schedule_text = 'M 07:30-09:00'
+        self.offering.save(update_fields=['schedule_text'])
+        slot = self.schedule(effective_from=date(2026, 10, 2)).slots.get()
+        meeting = MeetingService.generate(actor=self.actor, schedule_slot=slot, meeting_date=date(2026, 10, 5), offerings=[])
+        round_ = CheckingRoundService.create(actor=self.actor, meetings=[meeting], checking_date=meeting.meeting_date)
+        boundary = self.aware(2026, 10, 5, 8)
+        first = self.coverage(effective_from=self.aware(2026, 10, 2, 8), effective_until=boundary)
+        second = self.coverage(effective_from=boundary)
+        for item in meeting.reconciliations.filter(status='PENDING'):
+            ReconciliationService.resolve(actor=self.actor, reconciliation=item,
+                decision='KEEP_SNAPSHOT', reason='Synthetic prior review retained')
+        before = deepcopy(_meeting_snapshot(meeting))
+        manifest = deepcopy(round_.manifest_rows.get().meeting_snapshot)
+        reviews = list(meeting.reconciliations.values())
+        intervals = list(FacultyCoverage.objects.values())
+        self.client.force_login(self.actor)
+        preview = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertContains(preview, 'October 5, 2026')
+        self.assertContains(preview, '7:30 AM–9:00 AM')
+        self.assertEqual(self.post(meeting).status_code, 302)
+        adoption = MeetingCoverageAdoption.objects.get()
+        self.assertEqual((adoption.coverage, adoption.faculty_user, adoption.adopted_by), (first, self.faculty, self.actor))
+        self.assertEqual(adoption.decision_snapshot['original_meeting'], before)
+        meeting.refresh_from_db()
+        self.assertEqual(require_confirmable_meeting_faculty(meeting), self.faculty)
+        self.assertEqual(_meeting_snapshot(meeting), before)
+        self.assertEqual(round_.manifest_rows.get().meeting_snapshot, manifest)
+        self.assertEqual(list(meeting.reconciliations.values()), reviews)
+        self.assertEqual(list(FacultyCoverage.objects.values()), intervals)
+        self.assertEqual((first.effective_until, second.effective_from), (boundary, boundary))
+        self.assertFalse(AttendanceResult.objects.exists())
+        self.assertFalse(AttendanceCutoffPublication.objects.exists())
+        audit = existing.AuditLog.objects.get(action='FACULTY_ATTENDANCE_COVERAGE_ADOPTED')
+        self.assertEqual(audit.actor_user_id, self.actor.pk)
+        # Existing service retry stays idempotent; the stale UI endpoint does not resubmit it.
+        self.assertEqual(CoverageAdoptionService.adopt(actor=self.actor, meeting=meeting).pk, adoption.pk)
+        self.assertEqual(self.post(meeting).status_code, 404)
+        self.assertEqual(MeetingCoverageAdoption.objects.count(), 1)
+
+    def test_saved_or_substituted_meetings_are_not_recovery_targets(self):
+        meeting = self.ready()
+        saved = AttendanceResult.objects.create(meeting=meeting, faculty_user=self.replacement,
+            revision=1, status='PRESENT')
+        history = list(saved.history.values())
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertNotContains(response, f'data-legacy-adoption="{meeting.pk}"')
+        self.assertEqual(self.post(meeting).status_code, 404)
+        with self.assertRaises(ValidationError):
+            CoverageAdoptionService.preview(actor=self.actor, meeting=meeting)
+        saved.refresh_from_db()
+        self.assertEqual((saved.faculty_user, saved.revision), (self.replacement, 1))
+        self.assertEqual(list(saved.history.values()), history)
+        # Another synthetic meeting with explicit substitution is also protected.
+        other = MeetingService.generate(actor=self.actor, schedule_slot=meeting.schedule_slot,
+            meeting_date=date(2026, 1, 12), offerings=[])
+        type(other).objects.filter(pk=other.pk).update(faculty_user=None, unresolved_coverage=True)
+        other.refresh_from_db()
+        SubstitutionService.assign(actor=self.actor, meeting=other, substitute_faculty=self.replacement, reason='')
+        self.assertEqual(self.post(other).status_code, 404)
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+
+    def test_publication_closure_and_unrelated_pending_review_remain_protected(self):
+        meeting = self.ready()
+        review = existing.MeetingReconciliation.objects.create(meeting=meeting, source_type='SCHEDULE',
+            source_reference='synthetic-unrelated', status='PENDING', reason='Synthetic source review', detected_by=self.actor,
+            before_snapshot=_meeting_snapshot(meeting), proposed_snapshot={'synthetic_schedule_review': True})
+        self.assertContains(self.post(meeting), 'Resolve other source/history changes')
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+        ReconciliationService.resolve(actor=self.actor, reconciliation=review, decision='KEEP_SNAPSHOT', reason='')
+        # Test legacy protected evidence directly, only inside this rolled-back test DB.
+        closure = AttendanceClosureDecision.objects.create(meeting=meeting, status='CLOSED', kind='HOLIDAY',
+            pay_basis='REGULAR', faculty_user=self.faculty, decided_by=self.actor, reason='Synthetic legacy closure')
+        self.assertContains(self.post(meeting), 'Recorded or published attendance')
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+        publication = AttendanceCutoffPublication.objects.create(tenant=self.tenant, campus=self.campus,
+            academic_year=self.academic_year, term=self.term, start_date=meeting.meeting_date,
+            end_date=meeting.meeting_date, published_by=self.actor, review_fingerprint='synthetic',
+            published_at=existing.timezone.now(), submission_key='synthetic-protected-publication')
+        entry = AttendanceCutoffPublicationEntry.objects.create(publication=publication, meeting=meeting,
+            occurrence_key='synthetic-protected', meeting_date=meeting.meeting_date, starts_at=meeting.starts_at,
+            ends_at=meeting.ends_at, scheduled_minutes=60, status='PRESENT', faculty_user=self.faculty)
+        # Remove the disposable fixture closure to exercise publication alone (not the recovery action).
+        closure.delete()
+        self.assertContains(self.post(meeting), 'Recorded or published attendance')
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertNotContains(response, f'data-legacy-adoption="{meeting.pk}"')
+        entry.refresh_from_db()
+        self.assertEqual(entry.faculty_user, self.faculty)
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+
+    def test_missing_primary_link_has_actionable_error_without_guessing_a_candidate(self):
+        meeting = self.ready()
+        meeting.offering_links.update(is_primary=False)
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertContains(response, 'exactly one primary offering link')
+        self.assertNotContains(response, 'Verified candidate:')
+        self.assertNotContains(response, f'data-legacy-adoption="{meeting.pk}"')
+        self.assertContains(self.post(meeting), 'exactly one primary offering link')
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+
+    def sync_marked_meeting(self):
+        meeting = self.ready()
+        meeting.faculty_snapshot = {'college_academic_sync': True, 'note': 'Synthetic protected sync evidence'}
+        meeting.save(update_fields=['faculty_snapshot'])
+        return meeting
+
+    def test_unresolved_sync_marker_get_has_diagnostics_without_verified_candidate_or_form(self):
+        meeting = self.sync_marked_meeting()
+        before = deepcopy(_meeting_snapshot(meeting))
+        audits = existing.AuditLog.objects.count()
+        response = self.client.get(reverse('faculty_attendance:reconciliation'))
+        self.assertContains(response, 'College synchronization evidence')
+        self.assertContains(response, 'Effective from')
+        self.assertContains(response, 'Candidate not verified')
+        self.assertNotContains(response, 'Verified candidate:')
+        self.assertNotContains(response, f'data-legacy-adoption="{meeting.pk}"')
+        self.assertNotContains(response, 'Adopt verified dated faculty')
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+        meeting.refresh_from_db()
+        self.assertEqual(_meeting_snapshot(meeting), before)
+        self.assertEqual(existing.AuditLog.objects.count(), audits)
+
+    def test_unresolved_sync_marker_post_rejected_without_mutating_frozen_evidence_or_history(self):
+        meeting = self.sync_marked_meeting()
+        round_ = CheckingRoundService.create(actor=self.actor, meetings=[meeting], checking_date=meeting.meeting_date)
+        before = deepcopy(_meeting_snapshot(meeting))
+        frozen = deepcopy(round_.manifest_rows.get().meeting_snapshot)
+        reviews = list(meeting.reconciliations.values())
+        coverages = list(FacultyCoverage.objects.values())
+        audits = existing.AuditLog.objects.count()
+        response = self.post(meeting)
+        self.assertContains(response, 'Recovery was not saved.')
+        self.assertContains(response, 'College synchronization evidence')
+        self.assertNotContains(response, f'data-legacy-adoption="{meeting.pk}"')
+        self.assertFalse(MeetingCoverageAdoption.objects.exists())
+        self.assertFalse(AttendanceResult.objects.exists())
+        meeting.refresh_from_db()
+        self.assertEqual(_meeting_snapshot(meeting), before)
+        self.assertEqual(round_.manifest_rows.get().meeting_snapshot, frozen)
+        self.assertEqual(list(meeting.reconciliations.values()), reviews)
+        self.assertEqual(list(FacultyCoverage.objects.values()), coverages)
+        self.assertEqual(existing.AuditLog.objects.count(), audits)
+        with self.assertRaises(ValidationError):
+            require_confirmable_meeting_faculty(meeting)
+
+    def test_truthy_unresolved_sync_marker_rejects_both_service_entry_points(self):
+        meeting = self.sync_marked_meeting()
+        for marker in (True, 'synthetic-sync', 1):
+            with self.subTest(marker=marker):
+                meeting.faculty_snapshot['college_academic_sync'] = marker
+                meeting.save(update_fields=['faculty_snapshot'])
+                before = deepcopy(_meeting_snapshot(meeting))
+                audits = existing.AuditLog.objects.count()
+                for operation in (CoverageAdoptionService.preview, CoverageAdoptionService.adopt):
+                    with self.assertRaisesMessage(ValidationError, 'College synchronization evidence'):
+                        operation(actor=self.actor, meeting=meeting)
+                self.assertFalse(MeetingCoverageAdoption.objects.exists())
+                meeting.refresh_from_db()
+                self.assertEqual(_meeting_snapshot(meeting), before)
+                self.assertEqual(existing.AuditLog.objects.count(), audits)
 
 
 class ChecklistPrintExportTests(TestCase):

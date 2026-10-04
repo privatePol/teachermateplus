@@ -25,6 +25,7 @@ from .forms import (
     ChecklistPreparationForm,
     AttendanceClosureForm,
     CoverageForm,
+    CoverageAdoptionForm,
     CoverageReconciliationForm,
     CutoffPublicationForm,
     CutoffScopeForm,
@@ -1290,17 +1291,21 @@ def reconciliation_view(request):
         unresolved_coverage=True, faculty_user__isnull=True, coverage_adoption__isnull=True,
         substitution__isnull=True,
     ).filter(Q(attendance_result__isnull=True) | Q(attendance_result__revision=0))
+    adoption_form = None
+    adoption_error = False
     if request.method == "POST":
         kind = request.POST.get("kind")
         try:
             if kind == "adoption":
-                if request.POST.get("confirmed") != "on":
-                    raise ValidationError("Confirm adoption of verified coverage before applying.")
-                item = get_object_or_404(adoption_items, pk=request.POST.get("meeting_id"))
-                from .coverage_initialization import CoverageAdoptionService
-                CoverageAdoptionService.adopt(actor=request.user, meeting=item, reason=request.POST.get("reason", ""))
-                messages.success(request, "Verified dated coverage adopted; original meeting and round snapshots retained.")
-                return redirect("faculty_attendance:reconciliation")
+                _page_permission(request, MANAGE_COVERAGE_PERMISSION, department_ids)
+                adoption_form = CoverageAdoptionForm(request.POST)
+                if adoption_form.is_valid():
+                    item = get_object_or_404(adoption_items, pk=adoption_form.cleaned_data["meeting_id"])
+                    from .coverage_initialization import CoverageAdoptionService
+                    CoverageAdoptionService.adopt(actor=request.user, meeting=item, reason=adoption_form.cleaned_data["reason"])
+                    messages.success(request, "Verified dated coverage adopted; original meeting and round snapshots retained.")
+                    return redirect("faculty_attendance:reconciliation")
+                adoption_error = True
             elif kind == "coverage":
                 item = get_object_or_404(coverage_items, pk=request.POST.get("item_id"))
                 form = CoverageReconciliationForm(request.POST)
@@ -1325,13 +1330,41 @@ def reconciliation_view(request):
                     messages.success(request, "Meeting reconciliation resolved; historical snapshots remain intact.")
                     return redirect("faculty_attendance:reconciliation")
         except (ValidationError, PermissionDenied) as exc:
+            if kind == "adoption":
+                if isinstance(exc, PermissionDenied):
+                    return HttpResponseForbidden("Legacy meeting recovery authority is required.")
+                adoption_form.add_error(None, " ".join(exc.messages))
+                adoption_error = True
             messages.error(request, str(exc))
+    can_initialize_coverage = _can_page(request, MANAGE_COVERAGE_PERMISSION, department_ids)
+    recovery_items = []
+    if can_initialize_coverage:
+        from .coverage_initialization import CoverageAdoptionService
+        for item in adoption_items.order_by("starts_at", "pk"):
+            item.recovery_candidate = None
+            item.recovery_error = ""
+            try:
+                item.recovery_candidate = CoverageAdoptionService.preview(actor=request.user, meeting=item)
+            except PermissionDenied:
+                continue
+            except ValidationError as exc:
+                item.recovery_error = " ".join(exc.messages)
+            item.recovery_sections = item.sections_snapshot or [
+                {"course_code": link.offering.course.code, "course_title": link.offering.course.title,
+                 "section_code": link.offering.section.code} for link in item.offering_links.all()]
+            item.recovery_form = (
+                adoption_form if adoption_form and request.POST.get("meeting_id") == str(item.pk)
+                else CoverageAdoptionForm(initial={"meeting_id": item.pk}))
+            item.recovery_form.auto_id = f"adoption-{item.pk}-%s"
+            recovery_items.append(item)
     return render(request, "faculty_attendance/reconciliation.html", {
         "coverage_items": coverage_items,
         "source_items": source_items,
         "meeting_items": meeting_items,
-        "adoption_items": adoption_items,
-        "can_initialize_coverage": _can_page(request, MANAGE_COVERAGE_PERMISSION, department_ids),
+        "adoption_items": recovery_items,
+        "adoption_error": adoption_error,
+        "adoption_form_errors": adoption_form.errors if adoption_form and adoption_error else None,
+        "can_initialize_coverage": can_initialize_coverage,
         "coverage_form": CoverageReconciliationForm(),
         "source_form": SourceChangeReconciliationForm(),
         "meeting_form": ReconciliationForm(),

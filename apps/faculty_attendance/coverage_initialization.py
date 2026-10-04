@@ -17,21 +17,14 @@ from .services import CoverageService, ReconciliationService, _audit, _meeting_s
 
 class CoverageAdoptionService:
     @staticmethod
-    @transaction.atomic
-    def adopt(*, actor, meeting, reason=""):
-        # Academic mutations also lock offerings first. Never invert this order.
-        offerings = list(CourseOffering.objects.select_for_update().filter(
-            attendance_meetings=meeting).order_by("pk"))
-        for offering in offerings:
-            _require(actor, MANAGE_COVERAGE_PERMISSION, offering)
-            _require(actor, RECONCILE_PERMISSION, offering)
-        meeting = TeachingMeeting.objects.select_for_update().get(pk=meeting.pk)
-        _require(actor, RECONCILE_PERMISSION, meeting)
-        existing = MeetingCoverageAdoption.objects.filter(meeting=meeting).first()
-        if existing:
-            return existing
+    def _draft(*, actor, meeting, offerings, reason="", lock=False):
+        """Shared read-only eligibility/evidence checks; POST repeats them under locks."""
         if not offerings or not meeting.unresolved_coverage or meeting.faculty_user_id:
             raise ValidationError("Only an unresolved initial attribution can adopt coverage.")
+        if meeting.faculty_snapshot.get("college_academic_sync"):
+            raise ValidationError(
+                "Unresolved College synchronization evidence cannot be recovered by legacy adoption. "
+                "Review the dated Faculty Assignments and linked Course Offerings, including Effective from, for this class.")
         if hasattr(meeting, "substitution"):
             raise ValidationError("An explicit substitution already controls this meeting; keep it and review separately.")
         if (AttendanceResult.objects.filter(meeting=meeting, revision__gt=0).exists()
@@ -40,9 +33,12 @@ class CoverageAdoptionService:
             raise ValidationError("Recorded or published attendance needs the authorized correction/republication workflow.")
         coverages = []
         for offering in offerings:
-            matches = list(FacultyCoverage.objects.select_for_update().filter(
+            queryset = FacultyCoverage.objects.filter(
                 offering=offering, effective_from__lte=meeting.starts_at).filter(
-                Q(effective_until__isnull=True) | Q(effective_until__gt=meeting.starts_at)))
+                Q(effective_until__isnull=True) | Q(effective_until__gt=meeting.starts_at))
+            if lock:
+                queryset = queryset.select_for_update()
+            matches = list(queryset)
             if len(matches) != 1:
                 raise ValidationError("Every linked section needs one verified coverage interval at class start.")
             coverages.extend(matches)
@@ -52,7 +48,10 @@ class CoverageAdoptionService:
         refs = {f"coverage:{c.pk}" for c in coverages}
         if any(r.source_type != "COVERAGE" or r.source_reference not in refs for r in pending):
             raise ValidationError("Resolve other source/history changes before adopting this coverage.")
-        primary_id = meeting.offering_links.get(is_primary=True).offering_id
+        primary_ids = list(meeting.offering_links.filter(is_primary=True).values_list("offering_id", flat=True))
+        if len(primary_ids) != 1:
+            raise ValidationError("The dated meeting needs exactly one primary offering link before recovery.")
+        primary_id = primary_ids[0]
         primary = next(c for c in coverages if c.offering_id == primary_id)
         adoption = MeetingCoverageAdoption(
             meeting=meeting, coverage=primary, faculty_user=primary.faculty_user, adopted_by=actor,
@@ -66,6 +65,34 @@ class CoverageAdoptionService:
                              for c in coverages],
             })
         adoption.full_clean()
+        return adoption, pending
+
+    @classmethod
+    def preview(cls, *, actor, meeting):
+        """Return verified candidate evidence without saving or resolving anything."""
+        offerings = list(CourseOffering.objects.filter(attendance_meetings=meeting).order_by("pk"))
+        for offering in offerings:
+            _require(actor, MANAGE_COVERAGE_PERMISSION, offering)
+            _require(actor, RECONCILE_PERMISSION, offering)
+        _require(actor, RECONCILE_PERMISSION, meeting)
+        adoption, _pending = cls._draft(actor=actor, meeting=meeting, offerings=offerings)
+        return adoption.faculty_user
+
+    @classmethod
+    @transaction.atomic
+    def adopt(cls, *, actor, meeting, reason=""):
+        # Academic mutations also lock offerings first. Never invert this order.
+        offerings = list(CourseOffering.objects.select_for_update().filter(
+            attendance_meetings=meeting).order_by("pk"))
+        for offering in offerings:
+            _require(actor, MANAGE_COVERAGE_PERMISSION, offering)
+            _require(actor, RECONCILE_PERMISSION, offering)
+        meeting = TeachingMeeting.objects.select_for_update().get(pk=meeting.pk)
+        _require(actor, RECONCILE_PERMISSION, meeting)
+        existing = MeetingCoverageAdoption.objects.filter(meeting=meeting).first()
+        if existing:
+            return existing
+        adoption, pending = cls._draft(actor=actor, meeting=meeting, offerings=offerings, reason=reason, lock=True)
         adoption.save()
         for reconciliation in pending:
             ReconciliationService.resolve(actor=actor, reconciliation=reconciliation,

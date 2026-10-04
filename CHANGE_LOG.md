@@ -1,3 +1,10 @@
+## Exceptional legacy meeting recovery access - 2026-10-04
+
+- Restored the existing targeted adoption action inside Changes Needing Review's collapsed Administrative diagnostics and legacy recovery panel, replacing its campus-initialization link. Shows saved class/section evidence, meeting ID, Manila time and a service-verified faculty candidate; ineligible evidence stays diagnostic, not verified.
+- The scoped normal POST requires explicit confirmation, a nonblank recovery reason and CSRF. Direct DENY and all existing eligibility/locking/audit checks remain; a shared read-only preview does not save anything. Recovery appends attribution evidence without new coverage, snapshot/history conversion, attendance confirmation or publication.
+- Focused disposable validation, exact manifest and outstanding browser/staging acceptance are recorded in HANDOFF. No model, migration, dependency or runtime change.
+- Adoption eligibility also rejects unresolved meetings with no faculty and a truthy saved `college_academic_sync` marker. GET shows actionable diagnostics without a verified candidate/form; POST and the shared service reject without writing adoption or altering evidence. Resolver precedence is unchanged; empty-snapshot GE109 legacy recovery remains eligible.
+
 ## Attendance save/correction feedback - 2026-10-03
 
 - Removed redundant per-row bulk Present readiness/validation queries and notice recomputation for brand-new Present results; atomicity, permissions, protected findings, audit/revisions and correction notices remain. Existing audit storage records submission identities for safe retries. A timeout is explicitly an unknown outcome, not a failed-save assertion.
