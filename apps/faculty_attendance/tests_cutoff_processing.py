@@ -55,7 +55,7 @@ class CutoffProcessingTests(TestCase):
             for b in self.review().unattributed))
         self.assertEqual(self.publish().entries.get().meeting_id, first.pk)
 
-    def test_ba221_queue_excludes_ariel_but_own_is322_is323_remain_pending(self):
+    def test_ba221_queue_excludes_ariel_and_own_assigned_is322_is323_are_normal(self):
         self.term.end_date = date(2026, 12, 31)
         self.term.save(update_fields=["end_date"])
         self.academic_year.end_date = date(2027, 5, 31)
@@ -84,8 +84,8 @@ class CutoffProcessingTests(TestCase):
             term=self.term, meeting_date=scope["start_date"])
         review = review_faculty_cutoff(actor=self.actor, **scope)
         ariel = next(r for r in review.slices if r.faculty.pk == self.faculty.pk)
-        self.assertFalse(ariel.ready)
-        self.assertEqual({s["course_code"] for b in ariel.blockers for s in b.details["sections"]}, {"IS322", "IS323"})
+        self.assertTrue(ariel.ready, ariel.blockers)
+        self.assertFalse(ariel.blockers)
         self.assertEqual(len(review.unattributed), 2)
         self.assertTrue(all(not b.details["candidate_ids"] for b in review.unattributed))
         for meeting in fixtures.TeachingMeeting.objects.all():
@@ -255,12 +255,14 @@ class CutoffProcessingTests(TestCase):
 
     def test_all_ready_retry_freezes_batch_and_does_not_add_new_ready_faculty(self):
         _, second = self.pair()
+        pending = FacultyCutoffTests.block_replacement(self)
         self.client.force_login(self.actor)
         url = reverse("faculty_attendance:faculty_cutoff_review")
         response = self.client.get(url, self.query())
         values = self.action(response.context["publication_form"], "publish_ready")
         self.assertEqual(self.client.post(url, values).status_code, 302)
-        self.confirm(second)
+        pending.status = "RESOLVED"
+        pending.save(update_fields=["status"])
         self.assertEqual(self.client.post(url, values).status_code, 302)
         self.assertEqual(AttendanceCutoffPublication.objects.count(), 1)
         self.assertFalse(FacultyDTR.objects.exists())
@@ -282,7 +284,7 @@ class CutoffProcessingTests(TestCase):
         self.client.force_login(self.actor)
         url = reverse("faculty_attendance:faculty_cutoff_review")
         response = self.client.get(url, self.query())
-        self.assertEqual(response.context["publish_count"], 0)
+        self.assertEqual(response.context["publish_count"], 1)
         self.assertEqual(response.context["finalize_count"], 1)
         values = self.action(response.context["final_form"], "finalize_selected", faculty_ids=[self.faculty.pk])
         self.assertEqual(self.client.post(url, values).status_code, 302)

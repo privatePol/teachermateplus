@@ -1,3 +1,19 @@
+## Exceptions-only attendance and multi-date admin hours - 2026-10-04
+
+- Confirmed policy replaces blank-means-unverified: dated assigned scheduled classes are Present by default; encode exceptions only. Cutoff publication and DTR include normal scheduled hours without a Present checkbox or invented checker finding. Unassigned classes do not add hours or block unrelated faculty. Combined classes, dated boundaries, closures/leave and recorded exceptions remain protected.
+- Normal publication evidence is explicit and stable before/after automatic meeting materialization. Later exceptions require republication; saved publications and DTR snapshots are never rewritten. Term monitoring shows teaching attendance hours, keeping real checker verification separate.
+- Faculty DTR resolves the cutoff/faculty pair, shows awaiting-publication faculty clearly, and displays/prints the latest saved final first. Optional version selection opens prior saved output. General access-only accounts are excluded; genuine scoped admin assignments and history remain. Individual Department selection is removed without expanding permission scope.
+- Multi-date admin hours: add/edit/remove dated rows, apply the same decimal hours to selected dates, review the total and save all atomically. Row errors retain inputs; revisions, scoped checks, CSRF and idempotent retries prevent duplicate totals. Green/yellow cards and existing processing/unknown-outcome protections retained.
+- Focused evidence: 65 distinct Django cases passed across corrected/affected runs; 28 Node cases passed. No schema/dependency/migration changes. Authenticated browser/staging, PDF/printer and actual InnoDB acceptance remain pending; see HANDOFF for counts, failed development runs and exact manifest.
+
+## Cutoff-first DTR selection, saved print versions and simpler checker entries - 2026-10-04
+
+- DTR review now groups publications into one cutoff choice, then lists all authorized published faculty workloads in that cutoff. Changing cutoff refreshes faculty, summary and details together; legacy publication links and normal GET submission remain supported. Old faculty/publication combinations no longer cause the routine selector's 404; POST still validates the exact faculty-owned publication.
+- Default individual and checker-summary printing uses the latest immutable final DTR, not a newer unfinished draft. Previous final versions remain separately printable from expandable history. Historical print scope is checked against each saved final; existing calculations and finalization locks are unchanged.
+- DTR card headers use the standard green/yellow gradient. The checker-entry Department selector is removed: scope is derived from saved faculty evidence, or the previous entry on correction. Ambiguous/missing evidence fails safely with a specific message; posted department values cannot change attribution.
+- General-access AC roles alone no longer put an otherwise empty account into DTR choices/summary. Actual department-scoped AC assignments, published teaching, dated checker entries, saved finals and legitimate zero-hour teaching corrections remain available. No publications, assignments, attendance or DTR history are deleted.
+- Focused disposable validation and remaining authenticated browser/print acceptance are recorded in HANDOFF. No dependency, schema or migration change; no persistent DB/runtime or release action.
+
 ## Faculty cutoff simplification and runtime optimization - 2026-10-04
 
 - Ready faculty can publish their complete attributed records beside unrelated unassigned offerings. Missing attribution stays in a visible separate queue; concrete dated/history conflicts block identified faculty only. Saved attendance, publications and finals remain protected after current unassignment.

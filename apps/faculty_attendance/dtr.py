@@ -330,11 +330,17 @@ def _calculate(publication, faculty, entries, adjustments, mixed_decisions, curr
             new_closure = current.closures.get(entry.meeting_id) if current is not None else latest_closure(entry.meeting)
             if new_closure and new_closure.status == AttendanceClosureDecision.Status.CLOSED:
                 blockers.append(f"{entry.meeting_date}: a new class closure exists; republish this cutoff before DTR finalization.")
-            if not entry.result_revision_id:
+            normal = entry.meeting_snapshot.get("attendance_basis") == "ASSIGNED_DEFAULT"
+            if not entry.result_revision_id and not normal:
                 blockers.append(f"{entry.meeting_date}: published class is missing its attendance result revision.")
                 continue
             result = current.results.get(entry.meeting_id) if current is not None else AttendanceResult.objects.filter(meeting_id=entry.meeting_id).first()
-            if result is None or result.revision != entry.result_revision_number or result.faculty_user_id != faculty.pk:
+            if normal:
+                if (result.revision if result else 0) != entry.result_revision_number or (result and (
+                        result.status != "UNVERIFIED" or result.findings_snapshot or result.late_flag or result.early_flag
+                        or result.absent_without_notice_hours or result.absent_with_notice_hours or result.missed_periods)):
+                    blockers.append(f"{entry.meeting_date}: an exception was recorded after publication; republish before finalization.")
+            elif result is None or result.revision != entry.result_revision_number or result.faculty_user_id != faculty.pk:
                 blockers.append(f"{entry.meeting_date}: attendance changed after publication; republish the cutoff before finalization.")
             if entry.status == AttendanceResult.Status.UNVERIFIED:
                 blockers.append(f"{entry.meeting_date}: attendance remains unverified.")
@@ -362,7 +368,7 @@ def _calculate(publication, faculty, entries, adjustments, mixed_decisions, curr
                     applied_late_minutes = minutes["L"]
                     applied_early_minutes = minutes["E"]
                     decision_revision = decision.revision
-            status_label = entry.get_status_display()
+            status_label = "Present (assigned class; no exception)" if normal else entry.get_status_display()
         if sum(deductions.values(), ZERO) > scheduled:
             blockers.append(f"{entry.meeting_date}: attendance deductions exceed this scheduled class; correct overlapping findings.")
         for kind, value in deductions.items():
@@ -491,8 +497,8 @@ def preview_dtr(*, actor, publication, faculty, permission_code=DTR_VIEW_PERMISS
                 term=publication.term, start_date=publication.start_date, end_date=publication.end_date,
                 permission_code=permission_code)
             source_slice = next((row for row in review.slices if row.faculty.pk == faculty.pk), None)
-        membership = [{"key": e.occurrence_key, "meeting_id": e.meeting_id,
-            "result_revision": e.result_revision_number if not e.closure_decision_id else None,
+        membership = [{"key": e.occurrence_key, "meeting_id": None if e.meeting_snapshot.get("attendance_basis") == "ASSIGNED_DEFAULT" else e.meeting_id,
+            "result_revision": (e.result_revision_number or None) if not e.closure_decision_id else None,
             "closure_revision": e.closure_decision.revision if e.closure_decision_id else None} for e in entries]
         source_changed = (source_slice is None or source_slice.faculty.pk != faculty.pk or source_slice.blockers
             or (source_slice.fingerprint != publication.review_fingerprint if publication.faculty_scope_id else
@@ -501,6 +507,89 @@ def preview_dtr(*, actor, publication, faculty, permission_code=DTR_VIEW_PERMISS
             blockers += ("Faculty attendance membership or source revisions changed; resolve blockers and republish this faculty before finalization.",)
     payload = json.dumps({"snapshot": snapshot, "blockers": blockers}, sort_keys=True, separators=(",", ":"))
     return DTRPreview(publication, faculty, snapshot, blockers, hashlib.sha256(payload.encode()).hexdigest())
+
+
+def resolve_entry_department(*, publication, faculty, kind, previous=None, entry_date=None, offset_kind=""):
+    """Use saved entry/class/AC scope and the faculty's explicit home department."""
+    if previous:
+        ids = {previous.department_id}
+    else:
+        ids = _faculty_departments(publication, faculty)
+        if kind == DTRAdjustment.Kind.ADMIN:
+            ids = {pk for pk in ids if _faculty_is_ac(faculty=faculty, publication=publication, department_id=pk)}
+        elif entry_date:
+            dated = {e.meeting.department_id for e in _published_entries(publication, faculty)
+                if e.meeting_date == entry_date and e.meeting_id}
+            if dated:
+                ids.intersection_update(dated)
+        if len(ids) > 1 and faculty.default_department_id in ids:
+            ids = {faculty.default_department_id}
+    if len(ids) != 1:
+        message = ("This faculty has no active AC assignment for scheduled office hours." if not ids and kind == "ADMIN"
+            else "The saved faculty scope has missing or multiple departments; no entry department can be inferred safely.")
+        raise ValidationError({"kind": message})
+    return Department.objects.get(pk=ids.pop(), tenant_id=publication.tenant_id, campus_id=publication.campus_id)
+
+
+@transaction.atomic
+def save_admin_hours(*, actor, publication, faculty, rows):
+    """Atomic, revision-aware dated batch; exact retries do not duplicate hours."""
+    from .notice_locking import lock_notice_campus
+    lock_notice_campus(publication.campus_id)
+    publication = AttendanceCutoffPublication.objects.select_for_update().get(pk=publication.pk)
+    if publication.faculty_scope_id and publication.faculty_scope_id != faculty.pk:
+        raise PermissionDenied("This publication belongs to another faculty.")
+    current = current_adjustments(publication=publication, faculty=faculty,
+        rows=list(_adjustment_rows(publication=publication, faculty=faculty).select_for_update()))
+    by_id = {row.pk: row for row in current}
+    by_date = defaultdict(list)
+    for row in current:
+        if row.kind == "ADMIN":
+            by_date[row.entry_date].append(row)
+    plans, seen = [], set()
+    for index, values in enumerate(rows):
+        if not values:
+            continue
+        try:
+            prior = by_id.get(values.get("previous_id"))
+            if values.get("DELETE") and not values.get("previous_id"):
+                continue
+            if values.get("previous_id") and (not prior or prior.kind != "ADMIN"):
+                raise ValidationError("The dated entry changed. Reload before correcting it.")
+            entry_date = values.get("entry_date") or (prior.entry_date if prior else None)
+            if entry_date is None or not publication.start_date <= entry_date <= publication.end_date:
+                raise ValidationError("Date must be within this cutoff.")
+            if entry_date in seen:
+                raise ValidationError("Use one row per date; duplicate hours were not saved.")
+            seen.add(entry_date)
+            department = resolve_entry_department(publication=publication, faculty=faculty,
+                kind="ADMIN", previous=prior, entry_date=entry_date)
+            _require(actor, DTR_EDIT_PERMISSION, publication, {department.pk})
+            amount = ZERO if values.get("DELETE") else _hours(values.get("hours"))
+            if prior and prior.entry_date != entry_date:
+                raise ValidationError("A saved entry's date cannot be changed. Remove it and add the correct date.")
+            if prior and prior.revision != (values.get("expected_revision") or 0):
+                raise ValidationError("The dated entry revision changed; reload before saving.")
+            matches = [item for item in by_date[entry_date] if item.department_id == department.pk]
+            if prior is None and matches:
+                if len(matches) != 1 or matches[0].hours != amount:
+                    raise ValidationError("Admin hours already exist for this date. Reload its saved entry before changing it.")
+                plans.append((index, matches[0], None))
+            elif prior and prior.hours == amount:
+                plans.append((index, prior, None))
+            else:
+                plans.append((index, prior, dict(department=department, entry_date=entry_date, kind="ADMIN", hours=amount,
+                    reason=prior.reason if prior else "", previous=prior,
+                    expected_revision=prior.revision if prior else 0)))
+        except ValidationError as exc:
+            raise ValidationError({str(index): exc.messages}) from exc
+    saved = []
+    for index, prior, values in plans:
+        try:
+            saved.append(save_adjustment(actor=actor, publication=publication, faculty=faculty, **values) if values else prior)
+        except ValidationError as exc:
+            raise ValidationError({str(index): exc.messages}) from exc
+    return saved
 
 
 @transaction.atomic

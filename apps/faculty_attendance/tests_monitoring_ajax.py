@@ -40,7 +40,7 @@ class TermMonitoringAjaxTests(TestCase):
         self.assertIn('data-term-filter', data['html'])
         self.assertIn('method="get"', data['html'])
         self.assertIn('Latest verified class date', data['html'])
-        self.assertIn('Earlier classes may still be unverified', data['html'])
+        self.assertIn('Default Present classes do not invent checker verification', data['html'])
         self.assertIn('Not teaching or leave', data['html'])
         self.assertIn('0.97', data['html'])
         self.assertEqual(normal.context['report']['rows'][0]['actual'], Decimal('0.97'))

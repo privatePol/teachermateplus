@@ -22,7 +22,7 @@ from apps.core.services.audit import AuditService
 from apps.rbac.models import UserRole
 from apps.tenants.models import Campus, Department
 
-from .cutoffs import _review_cutoff, _fingerprint, _publication_entry_values
+from .cutoffs import _review_cutoff, _fingerprint, _publication_entry_values, _materialize_record
 from .models import AttendanceCutoffPublication, AttendanceCutoffPublicationEntry, DTRAdjustment, FacultyCoverage
 from .notice_locking import lock_notice_campus
 from .observations import StaleAttendanceReview, resolve_attendance_faculty
@@ -115,16 +115,19 @@ def review_faculty_cutoff(*, actor, tenant_id, campus_id, academic_year, term, s
     roles = roles.filter(Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True),
         Q(campus_id=campus_id) | Q(campus_id__isnull=True)).select_related("user")
     for role in roles.select_for_update() if lock else roles:
-        departments = {role.department_id or role.user.default_department_id} - {None}
-        if not departments:
-            department_rows = Department.objects.filter(tenant_id=tenant_id, campus_id=campus_id)
-            departments = set((department_rows.select_for_update() if lock else department_rows).values_list("pk", flat=True))
+        # Access roles alone do not constitute an office-hours assignment.
+        if role.tenant_id != tenant_id or role.campus_id != campus_id or not role.department_id:
+            continue
+        departments = {role.department_id}
         ac_ids.add(role.user_id)
         roster[role.user_id].update(departments)
     for record in evidence.records:
-        faculty_id = record.result.faculty_user_id if record.result else record.closure.faculty_user_id
-        roster[faculty_id].update(offering_map[l.offering_id].department_id
-            for l in record.meeting.offering_links.all() if l.offering_id in offering_map)
+        faculty_id = record.faculty.pk
+        if record.normal_faculty:
+            roster[faculty_id].update(o.department_id for o in record.occurrence.linked_offerings)
+        else:
+            roster[faculty_id].update(offering_map[l.offering_id].department_id
+                for l in record.meeting.offering_links.all() if l.offering_id in offering_map)
     for meeting in evidence.meetings:
         faculty, _ = resolve_attendance_faculty(meeting, getattr(meeting, "attendance_result", None))
         if faculty:
@@ -213,7 +216,7 @@ def review_faculty_cutoff(*, actor, tenant_id, campus_id, academic_year, term, s
                 unattributed.append(decorated)
     records = defaultdict(list)
     for record in evidence.records:
-        faculty_id = record.result.faculty_user_id if record.result else record.closure.faculty_user_id
+        faculty_id = record.faculty.pk
         records[faculty_id].append(record)
     slices = []
     faculty_rows = User.objects.filter(pk__in=roster).order_by("last_name", "first_name", "pk")
@@ -223,7 +226,7 @@ def review_faculty_cutoff(*, actor, tenant_id, campus_id, academic_year, term, s
             continue  # A partial department grant cannot publish a partial faculty.
         blockers = tuple(per_faculty[faculty.pk])
         snapshot = {"faculty_user_id": faculty.pk, "departments": sorted(departments),
-            "occurrences": [{"key": r.occurrence_key, "meeting_id": r.meeting.pk,
+            "occurrences": [{"key": r.occurrence_key, "meeting_id": None if r.normal_faculty else r.meeting.pk,
                 "result_revision": r.result.revision if r.result else None,
                 "closure_revision": r.closure.revision if r.closure else None} for r in records[faculty.pk]],
             "teaching_complete": not blockers,
@@ -308,7 +311,8 @@ def publish_faculty_cutoffs(*, actor, faculty_ids, expected_fingerprints, submis
             published_by=actor, published_at=timezone.now())
         publication.full_clean()
         publication.save()
-        entries = [AttendanceCutoffPublicationEntry(publication=publication, **_publication_entry_values(r)) for r in row.records]
+        entries = [AttendanceCutoffPublicationEntry(publication=publication,
+            **_publication_entry_values(_materialize_record(actor, r, PUBLISH_FACULTY_PERMISSION))) for r in row.records]
         for entry in entries:
             entry.full_clean()
         AttendanceCutoffPublicationEntry.objects.bulk_create(entries)

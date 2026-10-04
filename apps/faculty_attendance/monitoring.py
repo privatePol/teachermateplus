@@ -102,6 +102,11 @@ def _recorded_row(meeting):
             row['paid_closure'] = row['expected'] if closure.pay_basis == 'REGULAR' else ZERO
         return row
     if not result or result.status == AttendanceResult.Status.UNVERIFIED or not result.revision:
+        if result and (result.findings_snapshot or result.late_flag or result.early_flag
+                or result.absent_without_notice_hours or result.absent_with_notice_hours or result.missed_periods):
+            row.update(state='Needs finding review', warning='Saved exception evidence needs its valid result revision.')
+            return row
+        row.update(actual=row['expected'], state='Present by default', normal_present=True)
         return row
     amounts, warning = _deductions(meeting, result)
     if warning:
@@ -163,8 +168,8 @@ def term_summary(*, actor, tenant_id, campus_id, academic_year, term, as_of):
                      'faculty': faculty, 'department_id': occurrence.primary_offering.department_id,
                      'label': ', '.join(f'{o.course.code} / {o.section.code}' for o in occurrence.linked_offerings),
                      'time': f'{occurrence.start_time:%H:%M}–{occurrence.end_time:%H:%M}',
-                     'expected': Decimal(str(minutes)) / 60, 'actual': ZERO, 'paid_closure': ZERO,
-                     'verified': False, 'state': 'Unverified — not prepared', 'revision': 0,
+                     'expected': Decimal(str(minutes)) / 60, 'actual': Decimal(str(minutes)) / 60 if faculty else ZERO, 'paid_closure': ZERO,
+                     'verified': False, 'normal_present': bool(faculty), 'state': 'Present by default' if faculty else 'Faculty unresolved', 'revision': 0,
                      'a': ZERO, 'n': ZERO, 'late_minutes': 0, 'early_minutes': 0,
                      'late_flag': False, 'deductions': {},
                      'warning': '' if faculty else 'Faculty unresolved; no assignment was inferred.'})
@@ -172,6 +177,8 @@ def term_summary(*, actor, tenant_id, campus_id, academic_year, term, as_of):
     buckets = defaultdict(lambda: ZERO)
     for row in sorted(rows, key=lambda r: (r['date'], r['time'], r['meeting_id'] or 0)):
         faculty = row['faculty']
+        if faculty is None:
+            continue
         item = summary.setdefault(getattr(faculty, 'pk', None), {
             'faculty': faculty, 'expected': ZERO, 'actual': ZERO, 'leave': ZERO,
             'admin': ZERO, 'paid_closure': ZERO, 'latest_verified': None, 'unverified': 0,
@@ -182,7 +189,7 @@ def term_summary(*, actor, tenant_id, campus_id, academic_year, term, as_of):
             item['latest_verified'] = row['date']
             for kind, value in row['deductions'].items():
                 buckets[(faculty.pk, row['date'], row['department_id'], kind)] += value
-        elif not row['state'].startswith('Closed'):
+        elif not row.get('normal_present') and not row['state'].startswith('Closed'):
             item['unverified'] += 1
         item['details'].append(row)
     # Latest logical entries, not cutoff snapshots: no obsolete revisions or repeated publications.

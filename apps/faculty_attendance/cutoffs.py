@@ -26,6 +26,7 @@ from .models import (
     MeetingOffering,
     OfferingAttendanceSourceChange,
     TeachingMeeting,
+    FacultyCoverage,
 )
 from .observations import StaleAttendanceReview, require_confirmable_meeting_faculty, resolve_attendance_faculty, prime_meeting_readiness
 from .permissions import PUBLISH_PERMISSION, can_faculty_view_own_attendance, require_attendance_permission
@@ -49,6 +50,39 @@ class CutoffRecord:
     result: AttendanceResult | None
     result_revision: AttendanceResultRevision | None
     closure: AttendanceClosureDecision | None = None
+    normal_faculty: object = None
+    occurrence: object = None
+
+    @property
+    def faculty(self):
+        return self.normal_faculty or (self.result.faculty_user if self.result else self.closure.faculty_user)
+
+
+def _normal_meeting(occurrence, faculty):
+    """Read-only projection; publication materializes it, not a checker finding."""
+    offering = occurrence.primary_offering
+    start = timezone.make_aware(datetime.combine(occurrence.meeting_date, occurrence.start_time))
+    end = timezone.make_aware(datetime.combine(occurrence.meeting_date, occurrence.end_time))
+    return TeachingMeeting(tenant_id=offering.tenant_id, campus_id=offering.campus_id,
+        department_id=offering.department_id, faculty_user=faculty, meeting_date=occurrence.meeting_date,
+        starts_at=start, ends_at=end, scheduled_minutes=int((end - start).total_seconds() // 60),
+        occurrence_key=occurrence.occurrence_key, unresolved_coverage=False,
+        schedule_snapshot={"original_text": occurrence.source_schedule_text},
+        location_snapshot={"room": occurrence.source_room},
+        faculty_snapshot={"faculty_user_id": faculty.pk, "faculty_name": faculty.full_name},
+        sections_snapshot=[{"offering_id": o.pk, "course_code": o.course.code,
+            "course_title": o.course.title, "section_code": o.section.code, "section_name": o.section.name}
+            for o in occurrence.linked_offerings])
+
+
+def _materialize_record(actor, record, permission_code):
+    if record.meeting.pk or not record.normal_faculty:
+        return record
+    from .daily_encoding import materialize_daily_occurrence
+    meeting = materialize_daily_occurrence(actor=actor, occurrence=record.occurrence, permission_code=permission_code)
+    if require_confirmable_meeting_faculty(meeting).pk != record.faculty.pk or hasattr(meeting, "attendance_result"):
+        raise StaleAttendanceReview("Class evidence changed while publishing; reload the cutoff.")
+    return replace(record, meeting=meeting)
 
 
 @dataclass(frozen=True)
@@ -76,10 +110,14 @@ def _fingerprint(*, records, blockers):
         "records": [
             {
                 "occurrence_key": item.occurrence_key,
-                "meeting_id": item.meeting.pk,
+                "meeting_id": None if item.normal_faculty else item.meeting.pk,
                 "result_id": item.result.pk if item.result else None,
                 "result_revision": item.result.revision if item.result else None,
-                "faculty_user_id": item.result.faculty_user_id if item.result else item.closure.faculty_user_id,
+                "faculty_user_id": item.faculty.pk,
+                **({"normal_source": {"start": timezone.localtime(item.meeting.starts_at), "end": timezone.localtime(item.meeting.ends_at),
+                    "minutes": item.meeting.scheduled_minutes, "schedule": item.occurrence.source_schedule_text,
+                    "room": item.occurrence.source_room,
+                    "offerings": sorted(o.pk for o in item.occurrence.linked_offerings)}} if item.normal_faculty else {}),
                 "closure_id": item.closure.pk if item.closure else None,
                 "closure_revision": item.closure.revision if item.closure else None,
             }
@@ -227,19 +265,31 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
         )
     }
     matched_meeting_ids = set()
+    coverage_query = FacultyCoverage.objects.filter(offering_id__in=[o.pk for o in offerings]).select_related("faculty_user")
+    coverages = defaultdict(list)
+    for coverage in coverage_query.select_for_update() if lock else coverage_query:
+        coverages[coverage.offering_id].append(coverage)
     records = []
     for occurrence in occurrences:
         meeting = meetings_by_key.get(occurrence.occurrence_key) or meetings_by_signature.get(
             _occurrence_signature(occurrence)
         )
         if meeting is None:
+            at = timezone.make_aware(datetime.combine(occurrence.meeting_date, occurrence.start_time))
+            dated = [[c for c in coverages[o.pk] if c.effective_from <= at
+                and (c.effective_until is None or at < c.effective_until)] for o in occurrence.linked_offerings]
+            if dated and all(len(rows) == 1 for rows in dated) and len({rows[0].faculty_user_id for rows in dated}) == 1:
+                faculty = dated[0][0].faculty_user
+                records.append(CutoffRecord(occurrence.occurrence_key, _normal_meeting(occurrence, faculty),
+                    None, None, normal_faculty=faculty, occurrence=occurrence))
+                continue
             blockers.append(
                 CutoffBlocker(
-                    code="UNMATERIALIZED_OCCURRENCE",
+                    code="FACULTY_UNASSIGNED",
                     occurrence_key=occurrence.occurrence_key,
                     message=(
                         f"{occurrence.meeting_date} {occurrence.primary_offering.course.code} / "
-                        f"{occurrence.primary_offering.section.code} has not been encoded yet."
+                        f"{occurrence.primary_offering.section.code} has no reliable dated faculty assignment; excluded from faculty hours."
                     ),
                 )
             )
@@ -270,14 +320,14 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
             records.append(CutoffRecord(occurrence.occurrence_key, meeting, None, None, closure))
             continue
         if result is None or result.status == AttendanceResult.Status.UNVERIFIED:
-            blockers.append(
-                CutoffBlocker(
-                    code="UNVERIFIED_ATTENDANCE",
-                    meeting_id=meeting.pk,
-                    occurrence_key=occurrence.occurrence_key,
-                    message=f"{meeting.meeting_date} is still unverified; explicitly record an exception or confirm present.",
-                )
-            )
+            if result and (result.findings_snapshot or result.late_flag or result.early_flag
+                    or result.absent_without_notice_hours or result.absent_with_notice_hours or result.missed_periods):
+                blockers.append(CutoffBlocker(code="RESULT_REVISION_MISSING", meeting_id=meeting.pk,
+                    occurrence_key=occurrence.occurrence_key, message="Saved exception evidence needs its valid result revision."))
+            else:
+                records.append(CutoffRecord(occurrence.occurrence_key, meeting, result,
+                    revisions.get((result.pk, result.revision)) if result else None,
+                    normal_faculty=dated_faculty, occurrence=occurrence))
             continue
         if result.faculty_user_id is None:
             blockers.append(
@@ -352,6 +402,8 @@ def _review_cutoff(*, actor, tenant_id, campus_id, academic_year, term, start_da
     offering_map = {o.pk: o for o in offerings}
     decorated = []
     for blocker in blockers:
+        if not faculty_review and blocker.code == "FACULTY_UNASSIGNED":
+            continue
         meeting = meeting_map.get(blocker.meeting_id)
         occurrence = occurrence_map.get(blocker.occurrence_key)
         details = {}
@@ -409,6 +461,16 @@ def _publication_entry_values(record):
     adoption = getattr(meeting, "coverage_adoption", None)
     if adoption:
         meeting_snapshot["coverage_adoption"] = {"id": adoption.pk, "decision": adoption.decision_snapshot}
+    if record.normal_faculty:
+        meeting_snapshot["attendance_basis"] = "ASSIGNED_DEFAULT"
+        return {"occurrence_key": record.occurrence_key, "meeting": meeting,
+            "faculty_user": record.faculty, "result_revision": record.result_revision,
+            "meeting_date": meeting.meeting_date, "starts_at": meeting.starts_at, "ends_at": meeting.ends_at,
+            "scheduled_minutes": meeting.scheduled_minutes, "status": "PRESENT", "late_flag": False,
+            "late_minutes": 0, "early_flag": False, "early_minutes": 0,
+            "absent_without_notice_hours": 0, "absent_with_notice_hours": 0, "missed_periods": 0,
+            "meeting_snapshot": meeting_snapshot, "findings_snapshot": [],
+            "result_revision_number": record.result.revision if record.result else 0}
     if record.closure:
         closure = record.closure
         meeting_snapshot["closure"] = {
@@ -521,7 +583,8 @@ def publish_cutoff(
     publication.save()
     entries = []
     for record in review.records:
-        entry = AttendanceCutoffPublicationEntry(publication=publication, **_publication_entry_values(record))
+        entry = AttendanceCutoffPublicationEntry(publication=publication,
+            **_publication_entry_values(_materialize_record(actor, record, PUBLISH_PERMISSION)))
         entry.full_clean()
         entries.append(entry)
     AttendanceCutoffPublicationEntry.objects.bulk_create(entries)

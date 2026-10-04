@@ -58,12 +58,12 @@ class TermMonitoringTests(TestCase):
         UserPermission.objects.create(user=self.faculty, permission=Permission.objects.get(code=VIEW_PERMISSION),
                                       grant_type='ALLOW', tenant=self.tenant, campus=self.campus)
 
-    def test_unprepared_expected_hours_are_not_verified_and_get_is_read_only(self):
+    def test_unprepared_normal_hours_are_not_checker_verified_and_get_is_read_only(self):
         self.coverage()
         before = AttendanceResult.objects.count()
         report = self.report()
         row = report['rows'][0]
-        self.assertEqual((row['expected'], row['actual'], row['unverified']), (Decimal('1.00'), Decimal('0.00'), 1))
+        self.assertEqual((row['expected'], row['actual'], row['unverified']), (Decimal('1.00'), Decimal('1.00'), 0))
         self.assertIsNone(row['latest_verified'])
         self.assertTrue(report['provisional'])
         self.assertEqual(AttendanceResult.objects.count(), before)
@@ -75,18 +75,18 @@ class TermMonitoringTests(TestCase):
         self.assertContains(response, 'Provisional as of')
         self.assertFalse(AttendanceStaffNotice.objects.exists())
 
-    def test_prepared_unverified_stays_expected_only_and_cannot_publish(self):
+    def test_prepared_normal_is_publishable_without_checker_finding(self):
         meeting = self.meeting()
         row = self.report()['rows'][0]
-        self.assertEqual((row['expected'], row['actual'], row['unverified']), (Decimal('1'), Decimal('0'), 1))
+        self.assertEqual((row['expected'], row['actual'], row['unverified']), (Decimal('1'), Decimal('1'), 0))
         review = review_cutoff(actor=self.actor, tenant_id=self.tenant.pk, campus_id=self.campus.pk,
             academic_year=self.academic_year, term=self.term, start_date=meeting.meeting_date, end_date=meeting.meeting_date)
-        self.assertFalse(review.ready)
-        with self.assertRaises(ValidationError):
-            publish_cutoff(actor=self.actor, tenant_id=self.tenant.pk, campus_id=self.campus.pk,
-                academic_year=self.academic_year, term=self.term, start_date=meeting.meeting_date,
-                end_date=meeting.meeting_date, expected_fingerprint=review.fingerprint,
-                submission_key='unverified', publication_reason='')
+        self.assertTrue(review.ready, review.blockers)
+        publish_cutoff(actor=self.actor, tenant_id=self.tenant.pk, campus_id=self.campus.pk,
+            academic_year=self.academic_year, term=self.term, start_date=meeting.meeting_date,
+            end_date=meeting.meeting_date, expected_fingerprint=review.fingerprint,
+            submission_key='default-present', publication_reason='')
+        self.assertFalse(AttendanceResult.objects.exists())
 
     def test_malformed_unverified_publication_basic_is_provisional_not_final(self):
         meeting, publication = self._published_dtr_cutoff()
@@ -123,7 +123,7 @@ class TermMonitoringTests(TestCase):
         self.assertFalse(self.report(as_of=date(2025, 12, 31))['rows'])
         report = self.report(as_of=date(2026, 1, 12))
         self.assertEqual(report['rows'][0]['expected'], Decimal('2.00'))
-        self.assertEqual(report['rows'][0]['actual'], Decimal('0.00'))
+        self.assertEqual(report['rows'][0]['actual'], Decimal('2.00'))
         with patch('apps.faculty_attendance.monitoring.timezone.localdate', return_value=date(2026, 1, 5)):
             self.assertEqual(self.report(as_of=date(2026, 1, 12))['as_of'], date(2026, 1, 5))
         wrong = existing.AcademicYear.objects.create(tenant=self.tenant, code='OTHER', name='Other',
@@ -161,10 +161,7 @@ class TermMonitoringTests(TestCase):
     def test_conflicting_combined_coverage_stays_unresolved(self):
         meeting = self.meeting(offerings=[self.combined_offering])
         existing.TeachingMeeting.objects.filter(pk=meeting.pk).update(faculty_user=None, unresolved_coverage=True)
-        row = self.report()['rows'][0]
-        self.assertIsNone(row['faculty'])
-        self.assertEqual(row['actual'], 0)
-        self.assertEqual(row['unverified'], 1)
+        self.assertFalse(self.report()['rows'])
 
     def test_admin_leave_closure_and_logical_revisions_stay_separate(self):
         meeting, publication = self._published_dtr_cutoff(findings=[
@@ -371,7 +368,7 @@ class TermMonitoringTests(TestCase):
         save_closure(actor=self.actor, meeting=meeting, status='CLOSED', kind='SUSPENSION', pay_basis='PART_TIME', reason='', expected_revision=0)
         self.assertFalse(current_notices(actor=self.actor, tenant_id=self.tenant.pk, campus_id=self.campus.pk))
 
-    def test_prepared_morning_keeps_disjoint_afternoon_expected_unverified(self):
+    def test_prepared_morning_keeps_disjoint_afternoon_expected_default_present(self):
         self.offering.schedule_text = 'M 08:00-09:00; M 13:00-14:00'
         self.offering.save(update_fields=['schedule_text'])
         version = self.schedule(); self.coverage()
@@ -379,7 +376,7 @@ class TermMonitoringTests(TestCase):
                                           meeting_date=date(2026, 1, 5), offerings=[])
         self.result(morning)
         row = self.report()['rows'][0]
-        self.assertEqual((row['expected'], row['actual'], row['unverified']), (Decimal('2.00'), Decimal('1.00'), 1))
+        self.assertEqual((row['expected'], row['actual'], row['unverified']), (Decimal('2.00'), Decimal('2.00'), 0))
         self.assertEqual(len(row['details']), 2)
         self.assertIsNone(row['details'][1]['meeting_id'])
 

@@ -2,10 +2,24 @@
   <div class="card-header">{% if edit_item %}Correct entry R{{ edit_item.revision }}{% else %}Enter scheduled AC hours, leave credit or other deduction{% endif %}</div>
   <div class="card-body">
     <p class="small text-muted">Hours are decimal. For leave, choose VL/SL/EL and the dated deduction it offsets. Reason notes are optional; entry revisions are dated checker history, separate from immutable final DTR revisions.</p>
+    {% if can_admin_hours %}
+    <form method="post" action="{% url 'faculty_attendance:dtr_review' %}" data-dtr-ajax="admin_hours" data-admin-hours class="mb-4">
+      {% csrf_token %}<input type="hidden" name="action" value="admin_hours"><input type="hidden" name="publication" value="{{ publication.pk }}"><input type="hidden" name="faculty" value="{{ faculty.pk }}">{{ admin_hours_formset.management_form }}
+      <h3 class="h6">Scheduled admin hours — multiple dates</h3>
+      <p class="small">Edit saved dates here or add dates, then save all entries once. Remove a saved row to record a zero-hour revision; history stays intact.</p>
+      {{ admin_hours_formset.non_form_errors }}
+      <div data-admin-hours-rows>{% for entry in admin_hours_formset %}<div class="row g-2 mb-2" data-admin-hours-row>{{ entry.previous_id }}{{ entry.expected_revision }}<span hidden>{{ entry.DELETE }}</span><div class="col-sm-5"><label for="{{ entry.entry_date.id_for_label }}">Date</label>{{ entry.entry_date }}{{ entry.entry_date.errors }}</div><div class="col-sm-4"><label for="{{ entry.hours.id_for_label }}">Admin hours</label>{{ entry.hours }}{{ entry.hours.errors }}</div><div class="col-sm-3 align-self-end"><button type="button" class="btn btn-outline-danger" data-admin-hours-remove>Remove row</button></div><div class="col-12">{{ entry.non_field_errors }}</div></div>{% endfor %}</div>
+      <template data-admin-hours-template><div class="row g-2 mb-2" data-admin-hours-row>{{ admin_hours_formset.empty_form.previous_id }}{{ admin_hours_formset.empty_form.expected_revision }}<span hidden>{{ admin_hours_formset.empty_form.DELETE }}</span><div class="col-sm-5"><label for="{{ admin_hours_formset.empty_form.entry_date.id_for_label }}">Date</label>{{ admin_hours_formset.empty_form.entry_date }}</div><div class="col-sm-4"><label for="{{ admin_hours_formset.empty_form.hours.id_for_label }}">Admin hours</label>{{ admin_hours_formset.empty_form.hours }}</div><div class="col-sm-3 align-self-end"><button type="button" class="btn btn-outline-danger" data-admin-hours-remove>Remove row</button></div></div></template>
+      <button type="button" class="btn btn-sm btn-outline-success" data-admin-hours-add>Add row</button>
+      <details class="mt-3"><summary>Apply the same hours to multiple dates</summary><div class="d-flex flex-wrap gap-3 mt-2">{% for day in admin_dates %}<label><input type="checkbox" value="{{ day|date:'Y-m-d' }}" data-admin-hours-date> {{ day|date:'M j' }}</label>{% endfor %}</div><label class="mt-2">Same decimal hours <input type="number" step="0.01" min="0" data-admin-hours-same class="form-control"></label> <button type="button" class="btn btn-outline-success" data-admin-hours-apply>Apply to selected dates</button></details>
+      <p class="mt-3" aria-live="polite">Total entered admin hours: <strong data-admin-hours-total>0.00</strong></p><p data-admin-hours-message role="status" class="small"></p>
+      <button type="submit" class="btn btn-success">Save all entries</button>
+    </form>
+    {% endif %}
     <form method="post" action="{% url 'faculty_attendance:dtr_review' %}" class="row g-3" data-dtr-ajax="adjustment">
       {% csrf_token %}<input type="hidden" name="action" value="adjustment"><input type="hidden" name="publication" value="{{ publication.pk }}"><input type="hidden" name="faculty" value="{{ faculty.pk }}">{{ adjustment_form.previous_id }}{{ adjustment_form.expected_revision }}
       <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.entry_date.id_for_label }}">Date</label>{{ adjustment_form.entry_date }}<p class="dtr-date-hint mb-1">Allowed cutoff date: {{ publication.start_date }} to {{ publication.end_date }}.</p>{% if adjustment_form.entry_date.errors %}<div class="dtr-date-error" role="alert">{{ adjustment_form.entry_date.errors }}</div>{% endif %}</div>
-      <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.department.id_for_label }}">Department</label>{{ adjustment_form.department }}{{ adjustment_form.department.errors }}</div>
+      {{ adjustment_form.department }}
       <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.kind.id_for_label }}">Entry type</label>{{ adjustment_form.kind }}{{ adjustment_form.kind.errors }}</div>
       <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.hours.id_for_label }}">Decimal hours</label>{{ adjustment_form.hours }}{{ adjustment_form.hours.errors }}</div>
       <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.leave_type.id_for_label }}">Leave type (if leave)</label>{{ adjustment_form.leave_type }}{{ adjustment_form.leave_type.errors }}</div>

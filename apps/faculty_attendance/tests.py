@@ -1793,7 +1793,7 @@ class FacultyAttendanceFoundationTests(TestCase):
         )
         self.assertEqual(
             [item.code for item in self._review_meeting_cutoff(meeting).blockers],
-            ["UNVERIFIED_ATTENDANCE"],
+            [],
         )
         result = self._confirm_substituted_cutoff_meeting(meeting)
         review = self._review_meeting_cutoff(meeting)
@@ -2285,7 +2285,7 @@ class FacultyAttendanceFoundationTests(TestCase):
         self.assertContains(response, "Needs attention")
         self.assertNotContains(response, "Ready to encode")
 
-    def test_round_requires_deliberate_present_selection_and_preserves_invalid_exception_values(self):
+    def test_round_default_present_and_optional_note_preserve_invalid_exception_values(self):
         meeting = self.meeting()
         checking_round = CheckingRoundService.create(
             actor=self.actor,
@@ -2301,7 +2301,8 @@ class FacultyAttendanceFoundationTests(TestCase):
         initial = self.client.get(url)
         self.assertEqual(initial.status_code, 200)
         self.assertFalse(initial.context["rows"][0].present_selected)
-        self.assertContains(initial, "Leaving it blank keeps it unverified.")
+        self.assertContains(initial, "Present by default")
+        self.assertEqual(initial.context["rows"][0].display_status, "PRESENT")
         self.assertFalse(AttendanceResult.objects.exists())
 
         invalid = self.client.post(
@@ -2662,7 +2663,7 @@ class FacultyAttendanceFoundationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["counts"], {"unverified": 1, "present": 0, "exception": 1})
+        self.assertEqual(payload["counts"], {"unverified": 0, "present": 1, "exception": 1})
         self.assertIn('data-meeting-id="%s"' % first.pk, payload["row_html"])
         self.assertNotIn('data-meeting-id="%s"' % second.pk, payload["row_html"])
         result = AttendanceResult.objects.get(meeting=first)
@@ -2945,7 +2946,7 @@ class FacultyAttendanceFoundationTests(TestCase):
         self.assertEqual(len(other_date), 4)
         self.assertFalse(any(item.is_combined for item in other_date))
 
-    def test_dated_combined_cutoff_counts_one_unverified_then_one_verified_meeting(self):
+    def test_dated_combined_cutoff_counts_one_default_present_then_one_saved_present_meeting(self):
         version = self.schedule()
         self.coverage()
         self.coverage(self.combined_offering)
@@ -2989,7 +2990,8 @@ class FacultyAttendanceFoundationTests(TestCase):
         )
 
         self.assertFalse(issues)
-        self.assertEqual([item.code for item in unverified.blockers], ["UNVERIFIED_ATTENDANCE"])
+        self.assertTrue(unverified.ready, unverified.blockers)
+        self.assertEqual(len(unverified.records), 1)
         self.assertNotIn("UNMATERIALIZED_OCCURRENCE", {item.code for item in unverified.blockers})
         self.assertNotIn("RECORDED_MEETING_SOURCE_MISMATCH", {item.code for item in unverified.blockers})
         self.assertTrue(verified.ready)
@@ -3205,7 +3207,7 @@ class FacultyAttendanceFoundationTests(TestCase):
         self.assertFalse(TeachingMeeting.objects.exists())
         self.assertFalse(ScheduleVersion.objects.exists())
 
-    def test_cutoff_blocks_unmaterialized_occurrence_and_pending_source_change(self):
+    def test_cutoff_allows_assigned_unmaterialized_occurrence_but_blocks_pending_source_change(self):
         self.coverage()
         review = review_cutoff(
             actor=self.actor,
@@ -3216,8 +3218,8 @@ class FacultyAttendanceFoundationTests(TestCase):
             start_date=date(2026, 1, 5),
             end_date=date(2026, 1, 5),
         )
-        self.assertFalse(review.ready)
-        self.assertIn("UNMATERIALIZED_OCCURRENCE", {item.code for item in review.blockers})
+        self.assertTrue(review.ready, review.blockers)
+        self.assertEqual(len(review.records), 1)
         prepare_daily_encoding(
             actor=self.actor,
             offerings=[self.offering],
@@ -3449,7 +3451,7 @@ class FacultyAttendanceFoundationTests(TestCase):
             start_date=meeting.meeting_date, end_date=meeting.meeting_date,
         )
         before = review_cutoff(**values)
-        self.assertIn("UNVERIFIED_ATTENDANCE", {item.code for item in before.blockers})
+        self.assertTrue(before.ready, before.blockers)
         self.assertFalse(AttendanceResult.objects.filter(meeting=meeting).exists())
         closure = save_closure(
             actor=self.actor, meeting=meeting, status="CLOSED", kind="HOLIDAY",
@@ -3496,7 +3498,7 @@ class FacultyAttendanceFoundationTests(TestCase):
             academic_year=self.academic_year, term=self.term,
             start_date=meeting.meeting_date, end_date=meeting.meeting_date,
         )
-        self.assertIn("UNVERIFIED_ATTENDANCE", {item.code for item in reverted_review.blockers})
+        self.assertTrue(reverted_review.ready, reverted_review.blockers)
         with self.assertRaisesMessage(ValidationError, "changed"):
             save_closure(
                 actor=self.actor, meeting=meeting, status="CLOSED", kind="HOLIDAY",
@@ -4065,7 +4067,8 @@ class FacultyAttendanceFoundationTests(TestCase):
         department_start = html.index('name="department"')
         kind_start = html.index('name="kind"', department_start)
         hours_start = html.index('name="hours"', kind_start)
-        self.assertIn("errorlist", html[department_start:kind_start])
+        self.assertNotIn('<select name="department"', html)
+        self.assertNotIn("errorlist", html[department_start:kind_start])
         self.assertIn("errorlist", html[kind_start:hours_start])
 
         preview = preview_dtr(actor=self.actor, publication=publication, faculty=self.faculty)

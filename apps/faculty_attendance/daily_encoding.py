@@ -874,13 +874,13 @@ def inspect_daily_occurrences(occurrences):
     return deduplicate_daily_issues(issues)
 
 
-def _source_slot_for_occurrence(*, actor, occurrence):
+def _source_slot_for_occurrence(*, actor, occurrence, permission_code=ENCODE_PERMISSION):
     offering = CourseOffering.objects.select_for_update().select_related("tenant", "campus", "department").get(
         pk=occurrence.primary_offering.pk
     )
     require_attendance_permission(
         user=actor,
-        permission_code=ENCODE_PERMISSION,
+        permission_code=permission_code,
         tenant_id=offering.tenant_id,
         campus_id=offering.campus_id,
         department_id=offering.department_id,
@@ -939,19 +939,19 @@ def _source_slot_for_occurrence(*, actor, occurrence):
 
 
 @transaction.atomic
-def materialize_daily_occurrence(*, actor, occurrence):
+def materialize_daily_occurrence(*, actor, occurrence, permission_code=ENCODE_PERMISSION):
     """Create or reuse exactly one dated meeting from a recognizable academic source."""
     for offering in occurrence.linked_offerings:
         require_attendance_permission(
             user=actor,
-            permission_code=ENCODE_PERMISSION,
+            permission_code=permission_code,
             tenant_id=offering.tenant_id,
             campus_id=offering.campus_id,
             department_id=offering.department_id,
         )
     if occurrence.historical_meeting_id:
         return TeachingMeeting.objects.select_for_update().get(pk=occurrence.historical_meeting_id)
-    slot = _source_slot_for_occurrence(actor=actor, occurrence=occurrence)
+    slot = _source_slot_for_occurrence(actor=actor, occurrence=occurrence, permission_code=permission_code)
     existing = _existing_meeting_for_occurrence(schedule_slot=slot, occurrence=occurrence, lock=True)
     if existing is not None:
         return existing
@@ -960,7 +960,7 @@ def materialize_daily_occurrence(*, actor, occurrence):
         schedule_slot=slot,
         meeting_date=occurrence.meeting_date,
         offerings=[item for item in occurrence.linked_offerings if item.pk != occurrence.primary_offering.pk],
-        permission_code=ENCODE_PERMISSION,
+        permission_code=permission_code,
         occurrence_key=occurrence.occurrence_key,
         source_kind="COURSE_OFFERING",
     )

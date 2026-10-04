@@ -1037,8 +1037,6 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
         row.filter_time_key = f"{local_start.time().isoformat()}/{local_end.time().isoformat()}"
         row.filter_faculty_id = str(row.attributed_faculty.pk)
         row.filter_faculty_name = _last_first_name(row.attributed_faculty)
-        status = result.status if result else AttendanceResult.Status.UNVERIFIED
-        counts[status.lower()] += 1
         result_revision = result.revision if result else 0
         row.present_row_value = f"{row.meeting_id}:{result_revision}"
         row.expected_result_revision = result_revision
@@ -1050,15 +1048,24 @@ def _round_rows_context(request, checking_round, bound_form=None, selected_prese
         except ValidationError as exc:
             row.coverage_confirmable = False
             row.coverage_message = "; ".join(exc.messages)
+        status = result.status if result else (AttendanceResult.Status.PRESENT
+            if row.coverage_confirmable else AttendanceResult.Status.UNVERIFIED)
+        if result and status == "UNVERIFIED" and not (result.findings_snapshot or result.late_flag or result.early_flag
+                or result.absent_without_notice_hours or result.absent_with_notice_hours or result.missed_periods) and row.coverage_confirmable:
+            status = "PRESENT"
+        row.display_status = status
+        counts[status.lower()] += 1
         row.can_confirm_present = row.coverage_confirmable and (
             result is None or result.status == AttendanceResult.Status.UNVERIFIED
-        )
+        ) and status == AttendanceResult.Status.PRESENT
         row.present_selected = row.present_row_value in selected_present_rows
         row.present_note = request.POST.get(f"present_note_{row.meeting_id}", "") if request.method == "POST" else ""
         row.editing_is_correction = bool(result and result.revision)
         row.has_saved_absence = bool(result and any(f.get("finding_type") == "ABSENCE" for f in result.findings_snapshot))
         row.can_correct_result = can_correct
-        row.result_summary = _result_summary(result)
+        row.result_summary = (_result_summary(result) if result and result.status != AttendanceResult.Status.UNVERIFIED
+            else ["Present by default; no exception recorded"] if status == AttendanceResult.Status.PRESENT
+            else _result_summary(result))
         row.faculty_attribution_label = {
             FACULTY_ATTRIBUTION_RESULT: "Saved attendance attribution",
             FACULTY_ATTRIBUTION_SUBSTITUTION: "Explicit meeting substitute",
@@ -1119,7 +1126,7 @@ def _round_row_json_response(request, checking_round, meeting_id, *, bound_form=
         "row_html": row_html,
         "counts": counts,
         "result": {
-            "status": result.status if result else "UNVERIFIED",
+            "status": row.display_status,
             "revision": result.revision if result else 0,
             "summary": row.result_summary,
         },
@@ -1187,7 +1194,11 @@ def round_view(request, public_id):
                         correction_revision=cleaned["expected_revision"] if existing and existing.revision else None,
                     )
                     if observation is None:
-                        bound_form.add_error(None, "Blank findings remain unverified; no result was created.")
+                        if is_ajax:
+                            return _round_row_json_response(request, checking_round, cleaned["meeting_id"],
+                                message="No exception recorded. This assigned class remains Present by default.")
+                        messages.success(request, "No exception recorded. This assigned class remains Present by default.")
+                        return redirect("faculty_attendance:round", public_id=public_id)
                     else:
                         result = AttendanceResultService.select_observation(
                             actor=request.user,

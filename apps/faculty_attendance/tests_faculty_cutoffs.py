@@ -21,7 +21,7 @@ from .dtr import final_dtr_departments, finalize_dtr, preview_dtr, save_adjustme
 from .dtr_intervals import save_mixed_decision
 from .faculty_cutoffs import publish_faculty_cutoffs, review_faculty_cutoff
 from .faculty_cutoff_views import finalize_ready_faculty, processing_rows
-from .models import AttendanceCutoffPublication, AttendanceResult, FacultyDTR, FacultyCoverage
+from .models import AttendanceCutoffPublication, AttendanceResult, FacultyDTR, FacultyCoverage, CoverageReconciliation
 from .observations import AttendanceResultService, CheckingRoundService, ObservationService
 from .permissions import PUBLISH_FACULTY_PERMISSION, DTR_FINALIZE_PERMISSION, DTR_PRINT_PERMISSION, DTR_VIEW_PERMISSION, VIEW_PERMISSION
 from .services import MeetingService, SubstitutionService, _meeting_snapshot
@@ -85,6 +85,7 @@ class FacultyCutoffTests(TestCase):
 
     def test_ready_faculty_publishes_and_finalizes_beside_known_blocker(self):
         first, second = self.pair()
+        self.block_replacement()
         self.assertTrue(self.slice().ready)
         self.assertFalse(self.slice(self.replacement).ready)
         self.assertFalse(review_cutoff(actor=self.actor, **self.scope()).ready)
@@ -98,20 +99,28 @@ class FacultyCutoffTests(TestCase):
 
     def test_own_blocker_rejects_publication_atomically(self):
         self.pair()
+        self.block_replacement()
         before = AttendanceCutoffPublication.objects.count()
         with self.assertRaises(ValidationError):
             self.publish(self.replacement)
         self.assertEqual(AttendanceCutoffPublication.objects.count(), before)
 
-    def test_unique_unmaterialized_occurrence_blocks_only_dated_candidate(self):
+    def test_unique_assigned_unmaterialized_occurrence_is_ready_without_encoding(self):
         self.coverage()
         self.coverage(offering=self.combined_offering, faculty=self.replacement)
         prepare_daily_encoding(actor=self.actor, offerings=[self.combined_offering], academic_year=self.academic_year,
             term=self.term, meeting_date=date(2026, 1, 5))
         self.confirm(fixtures.TeachingMeeting.objects.get())
-        self.assertIn("UNMATERIALIZED_OCCURRENCE", {b.code for b in self.slice().blockers})
+        self.assertTrue(self.slice().ready)
+        self.assertEqual(len(self.slice().records), 1)
         self.assertTrue(self.slice(self.replacement).ready)
         self.publish(self.replacement)
+
+    def block_replacement(self):
+        return CoverageReconciliation.objects.create(tenant=self.tenant, campus=self.campus,
+            offering=self.combined_offering, department=self.department, event_type="DIRECT_UPDATE",
+            source_reference="synthetic-real-conflict", effective_at=self.aware(2026, 1, 5),
+            proposed_faculty=self.replacement, created_by=self.actor)
 
     def test_missing_attribution_stays_in_queue_without_blocking_known_faculty(self):
         self.coverage()
@@ -209,6 +218,7 @@ class FacultyCutoffTests(TestCase):
 
     def test_stale_selection_rejected_and_mixed_selection_rolls_back(self):
         first, _ = self.pair()
+        self.block_replacement()
         stale = self.slice().fingerprint
         result = AttendanceResult.objects.get(meeting=first)
         AttendanceResultService.correct_early_dismissal(actor=self.actor, result=result,

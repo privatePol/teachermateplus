@@ -1,0 +1,240 @@
+"""Cutoff-first DTR selection, immutable print versions and automatic scope."""
+from copy import deepcopy
+from datetime import date
+from unittest.mock import patch
+
+from django.test import Client, TestCase
+from django.urls import reverse
+
+from apps.rbac.models import Permission, Role, UserPermission, UserRole
+from . import tests_faculty_cutoffs as fixtures
+from .daily_encoding import prepare_daily_encoding
+from .dtr import save_adjustment
+from .dtr_views import _cutoff_key
+from .models import AttendanceCutoffPublication, DTRAdjustment, FacultyDTR, TeachingMeeting
+from .permissions import DTR_VIEW_PERMISSION, DTR_PRINT_PERMISSION, DTR_EDIT_PERMISSION
+
+
+class DTRSelectionTests(TestCase):
+    permission_codes = fixtures.FacultyCutoffTests.permission_codes
+    setUpTestData = classmethod(fixtures.FacultyCutoffTests.setUpTestData.__func__)
+    setUp = fixtures.FacultyCutoffTests.setUp
+    aware = fixtures.FacultyCutoffTests.aware
+    coverage = fixtures.FacultyCutoffTests.coverage
+    scope = fixtures.FacultyCutoffTests.scope
+    review = fixtures.FacultyCutoffTests.review
+    slice = fixtures.FacultyCutoffTests.slice
+    pair = fixtures.FacultyCutoffTests.pair
+    confirm = fixtures.FacultyCutoffTests.confirm
+    publish = fixtures.FacultyCutoffTests.publish
+    final = fixtures.FacultyCutoffTests.final
+
+    def get_page(self, **query):
+        self.client.force_login(self.actor)
+        return self.client.get(reverse("faculty_attendance:dtr_review"), query)
+
+    def test_one_cutoff_contains_all_published_faculties_and_legacy_stale_pair_recovers(self):
+        self.pair(confirm_second=True)
+        first = self.publish()
+        second = self.publish(self.replacement, key="second")
+        response = self.get_page(publication=second.pk, faculty=self.faculty.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["faculty"], self.faculty)
+        self.assertEqual(response.context["publication"], first)
+        self.assertEqual(len(response.context["cutoffs"]), 1)
+        self.assertEqual({r["faculty"].pk for r in response.context["summary"]}, {self.faculty.pk, self.replacement.pk})
+        response = self.get_page(cutoff=_cutoff_key(first), faculty=self.replacement.pk)
+        self.assertEqual(response.context["publication"], second)
+        # POST never silently changes the submitted faculty/publication pair.
+        response = self.client.post(reverse("faculty_attendance:dtr_review"), {
+            "publication": second.pk, "faculty": self.faculty.pk, "action": "adjustment",
+            "entry_date": "2026-01-05", "kind": "OTHER", "hours": "0.25"})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(DTRAdjustment.objects.exists())
+
+    def test_cutoff_change_resets_stale_faculty_and_ajax_refreshes_entire_workspace(self):
+        self.pair(confirm_second=True)
+        first = self.publish()
+        self.publish(self.replacement, key="other")
+        self.combined_offering.attendance_coverages.update(effective_until=self.aware(2026, 1, 6))
+        prepare_daily_encoding(actor=self.actor, offerings=[self.offering], academic_year=self.academic_year,
+            term=self.term, meeting_date=date(2026, 1, 12))
+        self.confirm(TeachingMeeting.objects.get(meeting_date=date(2026, 1, 12)))
+        with patch.object(self, "scope", return_value={**self.scope(), "start_date": date(2026, 1, 12), "end_date": date(2026, 1, 12)}):
+            later = self.publish(key="later-cutoff")
+        response = self.get_page(cutoff=_cutoff_key(later), faculty=self.replacement.pk, review="1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["faculty"], self.faculty)
+        response = self.client.get(reverse("faculty_attendance:dtr_review"), {
+            "cutoff": _cutoff_key(first), "partial": "selection", "reset_faculty": "1"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn('id="cutoff-select"', payload["workspace_html"])
+        self.assertIn(self.replacement.full_name, payload["workspace_html"])
+        self.assertEqual(payload["cutoff"], _cutoff_key(first))
+
+    def test_latest_final_print_and_previous_version_history_use_saved_values(self):
+        self.pair()
+        publication = self.publish()
+        first = self.final(publication)
+        saved_first = deepcopy(first.snapshot)
+        save_adjustment(actor=self.actor, publication=publication, faculty=self.faculty,
+            department=self.department, entry_date=publication.start_date, kind="OTHER", hours="0.25", reason="")
+        second = self.final(publication)
+        save_adjustment(actor=self.actor, publication=publication, faculty=self.faculty,
+            department=self.department, entry_date=publication.start_date, kind="OTHER", hours="0.25", reason="")
+        response = self.get_page(cutoff=_cutoff_key(publication), faculty=self.faculty.pk)
+        self.assertEqual(response.context["final"], second)
+        self.assertEqual(response.context["displayed_final"], second)
+        self.assertEqual(response.context["displayed_snapshot"]["net_payable_hours"], "0.75")
+        previous = self.get_page(cutoff=_cutoff_key(publication), faculty=self.faculty.pk, version="1")
+        self.assertEqual(previous.context["displayed_final"], first)
+        self.assertEqual(previous.context["displayed_snapshot"]["net_payable_hours"], "1.00")
+        self.assertEqual(self.get_page(cutoff=_cutoff_key(publication), faculty=self.faculty.pk, version="999").status_code, 404)
+        self.assertContains(response, "Print final DTR R2 (latest)")
+        self.assertContains(response, "Print saved R1")
+        summary = self.client.get(reverse("faculty_attendance:dtr_summary"), {"cutoff": _cutoff_key(publication)})
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual(summary.context["rows"][0]["print_snapshot"]["net_payable_hours"], "0.75")
+        self.assertContains(summary, "Changes awaiting review")
+        for final, amount in ((first, "1.00"), (second, "0.75")):
+            printed = self.client.get(reverse("faculty_attendance:dtr_print", args=[final.public_id]))
+            self.assertEqual(printed.context["snapshot"]["net_payable_hours"], amount)
+        first.refresh_from_db()
+        self.assertEqual(first.snapshot, saved_first)
+
+    def test_cutoff_summary_aggregates_latest_publication_for_each_faculty(self):
+        self.pair(confirm_second=True)
+        first = self.publish()
+        self.publish(self.replacement, key="second")
+        self.client.force_login(self.actor)
+        response = self.client.get(reverse("faculty_attendance:dtr_summary"), {"cutoff": _cutoff_key(first)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({r["faculty"].pk for r in response.context["rows"]}, {self.faculty.pk, self.replacement.pk})
+
+    def test_department_is_derived_on_create_and_correction_and_spoof_is_ignored(self):
+        self.pair()
+        publication = self.publish()
+        self.client.force_login(self.actor)
+        data = {"publication": publication.pk, "faculty": self.faculty.pk, "action": "adjustment",
+            "entry_date": "2026-01-05", "kind": "OTHER", "hours": "0.25", "reason": ""}
+        response = self.client.post(reverse("faculty_attendance:dtr_review"), data)
+        self.assertEqual(response.status_code, 302)
+        entry = DTRAdjustment.objects.get()
+        self.assertEqual(entry.department_id, self.department.pk)
+        data.update(previous_id=entry.pk, expected_revision=entry.revision, hours="0.50", department=self.other_department.pk)
+        response = self.client.post(reverse("faculty_attendance:dtr_review"), data, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertTrue(response.json()["ok"])
+        revised = DTRAdjustment.objects.get(revision=2)
+        self.assertEqual(revised.department_id, entry.department_id)
+        self.assertEqual(revised.supersedes_id, entry.pk)
+        self.assertNotIn('<select name="department"', response.json()["faculty_html"])
+
+    def test_missing_ac_retains_values_and_dated_teaching_resolves_department(self):
+        self.pair()
+        publication = self.publish()
+        self.client.force_login(self.actor)
+        data = {"publication": publication.pk, "faculty": self.faculty.pk, "action": "adjustment",
+            "entry_date": "2026-01-05", "kind": "ADMIN", "hours": "0.75", "reason": "Retained"}
+        response = self.client.post(reverse("faculty_attendance:dtr_review"), data, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("no active AC assignment", response.json()["faculty_html"])
+        self.assertIn("Retained", response.json()["faculty_html"])
+        data["kind"] = "OTHER"
+        # Dated class evidence narrows a wider faculty scope without asking the checker.
+        response = self.client.post(reverse("faculty_attendance:dtr_review"), data, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(DTRAdjustment.objects.get().department_id, self.department.pk)
+
+    def test_general_role_without_workload_is_hidden_but_scoped_ac_is_available(self):
+        role = Role.objects.create(code="AC", name="Synthetic AC")
+        membership = UserRole.objects.create(user=self.faculty, role=role,
+            tenant=self.tenant, campus=self.campus, department=self.department)
+        empty = {**self.scope(), "start_date": date(2026, 1, 6), "end_date": date(2026, 1, 6)}
+        with patch.object(self, "scope", return_value=empty):
+            publication = self.publish()
+        # Retain a legacy empty publication, but do not invent work from a general role.
+        membership.tenant = membership.campus = membership.department = None
+        membership.save()
+        response = self.get_page(publication=publication.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["summary"])
+        self.assertIsNone(response.context["faculty"])
+        self.assertNotContains(response, f'<option value="{self.faculty.pk}">')
+        self.assertEqual(AttendanceCutoffPublication.objects.count(), 1)
+        self.assertEqual(self.client.post(reverse("faculty_attendance:dtr_review"), {
+            "publication": publication.pk, "action": "adjustment"}).status_code, 403)
+        self.assertFalse(DTRAdjustment.objects.exists())
+        membership.tenant, membership.campus, membership.department = self.tenant, self.campus, self.department
+        membership.save()
+        response = self.get_page(publication=publication.pk)
+        self.assertEqual([r["faculty"].pk for r in response.context["summary"]], [self.faculty.pk])
+
+    def test_valid_pending_publication_faculty_has_actionable_state_not_404(self):
+        self.pair()
+        first = self.publish()
+        response = self.get_page(cutoff=_cutoff_key(first), faculty=self.replacement.pk, review="1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["faculty"], self.replacement)
+        self.assertTrue(response.context["pending_publication"])
+        self.assertContains(response, "Open faculty cutoff processing")
+        self.assertNotContains(response, "Finalize DTR hours")
+        summary = self.client.get(reverse("faculty_attendance:dtr_summary"), {"cutoff": _cutoff_key(first)})
+        self.assertEqual(summary.status_code, 200)
+        self.assertContains(summary, "Awaiting attendance publication")
+
+    def test_superseded_publication_get_resolves_latest_but_post_remains_rejected(self):
+        first, _ = self.pair()
+        publication = self.publish()
+        from .observations import AttendanceResultService
+        from .models import AttendanceResult
+        result = AttendanceResult.objects.get(meeting=first)
+        AttendanceResultService.correct_early_dismissal(actor=self.actor, result=result,
+            expected_revision=result.revision, minutes=10, reason="Synthetic corrected finding")
+        newest = self.publish(key="newest")
+        response = self.get_page(publication=publication.pk, faculty=self.faculty.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["publication"], newest)
+        self.assertEqual(self.client.post(reverse("faculty_attendance:dtr_review"), {
+            "publication": publication.pk, "faculty": self.faculty.pk, "action": "adjustment"}).status_code, 404)
+
+    def test_selection_and_print_scope_and_direct_denies(self):
+        self.pair()
+        publication = self.publish()
+        final = self.final(publication)
+        self.client.force_login(self.actor)
+        for code in (DTR_VIEW_PERMISSION, DTR_PRINT_PERMISSION, DTR_EDIT_PERMISSION):
+            deny = UserPermission.objects.create(user=self.actor, permission=Permission.objects.get(code=code), grant_type="DENY")
+            if code == DTR_VIEW_PERMISSION:
+                response = self.get_page(cutoff=_cutoff_key(publication), faculty=self.faculty.pk)
+                self.assertEqual(response.status_code, 403)
+            elif code == DTR_PRINT_PERMISSION:
+                viewed = self.get_page(cutoff=_cutoff_key(publication), faculty=self.faculty.pk)
+                self.assertEqual(viewed.context["displayed_final"], final)
+                self.assertFalse(viewed.context["displayed_can_print"])
+                self.assertNotContains(viewed, "Print saved DTR")
+                self.assertEqual(self.client.get(reverse("faculty_attendance:dtr_summary"), {"cutoff": _cutoff_key(publication)}).status_code, 403)
+                self.assertEqual(self.client.get(reverse("faculty_attendance:dtr_print", args=[final.public_id])).status_code, 403)
+            else:
+                response = self.client.post(reverse("faculty_attendance:dtr_review"), {"publication": publication.pk,
+                    "faculty": self.faculty.pk, "action": "adjustment", "entry_date": "2026-01-05", "kind": "OTHER", "hours": "1"})
+                self.assertEqual(response.status_code, 403)
+            deny.delete()
+        self.assertEqual(self.get_page(cutoff="999:999:2026-01-05:2026-01-05").status_code, 404)
+        self.assertFalse(DTRAdjustment.objects.exists())
+
+    def test_automatic_department_entry_still_requires_csrf(self):
+        self.pair()
+        publication = self.publish()
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.actor)
+        url = reverse("faculty_attendance:dtr_review")
+        data = {"publication": publication.pk, "faculty": self.faculty.pk, "action": "adjustment",
+            "entry_date": "2026-01-05", "kind": "OTHER", "hours": "0.25"}
+        self.assertEqual(client.post(url, data).status_code, 403)
+        self.assertFalse(DTRAdjustment.objects.exists())
+        self.assertEqual(client.get(url, {"cutoff": _cutoff_key(publication)}).status_code, 200)
+        data["csrfmiddlewaretoken"] = client.cookies["csrftoken"].value
+        self.assertEqual(client.post(url, data).status_code, 302)
+        self.assertEqual(DTRAdjustment.objects.get().department_id, self.department.pk)

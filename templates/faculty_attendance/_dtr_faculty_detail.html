@@ -1,15 +1,32 @@
+{% if displayed_final %}
+<section class="card att-dtr-card mb-3" id="saved-faculty-dtr-card" tabindex="-1" aria-labelledby="saved-dtr-title">
+  <div class="card-header" id="saved-dtr-title">{{ faculty.full_name }} &middot; Saved DTR R{{ displayed_final.revision }}{% if displayed_final == final %} (latest){% else %} (previous version){% endif %}</div>
+  <div class="card-body">
+    <form method="get" action="{% url 'faculty_attendance:dtr_review' %}" class="d-flex flex-wrap align-items-end gap-2 mb-3">
+      <input type="hidden" name="cutoff" value="{{ selected_cutoff }}"><input type="hidden" name="faculty" value="{{ faculty.pk }}">
+      <div><label for="dtr-version-select" class="form-label">Saved DTR version (optional)</label><select class="form-select" id="dtr-version-select" name="version">{% for version in final_versions %}<option value="{{ version.revision }}"{% if version == displayed_final %} selected{% endif %}>R{{ version.revision }}{% if version == final %} &mdash; latest{% else %} &mdash; previous{% endif %}</option>{% endfor %}</select></div>
+      <button class="btn btn-outline-success">View saved version</button>
+      {% if displayed_can_print %}<a class="btn btn-success" href="{% url 'faculty_attendance:dtr_print' displayed_final.public_id %}" target="_blank" rel="noopener noreferrer">Print saved DTR R{{ displayed_final.revision }}</a>{% endif %}
+    </form>
+    <p class="small text-muted">This is the immutable saved DTR. Current checker changes below do not change these hours until a new revision is finalized.</p>
+    <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Date / class</th><th>Attendance</th><th>Teaching</th><th>Admin</th><th>Deductions</th><th>Leave</th></tr></thead><tbody>{% for line in displayed_snapshot.lines %}<tr><td>{{ line.date }} &middot; {{ line.label }}{% if line.time %}<br>{{ line.time }}{% endif %}</td><td>{{ line.status }}</td><td>{{ line.teaching }}</td><td>{{ line.admin }}</td><td>A {{ line.a }} / N {{ line.n }} / L {{ line.late }} / E {{ line.early }} / Other {{ line.other }}</td><td>{{ line.leave }}</td></tr>{% empty %}<tr><td colspan="6">No dated teaching or office-hour rows in this saved revision.</td></tr>{% endfor %}</tbody></table></div>
+    <p><strong>Basic hours:</strong> {{ displayed_snapshot.basic_hours }} &middot; <strong>Deductions:</strong> {{ displayed_snapshot.gross_deductions }} &middot; <strong>Leave:</strong> {{ displayed_snapshot.leave_credit }} &middot; <strong>Net payable hours:</strong> {{ displayed_snapshot.net_payable_hours }}</p>
+  </div>
+</section>
+{% endif %}
 <section class="card att-dtr-card mb-3" id="faculty-dtr-card" tabindex="-1" aria-labelledby="faculty-dtr-title">
 {% if not preview %}
   <div class="card-header" id="faculty-dtr-title">Faculty DTR</div>
-  <div class="card-body text-muted">Select a faculty member from the checker cutoff summary.</div>
+  <div class="card-body text-muted">{% if pending_publication %}{{ faculty.full_name }} has attendance in this cutoff, but it has not been published yet. <a href="{% url 'faculty_attendance:faculty_cutoff_review' %}?academic_year={{ publication.academic_year_id }}&amp;term={{ publication.term_id }}&amp;start_date={{ publication.start_date|date:'Y-m-d' }}&amp;end_date={{ publication.end_date|date:'Y-m-d' }}">Open faculty cutoff processing</a>, publish this faculty's ready attendance, then return here to review the DTR.{% else %}Select a faculty member from the checker cutoff summary.{% endif %}</div>
 {% else %}
   <div class="card-header d-flex justify-content-between flex-wrap gap-2">
-    <span id="faculty-dtr-title">{{ faculty.full_name }} &middot; Daily DTR</span>
+    <span id="faculty-dtr-title">{{ faculty.full_name }} &middot; {% if final %}Current calculation / changes for review{% else %}Daily DTR{% endif %}</span>
     <span class="badge text-bg-{% if final %}success{% else %}secondary{% endif %}">{% if final %}Final DTR R{{ final.revision }}{% else %}Not finalized{% endif %}</span>
-    {% if final and can_print %}<a class="btn btn-sm btn-success" href="{% url 'faculty_attendance:dtr_print' final.public_id %}" target="_blank" rel="noopener noreferrer">Print final DTR R{{ final.revision }}</a>{% endif %}
+    {% if final and can_print %}<a class="btn btn-sm btn-success" href="{% url 'faculty_attendance:dtr_print' final.public_id %}" target="_blank" rel="noopener noreferrer">Print final DTR R{{ final.revision }} (latest)</a>{% endif %}
   </div>
   <div class="card-body">
     <p class="text-muted small">Scheduled class hours remain visible even when missed. Linked sections appear once. Entry revisions track a dated checker item; Final DTR revisions are separate immutable cutoff snapshots.</p>
+    {% if previous_final_versions %}<details class="mb-3"><summary>Previous final DTR versions</summary><ul class="mt-2">{% for version in previous_final_versions %}<li>Final DTR R{{ version.revision }} &middot; {{ version.finalized_at }}{% if version.can_print_dtr %} &middot; <a href="{% url 'faculty_attendance:dtr_print' version.public_id %}" target="_blank" rel="noopener noreferrer">Print saved R{{ version.revision }}</a>{% endif %}</li>{% endfor %}</ul></details>{% endif %}
     {% if needs_refinalization %}<div class="alert alert-warning" role="alert">A checker entry changed after Final DTR R{{ final.revision }}. That saved final stays unchanged. Review this draft and finalize a new DTR revision when ready.</div>{% endif %}
     {% if page_notice %}<div class="alert alert-warning" role="status">{{ page_notice }}</div>{% endif %}{% if already_final %}<div class="alert alert-info" role="status">This DTR is already final at the reviewed version. Final DTR R{{ final.revision }} is current; Finalize becomes available after a reviewable DTR change.</div>{% endif %}
     {% for blocker in preview.blockers %}<div class="att-dtr-problem" role="alert">{{ blocker }}</div>{% endfor %}

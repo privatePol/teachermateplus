@@ -47,7 +47,7 @@ class AttendanceRoundUITests(TestCase):
         response = self.client.get(url)
         self.assertEqual([row.meeting_id for row in response.context["rows"]], [ready.pk])
         self.assertEqual([row.meeting_id for row in response.context["index_rows"]], [ready.pk])
-        self.assertEqual(response.context["counts"], {"unverified": 1, "present": 0, "exception": 0})
+        self.assertEqual(response.context["counts"], {"unverified": 0, "present": 1, "exception": 0})
         self.assertEqual([row.meeting_id for row in response.context["unresolved_rows"]], [unresolved.pk])
         self.assertNotContains(response, f'id="meeting-row-{unresolved.pk}"')
         self.assertNotContains(response, f'href="#meeting-row-{unresolved.pk}"')
@@ -157,7 +157,7 @@ class AttendanceRoundUITests(TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn(f'id="meeting-row-{morning.pk}"', payload["row_html"])
         self.assertIn('tabindex="-1"', payload["row_html"])
-        self.assertEqual(payload["counts"], {"unverified": 1, "present": 0, "exception": 1})
+        self.assertEqual(payload["counts"], {"unverified": 0, "present": 1, "exception": 1})
 
     def test_filter_options_use_sorted_dated_names_and_deduplicate_schedule_across_dates(self):
         self.faculty.first_name, self.faculty.last_name = "Zoe", "Zulu"

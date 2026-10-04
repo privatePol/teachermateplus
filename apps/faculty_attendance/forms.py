@@ -437,6 +437,43 @@ class DTRAdjustmentForm(forms.Form):
         return values
 
 
+class DTRAdminHoursRowForm(forms.Form):
+    entry_date = forms.DateField(label="Date", widget=forms.DateInput(attrs={"type": "date", "class": "form-control"}))
+    hours = forms.DecimalField(label="Admin hours", min_value=0, max_digits=8, decimal_places=2,
+        widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}))
+    previous_id = forms.IntegerField(required=False, widget=forms.HiddenInput)
+    expected_revision = forms.IntegerField(required=False, min_value=0, widget=forms.HiddenInput)
+
+    def __init__(self, *args, cutoff_start_date=None, cutoff_end_date=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cutoff_start_date, self.cutoff_end_date = cutoff_start_date, cutoff_end_date
+
+    def clean_entry_date(self):
+        value = self.cleaned_data["entry_date"]
+        if not self.cutoff_start_date <= value <= self.cutoff_end_date:
+            raise forms.ValidationError("Date must be within this cutoff.")
+        return value
+
+
+class DTRAdminHoursFormSet(forms.BaseFormSet):
+    def clean(self):
+        if any(self.errors):
+            return
+        dates = set()
+        for form in self.forms:
+            values = form.cleaned_data
+            if not values or values.get("DELETE"):
+                continue
+            value = values["entry_date"]
+            if value in dates:
+                form.add_error("entry_date", "This date appears twice. Use one dated admin-hours row.")
+            dates.add(value)
+
+
+AdminHoursFormSet = forms.formset_factory(DTRAdminHoursRowForm, formset=DTRAdminHoursFormSet,
+    extra=1, can_delete=True, max_num=366, validate_max=True, absolute_max=400)
+
+
 class DTRAdjustmentRemovalForm(forms.Form):
     entry_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)

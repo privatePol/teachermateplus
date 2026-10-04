@@ -29,7 +29,7 @@
       <h1>Monthly Attendance Checklist</h1>
       <div class="print-scope"><span><strong>Academic Year:</strong> {{ selected_academic_year.code }}</span><span><strong>Semester:</strong> {{ selected_term.name }}</span><span><strong>Month:</strong> {{ selected_month|date:"F Y" }}</span><span><strong>Day Group:</strong> {{ selected_day_group_label }}</span></div>
     </header>
-    <div class="paper-legend"><strong>Legend:</strong> <span>A &mdash; absent without notice</span><span>N &mdash; absent with notice</span><span>L &mdash; late; record minutes</span><span>E &mdash; early dismissal; record minutes</span><span>L and E may be recorded together.</span><span>Blank applicable cells remain unverified.</span><span>N/A &mdash; this row does not apply on this date.</span></div>
+    <div class="paper-legend"><strong>Legend:</strong> <span>A &mdash; absent without notice</span><span>N &mdash; absent with notice</span><span>L &mdash; late; record minutes</span><span>E &mdash; early dismissal; record minutes</span><span>L and E may be recorded together.</span><span>Blank applicable cells mean Present for assigned classes unless an exception or closure is recorded.</span><span>N/A &mdash; this row does not apply on this date.</span></div>
     {% if corrections %}<div class="review-notice"><strong>Review required:</strong> The following offerings need schedule correction and are not printed as verified rows: {% for offering, reason in corrections %}{{ offering.course.code }}/{{ offering.section.code }} &mdash; {{ reason }}{% if not forloop.last %}; {% endif %}{% endfor %}</div>{% endif %}
     {% for batch in date_batches %}{% with date_columns=batch %}
     {% if not forloop.first %}<div style="break-before:page;page-break-before:always"></div>{% endif %}

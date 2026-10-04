@@ -11,7 +11,7 @@
   @media print {.faculty-cutoff form,.faculty-cutoff a {display:none}.faculty-cutoff header,.faculty-cutoff .card-header {background:white!important;color:black!important}}
 </style>
 <div class="container-fluid py-2 faculty-cutoff">
-  <header class="mb-3"><h1 class="h3">Faculty cutoff processing</h1><p class="mb-0">Review each faculty's classes, publish ready attendance, then review and finalize their DTR. Unassigned classes stay in a separate list and do not hold up other faculty.</p></header>
+  <header class="mb-3"><h1 class="h3">Faculty cutoff processing</h1><p class="mb-0">Assigned scheduled classes are Present by default. Record exceptions only, publish ready attendance, then review and finalize their DTR. Unassigned classes stay in a separate list and do not hold up other faculty.</p></header>
   <section class="card mb-3"><div class="card-header">Select cutoff</div><div class="card-body"><form method="get" data-attendance-processing="Reviewing faculty cutoff. Please wait." class="row g-3">
     {% for field in form %}<div class="col-md-3"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}
     <div class="col-12">{{ form.non_field_errors }}<button class="btn btn-outline-success">Review faculty cutoff</button></div>
@@ -21,7 +21,7 @@
   <div class="alert alert-light border" role="status">Ready to publish: <strong>{{ counts.ready }}</strong> | Pending faculty: <strong>{{ counts.pending }}</strong> | Published / review DTR: <strong>{{ counts.published }}</strong> | Finalized: <strong>{{ counts.finalized }}</strong> | Unassigned / unresolved offerings: <strong>{{ counts.unassigned }}</strong></div>
   <section class="card mb-3"><div class="card-header">Faculty readiness — {{ rows|length }}</div><div class="card-body"><div class="table-responsive">
     <table class="table table-sm"><thead><tr><th>Faculty</th><th>Status</th><th>Publication / final</th><th>Blockers and next action</th></tr></thead><tbody>
-    {% for row in rows %}<tr><td>{{ row.slice.faculty.full_name }}<br><small>{{ row.slice.records|length }} verified occurrence(s)</small></td><td>{{ row.status }}</td>
+    {% for row in rows %}<tr><td>{{ row.slice.faculty.full_name }}<br><small>{{ row.slice.records|length }} attributed occurrence(s)</small></td><td>{{ row.status }}</td>
       <td>{% if row.publication %}Published v{{ row.publication.version }}{% endif %}{% if row.final %}<br>Final revision {{ row.final.revision }}{% endif %}</td>
       <td>{% for warning in row.warnings %}<div class="blocker"><strong>{{ warning.blocker.details.date }}{% if warning.blocker.details.start %} {{ warning.blocker.details.start|time:"g:i A" }}–{{ warning.blocker.details.end|time:"g:i A" }} Manila{% endif %}</strong>
         {% for section in warning.blocker.details.sections %}<div>{{ section.course_code }} — {{ section.course_title }} ({{ section.section_code }})</div>{% endfor %}
