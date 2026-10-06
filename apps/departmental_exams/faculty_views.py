@@ -48,6 +48,8 @@ from .contribution_selectors import ContributionSelector
 from .contribution_services import (
     ContributionDifficultyDeficient,
     ContributionDifficultyDistributionService,
+    ContributionSectionCountMismatch,
+    ContributionSectionCountService,
     QuestionMutationService,
 )
 from .faculty_case_services import FacultyCaseMutationService, FacultyCasePolicy
@@ -352,6 +354,9 @@ def _workspace_context(request, contribution):
         "live_eligibility_read_only": live_eligibility_read_only,
         "quota_reached": quota_reached,
         "difficulty_distribution": difficulty_distribution,
+        "section_submission_counts": ContributionSectionCountService.evaluate(
+            contribution=contribution, questions=questions,
+        ),
         "active_import": active_import,
         "active_import_progress": (
             QuestionCSVImportService.status_payload(active_import)
@@ -2530,7 +2535,7 @@ def contribution_submit_view(request, contribution_id):
                 expected_contribution_revision=form.cleaned_data["expected_contribution_revision"],
                 request=request,
             )
-        except ContributionDifficultyDeficient as exc:
+        except (ContributionDifficultyDeficient, ContributionSectionCountMismatch) as exc:
             form.add_error(None, exc.messages[0])
         except (ContributionConflict, ValidationError) as exc:
             return _error_response(request, exc)
@@ -2543,6 +2548,7 @@ def contribution_submit_view(request, contribution_id):
         {
             "form": form,
             "contribution": contribution,
+            "section_submission_counts": ContributionSectionCountService.evaluate(contribution=contribution),
             "difficulty_distribution": ContributionDifficultyDistributionService.evaluate(
                 questions=contribution.questions.filter(
                     Q(import_batch__isnull=True)

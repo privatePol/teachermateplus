@@ -35,6 +35,7 @@
     <p class="mb-0 {% if difficulty_distribution.compliant %}text-success{% else %}text-warning{% endif %}">{{ difficulty_distribution.guidance }}</p>
   </div>
 </div>
+{% include "departmental_exams/faculty/_submission_section_counts.html" %}
 {% if contribution.cycle_course.inclusion_status == 'EXEMPT' %}
   <div class="alert alert-warning"><strong>This course is Exempt and read-only.</strong> Your retained contribution history remains visible to you, but no additions, edits, deletions, uploads, reordering, or submission are allowed.</div>
 {% elif active_import %}

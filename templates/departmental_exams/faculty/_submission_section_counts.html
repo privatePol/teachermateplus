@@ -1,0 +1,7 @@
+{% if section_submission_counts %}
+<div class="alert alert-info" role="status">
+  <strong>Your required section counts for Final Submission: 10 / 40.</strong>
+  <ul class="mb-1">{% for row in section_submission_counts.rows %}<li>Section {{ forloop.counter }} ({{ row.title }}): {{ row.current }} / {{ row.required }} required.</li>{% endfor %}</ul>
+  <div>You may save an incomplete Draft. Before Final Submission, each contributor must supply exactly 10 questions in the first section and 40 in the second. Linked questions count individually; Case narratives do not count.</div>
+</div>
+{% endif %}

@@ -1,3 +1,9 @@
+## Departmental 10/40 Final Submission guard - 2026-10-06
+
+- Added a submission-only count guard for Included DEPARTMENTAL contributions with quota 50 and one valid authoritative primary-owned frozen USE_SECTIONS blueprint: effective/frozen total 50, exactly two sections ordered with targets 10 then 40. Equivalent members use their primary's actual section IDs and stored order.
+- Final Submission requires each contributor's own 10/40 valid current confirmed question items, including linked questions individually. Case narratives, historical contributions and unconfirmed import rows do not count. Rejection shows actionable counts on the confirmation page; existing permission, stale-state, import, deadline, Case, placement, total quota and transactional protections remain intact.
+- Conditional workspace/confirmation guidance explains the narrow rule. Incomplete Draft saves, other configurations, advisory difficulty, generation and existing Submitted history remain unchanged. No schema change or migration.
+
 ## Existing assignment attribution before supplementary attendance setup - 2026-10-04
 
 - Narrow follow-up completed through both authorized integration paths: validated saved exceptions remain ready after later unassignment, including `AcademicCoverageIntegrationService.resolve` -> `CoverageService.close`. Closure origin is accepted only with correlated scope, actor, effective boundary and reconciliation lifetime; other origins remain binding. The prior 18-pass evidence covered the College bridge only. Current focused disposable run: 22/22 passed (42.193s); immutable finals/history/manifests and zero-query primed readiness preserved. Exact evidence is in HANDOFF and the focused report.
