@@ -1,3 +1,9 @@
+## Departmental 10/40 Final Submission policy (2026-10-06)
+
+An Included DEPARTMENTAL contribution with quota_snapshot=50 and a valid authoritative primary-owned frozen USE_SECTIONS blueprint (effective/frozen final total 50; exactly two positive uniquely ordered sections targeting 10 then 40) must have its own exact 10/40 valid current confirmed question items before Final Submission. Section identity comes from IDs and stored order, never titles or fixed tenant/cycle/course IDs. Equivalent member contributions use their existing examination unit's primary blueprint. Linked questions count individually; Case narratives, historical contribution rows and unconfirmed imports do not count.
+
+The normal and authorized correction Draft paths share the guard after existing authorization, revision/import, exact-total, payload, placement and Case checks. Only this business mismatch is displayed as actionable current/required counts on the confirmation page. Draft saves remain permissive, existing Submitted versions stay immutable, and other configurations retain their prior submission policy. Difficulty, Case type, generation, duplicate-contract, deadline and permission behavior is unchanged. No migration is required. See HANDOFF.md for executed validation and remaining acceptance limits.
+
 ## Midterm progressive course presentation (2026-09-27)
 
 Rank calculation normalizes each stored two-decimal exam grade to integer hundredths before SQL summation. A shared Decimal helper divides the exact integer total by the roster and rounds HALF_EVEN to two decimals for both display and rank frequencies. Integer aggregate keys associate SQL rows with competition ranks; no floating-point aggregate is round-tripped into an equality predicate. This preserves full-unit ranks and page ordering for decimal grades and ties with different student counts.

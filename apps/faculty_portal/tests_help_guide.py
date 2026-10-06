@@ -169,6 +169,9 @@ class FacultyHelpGuideTests(TestCase):
             "Existing table captions are preserved",
             "Save is disabled", "Case narratives only, not MCQ text or choices",
             "Departmental Automatic generation and printing preserve whole Cases",
+            "each contributor must Final Submit exactly 10 valid confirmed questions",
+            "Linked questions count individually; Case narratives do not count",
+            "Incomplete Draft saves remain allowed",
         ):
             self.assertContains(response, wording)
 

@@ -1,3 +1,9 @@
+## Departmental 10/40 Final Submission guard - 2026-10-06
+
+- Added a submission-only count guard for Included DEPARTMENTAL contributions with quota 50 and one valid authoritative primary-owned frozen USE_SECTIONS blueprint: effective/frozen total 50, exactly two sections ordered with targets 10 then 40. Equivalent members use their primary's actual section IDs and stored order.
+- Final Submission requires each contributor's own 10/40 valid current confirmed question items, including linked questions individually. Case narratives, historical contributions and unconfirmed import rows do not count. Rejection shows actionable counts on the confirmation page; existing permission, stale-state, import, deadline, Case, placement, total quota and transactional protections remain intact.
+- Conditional workspace/confirmation guidance explains the narrow rule. Incomplete Draft saves, other configurations, advisory difficulty, generation and existing Submitted history remain unchanged. No schema change or migration.
+
 ## Equivalent course codes Admin UI - 2026-09-28
 
 - Added an authorized Admin page within Prepare Faculty Contributions to review, create, change, and retire current-cycle Automatic equivalent-course groups. It shows each operational code/title, primary, represented campuses, offering and current-contribution counts, effective settings, and lifecycle locks. A short-lived signed review rechecks exact membership/settings before the existing protected service performs each change. Setup and generation pages show concise authorized membership context. No course, offering, assignment, contribution, question, or historical record is moved; no model or migration changed.

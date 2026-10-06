@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.http import Http404
 from django.utils import timezone
 
@@ -20,10 +21,14 @@ from .generation_algorithms import AllocationError, allocate_difficulties
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
+    ExamBlueprint,
+    ExamSection,
     ExaminationCycle,
     FacultyContribution,
     FacultyContributionEligibilitySource,
     Question,
+    QuestionBlueprintPlacement,
+    QuestionImportBatch,
 )
 from .question_content import (
     PLAIN_TEXT,
@@ -131,6 +136,109 @@ class ContributionDifficultyDistributionService:
                 f"Preferred difficulty target differs. {submission_details}"
             ),
         }
+
+
+class ContributionSectionCountMismatch(ValidationError):
+    def __init__(self, distribution):
+        self.distribution = distribution
+        details = " ".join(
+            f"Section {index} ({row['title']}): {row['current']} / {row['required']} required."
+            for index, row in enumerate(distribution["rows"], start=1)
+        )
+        super().__init__(
+            f"Final Submission requires your own 10/40 section counts. {details} "
+            "Edit your Draft section assignments before submitting. "
+            "Linked questions count individually; Case narratives do not count."
+        )
+
+
+class ContributionSectionCountService:
+    """Submission-only policy for the exact frozen Departmental 10/40 shape."""
+
+    @staticmethod
+    def evaluate(*, contribution, questions=None, for_update=False):
+        course = contribution.cycle_course
+        if (
+            contribution.active_marker != 1
+            or contribution.status != FacultyContribution.Status.DRAFT
+            or contribution.quota_snapshot != 50
+            or course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
+            or course.exam_classification != CycleCourse.ExamClassification.DEPARTMENTAL
+        ):
+            return None
+        from .exam_units import resolve_examination_unit
+
+        try:
+            unit = resolve_examination_unit(course, for_update=for_update)
+        except ValidationError:
+            # Conflicting units are outside this exact valid-configuration policy;
+            # existing submission authorization/Case validation still applies.
+            return None
+        configurations = CourseExamConfiguration.objects.filter(cycle_course=unit.primary)
+        blueprints = ExamBlueprint.active_objects.filter(cycle_course_id__in=unit.member_ids)
+        if for_update:
+            configurations = configurations.select_for_update()
+            blueprints = blueprints.select_for_update()
+        configuration = configurations.first()
+        blueprint_rows = list(blueprints.order_by("id"))
+        if (
+            configuration is None or configuration.final_item_count != 50
+            or configuration.final_item_count_source not in CourseExamConfiguration.ValueSource.values
+            or len(blueprint_rows) != 1
+        ):
+            return None
+        blueprint = blueprint_rows[0]
+        if (
+            blueprint.cycle_course_id != unit.primary.id
+            or blueprint.mode != ExamBlueprint.Mode.USE_SECTIONS
+            or blueprint.structure_frozen_at is None
+            or blueprint.structure_frozen_by_id is None
+            or blueprint.structure_final_item_count != 50
+        ):
+            return None
+        section_queryset = ExamSection.objects.filter(blueprint=blueprint).order_by("display_order", "id")
+        if for_update:
+            section_queryset = section_queryset.select_for_update()
+        sections = list(section_queryset)
+        if (
+            len(sections) != 2
+            or [section.item_quota for section in sections] != [10, 40]
+            or any(section.display_order < 1 or not section.title.strip() for section in sections)
+            or sections[0].display_order == sections[1].display_order
+        ):
+            return None
+        if questions is None:
+            questions = contribution.questions.all()
+        valid_ids = []
+        for question in questions:
+            if question.contribution_id != contribution.id:
+                continue
+            try:
+                QuestionPayloadService.validate({
+                    field: getattr(question, field)
+                    for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty", "content_format")
+                })
+            except ValidationError:
+                continue
+            valid_ids.append(question.id)
+        placements = QuestionBlueprintPlacement.objects.filter(
+            question_id__in=valid_ids,
+            question__contribution=contribution,
+            blueprint=blueprint,
+            section_id__in=[section.id for section in sections],
+        ).filter(
+            Q(question__import_batch__isnull=True)
+            | Q(question__import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+        )
+        if for_update:
+            placements = placements.select_for_update()
+        counts = Counter(placements.values_list("section_id", flat=True))
+        rows = [
+            {"section_id": section.id, "title": section.title,
+             "required": section.item_quota, "current": counts[section.id]}
+            for section in sections
+        ]
+        return {"rows": rows, "compliant": all(row["current"] == row["required"] for row in rows)}
 
 
 class Stage5LockService:
@@ -1146,6 +1254,11 @@ class QuestionMutationService:
             questions=questions,
             tenant_id=tenant_id,
         )
+        section_counts = ContributionSectionCountService.evaluate(
+            contribution=contribution, questions=questions, for_update=True,
+        )
+        if section_counts is not None and not section_counts["compliant"]:
+            raise ContributionSectionCountMismatch(section_counts)
         from .duplicate_contract import reconcile
         reconcile(contribution.cycle_course, legacy=True)
         difficulty_distribution = ContributionDifficultyDistributionService.evaluate(
