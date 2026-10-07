@@ -1,3 +1,5 @@
+import json
+
 from django import forms
 
 from .models import Question
@@ -37,6 +39,39 @@ class ContributionRevisionForm(BootstrapFormMixin, forms.Form):
     expected_contribution_revision = forms.IntegerField(
         min_value=1, widget=forms.HiddenInput
     )
+
+
+class QuestionMoveForm(ContributionRevisionForm):
+    selected_questions = forms.CharField(required=False, max_length=32768, widget=forms.HiddenInput)
+    selected_cases = forms.CharField(required=False, max_length=32768, widget=forms.HiddenInput)
+    destination_section_id = forms.TypedChoiceField(coerce=int, label="Destination section")
+    confirmation_token = forms.CharField(required=False, widget=forms.HiddenInput)
+
+    def __init__(self, *args, sections=(), confirmation=False, **kwargs):
+        self.sections = sections
+        self.confirmation = confirmation
+        super().__init__(*args, **kwargs)
+
+    def configure_dynamic_fields(self):
+        self.fields["destination_section_id"].choices = [("", "Select a destination section"),
+                                                       *((str(row.id), row.title) for row in self.sections)]
+        if self.confirmation:
+            self.fields["destination_section_id"].widget = forms.HiddenInput()
+
+    def _selection(self, name):
+        try:
+            value = json.loads(self.cleaned_data[name] or "[]")
+        except (TypeError, ValueError) as exc:
+            raise forms.ValidationError("Selection is invalid. Return to the workspace and select again.") from exc
+        if not isinstance(value, list):
+            raise forms.ValidationError("Selection is invalid. Return to the workspace and select again.")
+        return value
+
+    def clean_selected_questions(self):
+        return self._selection("selected_questions")
+
+    def clean_selected_cases(self):
+        return self._selection("selected_cases")
 
 
 class QuestionReuseForm(ContributionRevisionForm):

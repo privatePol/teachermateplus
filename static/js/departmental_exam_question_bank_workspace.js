@@ -52,7 +52,7 @@
     if (selected) {
       const mark = document.createElement('span');
       mark.className = 'qb-index-selected';
-      mark.setAttribute('aria-label', 'Selected for deletion');
+      mark.setAttribute('aria-label', 'Selected for an action');
       mark.textContent = '✓';
       button.append(mark);
     }

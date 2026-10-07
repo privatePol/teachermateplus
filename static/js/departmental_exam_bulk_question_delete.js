@@ -5,6 +5,9 @@
   const selectAll = form.querySelector("[data-bulk-select-all]");
   const count = form.querySelector("[data-bulk-selected-count]");
   const button = form.querySelector("[data-bulk-delete-button]");
+  const moveButton = form.querySelector("[data-section-move-button]");
+  const moveError = form.querySelector("[data-section-move-error]");
+  const caseBoxes = [...document.querySelectorAll("[data-section-move-case]")];
   const boxes = [...document.querySelectorAll("[data-bulk-question]")];
   const card = box => box.closest(".question-card");
   const visible = box => !card(box).hidden && card(box).getClientRects().length > 0;
@@ -13,6 +16,13 @@
     boxes.forEach(box => { if (!visible(box)) box.checked = false; });
     const shown = boxes.filter(visible);
     const selected = boxes.filter(box => box.checked);
+    caseBoxes.forEach(box => {
+      const members = [...box.closest('.qb-case-card').querySelectorAll('.question-card')];
+      if (!members.length || members.some(item => item.hidden)) box.checked = false;
+    });
+    const linkedSelected = selected.some(box => card(box).dataset.linked === "1");
+    if (moveButton) moveButton.disabled = linkedSelected || (!selected.length && !caseBoxes.some(box => box.checked));
+    if (moveError) moveError.hidden = !linkedSelected;
     count.textContent = String(selected.length);
     button.disabled = selected.length === 0;
     selectAll.checked = shown.length > 0 && shown.every(box => box.checked);
@@ -34,10 +44,15 @@
     refresh();
   });
   boxes.forEach(box => box.addEventListener("change", refresh));
+  caseBoxes.forEach(box => box.addEventListener("change", refresh));
   document.addEventListener("hidden.bs.collapse", refresh);
   document.addEventListener("shown.bs.collapse", refresh);
   form.addEventListener("submit", event => {
     refresh();
+    if (event.submitter?.matches('[data-section-move-button]')) {
+      if (moveButton.disabled) event.preventDefault();
+      return;
+    }
     const selected = boxes.filter(box => box.checked).length;
     if (!selected || !window.confirm(
       `Delete ${selected} selected question${selected === 1 ? "" : "s"}? Linked questions will be removed from their Cases; empty Cases remain for separate resolution.`

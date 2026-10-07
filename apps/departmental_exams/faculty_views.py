@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import csv
+import json
 from functools import wraps
 
 from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core import signing
 from django.db.models import Q
 from django.core.paginator import Paginator
 from django.http import Http404, HttpResponse, JsonResponse
@@ -41,6 +43,7 @@ from .contribution_forms import (
     QuestionDOCXUploadForm,
     QuestionDeleteForm,
     QuestionForm,
+    QuestionMoveForm,
     QuestionReorderForm,
     QuestionReuseForm,
 )
@@ -50,15 +53,19 @@ from .contribution_services import (
     ContributionDifficultyDistributionService,
     ContributionSectionCountMismatch,
     ContributionSectionCountService,
+    ContributionSectionMovePolicy,
+    SectionMoveInvalid,
     QuestionMutationService,
 )
 from .faculty_case_services import FacultyCaseMutationService, FacultyCasePolicy
+from .duplicate_contract import IncompatibleImportPlan, LegacyPoolConflict
 from .csv_import import CSV_FILENAME, QuestionCSVImportService
 from .docx_import import QuestionDOCXImportService
 from .import_sections import ImportSectionError, import_section_choices
 from .models import (
     ExamBlueprint,
     ExamScenario,
+    ExamScenarioMember,
     FacultyContribution,
     Question,
     QuestionBlueprintPlacement,
@@ -331,16 +338,32 @@ def _workspace_context(request, contribution):
         )
     except (PermissionDenied, ValidationError):
         case_context = None
+    try:
+        move_context = ContributionSectionMovePolicy.context(contribution=contribution)
+    except SectionMoveInvalid:
+        move_context = None
+    # Moving eligibility must not replace the existing flat/global reorder UI
+    # where Case authoring (and its grouped presentation) is unavailable.
+    presentation_context = case_context
     presentation_sections, scenarios, _numbers = _case_presentation(
-        contribution, questions, case_context
+        contribution, questions, presentation_context
     )
+    linked_question_ids = set(ExamScenarioMember.objects.filter(
+        question_id__in=[row.id for row in questions]).values_list("question_id", flat=True))
+    for question in questions:
+        question.move_linked = question.id in linked_question_ids
+    for scenario in scenarios:
+        scenario.move_selection = json.dumps(ContributionSectionMovePolicy.case_selection(
+            scenario, scenario.ordered_members), separators=(",", ":"))
     return {
         "contribution": contribution,
         "questions": questions,
-        "standalone_questions": (questions if case_context is None else
+        "standalone_questions": (questions if presentation_context is None else
                                  [q for group in presentation_sections for q in group["questions"]]),
         "presentation_sections": presentation_sections,
         "faculty_cases": scenarios,
+        "section_presentation_enabled": presentation_context is not None,
+        "section_move_enabled": move_context is not None and is_mutable,
         "saved_count": saved_count,
         "quota": quota,
         "remaining": max(quota - saved_count, 0),
@@ -1756,6 +1779,90 @@ def question_bulk_delete_view(request, contribution_id):
                                ContributionConflict("Selection changed. Refresh and retry."))
     messages.success(request, f"Deleted {count} selected question(s). Linked Cases remain in place. If a reviewer Case is incomplete, add replacements within it before submission.")
     return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
+
+
+@never_cache
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_POST
+def question_move_view(request, contribution_id):
+    contribution = _owner_contribution(request, contribution_id)
+    _require_currently_mutable(request, contribution)
+    tenant_id, campus_id = _scope(request)
+    try:
+        _blueprint, sections = ContributionSectionMovePolicy.context(contribution=contribution)
+    except SectionMoveInvalid as exc:
+        return render(request, "departmental_exams/faculty/question_move.html",
+                      {"contribution": contribution, "move_error": " ".join(exc.messages)}, status=400)
+    phase = request.POST.get("phase", "start")
+    if phase not in ("start", "review", "confirm"):
+        return _error_response(request, ContributionConflict("Invalid move state."))
+    data = request.POST.copy()
+    if phase == "start":
+        try:
+            pairs = [value.split(":") for value in request.POST.getlist("selected_questions")]
+            cases = [json.loads(value) for value in request.POST.getlist("selected_cases")]
+        except ValueError:
+            return _error_response(request, ContributionConflict("Invalid selection."))
+        data["selected_questions"] = json.dumps(pairs)
+        data["selected_cases"] = json.dumps(cases)
+        data["destination_section_id"] = str(sections[0].id)
+    # Rejected confirmations return an editable destination form for recovery.
+    form = QuestionMoveForm(data, sections=sections)
+    context = {"contribution": contribution, "form": form}
+    if not form.is_valid():
+        if "expected_contribution_revision" in form.errors:
+            return _error_response(request)
+        return render(request, "departmental_exams/faculty/question_move.html", context, status=400)
+    payload = {name: form.cleaned_data[name] for name in (
+        "selected_questions", "selected_cases", "destination_section_id", "expected_contribution_revision")}
+    identity = {"contribution_id": contribution.id, "actor_id": request.user.id,
+                "tenant_id": tenant_id, "campus_id": campus_id}
+    if phase == "confirm":
+        try:
+            approved = signing.loads(form.cleaned_data["confirmation_token"],
+                                     salt="faculty-section-move", max_age=1800)
+            if approved != {**identity, **payload}:
+                raise signing.BadSignature("Move confirmation changed.")
+        except signing.SignatureExpired:
+            return render(request, "departmental_exams/faculty/question_move.html",
+                          {"contribution": contribution,
+                           "move_error": "Move confirmation expired. Return to the workspace, select again, and review a new move."},
+                          status=409)
+        except signing.BadSignature:
+            return _error_response(request, ContributionConflict("Move confirmation changed or expired."))
+    kwargs = {"contribution_id": contribution.id, "user": request.user,
+              "tenant_id": tenant_id, "campus_id": campus_id,
+              "expected_contribution_revision": payload["expected_contribution_revision"],
+              "selected_questions": payload["selected_questions"], "selected_cases": payload["selected_cases"],
+              "destination_section_id": payload["destination_section_id"]}
+    try:
+        if phase == "confirm":
+            result = QuestionMutationService.move_many(**kwargs, request=request)
+            if result["moved_count"]:
+                messages.success(request, f"Moved {result['moved_count']} question(s), including {result['case_count']} whole Case(s), to {result['destination_title']}. {result['unchanged_count']} selected question(s) were already there.")
+            else:
+                messages.info(request, f"All {result['unchanged_count']} selected question(s) were already in {result['destination_title']}. No changes were made.")
+            return redirect("departmental_exams:contribution_workspace", contribution_id=contribution.id)
+        summary = QuestionMutationService.preview_move(**kwargs)
+    except ContributionConflict as exc:
+        return _error_response(request, exc)
+    except (SectionMoveInvalid, IncompatibleImportPlan, LegacyPoolConflict) as exc:
+        form.add_error(None, " ".join(exc.messages))
+        return render(request, "departmental_exams/faculty/question_move.html", context, status=400)
+    except ValidationError:
+        # Unknown service diagnostics retain the existing safe page response.
+        return _error_response(request)
+    initial = {**payload, "selected_questions": json.dumps(payload["selected_questions"]),
+               "selected_cases": json.dumps(payload["selected_cases"])}
+    if phase == "start":
+        initial["destination_section_id"] = ""
+    else:
+        initial["confirmation_token"] = signing.dumps({**identity, **payload}, salt="faculty-section-move", compress=True)
+        context["confirmation"] = True
+    context["form"] = QuestionMoveForm(initial=initial, sections=sections, confirmation=phase == "review")
+    context["summary"] = summary
+    return render(request, "departmental_exams/faculty/question_move.html", context)
 
 
 @_faculty_error_page
