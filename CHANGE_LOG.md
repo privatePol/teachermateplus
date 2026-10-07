@@ -1,3 +1,8 @@
+## Contribution workspace header and Move feedback - 2026-10-07
+
+- Move names its deduplicated affected-question count, including whole-Case members and selections in collapsed sections; invalid linked selections still disable it. The separate Move selection summary uses readable blue.
+- The full section header is one native keyboard-accessible button, including title and badges, with diagonal expand/collapse icons at the far right. ARIA names include the section title; no visible text toggle button remains. Headers/content stay visible without JavaScript and in print. Existing gradient, collapse/all controls, selection/filter/index/reorder and Delete scope remain intact; styles are workspace-scoped.
+
 ## Contribution workspace section collapse - 2026-10-07
 
 - Existing section groups start expanded and have independent keyboard-accessible Expand/Collapse controls plus Expand all sections / Collapse all sections. Styled section titles/count badges stay visible; section contents remain accessible without JavaScript and expand for printing. Nested Cases retain their existing default/open states.
