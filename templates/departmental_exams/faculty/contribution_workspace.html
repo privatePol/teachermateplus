@@ -88,14 +88,16 @@
       <div><label class="form-label" for="bulk-question-filter">Show questions</label><select id="bulk-question-filter" class="form-select" data-bulk-question-filter><option value="all">All</option><option value="EASY">Easy</option><option value="MODERATE">Moderate</option><option value="DIFFICULT">Difficult</option><option value="linked">Case linked</option><option value="standalone">Standalone</option></select></div>
       <label class="form-check"><input class="form-check-input" type="checkbox" data-bulk-select-all> <span class="form-check-label">Select all visible questions</span></label>
       <button class="btn btn-outline-danger" type="submit" data-bulk-delete-button disabled>Delete selected questions (<span data-bulk-selected-count>0</span>)</button>
+      {% if section_move_enabled %}<button class="btn btn-outline-primary" type="submit" formaction="{% url 'departmental_exams:question_move' contribution.id %}" data-section-move-button disabled>Move to section</button>{% endif %}
     </div>
     <p class="small text-muted mt-2 mb-0">Filtering clears selections that become hidden. Deleting linked questions leaves their Case in place. Add replacements within a reviewer Case before submission; a Faculty Case can be resolved or deleted separately.</p>
+    {% if section_move_enabled %}<p class="small text-muted mt-2 mb-0" data-section-move-help>Select standalone MCQs or explicitly select whole owned Cases. Individual linked questions and shared/reviewer Cases cannot move. Whole-Case selections clear when any member is filtered out. Draft section counts may remain incomplete.</p><p class="small text-warning mb-0" data-section-move-error hidden>Deselect individual linked questions. To move an owned Case, select its whole-Case checkbox instead.</p>{% endif %}
   </form>
   {% endif %}
 {% endif %}
 <div class="qb-workspace-layout" data-qb-layout>
 <div class="qb-workspace-primary" data-qb-question-list>
-{% if case_authoring_enabled %}
+{% if section_presentation_enabled %}
   <p class="small text-muted">Question numbers follow section and Case order, not the order you added questions. These are workspace numbers, not final exam item numbers.</p>
   {% for group in presentation_sections %}
   <section class="mb-4" aria-label="{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}">
@@ -109,6 +111,7 @@
             <div class="small text-muted">{% if scenario.is_correction_admin %}{{ scenario.ordered_members|length }} of your Linked Question{{ scenario.ordered_members|length|pluralize }} in this reviewer Case{% else %}{{ scenario.ordered_members|length }} Linked Question{{ scenario.ordered_members|length|pluralize }}{% endif %}</div>
           </div>
           <div class="d-flex flex-wrap align-items-center gap-2">
+            {% if section_move_enabled and scenario.contribution_id == contribution.id %}<label class="form-check small mb-0"><input class="form-check-input" type="checkbox" name="selected_cases" value="{{ scenario.move_selection }}" form="bulk-question-delete-form" data-section-move-case> <span class="form-check-label">Select whole Case for move ({{ scenario.ordered_members|length }} questions)</span></label>{% endif %}
             <button id="workspace-case-toggle-{{ scenario.id }}" class="btn btn-sm btn-outline-secondary tmp-case-collapse-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#workspace-case-{{ scenario.id }}" aria-expanded="false" aria-controls="workspace-case-{{ scenario.id }}"><span data-case-collapse-label>Show Case</span></button>
             {% if scenario.is_correction_admin %}
               {% if is_mutable and not quota_reached %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:faculty_case_question_create' contribution.id scenario.id %}">Add replacement Linked Question</a>{% endif %}
@@ -174,8 +177,8 @@
 {% endblock %}
 {% block extra_js %}{{ block.super }}
 <script src="{% static 'js/departmental_exam_case_disclosure.js' %}?v=case-navigation-20260914"></script>
-<script src="{% static 'js/departmental_exam_bulk_question_delete.js' %}?v=20260917"></script>
-<script src="{% static 'js/departmental_exam_question_bank_workspace.js' %}?v=20260918"></script>
+<script src="{% static 'js/departmental_exam_bulk_question_delete.js' %}?v=20261007-section-move"></script>
+<script src="{% static 'js/departmental_exam_question_bank_workspace.js' %}?v=20261007-section-move"></script>
 <script>
 (() => {
   const list = document.getElementById("question-list");

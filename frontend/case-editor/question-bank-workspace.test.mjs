@@ -5,6 +5,28 @@ import {readFileSync} from 'node:fs';
 
 const source=readFileSync(new URL('../../static/js/departmental_exam_question_bank_workspace.js',import.meta.url),'utf8');
 
+test('workspace global reorder collects every rendered question, including filtered cards', () => {
+  const template=readFileSync(new URL('../../templates/departmental_exams/faculty/contribution_workspace.html',import.meta.url),'utf8');
+  const reorderScript=template.match(/<script>\s*(\(\(\) => \{\s*const list = document\.getElementById\("question-list"\);[\s\S]*?)<\/script>/)?.[1];
+  assert.ok(reorderScript, 'exercise the actual workspace reorder script');
+  const dom=new JSDOM(`<!doctype html><form id="question-order-form"><input id="ordered-question-ids"><button>Save displayed order</button></form>
+    <div id="question-list">${[11,12,13].map((id,index)=>`<article class="question-card" data-question-id="${id}" data-section-id="${index===1?2:1}"><span class="question-position">${index+1}</span><button class="move-up">Move up</button><button class="move-down">Move down</button></article>`).join('')}</div>`,{runScripts:'outside-only'});
+  try {
+    const {document,Event}=dom.window;
+    const placements=()=>[...document.querySelectorAll('.question-card')].map(card=>[card.dataset.questionId,card.dataset.sectionId]).sort();
+    const before=placements();
+    dom.window.eval(reorderScript);
+    document.querySelector('[data-question-id="13"] .move-up').click();
+    document.querySelector('[data-question-id="11"] .move-down').click();
+    assert.deepEqual([...document.querySelectorAll('.question-card')].map(card=>card.dataset.questionId),['13','11','12']);
+    assert.deepEqual([...document.querySelectorAll('.question-position')].map(span=>span.textContent),['1','2','3']);
+    document.querySelector('[data-question-id="13"]').hidden=true;
+    document.querySelector('form').dispatchEvent(new Event('submit',{cancelable:true}));
+    assert.equal(document.querySelector('#ordered-question-ids').value,'13,11,12');
+    assert.deepEqual(placements(),before);
+  } finally {dom.window.close();}
+});
+
 function page(narrow=false) {
   const dom=new JSDOM(`<!doctype html><html><body>
     <nav class="faculty-topbar"></nav>
@@ -43,7 +65,7 @@ test('index navigates Case members without deleting, follows filter and reorder'
     assert.equal(document.querySelectorAll('[data-bulk-question]:checked').length,0);
     const linked=document.querySelector('#qb-question-11 [data-bulk-question]');
     linked.checked=true;linked.dispatchEvent(new Event('change',{bubbles:true}));
-    assert.equal(entries()[1].querySelector('.qb-index-selected')?.getAttribute('aria-label'),'Selected for deletion');
+    assert.equal(entries()[1].querySelector('.qb-index-selected')?.getAttribute('aria-label'),'Selected for an action');
     const standalone=document.querySelector('#qb-question-12');
     standalone.hidden=true;
     document.querySelector('[data-bulk-question-filter]').dispatchEvent(new Event('change',{bubbles:true}));

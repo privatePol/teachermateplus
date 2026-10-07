@@ -788,6 +788,63 @@ class QuestionPayloadService:
         return cleaned
 
 
+class SectionMoveInvalid(ValidationError):
+    """Actionable move validation; never render as missing page state."""
+
+
+class ContributionSectionMovePolicy:
+    @staticmethod
+    def context(*, contribution, for_update=False):
+        from .exam_units import resolve_examination_unit
+        from apps.core.services.features import FeatureSettingsService
+
+        if not FeatureSettingsService.is_departmental_exam_structured_lifecycle_enabled(
+            tenant_id=contribution.cycle_course.cycle.tenant_id,
+        ):
+            raise SectionMoveInvalid("Section moves require an enabled frozen section structure.")
+        try:
+            unit = resolve_examination_unit(contribution.cycle_course, for_update=for_update)
+        except ValidationError as exc:
+            raise SectionMoveInvalid("The examination unit is inconsistent. Ask an administrator to inspect it.") from exc
+        configs = CourseExamConfiguration.objects.filter(cycle_course_id__in=unit.member_ids)
+        blueprints = ExamBlueprint.active_objects.filter(cycle_course_id__in=unit.member_ids)
+        if for_update:
+            configs = configs.select_for_update()
+            blueprints = blueprints.select_for_update()
+        configs = list(configs.order_by("cycle_course_id"))
+        blueprints = list(blueprints.order_by("id"))
+        primary = next((row for row in configs if row.cycle_course_id == unit.primary.id), None)
+        if (primary is None or len(configs) != len(unit.member_ids)
+                or any(row.final_item_count != primary.final_item_count
+                       or row.final_item_count_source not in CourseExamConfiguration.ValueSource.values
+                       for row in configs)
+                or len(blueprints) != 1):
+            raise SectionMoveInvalid("The frozen section configuration is inconsistent. Ask an administrator to inspect it.")
+        blueprint = blueprints[0]
+        if (blueprint.cycle_course_id != unit.primary.id
+                or blueprint.mode != ExamBlueprint.Mode.USE_SECTIONS
+                or blueprint.structure_frozen_at is None or blueprint.structure_frozen_by_id is None
+                or blueprint.structure_final_item_count != primary.final_item_count):
+            raise SectionMoveInvalid("Section moves require an authoritative frozen Use Sections structure.")
+        sections = ExamSection.objects.filter(blueprint=blueprint).order_by("display_order", "id")
+        if for_update:
+            sections = sections.select_for_update()
+        sections = tuple(sections)
+        orders = [row.display_order for row in sections]
+        if (len(sections) < 2 or len(set(orders)) != len(orders)
+                or any(row.display_order <= 0 or row.item_quota <= 0 or not (row.title or "").strip()
+                       for row in sections)
+                or sum(row.item_quota for row in sections) != primary.final_item_count):
+            raise SectionMoveInvalid("Section moves require at least two valid frozen sections with consistent targets.")
+        return blueprint, sections
+
+    @staticmethod
+    def case_selection(scenario, members):
+        return {"id": scenario.id, "revision": scenario.revision,
+                "members": [[row.id, row.question_id, row.question.revision, row.position]
+                            for row in members]}
+
+
 class QuestionMutationService:
     @staticmethod
     def validate_payload_for_preview(payload):
@@ -857,6 +914,156 @@ class QuestionMutationService:
         reconcile(contribution.cycle_course)
         contribution.revision += 1
         contribution.save(update_fields=["revision", "updated_at"])
+
+    @staticmethod
+    def _move_pairs(values):
+        if not isinstance(values, (list, tuple)):
+            raise ContributionConflict("Selection is invalid. Refresh and select again.")
+        try:
+            pairs = [(int(item[0]), int(item[1])) for item in values
+                     if isinstance(item, (list, tuple)) and len(item) == 2
+                     and all(isinstance(value, (str, int)) and not isinstance(value, bool) for value in item)]
+        except (TypeError, ValueError, IndexError) as exc:
+            raise ContributionConflict("Selection is invalid. Refresh and select again.") from exc
+        if (len(pairs) != len(values) or len({item[0] for item in pairs}) != len(pairs)
+                or any(item_id <= 0 or revision <= 0 for item_id, revision in pairs)):
+            raise ContributionConflict("Selection is invalid or duplicated. Refresh and select again.")
+        return dict(pairs)
+
+    @classmethod
+    def _prepare_move(cls, *, contribution_id, selected_questions, selected_cases, destination_section_id,
+                      user, tenant_id, campus_id, expected_contribution_revision):
+        from .models import ExamScenario, ExamScenarioMember
+
+        _configuration, contribution, questions = cls._lock_mutable(
+            contribution_id=contribution_id, user=user, tenant_id=tenant_id, campus_id=campus_id,
+            expected_contribution_revision=expected_contribution_revision,
+        )
+        blueprint, sections = ContributionSectionMovePolicy.context(contribution=contribution, for_update=True)
+        try:
+            if not isinstance(destination_section_id, (str, int)) or isinstance(destination_section_id, bool):
+                raise ValueError
+            destination = next(row for row in sections if row.id == int(destination_section_id))
+        except (TypeError, ValueError, StopIteration) as exc:
+            raise SectionMoveInvalid("Select a valid destination section from this Draft's frozen exam structure.") from exc
+        requested = cls._move_pairs(selected_questions)
+        try:
+            case_pairs = [(item["id"], item["revision"]) for item in selected_cases]
+        except (KeyError, TypeError) as exc:
+            raise ContributionConflict("Case selection is invalid. Refresh and select again.") from exc
+        case_revisions = cls._move_pairs(case_pairs)
+        if not requested and not case_revisions:
+            raise SectionMoveInvalid("Select at least one standalone question or whole owned Case.")
+        by_id = {row.id: row for row in questions}
+        if any(item_id not in by_id or by_id[item_id].revision != revision
+               for item_id, revision in requested.items()):
+            raise ContributionConflict("A selected question changed or is unavailable. Refresh and select again.")
+        cases = list(ExamScenario.objects.select_for_update().filter(
+            pk__in=case_revisions, contribution=contribution).order_by("id"))
+        if len(cases) != len(case_revisions):
+            raise SectionMoveInvalid("Only whole Faculty-owned Cases entirely in this current Draft can move. No items were moved.")
+        for case in cases:
+            if (case.contribution_id != contribution.id or case.active_marker != 1
+                    or case.blueprint_id != blueprint.id or case.section_id not in {row.id for row in sections}):
+                raise SectionMoveInvalid("Only whole Faculty-owned Cases entirely in this current Draft can move. No items were moved.")
+            if case.revision != case_revisions[case.id]:
+                raise ContributionConflict("A selected Case changed. Refresh and select again.")
+        case_members = list(ExamScenarioMember.objects.select_for_update().filter(
+            scenario_id__in=case_revisions).order_by("scenario_id", "position", "id"))
+        if any(row.question_id not in by_id for row in case_members):
+            raise SectionMoveInvalid("A selected Case contains questions outside this Draft. No items were moved.")
+        case_by_id = {row.id: row for row in cases}
+        for member in case_members:
+            member.question = by_id[member.question_id]
+            member.scenario = case_by_id[member.scenario_id]
+        member_ids = {row.question_id for row in case_members}
+        all_ids = set(requested) | member_ids
+        memberships = list(ExamScenarioMember.objects.select_for_update().filter(
+            question_id__in=all_ids).order_by("id"))
+        if any(row.question_id in requested for row in memberships):
+            raise SectionMoveInvalid("Individual Case-linked questions cannot move. Deselect them and explicitly select the whole owned Case. No items were moved.")
+        for case in cases:
+            rows = [row for row in case_members if row.scenario_id == case.id]
+            if (not rows or any(row.active_marker != 1 or row.question_id not in by_id for row in rows)
+                    or [row.position for row in rows] != list(range(1, len(rows) + 1))
+                    or len({row.question_id for row in rows}) != len(rows)
+                    or any(sum(link.question_id == row.question_id for link in memberships) != 1 for row in rows)):
+                raise SectionMoveInvalid("A selected Case has an invalid or incomplete member graph. No items were moved. Ask an administrator to inspect it.")
+            supplied = next(item for item in selected_cases if int(item["id"]) == case.id)
+            expected_members = supplied.get("members")
+            if (not isinstance(expected_members, list)
+                    or any(not isinstance(row, list) or len(row) != 4
+                           or any(type(value) is not int or value <= 0 for value in row)
+                           for row in expected_members)):
+                raise ContributionConflict("Case member selection is invalid. Refresh and select again.")
+            if supplied.get("members") != ContributionSectionMovePolicy.case_selection(case, rows)["members"]:
+                raise ContributionConflict("Case members changed after selection. Refresh and select the whole Case again.")
+            try:
+                case.full_clean()
+            except ValidationError as exc:
+                raise SectionMoveInvalid("A selected Case has invalid saved structure or content. No items were moved.") from exc
+        selected = [row for row in questions if row.id in all_ids]
+        if len(selected) != len(all_ids):
+            raise SectionMoveInvalid("A Case contains questions outside this Draft. No items were moved.")
+        if any(row.import_batch_id and row.import_batch.status != QuestionImportBatch.Status.CONFIRMED for row in selected):
+            raise SectionMoveInvalid("Unconfirmed import questions cannot move. Complete the import first. No items were moved.")
+        placements = {row.question_id: row for row in QuestionBlueprintPlacement.objects.select_for_update()
+                      .filter(question_id__in=all_ids).order_by("id")}
+        valid_sections = {row.id for row in sections}
+        if set(placements) != all_ids:
+            raise SectionMoveInvalid("Some selected questions need a section assignment first. Use Edit to assign them. No items were moved.")
+        if any(row.blueprint_id != blueprint.id or row.section_id not in valid_sections for row in placements.values()):
+            raise SectionMoveInvalid("A selected question has an invalid source placement. No items were moved.")
+        if any(placements[row.question_id].section_id != row.scenario.section_id for row in case_members):
+            raise SectionMoveInvalid("A selected Case and its linked question sections disagree. No items were moved.")
+        return contribution, destination, selected, cases, placements
+
+    @classmethod
+    @transaction.atomic
+    def preview_move(cls, **kwargs):
+        contribution, destination, selected, cases, placements = cls._prepare_move(**kwargs)
+        return {"question_count": len(selected), "case_count": len(cases),
+                "standalone_count": len(kwargs["selected_questions"]),
+                "unchanged_count": sum(row.section_id == destination.id for row in placements.values()),
+                "destination_id": destination.id, "destination_title": destination.title,
+                "contribution_revision": contribution.revision}
+
+    @classmethod
+    @transaction.atomic
+    def move_many(cls, *, request=None, **kwargs):
+        contribution, destination, selected, cases, placements = cls._prepare_move(**kwargs)
+        changed = [row for row in selected if placements[row.id].section_id != destination.id]
+        changed_cases = [row for row in cases if row.section_id != destination.id]
+        result = {"moved_count": len(changed), "unchanged_count": len(selected) - len(changed),
+                  "case_count": len(changed_cases), "destination_title": destination.title}
+        if not changed:
+            return result
+        sources = {str(row.id): placements[row.id].section_id for row in changed}
+        question_revisions = {str(row.id): [row.revision, row.revision + 1] for row in changed}
+        case_revisions = {str(row.id): [row.revision, row.revision + 1] for row in changed_cases}
+        before_revision = contribution.revision
+        for question in changed:
+            placement = placements[question.id]
+            placement.section = destination
+            placement.placed_by = kwargs["user"]
+            placement.revision += 1
+            placement.save(update_fields=["section", "placed_by", "revision", "updated_at"])
+            question.revision += 1
+            question.save(update_fields=["revision", "updated_at"])
+        for case in changed_cases:
+            case.section = destination
+            case.updated_by = kwargs["user"]
+            case.revision += 1
+            case.save(update_fields=["section", "updated_by", "revision", "updated_at"])
+        cls._increment_contribution(contribution)
+        cls._audit(action="DE_EXAM_ITEMS_SECTION_MOVED", contribution=contribution, actor=kwargs["user"],
+                   metadata={"question_ids": [row.id for row in changed], "case_ids": [row.id for row in changed_cases],
+                             "source_section_ids": sources, "destination_section_id": destination.id,
+                             "moved_count": len(changed), "unchanged_count": result["unchanged_count"],
+                             "case_count": len(changed_cases), "question_revision_changes": question_revisions,
+                             "case_revision_changes": case_revisions,
+                             "revision_before": before_revision, "revision_after": contribution.revision}, request=request)
+        return result
 
     @classmethod
     @transaction.atomic

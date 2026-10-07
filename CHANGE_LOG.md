@@ -1,3 +1,11 @@
+## Faculty Draft section moves - 2026-10-07
+
+- Review remediation preserves the prior flat question list and Move up/down/Save displayed order controls when Case authoring is unavailable, including Automatic Standardized multi-section contributions. Section moving remains independently available; global reorder eligibility and backend rules are unchanged. Expired move confirmation now explains that a new review is required without applying changes.
+- Added one atomic Move to section operation for single/bulk standalone MCQs and explicitly selected whole Faculty-owned Cases in the current editable contribution. Whole Cases move their section context and every member placement together; individual linked questions, retained links, shared/reviewer Cases, partial selections and foreign/invalid graphs are rejected without partial changes.
+- Availability uses the existing structured-feature setting plus a valid authoritative primary-owned frozen Use Sections structure with at least two sections and consistent targets. Equivalent contributions use primary section IDs. Availability is independent of Departmental classification, quota 50 and the 10/40 shape.
+- Workspace selections lead to a destination form and read-only signed confirmation showing whole-Case and affected-question counts, including already-in-destination items. Filtering, Delete, permissions, deadlines, import/duplicate guards and stale-state protections remain intact. Existing individual Edit cannot relocate a linked member even if its caller omits the Case ID.
+- Moves preserve content, answers, difficulty, provenance, stored question/member order and original Submitted history. Necessary revisions and content-free audit metadata are updated once per operation; all-no-op requests do not change revisions. Incomplete Draft counts and Final Submission rules, including the applicable 10/40 guard, remain unchanged. No schema, migration or dependency change.
+
 ## Departmental 10/40 Final Submission guard - 2026-10-06
 
 - Added a submission-only count guard for Included DEPARTMENTAL contributions with quota 50 and one valid authoritative primary-owned frozen USE_SECTIONS blueprint: effective/frozen total 50, exactly two sections ordered with targets 10 then 40. Equivalent members use their primary's actual section IDs and stored order.

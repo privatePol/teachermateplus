@@ -1,8 +1,8 @@
 {% load departmental_exam_content %}
-<article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}" id="qb-question-{{ question.id }}" data-difficulty="{{ question.difficulty }}" data-linked="{% if linked %}1{% else %}0{% endif %}" data-scientific-group>
+<article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}" id="qb-question-{{ question.id }}" data-difficulty="{{ question.difficulty }}" data-linked="{% if linked or question.move_linked %}1{% else %}0{% endif %}" data-scientific-group>
   <div class="card-header qb-question-header">
     <div class="d-flex justify-content-between gap-3">
-      <h3 class="h6 mb-0">{% if is_mutable %}<label class="me-2"><input type="checkbox" name="selected_questions" value="{{ question.id }}:{{ question.revision }}" form="bulk-question-delete-form" data-bulk-question> <span class="visually-hidden">Select question {{ question.presentation_number|default:question.position }} for deletion</span></label>{% endif %}Question <span class="question-position">{{ question.presentation_number|default:question.position }}</span></h3>
+      <h3 class="h6 mb-0">{% if is_mutable %}<label class="me-2"><input type="checkbox" name="selected_questions" value="{{ question.id }}:{{ question.revision }}" form="bulk-question-delete-form" data-bulk-question> <span class="visually-hidden">Select question {{ question.presentation_number|default:question.position }} for an action</span></label>{% endif %}Question <span class="question-position">{{ question.presentation_number|default:question.position }}</span></h3>
     </div>
     <div class="qb-question-stem tmp-case-content mt-2" data-question-index-label data-scientific-content>{{ question.question_text|question_content:question.content_format }}</div>
   </div>

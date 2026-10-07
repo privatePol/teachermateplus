@@ -1,0 +1,23 @@
+{% extends "faculty_portal/base.html" %}
+{% block faculty_content %}
+<h1 class="h3">{% if confirmation %}Confirm section move{% else %}Move to section{% endif %}</h1>
+<p>Move standalone questions or complete Faculty-owned Cases within this editable Draft. Content and stored question/member order stay unchanged. Final Submission requirements still apply.</p>
+{% if move_error %}<div class="alert alert-danger" role="alert">{{ move_error }}</div>{% endif %}
+{% if form %}
+<form method="post" class="card card-body" action="{% url 'departmental_exams:question_move' contribution.id %}">
+  {% csrf_token %}
+  <input type="hidden" name="phase" value="{% if confirmation %}confirm{% else %}review{% endif %}">
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+  {% for field in form.hidden_fields %}{{ field }}{% if field.errors %}<div class="alert alert-danger" role="alert">{{ field.errors }}</div>{% endif %}{% endfor %}
+  {% if summary %}<p>Selected: <strong>{{ summary.standalone_count }} standalone question(s)</strong> and <strong>{{ summary.case_count }} whole Case(s)</strong>. Total affected: <strong>{{ summary.question_count }} question(s)</strong>.</p>{% endif %}
+  {% if confirmation %}
+    <p>Destination: <strong>{{ summary.destination_title }}</strong>. Already in destination: <strong>{{ summary.unchanged_count }} question(s)</strong>. These remain unchanged.</p>
+    <button class="btn btn-primary" type="submit">Confirm move</button>
+  {% else %}
+    <div class="mb-3"><label class="form-label" for="{{ form.destination_section_id.id_for_label }}">{{ form.destination_section_id.label }}</label>{{ form.destination_section_id }}{% for error in form.destination_section_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+    <button class="btn btn-primary" type="submit">Review move</button>
+  {% endif %}
+</form>
+{% endif %}
+<a class="btn btn-outline-secondary mt-3" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Cancel / return to workspace</a>
+{% endblock %}
