@@ -1,3 +1,14 @@
+## Contribution workspace section collapse - 2026-10-07
+
+- Existing section groups start expanded and have independent keyboard-accessible Expand/Collapse controls plus Expand all sections / Collapse all sections. Styled section titles/count badges stay visible; section contents remain accessible without JavaScript and expand for printing. Nested Cases retain their existing default/open states.
+- Section collapse preserves question and whole-Case selections. The workspace reports selected standalone questions, whole Cases, unique affected Move items and selections hidden in collapsed sections. Delete counts only individually selected questions. Select all visible excludes collapsed content; filtering retains its deselection rules. Invalid linked selections still block Move and never become a whole-Case selection automatically.
+- Question Index keeps filter-matching entries for collapsed sections and expands the section, then its Case, before scrolling. Flat-list global reorder, backend authorization, section assignment and Final Submission rules are unchanged. Accepted forest/sage/champagne section headers, pale-sage question headers and ivory cards remain scoped to the contribution workspace.
+
+## Contribution workspace soft section emphasis - 2026-10-07
+
+- Section headers now carry the muted forest/sage/champagne gradient, with white titles on solid forest green and white count badges. Narrow screens use a separate dark title row. Question headers use pale sage, dark-green text and a slim muted-gold separator; bodies use warm ivory, subtle dividers, rounded corners and minimal shadow.
+- Workspace-only selectors retain visible Case disclosure controls and distinct checked selection, dashed current-reading and solid keyboard-focus states. Section moving, filtering, Question Index, Case grouping and global reorder behavior are unchanged; reuse, authoring and Attendance are outside the styling scope.
+
 ## Faculty Draft section moves - 2026-10-07
 
 - Review remediation preserves the prior flat question list and Move up/down/Save displayed order controls when Case authoring is unavailable, including Automatic Standardized multi-section contributions. Section moving remains independently available; global reorder eligibility and backend rules are unchanged. Expired move confirmation now explains that a new review is required without applying changes.

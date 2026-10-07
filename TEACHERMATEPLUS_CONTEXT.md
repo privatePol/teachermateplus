@@ -1,3 +1,13 @@
+## Contribution workspace section disclosure (2026-10-07)
+
+Existing section groups are independently collapsible and start expanded. Expand all sections / Collapse all sections operate only on section wrappers; title/count headers remain visible and nested Case disclosure states are preserved. Native buttons expose expanded state and controlled regions; controls activate only with JavaScript, leaving section contents accessible otherwise. Scoped print rules expand section contents regardless of screen collapse. Flat-list/global reorder contexts remain flat.
+
+Section collapse preserves individual question and explicitly selected whole-Case selections. Move reports standalone question count, whole-Case count and unique affected question count; a hidden-selection summary identifies selections inside collapsed sections. Delete retains its separate individual-question scope/count. Select all visible excludes collapsed sections and Cases. Filtering still deselects hidden questions and whole Cases with any filtered member; hiding a Case itself keeps its prior individual-question deselection behavior. Invalid individual linked selections block Move, without automatic Case selection or member double-counting. Question Index follows filters rather than section visibility, shows whole-Case selection marks, and expands the target section then Case before scrolling. No backend mutation, permission, placement, history or Final Submission rule changes.
+
+## Contribution workspace visual hierarchy (2026-10-07)
+
+The contribution workspace uses branded muted forest/sage/champagne section headers, solid dark title areas for readable white text and white count badges. Question headers are understated pale sage with dark-green text and a slim muted-gold accent; card bodies are warm ivory with gentle corners/separators and minimal shadows. The dedicated `data-contribution-workspace` scope prevents these styling changes from affecting reuse, authoring or Attendance. Native selection checkmarks, Case disclosure controls and Question Index semantics remain; dashed reading and solid focus outlines distinguish states. The section-collapse enhancement above adds presentation controls and selection visibility while preserving this visual direction and backend rules.
+
 ## Faculty Draft section moves (2026-10-07)
 
 Section-move availability does not change existing presentation or global reorder eligibility. Contexts without Case authoring retain the prior flat list, Move up/down and Save displayed order; the JavaScript submits every globally ordered question ID, including filtered cards. Case-enabled contexts retain their grouped presentation. Expired confirmation returns a 409 with instructions to select and review again; no move is applied.

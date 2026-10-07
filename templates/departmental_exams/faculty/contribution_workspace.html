@@ -1,10 +1,10 @@
 {% extends "faculty_portal/base.html" %}
 {% load static departmental_exam_content %}
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-navigation-20260914"><link rel="stylesheet" href="{% static 'css/departmental_exam_question_bank_workspace.css' %}?v=20260918">{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-navigation-20260914"><link rel="stylesheet" href="{% static 'css/departmental_exam_question_bank_workspace.css' %}?v=20261007-section-collapse">{% endblock %}
 {% block faculty_content %}
 {% include "departmental_exams/_classification_badge.html" with course=contribution.cycle_course %}
-<div data-import-page data-question-bank-workspace{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
+<div data-import-page data-question-bank-workspace data-contribution-workspace{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
 <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:contribution_list' %}?cycle_status={{ contribution.cycle_course.cycle.status }}">Question Bank</a></li><li class="breadcrumb-item active">{{ contribution.cycle_course.course.code }}</li></ol></nav>
 <div class="card shadow-sm mb-3">
   <div class="card-body">
@@ -90,7 +90,9 @@
       <button class="btn btn-outline-danger" type="submit" data-bulk-delete-button disabled>Delete selected questions (<span data-bulk-selected-count>0</span>)</button>
       {% if section_move_enabled %}<button class="btn btn-outline-primary" type="submit" formaction="{% url 'departmental_exams:question_move' contribution.id %}" data-section-move-button disabled>Move to section</button>{% endif %}
     </div>
-    <p class="small text-muted mt-2 mb-0">Filtering clears selections that become hidden. Deleting linked questions leaves their Case in place. Add replacements within a reviewer Case before submission; a Faculty Case can be resolved or deleted separately.</p>
+    <p class="small text-muted mt-2 mb-0">Filtering clears selections that become hidden. Collapsing a section keeps selections. Delete counts only individually selected questions, including those in collapsed sections; whole-Case selections are for Move only. Deleting linked questions leaves their Case in place. Add replacements within a reviewer Case before submission; a Faculty Case can be resolved or deleted separately.</p>
+    {% if section_move_enabled %}<p class="small mt-2 mb-0" role="status" data-section-move-summary>Move selection: <span data-move-standalone-count>0</span> standalone questions; <span data-move-case-count>0</span> whole Cases; <span data-move-question-count>0</span> total affected questions.</p>{% endif %}
+    <p class="small mt-2 mb-0" role="status" data-section-hidden-summary hidden>In collapsed sections: <span data-hidden-question-count>0</span> individually selected questions (<span data-hidden-standalone-count>0</span> standalone); <span data-hidden-case-count>0</span> whole Cases; <span data-hidden-affected-count>0</span> total selected question items.</p>
     {% if section_move_enabled %}<p class="small text-muted mt-2 mb-0" data-section-move-help>Select standalone MCQs or explicitly select whole owned Cases. Individual linked questions and shared/reviewer Cases cannot move. Whole-Case selections clear when any member is filtered out. Draft section counts may remain incomplete.</p><p class="small text-warning mb-0" data-section-move-error hidden>Deselect individual linked questions. To move an owned Case, select its whole-Case checkbox instead.</p>{% endif %}
   </form>
   {% endif %}
@@ -99,9 +101,17 @@
 <div class="qb-workspace-primary" data-qb-question-list>
 {% if section_presentation_enabled %}
   <p class="small text-muted">Question numbers follow section and Case order, not the order you added questions. These are workspace numbers, not final exam item numbers.</p>
+  <div class="d-flex flex-wrap gap-2 mb-3" data-qb-section-controls hidden>
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-qb-expand-sections>Expand all sections</button>
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-qb-collapse-sections>Collapse all sections</button>
+  </div>
   {% for group in presentation_sections %}
-  <section class="mb-4" aria-label="{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}">
-    <h2 class="h4">{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}{% if group.section %} <span class="fs-6 fw-normal text-muted">Final exam: {{ group.section.item_quota }} items | Your saved questions: {{ group.saved_question_count }}</span>{% endif %}</h2>
+  <section class="mb-4" data-qb-section aria-label="{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}">
+    <div class="qb-section-header mb-3">
+      <h2 class="h4 qb-section-title" id="workspace-section-title-{{ forloop.counter }}"><span>{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}</span><button class="btn btn-sm qb-section-toggle" type="button" data-qb-section-toggle aria-expanded="true" aria-controls="workspace-section-content-{{ forloop.counter }}" aria-label="Collapse section: {% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}" hidden>Collapse section</button></h2>
+      {% if group.section %}<div class="qb-section-counts"><span class="badge qb-section-count">Final exam: {{ group.section.item_quota }} items | Your saved questions: {{ group.saved_question_count }}</span></div>{% endif %}
+    </div>
+    <div id="workspace-section-content-{{ forloop.counter }}" data-qb-section-content role="region" aria-labelledby="workspace-section-title-{{ forloop.counter }}">
     {% if group.assignment_required %}<p class="alert alert-warning">These saved questions still need an Exam Section before Final Submission.{% if is_mutable %} Use Edit to select a frozen Exam Section.{% else %} Section assignment is unavailable while this contribution is read-only.{% endif %}</p>{% endif %}
     {% for scenario in group.cases %}
       <article class="card shadow-sm mb-3 qb-case-card" id="qb-case-{{ scenario.id }}" data-qb-case-title="{{ scenario.title|default:'Case / Scenario' }}">
@@ -133,6 +143,7 @@
     {% for question in group.questions %}
       {% include "departmental_exams/faculty/_question_card.html" with show_global_reorder=False %}
     {% endfor %}
+    </div>
   </section>
   {% endfor %}
 {% else %}
@@ -177,8 +188,8 @@
 {% endblock %}
 {% block extra_js %}{{ block.super }}
 <script src="{% static 'js/departmental_exam_case_disclosure.js' %}?v=case-navigation-20260914"></script>
-<script src="{% static 'js/departmental_exam_bulk_question_delete.js' %}?v=20261007-section-move"></script>
-<script src="{% static 'js/departmental_exam_question_bank_workspace.js' %}?v=20261007-section-move"></script>
+<script src="{% static 'js/departmental_exam_bulk_question_delete.js' %}?v=20261007-section-collapse"></script>
+<script src="{% static 'js/departmental_exam_question_bank_workspace.js' %}?v=20261007-section-collapse"></script>
 <script>
 (() => {
   const list = document.getElementById("question-list");

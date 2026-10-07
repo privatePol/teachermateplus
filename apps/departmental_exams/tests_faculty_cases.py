@@ -694,6 +694,59 @@ class FacultyCaseFixtureMixin(Stage5FixtureMixin):
 
 
 class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
+    def test_workspace_sections_have_expanded_accessible_controls_without_mutation(self):
+        scenario = self.save_case()
+        self.add_question(scenario=scenario)
+        self.add_question(section=self.section_b, text="Synthetic section standalone")
+        before = self._question_mutation_snapshot()
+        response = self.client.get(reverse("departmental_exams:contribution_workspace", args=[self.contribution.id]))
+
+        class DisclosureMarkup(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.sections, self.toggles, self.contents = [], [], []
+
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                for key, collection in (("data-qb-section", self.sections),
+                                        ("data-qb-section-toggle", self.toggles),
+                                        ("data-qb-section-content", self.contents)):
+                    if key in attrs:
+                        collection.append((tag, attrs))
+
+        markup = DisclosureMarkup()
+        markup.feed(response.content.decode())
+        self.assertEqual(len(markup.sections), 2)
+        self.assertEqual(len(markup.toggles), 2)
+        self.assertEqual(len(markup.contents), 2)
+        for (tag, toggle), (_, content) in zip(markup.toggles, markup.contents):
+            self.assertEqual(tag, "button")
+            self.assertEqual(toggle["type"], "button")
+            self.assertEqual(toggle["aria-expanded"], "true")
+            self.assertEqual(toggle["aria-controls"], content["id"])
+            self.assertIn("hidden", toggle)  # JS-only controls; contents work without JS.
+            self.assertNotIn("hidden", content)
+            self.assertEqual(content["role"], "region")
+            self.assertContains(response, f'id="{content["aria-labelledby"]}"', html=False)
+        self.assertContains(response, "Expand all sections")
+        self.assertContains(response, "Collapse all sections")
+        self.assertContains(response, "data-section-hidden-summary")
+        self.assertContains(response, "data-move-question-count")
+        self.assertContains(response, "Final exam: 30 items | Your saved questions: 1")
+        self.assertContains(response, "Final exam: 20 items | Your saved questions: 1")
+        self.assertContains(response, f'data-bs-target="#workspace-case-{scenario.id}" aria-expanded="false"', html=False)
+        self.assertNotContains(response, "Save displayed order")
+        self.assertEqual(self._question_mutation_snapshot(), before)
+
+    def test_workspace_print_expands_sections_without_changing_screen_disclosures(self):
+        css = (Path(__file__).resolve().parents[2] / "static/css/departmental_exam_question_bank_workspace.css").read_text()
+        print_rules = css.split("@media print {", 1)[1].split("@media", 1)[0]
+        self.assertIn('[data-contribution-workspace] [data-qb-section-content][hidden] { display: block !important; }', print_rules)
+        self.assertIn('[data-qb-section-controls]', print_rules)
+        self.assertIn('[data-qb-section-toggle]', print_rules)
+        case_css = (Path(__file__).resolve().parents[2] / "static/css/departmental_exam_case_editor.css").read_text()
+        self.assertIn('.tmp-case-collapse.collapse, .tmp-case-collapse.collapsing', case_css.split('@media print {', 1)[1])
+
     def test_historical_csv_import_unplaced_recovery_and_existing_edit_route(self):
         from .csv_import import CSV_HEADERS
         from .tests_questionnaire_print_release import QuestionnairePrintReleaseTests
