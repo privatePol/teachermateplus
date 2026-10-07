@@ -1,7 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% load static departmental_exam_content %}
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-navigation-20260914"><link rel="stylesheet" href="{% static 'css/departmental_exam_question_bank_workspace.css' %}?v=20261007-section-collapse">{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}?v=case-navigation-20260914"><link rel="stylesheet" href="{% static 'css/departmental_exam_question_bank_workspace.css' %}?v=20261007-header-toggle">{% endblock %}
 {% block faculty_content %}
 {% include "departmental_exams/_classification_badge.html" with course=contribution.cycle_course %}
 <div data-import-page data-question-bank-workspace data-contribution-workspace{% if active_import %} data-question-import-controller data-status-url="{% if active_import.source_format == 'DOCX' %}{% url 'departmental_exams:docx_status' active_import.token %}{% else %}{% url 'departmental_exams:csv_status' active_import.token %}{% endif %}"{% endif %}>
@@ -107,10 +107,16 @@
   </div>
   {% for group in presentation_sections %}
   <section class="mb-4" data-qb-section aria-label="{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}">
-    <div class="qb-section-header mb-3">
-      <h2 class="h4 qb-section-title" id="workspace-section-title-{{ forloop.counter }}"><span>{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}</span><button class="btn btn-sm qb-section-toggle" type="button" data-qb-section-toggle aria-expanded="true" aria-controls="workspace-section-content-{{ forloop.counter }}" aria-label="Collapse section: {% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}" hidden>Collapse section</button></h2>
-      {% if group.section %}<div class="qb-section-counts"><span class="badge qb-section-count">Final exam: {{ group.section.item_quota }} items | Your saved questions: {{ group.saved_question_count }}</span></div>{% endif %}
-    </div>
+    <h2 class="h4 mb-3" id="workspace-section-title-{{ forloop.counter }}">
+      <button class="qb-section-header" type="button" data-qb-section-toggle aria-expanded="true" aria-controls="workspace-section-content-{{ forloop.counter }}" aria-label="Collapse section: {% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}" disabled>
+        <span class="qb-section-title">{% if group.assignment_required %}Section assignment required{% else %}{{ group.section.title|default:'Case-Based Questions' }}{% endif %}</span>
+        {% if group.section %}<span class="qb-section-counts"><span class="badge qb-section-count">Final exam: {{ group.section.item_quota }} items | Your saved questions: {{ group.saved_question_count }}</span></span>{% endif %}
+        <span class="qb-section-icon" data-qb-section-icon aria-hidden="true" hidden>
+          <svg data-qb-icon-collapse viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M14 4v6h6M21 3l-7 7M10 20v-6H4M3 21l7-7"/></svg>
+          <svg data-qb-icon-expand viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/></svg>
+        </span>
+      </button>
+    </h2>
     <div id="workspace-section-content-{{ forloop.counter }}" data-qb-section-content role="region" aria-labelledby="workspace-section-title-{{ forloop.counter }}">
     {% if group.assignment_required %}<p class="alert alert-warning">These saved questions still need an Exam Section before Final Submission.{% if is_mutable %} Use Edit to select a frozen Exam Section.{% else %} Section assignment is unavailable while this contribution is read-only.{% endif %}</p>{% endif %}
     {% for scenario in group.cases %}
@@ -188,8 +194,8 @@
 {% endblock %}
 {% block extra_js %}{{ block.super }}
 <script src="{% static 'js/departmental_exam_case_disclosure.js' %}?v=case-navigation-20260914"></script>
-<script src="{% static 'js/departmental_exam_bulk_question_delete.js' %}?v=20261007-section-collapse"></script>
-<script src="{% static 'js/departmental_exam_question_bank_workspace.js' %}?v=20261007-section-collapse"></script>
+<script src="{% static 'js/departmental_exam_bulk_question_delete.js' %}?v=20261007-header-toggle"></script>
+<script src="{% static 'js/departmental_exam_question_bank_workspace.js' %}?v=20261007-header-toggle"></script>
 <script>
 (() => {
   const list = document.getElementById("question-list");

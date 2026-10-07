@@ -28,8 +28,7 @@
     // Only this wrapper changes. Nested Case disclosure classes stay untouched.
     content.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
-    toggle.textContent = open ? 'Collapse section' : 'Expand section';
-    toggle.setAttribute('aria-label', `${toggle.textContent}: ${section.getAttribute('aria-label')}`);
+    toggle.setAttribute('aria-label', `${open ? 'Collapse section' : 'Expand section'}: ${section.getAttribute('aria-label')}`);
     section.dispatchEvent(new CustomEvent('tmp:section-visibility-changed', {bubbles: true}));
   }
   function setOpen(open) {
@@ -184,7 +183,9 @@
   sections.forEach(section => {
     const toggle = section.querySelector('[data-qb-section-toggle]');
     if (!toggle) return;
-    toggle.hidden = false;
+    toggle.disabled = false;
+    const icon = toggle.querySelector('[data-qb-section-icon]');
+    if (icon) icon.hidden = false;
     toggle.addEventListener('click', () => setSectionOpen(section, toggle.getAttribute('aria-expanded') !== 'true'));
   });
   if (sections.length) {

@@ -42,7 +42,10 @@
     setCount('data-hidden-affected-count', [...affected].filter(inCollapsedSection).length);
     const hiddenSummary = form.querySelector('[data-section-hidden-summary]');
     if (hiddenSummary) hiddenSummary.hidden = !hiddenQuestions.length && !hiddenCases.length;
-    if (moveButton) moveButton.disabled = linkedSelected || (!selected.length && !selectedCases.length);
+    if (moveButton) {
+      moveButton.textContent = affected.size ? `Move selected ${affected.size} question${affected.size === 1 ? '' : 's'} to section` : 'Move to section';
+      moveButton.disabled = linkedSelected || (!selected.length && !selectedCases.length);
+    }
     if (moveError) moveError.hidden = !linkedSelected;
     count.textContent = String(selected.length);
     button.disabled = selected.length === 0;

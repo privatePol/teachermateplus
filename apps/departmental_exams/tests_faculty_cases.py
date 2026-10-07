@@ -693,6 +693,41 @@ class FacultyCaseFixtureMixin(Stage5FixtureMixin):
         )
 
 
+class WorkspaceHeaderUITests(SimpleTestCase):
+    def test_full_section_header_is_one_native_button_with_icons_and_no_js_access(self):
+        from django.template import Context, Engine
+        template = (Path(__file__).resolve().parents[2] / "templates/departmental_exams/faculty/contribution_workspace.html").read_text()
+        start = template.index('<h2 class="h4 mb-3" id="workspace-section-title-')
+        end = template.index('{% if group.assignment_required %}<p', start)
+        header = Engine().from_string(template[start:end]).render(Context({
+            "forloop": {"counter": 1},
+            "group": {"section": {"title": "Section A & scope", "item_quota": 30}, "saved_question_count": 1},
+        }))
+        self.assertEqual(header.count("<button"), 1)
+        self.assertEqual(header.count("<h2"), 1)
+        self.assertIn('class="qb-section-header" type="button"', header)
+        self.assertIn('aria-expanded="true" aria-controls="workspace-section-content-1"', header)
+        self.assertIn('aria-label="Collapse section: Section A &amp; scope" disabled', header)
+        self.assertIn('class="qb-section-title">Section A &amp; scope</span>', header)
+        self.assertIn('Final exam: 30 items | Your saved questions: 1', header)
+        self.assertIn('data-qb-section-icon aria-hidden="true" hidden', header)
+        self.assertIn('data-qb-icon-collapse', header)
+        self.assertIn('data-qb-icon-expand', header)
+        self.assertIn('data-qb-section-content role="region" aria-labelledby="workspace-section-title-1"', header)
+        self.assertNotIn('data-qb-section-content hidden', header)
+        self.assertNotIn('>Collapse section<', header)
+
+    def test_print_keeps_header_and_expands_content_with_scoped_blue_summary(self):
+        css = (Path(__file__).resolve().parents[2] / "static/css/departmental_exam_question_bank_workspace.css").read_text()
+        print_rules = css.split("@media print {", 1)[1].split("@media", 1)[0]
+        self.assertIn('[data-contribution-workspace] [data-qb-section-content][hidden] { display: block !important; }', print_rules)
+        self.assertIn('[data-qb-section-icon]', print_rules)
+        self.assertNotIn('[data-qb-section-toggle]', print_rules)
+        self.assertIn('[data-contribution-workspace] [data-section-move-summary] { color: #0b57d0; }', css)
+        self.assertIn('.qb-section-header[aria-expanded="true"] [data-qb-icon-expand]', css)
+        self.assertIn('.qb-section-header[aria-expanded="false"] [data-qb-icon-collapse]', css)
+
+
 class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
     def test_workspace_sections_have_expanded_accessible_controls_without_mutation(self):
         scenario = self.save_case()
@@ -705,26 +740,47 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
             def __init__(self):
                 super().__init__()
                 self.sections, self.toggles, self.contents = [], [], []
+                self.heading_depth = self.button_depth = 0
+                self.header_headings = []
+                self.nested_buttons = False
 
             def handle_starttag(self, tag, attrs):
                 attrs = dict(attrs)
+                if tag == "h2":
+                    self.heading_depth += 1
+                if tag == "button":
+                    self.nested_buttons |= self.button_depth > 0
+                    self.button_depth += 1
+                    if "data-qb-section-toggle" in attrs:
+                        self.header_headings.append(self.heading_depth == 1)
                 for key, collection in (("data-qb-section", self.sections),
                                         ("data-qb-section-toggle", self.toggles),
                                         ("data-qb-section-content", self.contents)):
                     if key in attrs:
                         collection.append((tag, attrs))
 
+            def handle_endtag(self, tag):
+                if tag == "h2":
+                    self.heading_depth -= 1
+                if tag == "button":
+                    self.button_depth -= 1
+
         markup = DisclosureMarkup()
         markup.feed(response.content.decode())
         self.assertEqual(len(markup.sections), 2)
         self.assertEqual(len(markup.toggles), 2)
         self.assertEqual(len(markup.contents), 2)
+        self.assertEqual(markup.header_headings, [True, True])
+        self.assertFalse(markup.nested_buttons)
         for (tag, toggle), (_, content) in zip(markup.toggles, markup.contents):
             self.assertEqual(tag, "button")
             self.assertEqual(toggle["type"], "button")
             self.assertEqual(toggle["aria-expanded"], "true")
             self.assertEqual(toggle["aria-controls"], content["id"])
-            self.assertIn("hidden", toggle)  # JS-only controls; contents work without JS.
+            self.assertIn("disabled", toggle)  # Header stays visible without JS; contents remain accessible.
+            self.assertNotIn("hidden", toggle)
+            self.assertEqual(toggle["class"], "qb-section-header")
+            self.assertTrue(toggle["aria-label"].startswith("Collapse section: Section "))
             self.assertNotIn("hidden", content)
             self.assertEqual(content["role"], "region")
             self.assertContains(response, f'id="{content["aria-labelledby"]}"', html=False)
@@ -732,6 +788,9 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         self.assertContains(response, "Collapse all sections")
         self.assertContains(response, "data-section-hidden-summary")
         self.assertContains(response, "data-move-question-count")
+        self.assertContains(response, 'data-qb-section-icon aria-hidden="true" hidden', count=2, html=False)
+        self.assertContains(response, "data-qb-icon-collapse", count=2)
+        self.assertContains(response, "data-qb-icon-expand", count=2)
         self.assertContains(response, "Final exam: 30 items | Your saved questions: 1")
         self.assertContains(response, "Final exam: 20 items | Your saved questions: 1")
         self.assertContains(response, f'data-bs-target="#workspace-case-{scenario.id}" aria-expanded="false"', html=False)
@@ -743,7 +802,8 @@ class FacultyCaseWorkflowTests(FacultyCaseFixtureMixin, Stage4TestCase):
         print_rules = css.split("@media print {", 1)[1].split("@media", 1)[0]
         self.assertIn('[data-contribution-workspace] [data-qb-section-content][hidden] { display: block !important; }', print_rules)
         self.assertIn('[data-qb-section-controls]', print_rules)
-        self.assertIn('[data-qb-section-toggle]', print_rules)
+        self.assertIn('[data-qb-section-icon]', print_rules)
+        self.assertNotIn('[data-qb-section-toggle]', print_rules)  # Print title/count headers, hide only icons.
         case_css = (Path(__file__).resolve().parents[2] / "static/css/departmental_exam_case_editor.css").read_text()
         self.assertIn('.tmp-case-collapse.collapse, .tmp-case-collapse.collapsing', case_css.split('@media print {', 1)[1])
 

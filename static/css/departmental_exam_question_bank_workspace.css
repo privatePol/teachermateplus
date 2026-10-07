@@ -50,13 +50,16 @@
 /* Workspace-only visual hierarchy; no authoring/reuse or Attendance styles. */
 [data-contribution-workspace] .qb-contribution-progress .progress-bar { background: linear-gradient(90deg, #245743, #78947c); }
 [data-contribution-workspace] :is(.qb-action-toolbar, .qb-index-panel) { background: #fffefa; box-shadow: 0 2px 6px #244b3b0b; }
-[data-contribution-workspace] .qb-section-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; overflow: hidden; border: 1px solid #cbd7cb; border-radius: .8rem; background: linear-gradient(105deg, #245743 0%, #78947c 62%, #e8dcaf 100%); }
+[data-contribution-workspace] .qb-section-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: stretch; width: 100%; padding: 0; overflow: hidden; font: inherit; text-align: left; border: 1px solid #cbd7cb; border-radius: .8rem; background: linear-gradient(105deg, #245743 0%, #78947c 62%, #e8dcaf 100%); }
 [data-contribution-workspace] .qb-section-title { display: flex; align-items: center; margin: 0; padding: .9rem 1rem; min-width: 0; background: #245743; color: #fff; font-size: 1.15rem; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 [data-contribution-workspace] .qb-section-title { flex-wrap: wrap; gap: .75rem; }
-[data-contribution-workspace] .qb-section-toggle { margin-left: auto; flex-shrink: 0; min-height: 2.5rem; color: #244b3b; background: #fffefa; border: 1px solid #78947c; }
-[data-contribution-workspace] .qb-section-toggle:hover { background: #edf4ee; }
+[data-contribution-workspace] .qb-section-header:enabled { cursor: pointer; }
+[data-contribution-workspace] .qb-section-header:disabled { opacity: 1; }
+[data-contribution-workspace] .qb-section-icon { display: grid; place-items: center; align-self: center; grid-column: -2 / -1; width: 2rem; height: 2rem; margin: .65rem; color: #244b3b; background: #fffefa; border: 1px solid #78947c; border-radius: .4rem; }
+[data-contribution-workspace] .qb-section-header[aria-expanded="true"] [data-qb-icon-expand], [data-contribution-workspace] .qb-section-header[aria-expanded="false"] [data-qb-icon-collapse] { display: none; }
+[data-contribution-workspace] [data-section-move-summary] { color: #0b57d0; }
 [data-contribution-workspace] [data-qb-section-content][hidden] { display: none; }
-[data-contribution-workspace] :is([data-qb-section-controls], [data-qb-section-toggle])[hidden] { display: none !important; }
+[data-contribution-workspace] :is([data-qb-section-controls], [data-qb-section-icon])[hidden] { display: none !important; }
 [data-contribution-workspace] .qb-section-counts { display: flex; align-items: center; justify-content: flex-end; min-width: 0; padding: .8rem 1rem; }
 [data-contribution-workspace] .qb-section-count { padding: .55rem .7rem; color: #244b3b; background: #fff; border: 1px solid #d8e1d8; border-radius: .6rem; font-size: .8rem; font-weight: 600; line-height: 1.4; white-space: normal; text-align: left; }
 [data-contribution-workspace] :is(.question-card, .qb-case-card) { color: #303632; background: #fffefa; border-color: #d6ded6; border-radius: .75rem; box-shadow: 0 1px 3px #244b3b0a !important; }
@@ -72,7 +75,8 @@
 [data-contribution-workspace] :is(button, a, input, summary):focus-visible { outline: 3px solid #46688a; outline-offset: 3px; }
 [data-contribution-workspace] :is(.question-card, .qb-case-card).qb-nav-flash { outline: 3px double #8a7951; outline-offset: 3px; }
 @media (max-width: 575.98px) {
-  [data-contribution-workspace] .qb-section-header { grid-template-columns: minmax(0, 1fr); }
+  [data-contribution-workspace] .qb-section-header { grid-template-columns: minmax(0, 1fr) auto; }
+  [data-contribution-workspace] .qb-section-title { grid-column: 1 / -1; }
   [data-contribution-workspace] .qb-section-counts { justify-content: flex-start; }
 }
 @media (max-width: 1199.98px) {
@@ -82,7 +86,7 @@
 }
 @media print {
   [data-contribution-workspace] [data-qb-section-content][hidden] { display: block !important; }
-  [data-contribution-workspace] :is([data-qb-section-controls], [data-qb-section-toggle], [data-section-hidden-summary], [data-section-move-summary]) { display: none !important; }
+  [data-contribution-workspace] :is([data-qb-section-controls], [data-qb-section-icon], [data-section-hidden-summary], [data-section-move-summary]) { display: none !important; }
   .qb-action-toolbar { position: static; }
   .qb-index-shell { display: none; }
   .qb-workspace-layout, .qb-workspace-layout.index-collapsed { display: block; }
