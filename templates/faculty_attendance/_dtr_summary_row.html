@@ -1,9 +1,10 @@
 <tr id="dtr-summary-faculty-{{ row.faculty.pk }}"{% if faculty and faculty.pk == row.faculty.pk %} class="table-success"{% endif %}>
-  <td><button type="button" class="btn btn-link p-0 text-start" data-dtr-faculty-select data-faculty-id="{{ row.faculty.pk }}" aria-controls="faculty-dtr-card"{% if faculty and faculty.pk == row.faculty.pk %} aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ row.faculty.full_name }}</button></td>
-  <td>{{ row.preview.snapshot.basic_hours }}</td>
-  <td>{{ row.preview.snapshot.gross_deductions }}</td>
-  <td>{{ row.preview.snapshot.leave_credit }}</td>
-  <td>{{ row.preview.snapshot.net_payable_hours }}</td>
+  <td class="dtr-number">{{ row.row_number }}</td>
+  <td><button type="button" class="btn btn-link p-0 text-start" data-dtr-faculty-select data-faculty-id="{{ row.faculty.pk }}" aria-controls="faculty-dtr-card"{% if faculty and faculty.pk == row.faculty.pk %} aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ row.faculty_display_name }}</button></td>
+  <td class="dtr-number">{{ row.preview.snapshot.basic_hours }}</td>
+  <td class="dtr-number">{{ row.preview.snapshot.gross_deductions }}</td>
+  <td class="dtr-number">{{ row.preview.snapshot.leave_credit }}</td>
+  <td class="dtr-number">{{ row.preview.snapshot.net_payable_hours }}</td>
   <td>{% if row.final %}R{{ row.final.revision }}{% if row.final.publication_id != publication.pk %} &middot; older publication{% endif %}{% else %}Not finalized{% endif %}</td>
   <td>{% if not row.publication %}Awaiting attendance publication{% elif row.preview.ready %}Ready{% else %}Needs review{% endif %}</td>
 </tr>

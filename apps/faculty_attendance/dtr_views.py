@@ -2,6 +2,7 @@
 
 from urllib.parse import urlencode
 from datetime import timedelta
+from copy import deepcopy
 
 from django import forms
 from django.contrib import messages
@@ -99,6 +100,24 @@ def _cutoff_key(publication):
     return f"{publication.academic_year_id}:{publication.term_id}:{publication.start_date}:{publication.end_date}"
 
 
+def _dtr_faculty_name(faculty):
+    given = " ".join(part.strip() for part in (faculty.first_name, faculty.middle_name or "") if part and part.strip())
+    surname = faculty.last_name.strip()
+    return f"{surname}, {given}" if surname and given else surname or given or faculty.username
+
+
+def _workspace_snapshot(saved):
+    """Display fields only; never mutate saved evidence or recompute totals."""
+    snapshot = deepcopy(saved)
+    for line in snapshot.get("lines", []):
+        status = line.get("status", "")
+        line["display_status"] = "Present" if status.lower().startswith("present") else status
+        for field in ("late", "early"):
+            minutes = line.get(f"{field}_minutes")
+            line[f"display_{field}"] = f"{minutes} min" if minutes is not None else f"{line.get(field, '0.00')} hr"
+    return snapshot
+
+
 def _cutoff_rows(request, publication):
     """Share the existing batched, scoped read path across a cutoff's faculties."""
     from .faculty_cutoffs import review_faculty_cutoff
@@ -124,6 +143,10 @@ def _cutoff_rows(request, publication):
                 or faculty.pk in ac_owners or (item["publication"] and item["publication"].scope_snapshot.get("revises_teaching_to_empty"))):
             continue
         rows.append({**item, "faculty": faculty})
+    rows.sort(key=lambda row: (row["faculty"].last_name.strip().casefold(), row["faculty"].first_name.strip().casefold(), row["faculty"].pk))
+    for number, row in enumerate(rows, 1):
+        row["row_number"] = number
+        row["faculty_display_name"] = _dtr_faculty_name(row["faculty"])
     return rows
 
 
@@ -221,8 +244,18 @@ def _detail_context(*, request, publication, faculty, editable_departments, depa
     has_mixed_reconciliation = bool(preview and any(
         line.get("can_reconcile") for line in preview.snapshot["lines"]
     ))
+    # One table at a time. GET defaults to the selected immutable final; an
+    # explicit review or correction opens current records without changing print.
+    review_current = bool(preview and (not displayed_final or (
+        not request.GET.get("version") and (request.GET.get("view") == "current"
+        or any(request.GET.get(key) for key in ("edit", "remove", "early", "mixed"))
+        or request.method == "POST" and (request.POST.get("action") != "finalize" or final_form.errors)))))
+    detail_snapshot = _workspace_snapshot(preview.snapshot if review_current else displayed_final.snapshot) if (review_current or displayed_final) else None
     return {
         "faculty": faculty,
+        "faculty_display_name": _dtr_faculty_name(faculty) if faculty else "",
+        "review_current": review_current,
+        "detail_snapshot": detail_snapshot,
         "pending_publication": pending_publication,
         "preview": preview,
         "final": final,
@@ -276,6 +309,8 @@ def _ajax_dtr_payload(*, request, context, summary, publication, message, ok, st
         "faculty_id": faculty.pk if faculty else None,
         "publication_id": publication.pk,
         "cutoff": _cutoff_key(publication),
+        "view": "current" if context["review_current"] else "saved",
+        "version": context["displayed_final"].revision if context["displayed_final"] and not context["review_current"] else None,
         "workspace_html": render_to_string("faculty_attendance/_dtr_workspace.html", context, request=request)
             if request.method == "GET" else "",
         "faculty_html": render_to_string("faculty_attendance/_dtr_faculty_detail.html", context, request=request),

@@ -25,7 +25,7 @@
       <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.leave_type.id_for_label }}">Leave type (if leave)</label>{{ adjustment_form.leave_type }}{{ adjustment_form.leave_type.errors }}</div>
       <div class="col-sm-6 col-lg-3"><label class="form-label" for="{{ adjustment_form.offset_kind.id_for_label }}">Deduction to offset</label>{{ adjustment_form.offset_kind }}{{ adjustment_form.offset_kind.errors }}</div>
       <div class="col-lg-6"><label class="form-label" for="{{ adjustment_form.reason.id_for_label }}">Checker note (optional)</label>{{ adjustment_form.reason }}{{ adjustment_form.reason.errors }}</div>
-      <div class="col-12">{{ adjustment_form.non_field_errors }}<button class="btn btn-success">{% if edit_item %}Save entry revision{% else %}Save dated entry{% endif %}</button>{% if edit_item %}<a class="btn btn-outline-secondary ms-2" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}">Cancel edit</a>{% endif %}</div>
+      <div class="col-12">{{ adjustment_form.non_field_errors }}<button class="btn btn-success">{% if edit_item %}Save entry revision{% else %}Save dated entry{% endif %}</button>{% if edit_item %}<a class="btn btn-outline-secondary ms-2" data-dtr-navigation href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}">Cancel edit</a>{% endif %}</div>
     </form>
     <div class="mt-3">
       <h3 class="h6">Current checker entries</h3>
@@ -35,7 +35,7 @@
         <li class="list-group-item">
           <div class="d-flex justify-content-between flex-wrap gap-2">
             <span><strong>{{ item.entry_date }} &middot; {{ item.get_kind_display }}</strong>{% if item.is_removed %}<br><span class="badge text-bg-secondary">Removed</span> <span>Zero-hour reversal &middot; Entry R{{ item.revision }}</span>{% else %}<br><span class="badge text-bg-success">Active</span> <span>{{ item.hours }} hr &middot; Entry R{{ item.revision }}</span>{% endif %}<br><small>{{ item.reason|default:"No reason recorded" }}</small></span>
-            <span class="d-flex align-items-start gap-2">{% if item.can_edit_dtr %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}&amp;edit={{ item.pk }}#checker-entry">Correct</a>{% endif %}{% if item.can_remove_dtr %}<a class="btn btn-sm btn-outline-danger" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}&amp;remove={{ item.pk }}#remove-checker-entry">Remove</a>{% endif %}</span>
+            <span class="d-flex align-items-start gap-2">{% if item.can_edit_dtr %}<a class="btn btn-sm btn-outline-secondary" data-dtr-navigation href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}&amp;edit={{ item.pk }}#checker-entry">Correct</a>{% endif %}{% if item.can_remove_dtr %}<a class="btn btn-sm btn-outline-danger" data-dtr-navigation href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}&amp;remove={{ item.pk }}#remove-checker-entry">Remove</a>{% endif %}</span>
           </div>
           {% if item.prior_revisions %}<details class="mt-2"><summary>Entry revision history ({{ item.prior_revisions|length }} earlier)</summary><ul class="small mt-2 mb-0">{% for revision in item.prior_revisions %}<li>Entry R{{ revision.revision }} &middot; {% if revision.hours == 0 %}Removed{% else %}{{ revision.hours }} hr{% endif %} &middot; {{ revision.reason|default:"No reason recorded" }}</li>{% endfor %}</ul></details>{% endif %}
         </li>
@@ -51,7 +51,7 @@
         {% csrf_token %}<input type="hidden" name="action" value="remove_adjustment"><input type="hidden" name="publication" value="{{ publication.pk }}"><input type="hidden" name="faculty" value="{{ faculty.pk }}">{{ removal_form.entry_id }}{{ removal_form.expected_revision }}
         <div class="col-lg-8"><label class="form-label" for="{{ removal_form.reason.id_for_label }}">Removal note (optional)</label>{{ removal_form.reason }}{{ removal_form.reason.errors }}</div>
         <div class="col-12"><label class="d-flex align-items-start gap-2">{{ removal_form.confirm_removal }}<span>{{ removal_form.confirm_removal.label }}</span></label>{{ removal_form.confirm_removal.errors }}</div>
-        <div class="col-12">{{ removal_form.non_field_errors }}<button class="btn btn-danger">Confirm removal</button><a class="btn btn-outline-secondary ms-2" href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}#checker-entry">Cancel</a></div>
+        <div class="col-12">{{ removal_form.non_field_errors }}<button class="btn btn-danger">Confirm removal</button><a class="btn btn-outline-secondary ms-2" data-dtr-navigation href="{% url 'faculty_attendance:dtr_review' %}?publication={{ publication.pk }}&amp;faculty={{ faculty.pk }}#checker-entry">Cancel</a></div>
       </form>
     </div>
     {% endif %}

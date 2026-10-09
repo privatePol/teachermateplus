@@ -92,8 +92,8 @@ class DTRSelectionTests(TestCase):
         self.assertEqual(previous.context["displayed_final"], first)
         self.assertEqual(previous.context["displayed_snapshot"]["net_payable_hours"], "1.00")
         self.assertEqual(self.get_page(cutoff=_cutoff_key(publication), faculty=self.faculty.pk, version="999").status_code, 404)
-        self.assertContains(response, "Print final DTR R2 (latest)")
-        self.assertContains(response, "Print saved R1")
+        self.assertContains(response, "Print saved DTR R2")
+        self.assertContains(previous, "Print saved DTR R1")
         summary = self.client.get(reverse("faculty_attendance:dtr_summary"), {"cutoff": _cutoff_key(publication)})
         self.assertEqual(summary.status_code, 200)
         self.assertEqual(summary.context["rows"][0]["print_snapshot"]["net_payable_hours"], "0.75")
@@ -238,3 +238,105 @@ class DTRSelectionTests(TestCase):
         data["csrfmiddlewaretoken"] = client.cookies["csrftoken"].value
         self.assertEqual(client.post(url, data).status_code, 302)
         self.assertEqual(DTRAdjustment.objects.get().department_id, self.department.pk)
+
+    def test_workspace_names_numbering_and_ajax_selection_use_structured_fields(self):
+        self.pair(confirm_second=True)
+        first = self.publish()
+        self.publish(self.replacement, key="workspace-second")
+        User = type(self.faculty)
+        User.objects.filter(pk=self.faculty.pk).update(first_name="Laarni Grace", middle_name="C.", last_name=" Lagman ")
+        User.objects.filter(pk=self.replacement.pk).update(first_name="Juan", middle_name="", last_name="Garcia")
+        self.faculty.refresh_from_db(); self.replacement.refresh_from_db()
+        response = self.get_page(cutoff=_cutoff_key(first), faculty=self.faculty.pk)
+        rows = response.context["summary"]
+        self.assertEqual([(row["row_number"], row["faculty_display_name"]) for row in rows],
+            [(1, "Garcia, Juan"), (2, "Lagman, Laarni Grace C.")])
+        self.assertContains(response, "Lagman, Laarni Grace C.")
+        selected = self.client.get(reverse("faculty_attendance:dtr_review"),
+            {"cutoff": _cutoff_key(first), "faculty": self.replacement.pk, "partial": "faculty"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest").json()
+        self.assertEqual(selected["faculty_id"], self.replacement.pk)
+        self.assertIn("Garcia, Juan", selected["faculty_html"])
+        self.assertEqual(selected["cutoff"], _cutoff_key(first))
+        self.assertEqual(selected["faculty_html"].count("data-dtr-detail-table"), 1)
+        # Equal surname/given names use stable user identity, not incidental row order.
+        User.objects.filter(pk__in=[self.faculty.pk,self.replacement.pk]).update(first_name="Juan",last_name="Garcia")
+        tied = self.get_page(cutoff=_cutoff_key(first))
+        self.assertEqual([r["faculty"].pk for r in tied.context["summary"]], sorted([self.faculty.pk,self.replacement.pk]))
+
+    def test_one_table_saved_previous_and_current_review_keep_correct_evidence(self):
+        self.pair()
+        publication = self.publish()
+        first = self.final(publication)
+        original = deepcopy(first.snapshot)
+        save_adjustment(actor=self.actor, publication=publication, faculty=self.faculty,
+            department=self.department, entry_date=publication.start_date, kind="OTHER", hours="0.25", reason="First correction")
+        second = self.final(publication)
+        save_adjustment(actor=self.actor, publication=publication, faculty=self.faculty,
+            department=self.department, entry_date=publication.start_date, kind="OTHER", hours="0.25", reason="Pending correction")
+        query = {"cutoff":_cutoff_key(publication), "faculty":self.faculty.pk}
+        saved = self.get_page(**query)
+        self.assertFalse(saved.context["review_current"])
+        self.assertEqual(saved.context["detail_snapshot"]["net_payable_hours"], "0.75")
+        self.assertContains(saved, "Changes awaiting review")
+        self.assertContains(saved, "data-dtr-detail-table", count=1)
+        self.assertNotContains(saved, 'data-dtr-ajax="adjustment"')
+        self.assertNotContains(saved, "Current calculation / changes for review")
+        self.assertNotContains(saved, "Present (assigned class; no exception)")
+        previous = self.get_page(**query, version="1")
+        self.assertContains(previous, "previous version")
+        self.assertEqual(previous.context["detail_snapshot"]["net_payable_hours"], "1.00")
+        self.assertNotContains(previous, "Correct E")
+        self.assertNotContains(previous, "Finalize DTR hours")
+        current = self.get_page(**query, view="current")
+        self.assertTrue(current.context["review_current"])
+        self.assertEqual(current.context["detail_snapshot"]["net_payable_hours"], "0.50")
+        self.assertContains(current, "data-dtr-detail-table", count=1)
+        self.assertContains(current, 'data-dtr-ajax="adjustment"')
+        self.assertContains(current, "Print saved DTR R2")
+        for heading in ("Date", "Subject / Section", "Time", "Attendance / Finding", "Teaching", "Admin", "A", "N", "L", "Early", "Other", "Leave", "Action"):
+            self.assertIn(f">{heading}", current.content.decode())
+        self.assertNotContains(current, "A 0.00 / N")
+        first.refresh_from_db()
+        self.assertEqual(first.snapshot, original)
+        self.assertEqual(second.snapshot["net_payable_hours"], "0.75")
+
+    def test_correction_navigation_and_post_keep_current_record_ids_and_number(self):
+        self.pair()
+        publication = self.publish()
+        final = self.final(publication)
+        self.get_page(cutoff=_cutoff_key(publication))
+        posted = self.client.post(reverse("faculty_attendance:dtr_review"), {
+            "publication":publication.pk,"faculty":self.faculty.pk,"action":"adjustment",
+            "entry_date":"2026-01-05","kind":"OTHER","hours":"0.25"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(posted.status_code,200)
+        self.assertEqual(posted.json()["view"],"current")
+        self.assertIn('<td class="dtr-number">1</td>',posted.json()["summary_row_html"])
+        self.assertIn("Current DTR for review",posted.json()["faculty_html"])
+        entry = DTRAdjustment.objects.get()
+        edit = self.get_page(cutoff=_cutoff_key(publication),faculty=self.faculty.pk,edit=entry.pk)
+        self.assertTrue(edit.context["review_current"])
+        self.assertEqual(edit.context["edit_item"],entry)
+        self.assertContains(edit,'data-dtr-navigation')
+        early = self.get_page(cutoff=_cutoff_key(publication),faculty=self.faculty.pk,
+            early=publication.entries.get().meeting_id)
+        self.assertTrue(early.context["show_early_form"])
+        self.assertContains(early,"Save attendance revision")
+        final.refresh_from_db()
+        self.assertEqual(final.snapshot["net_payable_hours"],"1.00")
+
+    def test_failed_finalization_retains_review_and_bound_errors(self):
+        self.pair()
+        publication = self.publish()
+        self.final(publication)
+        save_adjustment(actor=self.actor, publication=publication, faculty=self.faculty,
+            department=self.department, entry_date=publication.start_date, kind="OTHER", hours="0.25", reason="")
+        current = self.get_page(cutoff=_cutoff_key(publication),faculty=self.faculty.pk,view="current")
+        response = self.client.post(reverse("faculty_attendance:dtr_review"),{
+            "publication":publication.pk,"faculty":self.faculty.pk,"action":"finalize",
+            "expected_fingerprint":current.context["preview"].fingerprint},HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code,400)
+        self.assertEqual(response.json()["view"],"current")
+        self.assertIn("errorlist",response.json()["faculty_html"])
+        self.assertEqual(FacultyDTR.objects.count(),1)

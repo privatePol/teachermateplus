@@ -1,3 +1,9 @@
+## Faculty DTR workspace selection and consolidated review - 2026-10-09
+
+- Faculty dropdown and checker-name selection automatically load the authorized DTR through existing AJAX, with an indeterminate Loading DTR modal, cancellation, bounded timeout, latest-response checks, retry, heading focus and reduced-motion-aware scrolling. Selection, summary, cutoff, version and URL update together; failed loads restore the previous selection. Delegated forms survive replacement and unsaved entries are protected.
+- One on-screen detail table defaults to the latest immutable final. Earlier finals remain read-only; current corrections/review are explicitly selected within the same section and cannot silently replace saved print evidence. Separate Date, Subject/Section, Time, Finding, Teaching/Admin/A/N/L/Early/Other/Leave/Action columns and a grouped footer retain saved calculations and minute/hour units.
+- Checker summary and selector use structured surname/given/middle fields, surname/given/identity ordering and matching row numbers. No Department selector, calculation change, permission expansion, schema change or print-layout change.
+
 ## Faculty DTR portrait attendance and Admin matrices - 2026-10-09
 
 - Individual Admin and Faculty DTR prints now use the selected saved final's teaching matrix, grouped by saved class/linked sections/schedule and day pattern, with inclusive date/weekday columns and row/footer totals. Normal dates display hours; meaningful exceptions retain A/N/L/E markers and applicable minutes without deducting them again.
