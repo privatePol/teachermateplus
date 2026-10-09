@@ -3645,6 +3645,7 @@ class FacultyAttendanceFoundationTests(TestCase):
         denial.delete()
 
     def test_dtr_print_sections_and_display_rounding_bridge(self):
+        from .dtr_printing import build_dtr_matrix
         _meeting, publication = self._published_dtr_cutoff()
         preview = preview_dtr(actor=self.actor, publication=publication, faculty=self.faculty)
         final = finalize_dtr(
@@ -3663,11 +3664,13 @@ class FacultyAttendanceFoundationTests(TestCase):
                                "paid_teaching_minutes": 50, "late_minutes": 1}]
         html = render_to_string("faculty_attendance/dtr_print.html", {
             "final": final, "snapshot": printable_final_snapshot(synthetic),
+            "matrix": build_dtr_matrix(synthetic),
         })
-        for heading in ("Dated teaching schedule", "Dated AC administrative office hours", "Dated deductions and VL / SL / EL offsets"):
+        for heading in ("Teaching attendance", "Office Hours - Admin", "COMPUTATION - HOURS"):
             self.assertIn(heading, html)
         self.assertIn("+0.01 display-rounding bridge", html)
-        self.assertIn("Net Payable Hours: 0.82", html)
+        self.assertIn("Net Payable Hours:", html)
+        self.assertIn(">0.82<", html)
 
     def test_final_dtr_print_institution_campus_logo_and_id_only_footer(self):
         _meeting, publication = self._published_dtr_cutoff()
@@ -3707,11 +3710,12 @@ class FacultyAttendanceFoundationTests(TestCase):
         self.client.force_login(self.actor)
         response = self.client.get(reverse("faculty_attendance:dtr_print", args=[final.public_id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, saved["lines"][0]["label"])
-        self.assertContains(response, saved["lines"][0]["time"])
-        self.assertContains(response, saved["lines"][0]["status"])
-        self.assertContains(response, "1.00 saved hours")
-        self.assertContains(response, "Credited teaching: 1.00 saved hours")
+        self.assertEqual(response.context["matrix"]["pages"][0]["teaching_total"], "1.00")
+        for section in saved["lines"][0]["sections"]:
+            self.assertContains(response, section["course_code"])
+            self.assertContains(response, section["section_code"])
+        self.assertContains(response, 'class="date-cell">1.00')
+        self.assertNotContains(response, "Present (assigned class; no exception)")
         self.assertNotContains(response, "No scheduled teaching classes")
         final.refresh_from_db()
         self.assertNotIn("class_count", final.snapshot)
@@ -3738,11 +3742,12 @@ class FacultyAttendanceFoundationTests(TestCase):
         self.client.force_login(self.actor)
         response = self.client.get(reverse("faculty_attendance:dtr_print", args=[final.public_id]))
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(response.content.decode().count('<td class="number">1 min</td>'), 2)
+        self.assertContains(response, "L 1m")
+        self.assertContains(response, "E 1m")
         self.assertContains(response, "L 1 min + E 1 min = 0.03 hours (rounded together)")
-        self.assertContains(response, "Gross Deductions: 0.03")
-        self.assertContains(response, "Basic 1.00 - gross 0.03 + applied VL/SL/EL 0.00")
-        self.assertContains(response, "Net Payable Hours: 0.97")
+        self.assertContains(response, ">0.03<")
+        self.assertContains(response, "Net Payable Hours:")
+        self.assertContains(response, ">0.97<")
         self.assertNotContains(response, "L 1 min / 60 = 0.02")
 
     def test_dtr_reference_hour_calculations_and_final_total_rounding(self):

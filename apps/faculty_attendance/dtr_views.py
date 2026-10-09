@@ -26,6 +26,7 @@ from .dtr import (
 )
 from .forms import DTRAdjustmentForm, DTRAdjustmentRemovalForm, DTREarlyCorrectionForm, DTRFinalizationForm, DTRMixedFindingForm, AdminHoursFormSet
 from .dtr_intervals import current_mixed_decisions, needs_interval_reconciliation, save_mixed_decision
+from .dtr_printing import build_dtr_matrix
 from .models import AttendanceCutoffPublication, AttendanceResult, DTRAdjustment, FacultyDTR
 from .observations import AttendanceResultService
 from .permissions import DTR_AC_SUMMARY_PERMISSION, DTR_PRINT_PERMISSION, DTR_VIEW_PERMISSION, can_faculty_view_own_attendance
@@ -719,9 +720,16 @@ def dtr_print_view(request, public_id):
         _require(request.user, DTR_PRINT_PERMISSION, final.publication, final_dtr_departments(final))
     except PermissionDenied:
         return HttpResponseForbidden("DTR printing authority is required for every included department.")
-    return render(request, "faculty_attendance/dtr_print.html", {
-        "final": final, "snapshot": printable_final_snapshot(final.snapshot),
-    })
+    return render(request, "faculty_attendance/dtr_print.html", _final_print_context(final))
+
+
+def _final_print_context(final):
+    # Enrich only from this selected final's immutable publication, never the
+    # latest publication or current course/section/roster/schedule records.
+    entries = final.publication.entries.filter(faculty_user_id=final.faculty_user_id).values(
+        "meeting_id", "meeting_snapshot")
+    return {"final": final, "snapshot": printable_final_snapshot(final.snapshot),
+        "matrix": build_dtr_matrix(final.snapshot, published_entries=entries)}
 
 
 @portal_required("FACULTY")
@@ -755,6 +763,4 @@ def my_dtr_print_view(request, public_id):
         faculty_final_dtr(user=request.user, final=final)
     except PermissionDenied:
         return HttpResponseForbidden("Only the DTR owner may print this finalized record.")
-    return render(request, "faculty_attendance/dtr_print.html", {
-        "final": final, "snapshot": printable_final_snapshot(final.snapshot),
-    })
+    return render(request, "faculty_attendance/dtr_print.html", _final_print_context(final))

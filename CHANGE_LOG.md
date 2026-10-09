@@ -1,3 +1,10 @@
+## Faculty DTR portrait attendance and Admin matrices - 2026-10-09
+
+- Individual Admin and Faculty DTR prints now use the selected saved final's teaching matrix, grouped by saved class/linked sections/schedule and day pattern, with inclusive date/weekday columns and row/footer totals. Normal dates display hours; meaningful exceptions retain A/N/L/E markers and applicable minutes without deducting them again.
+- Office Hours - Admin is a separate date matrix, aggregating valid same-date entries. A compact saved computation and signature blocks replace repeated zero-deduction rows. No Department selection was added; older selected final versions use their own immutable publication evidence.
+- Portrait date bands and workload pages repeat headers and keep type readable. Size/Units and named approvers use saved metadata only; unavailable historical fields are marked rather than guessed from current rosters/courses or copied from the reference.
+- The supplied TMP example's 19 occurrences become 10 matrix rows on one portrait page, retaining 33.00 hours. Rendered comparison, exception/admin and pagination evidence are recorded in HANDOFF. Attendance, deductions, leave and saved values are unchanged; no schema, persistent DB, commit/push or deployment action.
+
 ## Existing assignment attribution before supplementary attendance setup - 2026-10-04
 
 - Narrow follow-up completed through both authorized integration paths: validated saved exceptions remain ready after later unassignment, including `AcademicCoverageIntegrationService.resolve` -> `CoverageService.close`. Closure origin is accepted only with correlated scope, actor, effective boundary and reconciliation lifetime; other origins remain binding. The prior 18-pass evidence covered the College bridge only. Current focused disposable run: 22/22 passed (42.193s); immutable finals/history/manifests and zero-query primed readiness preserved. Exact evidence is in HANDOFF and the focused report.
