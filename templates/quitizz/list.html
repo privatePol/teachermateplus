@@ -1,0 +1,13 @@
+{% extends "quitizz/base.html" %}
+{% block quitizz_content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3"><div><h1 class="h3 mb-1">My QuiTizzes</h1><p class="text-muted mb-0">Your collection in the selected campus. Build once, host again.</p></div>{% if caps.manage %}<a href="{% url 'quitizz:create' %}" class="btn btn-success">Create QuiTizz</a>{% endif %}</div>
+<div class="qt-grid">
+{% for quiz in quizzes %}
+<article class="card qt-card"><div class="card-body"><div class="d-flex justify-content-between gap-2"><h2 class="h5">{{ quiz.title }}</h2><span class="badge {% if quiz.is_archived %}text-bg-secondary{% else %}text-bg-success{% endif %}">{% if quiz.is_archived %}Archived{% else %}Active{% endif %}</span></div><p class="text-muted small">{{ quiz.question_count }} question{{ quiz.question_count|pluralize }} · Revision {{ quiz.revision }}</p><p class="small">Owner: {{ quiz.owner.full_name|default:quiz.owner.username }}<br>{{ quiz.campus.name }}</p><div class="d-flex flex-wrap gap-2">
+{% if caps.manage %}<a class="btn btn-outline-success btn-sm" href="{% url 'quitizz:edit' quiz.public_id %}">Edit QuiTizz</a>{% endif %}
+{% if caps.host and not quiz.is_archived %}<a class="btn btn-success btn-sm" href="{% url 'quitizz:launch' quiz.public_id %}">Host QuiTizz</a>{% endif %}
+{% if caps.manage %}<form method="post" action="{% url 'quitizz:archive' quiz.public_id %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ quiz.revision }}"><input type="hidden" name="archived" value="{% if quiz.is_archived %}0{% else %}1{% endif %}"><button class="btn btn-outline-secondary btn-sm">{% if quiz.is_archived %}Reactivate{% else %}Archive{% endif %}</button></form>{% endif %}
+</div></div></article>
+{% empty %}<div class="card qt-card"><div class="card-body py-5 text-center"><h2 class="h5">Your next bright idea starts here</h2><p class="text-muted">No QuiTizzes saved in this campus yet.</p>{% if caps.manage %}<a class="btn btn-success" href="{% url 'quitizz:create' %}">Create QuiTizz</a>{% endif %}</div></div>{% endfor %}
+</div>
+{% endblock %}

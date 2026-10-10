@@ -1,0 +1,2 @@
+{% extends "quitizz/base.html" %}
+{% block quitizz_content %}<h1 class="h3">QuiTizz could not be saved</h1><div class="alert alert-warning">{% for error in errors %}<p class="mb-1">{{ error }}</p>{% endfor %}</div><a class="btn btn-outline-success" href="{% url 'quitizz:list' %}">Return to My QuiTizzes</a>{% endblock %}

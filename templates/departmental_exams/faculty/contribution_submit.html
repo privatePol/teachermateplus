@@ -2,6 +2,7 @@
 {% block faculty_content %}
 <h1 class="h3">Final contribution submission</h1>
 <div class="alert alert-warning">Submission requires exactly {{ contribution.quota_snapshot }} valid questions and is permanent. There is no contributor reopen or grace-period override.</div>
+{% include "departmental_exams/faculty/_submission_section_counts.html" %}
 <div class="card shadow-sm mb-3"><div class="card-body">
   <h2 class="h5">Preferred Difficulty Distribution</h2>
   <ul class="mb-2">

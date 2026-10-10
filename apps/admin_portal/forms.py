@@ -3722,6 +3722,11 @@ class ConfigurableFeatureSettingForm(forms.Form):
             "Faculty Portal score encoding page. Turning this off restores the standard score-entry behavior."
         ),
     )
+    quitizz_enabled = forms.BooleanField(
+        required=False,
+        label="Enable QuiTizz",
+        help_text="Enables Faculty Portal QuiTizz authoring and saved host sessions for explicitly authorized users. Off by default. Participant gameplay is not available yet.",
+    )
     exit_pulse_enabled = forms.BooleanField(
         required=False,
         label="Enable Exit Pulse",

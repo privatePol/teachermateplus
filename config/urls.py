@@ -11,6 +11,7 @@ urlpatterns = [
     path("", include("apps.faculty_attendance.urls")),
     path("", include("apps.exit_pulse.urls")),
     path("", include("apps.orientation_feedback.urls")),
+    path("", include("apps.quitizz.urls")),
     path("", include("apps.departmental_exams.urls")),
     path("", include("apps.student_portal.urls")),
 ]

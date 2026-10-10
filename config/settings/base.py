@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "apps.interventions.apps.InterventionsConfig",
     "apps.exit_pulse.apps.ExitPulseConfig",
     "apps.orientation_feedback.apps.OrientationFeedbackConfig",
+    "apps.quitizz.apps.QuiTizzConfig",
     "apps.departmental_exams.apps.DepartmentalExamsConfig",
     "apps.student_portal.apps.StudentPortalConfig",
     "apps.admin_portal.apps.AdminPortalConfig",
@@ -171,6 +172,30 @@ CACHES = {
         "LOCATION": os.getenv("DJANGO_CACHE_LOCATION", "teachermateplus-local"),
     }
 }
+
+# Redis is transport/shared throttling only; game state always lives in the DB.
+QUITIZZ_REDIS_URL = os.getenv("QUITIZZ_REDIS_URL", "").strip()
+QUITIZZ_REDIS_NAMESPACE = os.getenv("QUITIZZ_REDIS_NAMESPACE", "").strip()
+QUITIZZ_DEPLOYMENT = os.getenv("QUITIZZ_DEPLOYMENT", DJANGO_ENV).strip().lower()
+if QUITIZZ_DEPLOYMENT not in {"local", "staging", "production"}:
+    raise ImproperlyConfigured("QUITIZZ_DEPLOYMENT must be local, staging or production.")
+if QUITIZZ_REDIS_URL and (not QUITIZZ_REDIS_NAMESPACE or not all(
+        c.isalnum() or c in "-_" for c in QUITIZZ_REDIS_NAMESPACE)):
+    raise ImproperlyConfigured("Set an explicit alphanumeric QUITIZZ_REDIS_NAMESPACE per deployment.")
+QUITIZZ_PREFIX = f"tmp:{QUITIZZ_DEPLOYMENT}:{QUITIZZ_REDIS_NAMESPACE or 'local'}:quitizz"
+CACHES["quitizz"] = {
+    "BACKEND": "django.core.cache.backends.redis.RedisCache" if QUITIZZ_REDIS_URL else "django.core.cache.backends.locmem.LocMemCache",
+    "LOCATION": QUITIZZ_REDIS_URL or "quitizz-local-only",
+    "KEY_PREFIX": f"{QUITIZZ_PREFIX}:throttle",
+    "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2} if QUITIZZ_REDIS_URL else {},
+}
+CHANNEL_LAYERS = {"default": {
+    "BACKEND": "channels_redis.core.RedisChannelLayer" if QUITIZZ_REDIS_URL else "channels.layers.InMemoryChannelLayer",
+    # Redis receive blocks for 5s; read timeout must exceed that healthy wait.
+    "CONFIG": {"hosts": [{"address": QUITIZZ_REDIS_URL, "socket_connect_timeout": 2, "socket_timeout": 10}],
+               "prefix": f"{QUITIZZ_PREFIX}:channels",
+               "expiry": 60, "group_expiry": 3600, "capacity": 256} if QUITIZZ_REDIS_URL else {},
+}}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.User"

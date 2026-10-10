@@ -1,0 +1,17 @@
+[Unit]
+Description=teachermateplus Staging QuiTizz ASGI Service
+After=network.target
+
+[Service]
+Type=simple
+User=teachermateplus_staging
+Group=teachermateplus_staging
+WorkingDirectory=/opt/teachermateplus_staging
+EnvironmentFile=/etc/teachermateplus_staging/teachermateplus_staging.env
+Environment=QUITIZZ_DEPLOYMENT=staging
+ExecStart=/opt/teachermateplus_staging/.venv/bin/daphne --proxy-headers -b 127.0.0.1 -p 8002 --websocket_timeout 28800 --ping-interval 30 --ping-timeout 30 config.asgi:application
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

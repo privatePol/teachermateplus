@@ -1,3 +1,10 @@
+## QuiTizz and Faculty Attendance integration review - 2026-10-10 (uncommitted)
+
+- Integrated QuiTizz tip `23a377235aadc4af149551346c1a2988194caa6f` into an isolated worktree based on Faculty Attendance baseline `8724304a506b641722407e584b325054f620ae36`. Attendance/DTR content and the complete Phase 1–2C QuiTizz source are retained.
+- Resolved shared feature/menu, configurable-feature template, dependency, and documentation conflicts. Normalized the mixed single-topic and `topics`-array Admin guide data so the guide renderer preserves both Attendance and QuiTizz sections.
+- Corrected staging Daphne and Gunicorn systemd app, owner, and environment paths to the actual underscore-based staging layout; retained the existing Gunicorn runtime socket, routed `/ws/quitizz/` only to local Daphne, and kept HTTP traffic on Gunicorn.
+- No integration-specific migration was added. Validation results and inherited baseline test observations are recorded in `HANDOFF.md`. No commit, push, deployment, restart, or normal-local migration was performed.
+
 ## Faculty DTR workspace selection and consolidated review - 2026-10-09
 
 - Faculty dropdown and checker-name selection automatically load the authorized DTR through existing AJAX, with an indeterminate Loading DTR modal, cancellation, bounded timeout, latest-response checks, retry, heading focus and reduced-motion-aware scrolling. Selection, summary, cutoff, version and URL update together; failed loads restore the previous selection. Delegated forms survive replacement and unsaved entries are protected.
@@ -216,6 +223,89 @@
 
 - Integrated the default-off attendance foundation with permanent replacement, assignment/reactivation, unassignment, administrative acceptance, and import paths through explicit pending/resolved coverage reconciliation. Effective boundaries are explicit Manila date-times; assignment and acceptance timestamps are never treated as teaching start dates. Historical meeting snapshots and inactive-faculty attribution remain intact.
 - Added frozen checking rounds, idempotent checker observations, partial A/N absence, simultaneous L/E findings, exact reviewed-row present confirmation, current authoritative results with correction revisions, explicit attribution reconciliation, and scoped date-range/monthly tardiness selectors. Added ungranted encode/correct permissions and migrations `0003`/`0004`. Checklist UI, DTR/payroll policy, reports, printing, navigation, and calendar/leave treatment remain out of scope.
+## 2026-10-10 - QuiTizz Phase 2C presentation polish (uncommitted)
+
+- Final branding: **QuiTizz / Powered by TeacherMate+ / Scan. Play. Spark. Win.** Institutional branding outside QuiTizz is preserved.
+- Mobile player answer cards, locked/reveal feedback, private final score/rank and champion result; host current-question presentation and valid lifecycle controls; separate host-authorized projector with QR/lobby/question/reveal/Top 5/final Top 3 states.
+- Revealed HTTP-only A-D aggregate counts and canonical server ranking; no private responses or pre-reveal keys on projector. Original SVG trophy/crown/medal/rocket assets, bounded local kwitis/fireworks/confetti, static reduced-motion results, focus/touch/text accessibility. No sounds or animation dependency.
+- Notification-only WebSocket contract, HTTP authority, 100ms coalescing, 60s/5s recovery, zero forwarding queries and existing RBAC/scope/privacy remain. No migrations required. Validation and exact inventory: `docs/QUITIZZ_PHASE2C_REVIEW.md`; actual browser/mobile/projector acceptance remains unperformed. Not production-ready.
+- No staging, commit, push, deployment, restart, normal-local migrate, Attendance/DTR, secret/.env or repository-log changes.
+
+## 2026-10-10 - QuiTizz Phase 2B final notification-only remediation (uncommitted)
+
+- Replaced data-bearing socket events with constant `sync_required` wakeups. Removed WebSocket ready and per-event/post-accept authorization checks; browser connection triggers canonical authorized HTTP recovery and never unlocks gameplay itself. Delayed DENY/removal/OFF/expiry transport revocation cannot disclose protected socket data.
+- Host answer counts now come solely from ordered canonical HTTP. Signals debounce over 100ms with one active fetch and at most one follow-up; connected/disconnected recovery cadences and existing cleanup/expiry remain. Denial disables/hides gameplay and cannot be undone by late responses. Expired host state returns generic JSON 404.
+- Final Django 195/195 and Node 18/18 PASS, including retained RBAC/settings/menu regressions, permanent races, actual UI/transport, 100 authorized sockets and query/coalescing probes. Forwarding drops from 16/3 host/player queries to 0/0 at 1/20/100 participants. Full results, 17 changed remediation paths and remaining operational acceptance are in HANDOFF and `docs/QUITIZZ_PHASE2B_REVIEW.md`.
+- No model/migration, normal-local migrate, Phase 2C, Attendance/DTR, secrets, staging, commit, push, deployment or restart. Earlier security/readiness contracts below are superseded; unresolved operational work remains.
+
+## 2026-10-10 - QuiTizz Phase 2B security race remediation 2 (uncommitted)
+
+- Transport acceptance is provisional. Fresh authoritative authorization after accept gates ready; every outbound gameplay event rechecks current authorization. The browser also waits for ready before showing a usable realtime connection. Hosts independently reauthorize every 30 seconds, so direct DENY does not depend on client heartbeat.
+- Registration and cleanup share a per-connection lock, retain pending group intent, and discard any add completed after revocation. One owned shutdown cancels/awaits admission and timers, suppresses queued gameplay and sends at most one close.
+- Added nine permanent Django race regressions and one provisional-browser Node regression. Final combined validation: 182/182 Django (162 QuiTizz + 20 retained), 12/12 Node, 100 authorized sockets with clean groups, checks and migration drift/plan PASS. Exact commands, bounded query increases and operational limits are in `docs/QUITIZZ_PHASE2B_REVIEW.md` and `HANDOFF.md`.
+- Preserved the host answer-count implementation and its five passing Node regressions. No schema change, normal-local migration, Phase 2C, Attendance/DTR, secrets, staging, commit, push, deployment or restart.
+
+## 2026-10-10 - QuiTizz Phase 2B admission/count remediation (uncommitted)
+
+- Closed the authorization-to-subscription gap: internally register groups, then reload authoritative authorization before accept/ready; revocation can cancel pending admission, and rejection immediately discards memberships. Host checks reload the persisted login/user/scope. Heartbeat rechecks authorization after registration and cannot restore a revoked socket.
+- Kept gameplay forwarding query-free and suppressed it before admission or after revocation. Existing HTTP/domain authority, post-commit publication, privacy and origin/direct-DENY protections remain intact.
+- Host counts now guard an in-flight HTTP response with a client answer-event revision only for the same question UUID and lifecycle version. New questions reset normally; fresh canonical recovery can correct counts. Updated the host asset version and both QuiTizz guides.
+- Added permanent admission/heartbeat and frontend ordering regressions. Exact final commands/results and outstanding operational acceptance are in `docs/QUITIZZ_PHASE2B_REVIEW.md` and `HANDOFF.md`. No schema change, normal-local migration, Phase 2C, Attendance/DTR, secrets, staging, commit, push, deployment or restart.
+
+## 2026-10-10 - QuiTizz Phase 2B realtime transport (uncommitted)
+
+- Added read-only host/player WebSockets with same-origin validation, exact host scope/RBAC and a session-specific HttpOnly participant reconnect-cookie bridge. HTTP transactions and database scoring/timing/history remain authoritative; compact safe notifications run only after commit.
+- Host lobby/removal and accepted-answer count update in realtime. Player lifecycle invalidations recover private state through HTTP, keeping keys/feedback behind committed reveal and private authenticated state. Removed/expired participants and feature changes revoke subscriptions; reconnect rechecks authorization.
+- Added connection indicators, automatic reconnect, coalesced/serialized HTTP recovery, five-second disconnected fallback and sixty-second connected recovery. Host controls/answers remain HTTP; countdowns remain local. No Phase 2C effects.
+- Added dedicated Redis Channels/cache configuration, deployment/namespace prefixes, shared throttles with TTL and fail-closed outage behavior, and production-like configuration warnings. LocMem/in-memory fallback is explicitly development-only evidence.
+- Added separate staging/production Daphne unit and Nginx WebSocket source configuration; existing Gunicorn HTTP services retain their commands. No operational configuration was executed. No schema/model change or normal-local migration.
+- Exact validation, inventory and operational acceptance limits are recorded in `docs/QUITIZZ_PHASE2B_REVIEW.md` and `HANDOFF.md`. No staging, commit, push, deployment, service restart, secrets or Faculty Attendance/DTR changes.
+
+## 2026-10-10 - QuiTizz Phase 2A core gameplay
+
+- Added public session QR fragment exchange, nickname join, digest-backed participant cookies/reconnect, lobby and private HTTP game state. Players do not need TMP accounts; feature OFF blocks public access and game mutations.
+- Added authorized, scoped, versioned host joining/start/open/close/reveal/next/complete/cancel/removal controls. Launched question content remains immutable; timers, answer acceptance and 0 / 700-1000 scoring use server timestamps. First accepted answers are locked, retries do not rescore, and feedback is withheld until reveal.
+- Added participant/response schema and migration `quitizz.0004_quitizzparticipant_quitizzresponse_and_more`, including safe existing-question UUID backfill. Normal-local migrations were not applied.
+- HTTP state refresh is five seconds; countdowns are local. Added focused security/lifecycle/scoring/query-growth and historical migration tests. Exact executed results, inventory and limits are in `docs/QUITIZZ_PHASE2A_REVIEW.md` and `HANDOFF.md`.
+- Shared Redis throttling, MariaDB/InnoDB concurrency/throughput and real-browser acceptance remain pre-deployment requirements. No Phase 2B/2C infrastructure, framework or animation changes; no publication under this gate.
+
+## 2026-10-10 - QuiTizz Phase 1 foundation (uncommitted)
+
+- Added an independent QuiTizz app with owner-only tenant/campus authoring in Faculty Portal, four-choice questions, safe delete/reorder and archive/reactivate.
+- Added the default-OFF `FEATURE_QUITIZZ_ENABLED` toggle to Configurable Features. Explicit exact-campus `faculty_portal.access` and `quitizz.manage` / `quitizz.host` assignments govern navigation and direct routes; applicable direct DENY wins without role-name or superuser bypass. `quitizz.view_history` is reserved.
+- Launch atomically saves independent immutable question/answer/timer/order snapshots and audits the action. Saved revisions reject stale edits and launches.
+- Added schema, permission and Faculty navigation migrations plus focused tests. No normal database migration, commit or release. Participant joining, responses, scoring, leaderboard, WebSockets and animations remain out of scope.
+
+## Contribution workspace header and Move feedback - 2026-10-07
+
+- Move names its deduplicated affected-question count, including whole-Case members and selections in collapsed sections; invalid linked selections still disable it. The separate Move selection summary uses readable blue.
+- The full section header is one native keyboard-accessible button, including title and badges, with diagonal expand/collapse icons at the far right. ARIA names include the section title; no visible text toggle button remains. Headers/content stay visible without JavaScript and in print. Existing gradient, collapse/all controls, selection/filter/index/reorder and Delete scope remain intact; styles are workspace-scoped.
+
+## Contribution workspace section collapse - 2026-10-07
+
+- Existing section groups start expanded and have independent keyboard-accessible Expand/Collapse controls plus Expand all sections / Collapse all sections. Styled section titles/count badges stay visible; section contents remain accessible without JavaScript and expand for printing. Nested Cases retain their existing default/open states.
+- Section collapse preserves question and whole-Case selections. The workspace reports selected standalone questions, whole Cases, unique affected Move items and selections hidden in collapsed sections. Delete counts only individually selected questions. Select all visible excludes collapsed content; filtering retains its deselection rules. Invalid linked selections still block Move and never become a whole-Case selection automatically.
+- Question Index keeps filter-matching entries for collapsed sections and expands the section, then its Case, before scrolling. Flat-list global reorder, backend authorization, section assignment and Final Submission rules are unchanged. Accepted forest/sage/champagne section headers, pale-sage question headers and ivory cards remain scoped to the contribution workspace.
+
+## Contribution workspace soft section emphasis - 2026-10-07
+
+- Section headers now carry the muted forest/sage/champagne gradient, with white titles on solid forest green and white count badges. Narrow screens use a separate dark title row. Question headers use pale sage, dark-green text and a slim muted-gold separator; bodies use warm ivory, subtle dividers, rounded corners and minimal shadow.
+- Workspace-only selectors retain visible Case disclosure controls and distinct checked selection, dashed current-reading and solid keyboard-focus states. Section moving, filtering, Question Index, Case grouping and global reorder behavior are unchanged; reuse, authoring and Attendance are outside the styling scope.
+
+## Faculty Draft section moves - 2026-10-07
+
+- Review remediation preserves the prior flat question list and Move up/down/Save displayed order controls when Case authoring is unavailable, including Automatic Standardized multi-section contributions. Section moving remains independently available; global reorder eligibility and backend rules are unchanged. Expired move confirmation now explains that a new review is required without applying changes.
+- Added one atomic Move to section operation for single/bulk standalone MCQs and explicitly selected whole Faculty-owned Cases in the current editable contribution. Whole Cases move their section context and every member placement together; individual linked questions, retained links, shared/reviewer Cases, partial selections and foreign/invalid graphs are rejected without partial changes.
+- Availability uses the existing structured-feature setting plus a valid authoritative primary-owned frozen Use Sections structure with at least two sections and consistent targets. Equivalent contributions use primary section IDs. Availability is independent of Departmental classification, quota 50 and the 10/40 shape.
+- Workspace selections lead to a destination form and read-only signed confirmation showing whole-Case and affected-question counts, including already-in-destination items. Filtering, Delete, permissions, deadlines, import/duplicate guards and stale-state protections remain intact. Existing individual Edit cannot relocate a linked member even if its caller omits the Case ID.
+- Moves preserve content, answers, difficulty, provenance, stored question/member order and original Submitted history. Necessary revisions and content-free audit metadata are updated once per operation; all-no-op requests do not change revisions. Incomplete Draft counts and Final Submission rules, including the applicable 10/40 guard, remain unchanged. No schema, migration or dependency change.
+
+## Departmental 10/40 Final Submission guard - 2026-10-06
+
+- Added a submission-only count guard for Included DEPARTMENTAL contributions with quota 50 and one valid authoritative primary-owned frozen USE_SECTIONS blueprint: effective/frozen total 50, exactly two sections ordered with targets 10 then 40. Equivalent members use their primary's actual section IDs and stored order.
+- Final Submission requires each contributor's own 10/40 valid current confirmed question items, including linked questions individually. Case narratives, historical contributions and unconfirmed import rows do not count. Rejection shows actionable counts on the confirmation page; existing permission, stale-state, import, deadline, Case, placement, total quota and transactional protections remain intact.
+- Conditional workspace/confirmation guidance explains the narrow rule. Incomplete Draft saves, other configurations, advisory difficulty, generation and existing Submitted history remain unchanged. No schema change or migration.
+
 ## Equivalent course codes Admin UI - 2026-09-28
 
 - Added an authorized Admin page within Prepare Faculty Contributions to review, create, change, and retire current-cycle Automatic equivalent-course groups. It shows each operational code/title, primary, represented campuses, offering and current-contribution counts, effective settings, and lifecycle locks. A short-lived signed review rechecks exact membership/settings before the existing protected service performs each change. Setup and generation pages show concise authorized membership context. No course, offering, assignment, contribution, question, or historical record is moved; no model or migration changed.

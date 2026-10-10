@@ -172,6 +172,11 @@ urlpatterns = [
         name="question_bulk_delete",
     ),
     path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/questions/move/",
+        faculty_views.question_move_view,
+        name="question_move",
+    ),
+    path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/questions/reorder/",
         faculty_views.question_reorder_view,
         name="question_reorder",

@@ -44,6 +44,7 @@ class MenuService:
                 user, tenant_id=tenant_id, campus_id=campus_id
             )
 
+        quitizz_caps = None
         output = []
         for group in groups:
             if group.code == "DEPARTMENTAL_EXAMS" and not FeatureSettingsService.is_departmental_exam_builder_enabled(tenant_id=tenant_id):
@@ -55,6 +56,14 @@ class MenuService:
                     tenant_id=tenant_id
                 ):
                     continue
+            if group.code == "QUITIZZ":
+                if portal != "FACULTY":
+                    continue
+                from apps.quitizz.access import capabilities
+
+                quitizz_caps = capabilities(user, tenant_id, campus_id)
+                if not any(quitizz_caps.values()):
+                    continue
             items = list(getattr(group, "active_items", []))
             item_map = {}
             for item in items:
@@ -63,6 +72,13 @@ class MenuService:
                     for item_permission in item.menuitempermission_set.all()
                 }
                 is_visible = not required_codes or bool(required_codes & effective_codes)
+                if group.code == "QUITIZZ":
+                    # Use the same assigned-permission checks as direct routes;
+                    # generic effective_codes includes a superuser shortcut.
+                    allowed = {"quitizz.manage"} if quitizz_caps["manage"] else set()
+                    if quitizz_caps["host"]:
+                        allowed.add("quitizz.host")
+                    is_visible = bool(required_codes & allowed)
                 item_map[item.id] = {
                     "item": item,
                     "url": cls._item_url(item.route_name),

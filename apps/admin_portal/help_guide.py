@@ -6,6 +6,41 @@ from apps.core.services.permissions import PermissionService
 
 
 ADMIN_HELP_SECTIONS = [
+    {'code': 'quitizz-configuration',
+     'title': 'QuiTizz Configuration',
+     'topics': [{'code': 'quitizz-toggle',
+                 'title': 'Enable QuiTizz',
+                 'permissions': ['system_settings.update'],
+                 'purpose': 'Controls tenant availability for Faculty Portal QuiTizz authoring and saved host '
+                            'sessions.',
+                 'check_first': ['Select the correct tenant.', 'QuiTizz starts OFF.',
+                                 'Confirm realtime and shared throttling readiness with operations before rollout. '
+                                 'Players recover automatically through HTTP if realtime disconnects.'],
+                 'actions': [{'name': 'Configurable Features > QuiTizz',
+                              'does': 'Turns QuiTizz ON/OFF for the selected tenant.',
+                              'when': 'Enable when authorized employees are ready to author and host.',
+                              'avoid': 'Enabling the feature does not grant access.',
+                              'result': 'OFF hides navigation and blocks direct routes, public joining, '
+                                        'participant state, answers and host gameplay, including connections '
+                                        'still being admitted. ON still requires '
+                                        'explicit campus-scoped permissions.',
+                              'editable': 'Existing system-settings permission is required.'},
+                             {'name': 'Existing RBAC administration',
+                              'does': 'Assigns faculty_portal.access plus quitizz.manage and/or quitizz.host in '
+                                      'the exact tenant and campus. quitizz.view_history is reserved for a '
+                                      'future release.',
+                              'when': 'Grant to an authorized employee regardless of role name.',
+                              'avoid': 'No automatic role or superuser grants; direct DENY takes precedence.',
+                              'result': 'Normal authoring and hosting appear only in Faculty Portal. Revoked '
+                                        'hosts are denied gameplay on the next HTTP recovery. Realtime carries '
+                                        'only recovery signals, even if closing a revoked socket is delayed; '
+                                        'idle host connections recheck access within 30 seconds.',
+                              'editable': 'Use existing role/user permission administration.'}],
+                 'avoid': 'Normal authoring and hosting belong in Faculty Portal. Players use the public '
+                          'session QR without a TMP login. Keep host answer-key screens private. Open Projector '
+                          'uses the same host permission and scope; only revealed aggregate results and scores '
+                          'appear there. QuiTizz uses Powered by TeacherMate+ and Scan. Play. Spark. Win.',
+                 'next_step': 'Use Faculty Portal > QuiTizz to create or host an owned definition.'}]},
     {
         "code": "attendance-faculty-cutoff",
         "title": "Faculty Cutoff Processing",
@@ -1215,8 +1250,18 @@ def build_admin_help_sections(*, user, tenant_id: int | None, campus_id: int | N
     for section in ADMIN_HELP_SECTIONS:
         if section.get("superadmin_only") and not is_superadmin:
             continue
+        topics = section.get("topics")
+        if topics is None:
+            topics = [
+                {
+                    key: deepcopy(value)
+                    for key, value in section.items()
+                    if key not in {"code", "title", "superadmin_only"}
+                }
+                | {"code": section["code"], "title": section["title"]}
+            ]
         visible_topics = []
-        for topic in section["topics"]:
+        for topic in topics:
             required = set(topic.get("permissions", []))
             if required and not (required & permission_codes):
                 continue

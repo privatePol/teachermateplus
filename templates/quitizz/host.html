@@ -1,0 +1,33 @@
+{% extends "quitizz/base.html" %}
+{% load static %}
+{% block quitizz_content %}
+<section id="qt-host" data-state-url="{% url 'quitizz:host_state' public_id=session.public_id %}" data-version="{{ session.state_version }}" data-socket-url="/ws/quitizz/{{ session.public_id }}/host/" data-qr-url="{% url 'quitizz:host_qr' public_id=session.public_id %}">
+<div class="d-flex flex-wrap justify-content-between gap-2 mb-3"><h1 class="h3">QuiTizz Session</h1><a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'quitizz:projector' public_id=session.public_id %}">Open Projector</a></div><h2 class="h4">{{ session.title_snapshot }}</h2>
+<p id="qt-session-status"><strong>{{ session.get_status_display }}</strong> &middot; Current question: {{ session.current_position }}</p>
+<p id="qt-connection" class="small text-muted" role="status" aria-live="polite">Connecting; HTTP recovery active.</p>
+<p id="qt-host-error" class="alert alert-danger" role="alert" hidden></p>
+<p class="text-muted">Saved {{ session.created_at }} &middot; Source revision {{ session.source_revision }} &middot; {{ questions|length }} questions</p>
+<div id="qt-joining">{% if session.joining_open %}<img class="qt-qr" src="{% url 'quitizz:host_qr' public_id=session.public_id %}" alt="Scan this QR code to join this QuiTizz session"><p>Joining is open. Scan, enter a nickname, and wait in the lobby.</p>{% else %}<p>Joining is closed.</p>{% endif %}</div>
+{% if session.status != 'COMPLETED' and session.status != 'CANCELLED' %}
+<form method="post" action="{% url 'quitizz:host_command' public_id=session.public_id %}" id="qt-command" class="d-flex flex-wrap gap-2 mb-3">
+{% csrf_token %}<input type="hidden" name="version" value="{{ session.state_version }}">
+{% if session.joining_open %}<button class="btn btn-outline-success" name="action" value="close_joining">Close joining</button>{% else %}<button class="btn btn-outline-success" name="action" value="open_joining">Open joining</button>{% endif %}
+{% if session.status == 'LOBBY' %}<button class="btn btn-success" name="action" value="start">Start</button>{% endif %}
+{% if session.status == 'QUESTION_CLOSED' %}{% for question in questions %}{% if question.position == session.current_position %}{% if question.opened_at %}<button class="btn btn-success" name="action" value="reveal">Reveal answer</button>{% else %}<button class="btn btn-success" name="action" value="open_question">Open Question</button>{% endif %}{% endif %}{% endfor %}{% endif %}
+{% if session.status == 'QUESTION_OPEN' %}<button class="btn btn-success" name="action" value="close_question">Close Question</button>{% endif %}
+{% if session.status == 'ANSWER_REVEALED' %}{% if session.current_position < questions|length %}<button class="btn btn-success" name="action" value="next">Next Question</button>{% endif %}<button class="btn btn-success" name="action" value="complete">End / Complete</button>{% endif %}
+<button class="btn btn-outline-danger" name="action" value="cancel">Cancel session</button>
+</form>{% endif %}
+<section id="qt-presentation" class="qt-stage mb-4" aria-live="polite" aria-atomic="true"><h2>Recovering current session...</h2></section>
+<p>Participants: <strong id="qt-count">{{ participant_count }}</strong></p>
+<p>Answers received: <strong id="qt-answered">{{ answered_count }}</strong></p>
+<ul id="qt-participants" class="list-group mb-4">
+{% for participant in participants %}<li class="list-group-item d-flex justify-content-between align-items-center gap-2" data-player-id="{{ participant.public_id }}"><span>{{ participant.nickname }}</span>
+{% if session.status != 'COMPLETED' and session.status != 'CANCELLED' %}<form method="post" action="{% url 'quitizz:host_command' public_id=session.public_id %}">{% csrf_token %}<input type="hidden" name="version" value="{{ session.state_version }}"><input type="hidden" name="participant" value="{{ participant.public_id }}"><button class="btn btn-sm btn-outline-danger" name="action" value="remove" aria-label="Remove {{ participant.nickname }}">Remove</button></form>{% endif %}
+</li>{% empty %}<li class="list-group-item">Waiting for participants.</li>{% endfor %}
+</ul><p class="small">Session reference: {{ session.public_id }}</p>
+<details><summary>Saved questions and host answer keys (host only)</summary>
+{% for question in questions %}<article class="card qt-card my-3"><div class="card-body"><h3 class="h6">{{ question.position }}. {{ question.prompt|linebreaksbr }}</h3><div class="qt-choices small"><div>A. {{ question.choice_a|linebreaksbr }}</div><div>B. {{ question.choice_b|linebreaksbr }}</div><div>C. {{ question.choice_c|linebreaksbr }}</div><div>D. {{ question.choice_d|linebreaksbr }}</div></div><p class="small text-muted mt-3 mb-0">Host answer: {{ question.correct_choice }} &middot; {{ question.timer_seconds }} seconds</p></div></article>{% endfor %}
+</details><a class="btn btn-outline-success" href="{% url 'quitizz:list' %}">My QuiTizzes</a>
+</section><script>window.QuiTizzIcons = "{% static 'quitizz/icons.svg' %}";</script><script src="{% static 'js/quitizz_presentation.js' %}?v=20261010-phase2c"></script><script src="{% static 'js/quitizz_realtime.js' %}?v=20261010-phase2b-notification-only"></script><script src="{% static 'js/quitizz_host.js' %}?v=20261010-phase2c"></script>
+{% endblock %}

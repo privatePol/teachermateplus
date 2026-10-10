@@ -180,6 +180,17 @@ class FacultyCasePolicy:
         placement = QuestionBlueprintPlacement.objects.select_for_update().filter(
             question=question
         ).first()
+        # Membership is authoritative even when a caller omits scenario_id.
+        # Linked content edits keep the current section; only whole-Case Move
+        # may relocate an existing Case and all its placements together.
+        memberships = list(ExamScenarioMember.objects.select_for_update().filter(
+            question=question).select_related("scenario").order_by("id"))
+        target_section_id = section.id if section else None
+        if memberships and (
+            any(row.scenario.section_id != target_section_id for row in memberships)
+            or (placement is not None and placement.section_id != target_section_id)
+        ):
+            raise ValidationError("Individual Linked Questions cannot change section. Use Move to section for the whole owned Case.")
         if blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS:
             if placement is None:
                 placement = QuestionBlueprintPlacement(
@@ -458,7 +469,7 @@ class FacultyCaseMutationService:
             and ExamScenarioMember.objects.select_for_update().filter(scenario=scenario).exists()
         ):
             raise ValidationError(
-                "A Case with Linked Questions cannot change Exam Section. Delete its Linked Questions first."
+                "A Case with Linked Questions cannot change Exam Section through Edit. Use Move to section for the whole owned Case."
             )
         before_revision = contribution.revision
         if creating:

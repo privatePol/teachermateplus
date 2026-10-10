@@ -405,9 +405,11 @@ class CaseGenerationTests(FacultyCaseFixtureMixin, Stage4TestCase):
         for i in range(39):
             self.add_question(section=self.section_b, text=f"Standalone {i}")
         self.contribution.refresh_from_db()
-        QuestionMutationService.submit(contribution_id=self.contribution.id, user=self.faculty,
-            tenant_id=self.tenant.id, campus_id=self.campus.id,
-            expected_contribution_revision=self.contribution.revision)
+        # Preserve a pre-guard Submitted fixture: new 11/39 submissions are now
+        # rejected, while existing Submitted history must remain untouched.
+        FacultyContribution.objects.filter(pk=self.contribution.id).update(
+            status="SUBMITTED", submitted_at=timezone.now(),
+        )
         FacultyContribution.objects.filter(pk=self.other_contribution.id).update(
             roster_status="BLOCKED", roster_blocked_at=timezone.now())
         self.other_contribution.eligibility_sources.update(is_current=False, invalidated_at=timezone.now())

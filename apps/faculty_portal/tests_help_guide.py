@@ -38,6 +38,24 @@ class FacultyHelpGuideTests(TestCase):
         )
         self.client.force_login(self.user)
 
+    def test_section_move_guide_explains_whole_cases_and_draft_boundaries(self):
+        response = self.client.get(reverse("faculty_portal:guide"))
+        self.assertContains(response, "Move to section")
+        self.assertContains(response, "explicitly selected whole Faculty-owned Cases")
+        self.assertContains(response, "Individual linked questions and Admin/shared/reviewer Cases cannot move")
+        self.assertContains(response, "Case count and total affected question count")
+        self.assertContains(response, "Final Submission and its applicable 10/40 checks remain unchanged")
+
+    def test_section_collapse_guide_distinguishes_hidden_selection_filter_and_delete_scope(self):
+        response = self.client.get(reverse("faculty_portal:guide"))
+        for text in ("Sections start expanded", "Expand all sections", "Collapse all sections",
+                     "Collapsing a section keeps question and whole-Case selections",
+                     "Select all visible excludes collapsed contents",
+                     "Delete counts only individually selected questions",
+                     "A Question Index jump expands the destination section and its Case",
+                     "Sections remain accessible without JavaScript"):
+            self.assertContains(response, text)
+
     def test_revised_faculty_guide_explains_zero_blank_and_base_50(self):
         response = self.client.get(reverse("faculty_portal:guide"))
 
@@ -169,6 +187,9 @@ class FacultyHelpGuideTests(TestCase):
             "Existing table captions are preserved",
             "Save is disabled", "Case narratives only, not MCQ text or choices",
             "Departmental Automatic generation and printing preserve whole Cases",
+            "each contributor must Final Submit exactly 10 valid confirmed questions",
+            "Linked questions count individually; Case narratives do not count",
+            "Incomplete Draft saves remain allowed",
         ):
             self.assertContains(response, wording)
 

@@ -1,0 +1,2 @@
+{% extends "quitizz/base.html" %}
+{% block quitizz_content %}<h1 class="h3">Delete question</h1><div class="card qt-card"><div class="card-body"><p>{{ question.prompt|linebreaksbr }}</p><p>Remove this question from {{ quiz.title }}? Launched sessions retain their saved copy.</p><form method="post">{% csrf_token %}<input type="hidden" name="revision" value="{{ quiz.revision }}"><button class="btn btn-danger">Delete question</button><a class="btn btn-outline-secondary" href="{% url 'quitizz:edit' quiz.public_id %}">Cancel</a></form></div></div>{% endblock %}

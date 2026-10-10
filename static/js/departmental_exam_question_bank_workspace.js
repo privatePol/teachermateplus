@@ -12,6 +12,7 @@
   const toolbar = workspace.querySelector('[data-qb-action-toolbar]');
   const filter = workspace.querySelector('[data-bulk-question-filter]');
   const narrow = window.matchMedia?.('(max-width: 1199.98px)');
+  const sections = [...workspace.querySelectorAll('[data-qb-section]')];
   let entries = [];
   let currentId = null;
   let frame = null;
@@ -20,6 +21,16 @@
   const toolbarHeight = () => toolbar?.getBoundingClientRect().height || 0;
   const label = element => (element?.textContent || '').replace(/\s+/g, ' ').trim();
   const visibleForFilter = card => !card.hidden;
+  function setSectionOpen(section, open) {
+    const content = section.querySelector('[data-qb-section-content]');
+    const toggle = section.querySelector('[data-qb-section-toggle]');
+    if (!content || !toggle || content.hidden === !open) return;
+    // Only this wrapper changes. Nested Case disclosure classes stay untouched.
+    content.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', `${open ? 'Collapse section' : 'Expand section'}: ${section.getAttribute('aria-label')}`);
+    section.dispatchEvent(new CustomEvent('tmp:section-visibility-changed', {bubbles: true}));
+  }
   function setOpen(open) {
     layout.classList.toggle('index-collapsed', !open);
     panel.setAttribute('aria-hidden', String(!open));
@@ -52,7 +63,7 @@
     if (selected) {
       const mark = document.createElement('span');
       mark.className = 'qb-index-selected';
-      mark.setAttribute('aria-label', 'Selected for deletion');
+      mark.setAttribute('aria-label', 'Selected for an action');
       mark.textContent = '✓';
       button.append(mark);
     }
@@ -69,7 +80,7 @@
         const members = [...item.querySelectorAll('.question-card')].filter(visibleForFilter);
         if (!members.length && item.querySelector('.question-card')) return;
         if (!members.length && filter?.value !== 'all') return;
-        addEntry(fragment, item, item.dataset.qbCaseTitle || 'Case / Scenario', 'case', false);
+        addEntry(fragment, item, item.dataset.qbCaseTitle || 'Case / Scenario', 'case', item.querySelector('[data-section-move-case]')?.checked);
         members.forEach(card => {
           const number = label(card.querySelector('.question-position'));
           addEntry(fragment, card, label(card.querySelector('[data-question-index-label]')), 'member', card.querySelector('[data-bulk-question]')?.checked, number);
@@ -130,6 +141,8 @@
     scheduleCurrent();
   }
   function navigate(target) {
+    const section = target.closest('[data-qb-section]');
+    if (section) setSectionOpen(section, true);
     const disclosure = target.closest('.qb-case-card')?.querySelector('.tmp-case-collapse');
     if (disclosure && !disclosure.classList.contains('show')) {
       disclosure.addEventListener('shown.bs.collapse', () => jump(target), {once: true});
@@ -150,11 +163,13 @@
     box.closest('.question-card').classList.toggle('is-deletion-selected', box.checked);
     renderIndex();
   }));
+  workspace.querySelectorAll('[data-section-move-case]').forEach(box => box.addEventListener('change', renderIndex));
   workspace.querySelector('[data-bulk-select-all]')?.addEventListener('change', () => {
     workspace.querySelectorAll('[data-bulk-question]').forEach(box => box.closest('.question-card').classList.toggle('is-deletion-selected', box.checked));
     renderIndex();
   });
   document.addEventListener('tmp:question-bank-order-changed', renderIndex);
+  workspace.addEventListener('tmp:section-visibility-changed', renderIndex);
   document.addEventListener('shown.bs.collapse', () => { renderIndex(); scheduleCurrent(); });
   document.addEventListener('hidden.bs.collapse', () => { renderIndex(); scheduleCurrent(); });
   window.addEventListener('scroll', scheduleCurrent, {passive: true});
@@ -165,6 +180,22 @@
     if (toolbar) sizes.observe(toolbar);
   }
   narrow?.addEventListener?.('change', event => { if (event.matches) setOpen(false); syncHeader(); });
+  sections.forEach(section => {
+    const toggle = section.querySelector('[data-qb-section-toggle]');
+    if (!toggle) return;
+    toggle.disabled = false;
+    const icon = toggle.querySelector('[data-qb-section-icon]');
+    if (icon) icon.hidden = false;
+    toggle.addEventListener('click', () => setSectionOpen(section, toggle.getAttribute('aria-expanded') !== 'true'));
+  });
+  if (sections.length) {
+    const controls = workspace.querySelector('[data-qb-section-controls]');
+    if (controls) controls.hidden = false;
+    const controlledIds = sections.map(section => section.querySelector('[data-qb-section-content]')?.id).filter(Boolean).join(' ');
+    workspace.querySelectorAll('[data-qb-expand-sections], [data-qb-collapse-sections]').forEach(button => button.setAttribute('aria-controls', controlledIds));
+    workspace.querySelector('[data-qb-expand-sections]')?.addEventListener('click', () => sections.forEach(section => setSectionOpen(section, true)));
+    workspace.querySelector('[data-qb-collapse-sections]')?.addEventListener('click', () => sections.forEach(section => setSectionOpen(section, false)));
+  }
   setOpen(!narrow?.matches);
   syncHeader();
   renderIndex();
