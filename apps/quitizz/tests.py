@@ -401,7 +401,7 @@ class QuiTizzFoundationTests(TestCase):
         self.assertFalse(QuiTizzSession.objects.exists())
         response = self.client.post(self.url("launch", quiz), {"revision": quiz.revision}, follow=True)
         self.assertContains(response, "QuiTizz Session")
-        self.assertContains(response, "Powered by NCBA TeacherMate+")
+        self.assertContains(response, "Powered by TeacherMate+")
 
     def test_source_edit_delete_archive_preserves_snapshots(self):
         quiz = self.quiz()

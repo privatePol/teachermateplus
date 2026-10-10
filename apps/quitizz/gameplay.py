@@ -369,12 +369,36 @@ def state(public_id, credential):
     return result
 
 
+def presentation_state(session, question=None, *, counts=None):
+    """Host-authorized projection. Never include identities beside responses."""
+    question = question or (session.questions.filter(position=session.current_position).first() if session.current_position else None)
+    result = {"title": session.title_snapshot, "status": session.status, "version": session.state_version,
+        "server_now": timezone.now().isoformat(), "joining_open": session.joining_open,
+        "position": session.current_position}
+    result.update(counts if counts is not None else {"question_count": session.questions.count(),
+        "participant_count": session.participants.filter(removed_at__isnull=True).count(),
+        "answered_count": question.responses.count() if question else 0})
+    if question and question.opened_at and session.status != "CANCELLED":
+        result["question"] = {"position": question.position, "prompt": question.prompt,
+            "choices": {letter: getattr(question, f"choice_{letter.lower()}") for letter in "ABCD"},
+            "deadline": question.deadline_at.isoformat()}
+    if question and question.revealed_at and session.status in {"ANSWER_REVEALED", "COMPLETED"}:
+        from django.db.models import Count
+        counts = dict(question.responses.values("selected_choice").annotate(total=Count("pk")).values_list("selected_choice", "total"))
+        result["reveal"] = {"correct_choice": question.correct_choice,
+            "distribution": {letter: counts.get(letter, 0) for letter in "ABCD"}}
+        result["leaderboard"] = [{"rank": rank, "nickname": player.nickname, "score": player.total_score}
+            for rank, player in enumerate(ranked_participants(session)[:5], 1)]
+    return result
+
+
 def host_state(session):
     # One list query, independent of population; no per-row response lookups.
     participants = list(session.participants.filter(removed_at__isnull=True).values("public_id", "nickname", "joined_at"))
     question = session.questions.filter(position=session.current_position).first() if session.current_position else None
-    return {"status": session.status, "version": session.state_version, "joining_open": session.joining_open,
+    counts = {"participant_count": len(participants), "question_count": session.questions.count(),
+        "answered_count": question.responses.count() if question else 0}
+    return {**presentation_state(session, question, counts=counts), "status": session.status, "version": session.state_version, "joining_open": session.joining_open,
         "position": session.current_position, "participant_count": len(participants), "participants": participants,
         "question_id": str(question.public_id) if question else None,
-        "answered_count": question.responses.count() if question else 0,
-        "question_opened": bool(question and question.opened_at), "question_count": session.questions.count()}
+        "question_opened": bool(question and question.opened_at)}

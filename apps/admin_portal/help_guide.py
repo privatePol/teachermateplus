@@ -37,7 +37,9 @@ ADMIN_HELP_SECTIONS = [
                                         'idle host connections recheck access within 30 seconds.',
                               'editable': 'Use existing role/user permission administration.'}],
                  'avoid': 'Normal authoring and hosting belong in Faculty Portal. Players use the public '
-                          'session QR without a TMP login. Keep host answer-key screens private.',
+                          'session QR without a TMP login. Keep host answer-key screens private. Open Projector '
+                          'uses the same host permission and scope; only revealed aggregate results and scores '
+                          'appear there. QuiTizz uses Powered by TeacherMate+ and Scan. Play. Spark. Win.',
                  'next_step': 'Use Faculty Portal > QuiTizz to create or host an owned definition.'}]},
     {
         "code": "departmental-exam-contributors",

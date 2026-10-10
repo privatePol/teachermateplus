@@ -1,11 +1,11 @@
 {% extends "faculty_portal/base.html" %}
 {% load static %}
 {% block title %}QuiTizz | TeacherMate+{% endblock %}
-{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/quitizz.css' %}">{% endblock %}
+{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/quitizz.css' %}?v=20261010-phase2c">{% endblock %}
 {% block faculty_content %}
 <div class="qt-wrap">
   <header class="qt-brand mb-4">
-    <div class="d-flex align-items-center gap-3"><svg width="38" height="38" viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M15 25 9 31m7-6 10-15 5-1-1 5-15 10Z" stroke="currentColor" stroke-width="2"/><path d="m15 25-2-8 6-2m-4 10 8 2 2-6M8 9v6m-3-3h6m18 17v6m-3-3h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><div><a class="qt-wordmark" href="{% url 'quitizz:list' %}">QuiTizz</a><div class="small">Powered by NCBA TeacherMate+</div></div></div>
+    <div class="d-flex align-items-center gap-3"><svg width="38" height="38" viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M15 25 9 31m7-6 10-15 5-1-1 5-15 10Z" stroke="currentColor" stroke-width="2"/><path d="m15 25-2-8 6-2m-4 10 8 2 2-6M8 9v6m-3-3h6m18 17v6m-3-3h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><div><a class="qt-wordmark" href="{% url 'quitizz:list' %}">QuiTizz</a><div class="small">Powered by TeacherMate+</div></div></div>
     <span class="qt-tagline">Scan. Play. Spark. Win.</span>
   </header>
   {% block quitizz_content %}{% endblock %}

@@ -6,7 +6,7 @@ FACULTY_HELP_SECTIONS = [
      'title': 'QuiTizz',
      'topics': [{'code': 'quitizz-author-host',
                  'title': 'Create and Host QuiTizz',
-                 'purpose': 'Build your own QuiTizzes and launch independent saved sessions. Powered by NCBA '
+                 'purpose': 'Build your own QuiTizzes and launch independent saved sessions. Powered by '
                             'TeacherMate+.',
                  'check_first': ['Ask an administrator to enable QuiTizz in Configurable Features.',
                                  'Use an account with assigned Faculty Portal access and QuiTizz manage or host '
@@ -68,6 +68,17 @@ FACULTY_HELP_SECTIONS = [
                               'editable': 'Only the authorized host; stale controls require a reload. Live '
                                           'recovery blocks gameplay when access is revoked; every recovery '
                                           'requires current permission.'},
+                             {'name': 'Open Projector / Results',
+                              'does': 'Opens the authorized presentation in a separate tab. QuiTizz. Powered by '
+                                      'TeacherMate+. Scan. Play. Spark. Win. Show the QR and lobby, questions, '
+                                      'revealed A-D response counts, Top 5 and final Gold/Silver/Bronze Top 3.',
+                              'when': 'Use a 16:9 display while keeping private host controls on your laptop.',
+                              'avoid': 'The projector still needs your host login and selected campus. It never '
+                                       'shows private player responses or pre-reveal answer keys. Nicknames and '
+                                       'scores become visible after reveal. Do not share your host login.',
+                              'result': 'Correct answers show text and points with a brief kwitis spark. Final '
+                                        'results use bounded local fireworks; reduced motion keeps static results.',
+                              'editable': 'Presentation only; host controls and scoring remain authoritative HTTP.'},
                              {'name': 'Archive / Reactivate',
                               'does': 'Preserves a definition while disabling editing and future launches, or '
                                       'makes it available again.',

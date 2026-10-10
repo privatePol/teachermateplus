@@ -3,6 +3,8 @@
   const root = document.getElementById("qt-host");
   if (!root) return;
   const byId = (id) => document.getElementById(id);
+  const stage = byId("qt-presentation");
+  const presentation = stage && window.QuiTizzPresentation?.create(stage);
   let latest = 0, pending = false, available = false;
   let requested = 0, rendered = 0, unavailable = false;
   function lockControls() {
@@ -17,6 +19,7 @@
     latest = state.version;
     const changed = String(state.version) !== root.dataset.version;
     root.dataset.version = String(state.version);
+    presentation?.render(state);
     byId("qt-count").textContent = String(state.participant_count);
     byId("qt-answered").textContent = String(state.answered_count);
     byId("qt-session-status").textContent = `${state.status.replaceAll("_", " ")} · Current question: ${state.position}`;
@@ -84,7 +87,8 @@
       if (!response.ok || !response.headers.get("Content-Type")?.includes("application/json")) {
         if ([401, 403, 404].includes(response.status) || response.redirected || response.ok) {
           unavailable = true; available = false; lockControls();
-          root.querySelectorAll("#qt-joining, #qt-participants, details").forEach((element) => { element.hidden = true; });
+          root.querySelectorAll("#qt-joining, #qt-participants, #qt-presentation, details").forEach((element) => { element.hidden = true; });
+          presentation?.clear();
           transport.stop(); byId("qt-connection").textContent = "Session unavailable.";
         }
         return;

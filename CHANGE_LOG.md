@@ -1,3 +1,11 @@
+## 2026-10-10 - QuiTizz Phase 2C presentation polish (uncommitted)
+
+- Final branding: **QuiTizz / Powered by TeacherMate+ / Scan. Play. Spark. Win.** Institutional branding outside QuiTizz is preserved.
+- Mobile player answer cards, locked/reveal feedback, private final score/rank and champion result; host current-question presentation and valid lifecycle controls; separate host-authorized projector with QR/lobby/question/reveal/Top 5/final Top 3 states.
+- Revealed HTTP-only A-D aggregate counts and canonical server ranking; no private responses or pre-reveal keys on projector. Original SVG trophy/crown/medal/rocket assets, bounded local kwitis/fireworks/confetti, static reduced-motion results, focus/touch/text accessibility. No sounds or animation dependency.
+- Notification-only WebSocket contract, HTTP authority, 100ms coalescing, 60s/5s recovery, zero forwarding queries and existing RBAC/scope/privacy remain. No migrations required. Validation and exact inventory: `docs/QUITIZZ_PHASE2C_REVIEW.md`; actual browser/mobile/projector acceptance remains unperformed. Not production-ready.
+- No staging, commit, push, deployment, restart, normal-local migrate, Attendance/DTR, secret/.env or repository-log changes.
+
 ## 2026-10-10 - QuiTizz Phase 2B final notification-only remediation (uncommitted)
 
 - Replaced data-bearing socket events with constant `sync_required` wakeups. Removed WebSocket ready and per-event/post-accept authorization checks; browser connection triggers canonical authorized HTTP recovery and never unlocks gameplay itself. Delayed DENY/removal/OFF/expiry transport revocation cannot disclose protected socket data.

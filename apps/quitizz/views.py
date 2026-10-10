@@ -159,6 +159,26 @@ def host_state(request, public_id):
 @never_cache
 @require_http_methods(["GET"])
 @access("host")
+def projector(request, public_id):
+    session = owned_session(request, public_id)
+    return render(request, "quitizz/projector.html", {"session": session})
+
+
+@never_cache
+@require_http_methods(["GET"])
+@access("host")
+def projector_state(request, public_id):
+    session = owned_session(request, public_id)
+    try:
+        gameplay.available(session)
+    except gameplay.Unavailable as exc:
+        return JsonResponse({"error": exc.messages[0]}, status=404)
+    return JsonResponse(gameplay.presentation_state(session))
+
+
+@never_cache
+@require_http_methods(["GET"])
+@access("host")
 def host_qr(request, public_id):
     session = owned_session(request, public_id)
     url = request.build_absolute_uri(reverse("quitizz:play", kwargs={"public_id": public_id}))
