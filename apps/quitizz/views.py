@@ -2,9 +2,16 @@ from functools import wraps
 
 from django.core.exceptions import ValidationError
 from django.db.models import Count
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods, require_POST
+from reportlab.graphics import renderSVG
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
 
+from . import gameplay
 from .access import require_access
 from .forms import QuestionForm, QuiTizzForm
 from .models import QuiTizzSession
@@ -112,9 +119,48 @@ def launch(request, public_id):
     return render(request, "quitizz/launch.html", {"quiz": obj, "questions": obj.questions.all()})
 
 
+def owned_session(request, public_id):
+    scope = request.quitizz_scope
+    return get_object_or_404(QuiTizzSession.objects.filter(tenant_id=scope["tenant_id"], campus_id=scope["campus_id"], host=scope["user"]), public_id=public_id)
+
+
+@never_cache
 @require_http_methods(["GET"])
 @access("host")
 def host(request, public_id):
-    scope = request.quitizz_scope
-    session = get_object_or_404(QuiTizzSession.objects.filter(tenant_id=scope["tenant_id"], campus_id=scope["campus_id"], host=scope["user"]), public_id=public_id)
-    return render(request, "quitizz/host.html", {"session": session, "questions": session.questions.all()})
+    session = owned_session(request, public_id)
+    state = gameplay.host_state(session)
+    return render(request, "quitizz/host.html", {"session": session, "questions": session.questions.all(),
+        "participants": state["participants"], "participant_count": state["participant_count"]})
+
+
+@never_cache
+@require_POST
+@access("host")
+def host_command(request, public_id):
+    gameplay.command(**request.quitizz_scope, public_id=public_id, version=request.POST.get("version"),
+        action=request.POST.get("action"), participant_id=request.POST.get("participant"), request=request)
+    return redirect("quitizz:host", public_id=public_id)
+
+
+@never_cache
+@require_http_methods(["GET"])
+@access("host")
+def host_state(request, public_id):
+    session = owned_session(request, public_id)
+    gameplay.available(session)
+    return JsonResponse(gameplay.host_state(session))
+
+
+@never_cache
+@require_http_methods(["GET"])
+@access("host")
+def host_qr(request, public_id):
+    session = owned_session(request, public_id)
+    url = request.build_absolute_uri(reverse("quitizz:play", kwargs={"public_id": public_id}))
+    qr = QrCodeWidget(f"{url}#{gameplay.capability(session)}")
+    x1, y1, x2, y2 = qr.getBounds()
+    size = 320
+    drawing = Drawing(size, size, transform=[size / (x2 - x1), 0, 0, size / (y2 - y1), 0, 0])
+    drawing.add(qr)
+    return HttpResponse(renderSVG.drawToString(drawing), content_type="image/svg+xml")

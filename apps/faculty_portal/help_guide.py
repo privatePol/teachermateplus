@@ -34,10 +34,31 @@ FACULTY_HELP_SECTIONS = [
                               'does': 'Reviews the current title, revision and order, then saves an independent '
                                       'QuiTizz Session and host preview.',
                               'when': 'At least one valid question is saved and host permission is assigned.',
-                              'avoid': 'Participant joining and gameplay are not available in this phase.',
+                              'avoid': 'Keep the host screen private: it contains saved answer keys. Share only '
+                                       'the session QR code with players.',
                               'result': 'Immutable saved questions, choices, answers, timers and order. Each '
                                         'launch is independent.',
                               'editable': 'The launched snapshot cannot be edited.'},
+                             {'name': 'Lobby / Play QuiTizz',
+                              'does': 'Open joining to display the QR. Players scan, enter a unique nickname '
+                                      'and join without a TMP login. Refresh restores their participant on the '
+                                      'same browser until the session identity expires.',
+                              'when': 'After launching an owned session with host permission.',
+                              'avoid': 'A removed player cannot reuse their identity. Joining closes on Start; '
+                                       'the host may reopen it. Reopening replaces the earlier QR.',
+                              'result': 'A waiting lobby and an escaped participant list.',
+                              'editable': 'The host can close joining, remove a participant or cancel.'},
+                             {'name': 'Start / Open Question / Close / Reveal / Next / End',
+                              'does': 'Start prepares question 1. Open Question starts its server timer. Close '
+                                      'locks answers, Reveal shows feedback, Next prepares the next question. '
+                                      'End completes after reveal; Cancel ends without revealing an open key.',
+                              'when': 'Use the controls in order. State refreshes every five seconds.',
+                              'avoid': 'The first accepted answer is locked. Late answers fail. Browser '
+                                       'countdowns do not decide acceptance; the server does.',
+                              'result': 'Wrong answers score 0; correct answers score 700 plus a speed bonus '
+                                        'of up to 300. Points appear after reveal, and final private rank '
+                                        'appears after completion.',
+                              'editable': 'Only the authorized host; stale controls require a reload.'},
                              {'name': 'Archive / Reactivate',
                               'does': 'Preserves a definition while disabling editing and future launches, or '
                                       'makes it available again.',
@@ -47,8 +68,8 @@ FACULTY_HELP_SECTIONS = [
                               'editable': 'Owner with manage permission.'}],
                  'avoid': 'QuiTizz does not change grades or use confidential examination questions, course '
                           'rosters or academic terms.',
-                 'next_step': 'Review your saved host preview. Participant joining and live gameplay require a '
-                              'later release.'}]},
+                 'next_step': 'Open joining and share the QR. Turning QuiTizz OFF blocks participant state, '
+                              'joins and answers, and host gameplay controls without erasing saved history.'}]},
     {
         "code": "departmental-exam-contributions",
         "title": "Departmental Exam Builder",

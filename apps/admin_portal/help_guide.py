@@ -18,7 +18,8 @@ ADMIN_HELP_SECTIONS = [
                               'does': 'Turns QuiTizz ON/OFF for the selected tenant.',
                               'when': 'Enable when authorized employees are ready to author and host.',
                               'avoid': 'Enabling the feature does not grant access.',
-                              'result': 'OFF hides navigation and blocks direct routes. ON still requires '
+                              'result': 'OFF hides navigation and blocks direct routes, public joining, '
+                                        'participant state, answers and host gameplay. ON still requires '
                                         'explicit campus-scoped permissions.',
                               'editable': 'Existing system-settings permission is required.'},
                              {'name': 'Existing RBAC administration',
@@ -29,8 +30,8 @@ ADMIN_HELP_SECTIONS = [
                               'avoid': 'No automatic role or superuser grants; direct DENY takes precedence.',
                               'result': 'Normal authoring and hosting appear only in Faculty Portal.',
                               'editable': 'Use existing role/user permission administration.'}],
-                 'avoid': 'Do not look for normal authoring under Admin Tools. Participant joining, scoring and '
-                          'live gameplay are not available yet.',
+                 'avoid': 'Normal authoring and hosting belong in Faculty Portal. Players use the public '
+                          'session QR without a TMP login. Keep host answer-key screens private.',
                  'next_step': 'Use Faculty Portal > QuiTizz to create or host an owned definition.'}]},
     {
         "code": "departmental-exam-contributors",

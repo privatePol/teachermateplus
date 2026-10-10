@@ -11,6 +11,17 @@ from apps.core.models import TimeStampedModel
 
 
 _snapshot_session = ContextVar("quitizz_snapshot_session", default=None)
+_gameplay_write = ContextVar("quitizz_gameplay_write", default=False)
+
+
+@contextmanager
+def gameplay_write():
+    """Internal service-only allowance; snapshot content still cannot be updated."""
+    token = _gameplay_write.set(True)
+    try:
+        yield
+    finally:
+        _gameplay_write.reset(token)
 
 
 @contextmanager
@@ -104,6 +115,9 @@ class QuiTizzQuestion(QuestionContent):
 
 class ImmutableQuerySet(models.QuerySet):
     def update(self, **kwargs):
+        allowed = getattr(self.model, "GAMEPLAY_FIELDS", frozenset())
+        if _gameplay_write.get() and kwargs and set(kwargs) <= allowed:
+            return super().update(**kwargs)
         raise ValidationError("Launched snapshots are immutable.")
 
     def delete(self):
@@ -144,6 +158,15 @@ class ImmutableModel(ValidatedModel):
 class QuiTizzSession(ImmutableModel):
     class Status(models.TextChoices):
         READY = "READY", "Ready"
+        LOBBY = "LOBBY", "Lobby"
+        QUESTION_OPEN = "QUESTION_OPEN", "Question open"
+        QUESTION_CLOSED = "QUESTION_CLOSED", "Question closed"
+        ANSWER_REVEALED = "ANSWER_REVEALED", "Answer revealed"
+        COMPLETED = "COMPLETED", "Completed"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    GAMEPLAY_FIELDS = frozenset({"status", "joining_open", "join_generation", "expires_at", "completed_at",
+        "current_position", "state_version", "scoring_policy_snapshot", "updated_at"})
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     source = models.ForeignKey(QuiTizz, on_delete=models.PROTECT, related_name="sessions")
@@ -156,13 +179,17 @@ class QuiTizzSession(ImmutableModel):
     scoring_policy_snapshot = models.JSONField(default=dict, blank=True)
     current_position = models.PositiveIntegerField(default=0)
     state_version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
+    joining_open = models.BooleanField(default=False)
+    join_generation = models.UUIDField(default=uuid.uuid4, editable=False)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at", "-id"]
         indexes = [models.Index(fields=["tenant", "campus", "host", "status"], name="qts_host_scope_idx")]
         constraints = [
             models.CheckConstraint(condition=models.Q(source_revision__gt=0) & models.Q(state_version__gt=0), name="qts_versions_positive"),
-            models.CheckConstraint(condition=models.Q(status="READY"), name="qts_foundation_status"),
+            models.CheckConstraint(condition=models.Q(status__in=["READY", "LOBBY", "QUESTION_OPEN", "QUESTION_CLOSED", "ANSWER_REVEALED", "COMPLETED", "CANCELLED"]), name="qts_gameplay_status"),
         ]
 
     def clean(self):
@@ -171,7 +198,13 @@ class QuiTizzSession(ImmutableModel):
 
 
 class QuiTizzSessionQuestion(QuestionContent, ImmutableModel):
+    GAMEPLAY_FIELDS = frozenset({"opened_at", "deadline_at", "closed_at", "revealed_at", "updated_at"})
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     session = models.ForeignKey(QuiTizzSession, on_delete=models.PROTECT, related_name="questions")
+    opened_at = models.DateTimeField(null=True, blank=True)
+    deadline_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    revealed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["position", "id"]
@@ -180,3 +213,53 @@ class QuiTizzSessionQuestion(QuestionContent, ImmutableModel):
     def check_creation(self):
         if self.session_id != _snapshot_session.get():
             raise ValidationError("Questions can only be snapshotted during launch.")
+
+
+class QuiTizzParticipant(ValidatedModel):
+    session = models.ForeignKey(QuiTizzSession, on_delete=models.PROTECT, related_name="participants")
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    nickname = models.CharField(max_length=32)
+    nickname_key = models.CharField(max_length=64)
+    reconnect_digest = models.CharField(max_length=64, editable=False)
+    reconnect_expires_at = models.DateTimeField()
+    joined_at = models.DateTimeField(auto_now_add=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    total_score = models.PositiveBigIntegerField(default=0)
+    correct_count = models.PositiveIntegerField(default=0)
+    cumulative_response_ms = models.PositiveBigIntegerField(default=0)
+    final_rank = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["joined_at", "public_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["session", "nickname_key"], name="qtp_unique_nickname"),
+            models.CheckConstraint(condition=~models.Q(nickname="") & ~models.Q(nickname_key=""), name="qtp_nickname_required"),
+            models.CheckConstraint(condition=models.Q(total_score__gte=0) & models.Q(correct_count__gte=0) & models.Q(cumulative_response_ms__gte=0), name="qtp_totals_nonnegative"),
+            models.CheckConstraint(condition=models.Q(final_rank__isnull=True) | models.Q(final_rank__gt=0), name="qtp_rank_positive"),
+        ]
+        indexes = [models.Index(fields=["session", "removed_at", "joined_at"], name="qtp_session_active_idx")]
+
+    def clean(self):
+        from .gameplay import normalize_nickname
+        self.nickname, self.nickname_key = normalize_nickname(self.nickname)
+
+
+class QuiTizzResponse(ValidatedModel):
+    participant = models.ForeignKey(QuiTizzParticipant, on_delete=models.PROTECT, related_name="responses")
+    session_question = models.ForeignKey(QuiTizzSessionQuestion, on_delete=models.PROTECT, related_name="responses")
+    selected_choice = models.CharField(max_length=1, choices=QuestionContent.Choice.choices)
+    received_at = models.DateTimeField()
+    elapsed_ms = models.PositiveBigIntegerField()
+    is_correct = models.BooleanField()
+    awarded_points = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["participant", "session_question"], name="qtr_one_response"),
+            models.CheckConstraint(condition=models.Q(selected_choice__in=["A", "B", "C", "D"]), name="qtr_choice_ad"),
+            models.CheckConstraint(condition=models.Q(elapsed_ms__gte=0) & models.Q(awarded_points__gte=0) & models.Q(awarded_points__lte=1000), name="qtr_score_bounds"),
+        ]
+
+    def clean(self):
+        if self.participant_id and self.session_question_id and self.participant.session_id != self.session_question.session_id:
+            raise ValidationError("Response session must match participant session.")

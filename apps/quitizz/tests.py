@@ -556,7 +556,8 @@ class QuiTizzFoundationTests(TestCase):
         response = self.client.get(reverse("faculty_portal:guide"))
         self.assertContains(response, "Create and Host QuiTizz")
         self.assertContains(response, "existing sessions retain their snapshots")
-        self.assertContains(response, "Participant joining and gameplay are not available")
+        self.assertContains(response, "Players scan, enter a unique nickname")
+        self.assertContains(response, "Open Question starts its server timer")
 
     def test_admin_guide_limits_responsibility_to_configuration(self):
         from apps.admin_portal.help_guide import build_admin_help_sections

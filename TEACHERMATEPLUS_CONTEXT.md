@@ -1,3 +1,11 @@
+## 2026-10-10 - QuiTizz Phase 2A
+
+QuiTizz now has account-free public QR join and cookie-based participant reconnect, nickname uniqueness independent of database collation, lobby and HTTP gameplay state. The existing default-OFF feature and exact tenant/campus assigned Faculty host RBAC remain authoritative. Public clients derive their scope from the session. QR capabilities are signed, fragment-only until CSRF POST exchange; only participant credential digests are saved.
+
+The host opens joining, starts/prepares question 1, opens its server timer, closes, reveals, advances and completes/cancels, with expected state versions and transactions. Removed players cannot reconnect or answer. Immutable launched content stays unchanged. Server receipt time decides acceptance and deterministic 0 / 700-1000 scoring; pre-reveal responses expose no key/correctness/points/rank. Final private ranks use score, correct count, cumulative response milliseconds, joined_at and UUID.
+
+Schema migration `quitizz.0004_quitizzparticipant_quitizzresponse_and_more` adds participants/responses, lifecycle/timing metadata and batched snapshot-question public UUID backfill. Only disposable SQLite test migrations are authorized here. Five-second state refresh and local display countdowns reserve WebSocket transport for Phase 2B. Cache throttles are per-process with default LocMem: shared Redis enforcement, MariaDB/InnoDB concurrency/throughput and browser acceptance remain rollout gates. See `docs/QUITIZZ_PHASE2A_REVIEW.md` for actual commands/results and unresolved risks. No commit, push or deployment is authorized.
+
 ## QuiTizz Phase 1 - 2026-10-10
 
 QuiTizz (Powered by NCBA TeacherMate+, tagline "Scan. Play. Spark. Win.") lives in `apps/quitizz` and `/faculty/quitizz/`. It is independent of grading, terms, rosters and confidential examination content. Definitions belong to one owner, tenant and originating campus. Authoring uses `quitizz.manage`; launch/host preview uses `quitizz.host`; `quitizz.view_history` is reserved. Both use assigned exact-campus `faculty_portal.access`, applicable direct DENY precedence, and default-OFF `FEATURE_QUITIZZ_ENABLED`. Global feature settings may provide the existing fallback, with tenant override.

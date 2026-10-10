@@ -11,3 +11,9 @@
 .qt-wrap .errorlist { color: #a52222; margin-top: .4rem; }
 .qt-wrap .btn:focus-visible, .qt-wrap a:focus-visible { outline: 3px solid #a07813; outline-offset: 3px; }
 @media (max-width: 600px) { .qt-choices { grid-template-columns: 1fr; } .qt-brand { padding: 1rem; } }
+.qt-player { max-width: 760px; }
+.qt-answer { min-height: 76px; padding: 1rem; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qt-player .form-control, .qt-player form > button { min-height: 52px; }
+.qt-player button:focus-visible, .qt-player input:focus-visible { outline: 3px solid #a07813; outline-offset: 3px; }
+.qt-player h2 { white-space: pre-wrap; overflow-wrap: anywhere; }
+.qt-qr { width: min(100%, 320px); height: auto; }

@@ -1,3 +1,11 @@
+## 2026-10-10 - QuiTizz Phase 2A core gameplay
+
+- Added public session QR fragment exchange, nickname join, digest-backed participant cookies/reconnect, lobby and private HTTP game state. Players do not need TMP accounts; feature OFF blocks public access and game mutations.
+- Added authorized, scoped, versioned host joining/start/open/close/reveal/next/complete/cancel/removal controls. Launched question content remains immutable; timers, answer acceptance and 0 / 700-1000 scoring use server timestamps. First accepted answers are locked, retries do not rescore, and feedback is withheld until reveal.
+- Added participant/response schema and migration `quitizz.0004_quitizzparticipant_quitizzresponse_and_more`, including safe existing-question UUID backfill. Normal-local migrations were not applied.
+- HTTP state refresh is five seconds; countdowns are local. Added focused security/lifecycle/scoring/query-growth and historical migration tests. Exact executed results, inventory and limits are in `docs/QUITIZZ_PHASE2A_REVIEW.md` and `HANDOFF.md`.
+- Shared Redis throttling, MariaDB/InnoDB concurrency/throughput and real-browser acceptance remain pre-deployment requirements. No Phase 2B/2C infrastructure, framework or animation changes; no publication under this gate.
+
 ## 2026-10-10 - QuiTizz Phase 1 foundation (uncommitted)
 
 - Added an independent QuiTizz app with owner-only tenant/campus authoring in Faculty Portal, four-choice questions, safe delete/reorder and archive/reactivate.
