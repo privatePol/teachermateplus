@@ -1,3 +1,10 @@
+## 2026-10-10 - QuiTizz Phase 1 foundation (uncommitted)
+
+- Added an independent QuiTizz app with owner-only tenant/campus authoring in Faculty Portal, four-choice questions, safe delete/reorder and archive/reactivate.
+- Added the default-OFF `FEATURE_QUITIZZ_ENABLED` toggle to Configurable Features. Explicit exact-campus `faculty_portal.access` and `quitizz.manage` / `quitizz.host` assignments govern navigation and direct routes; applicable direct DENY wins without role-name or superuser bypass. `quitizz.view_history` is reserved.
+- Launch atomically saves independent immutable question/answer/timer/order snapshots and audits the action. Saved revisions reject stale edits and launches.
+- Added schema, permission and Faculty navigation migrations plus focused tests. No normal database migration, commit or release. Participant joining, responses, scoring, leaderboard, WebSockets and animations remain out of scope.
+
 ## Contribution workspace header and Move feedback - 2026-10-07
 
 - Move names its deduplicated affected-question count, including whole-Case members and selections in collapsed sections; invalid linked selections still disable it. The separate Move selection summary uses readable blue.

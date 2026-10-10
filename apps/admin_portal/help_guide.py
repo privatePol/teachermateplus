@@ -6,6 +6,32 @@ from apps.core.services.permissions import PermissionService
 
 
 ADMIN_HELP_SECTIONS = [
+    {'code': 'quitizz-configuration',
+     'title': 'QuiTizz Configuration',
+     'topics': [{'code': 'quitizz-toggle',
+                 'title': 'Enable QuiTizz',
+                 'permissions': ['system_settings.update'],
+                 'purpose': 'Controls tenant availability for Faculty Portal QuiTizz authoring and saved host '
+                            'sessions.',
+                 'check_first': ['Select the correct tenant.', 'QuiTizz starts OFF.'],
+                 'actions': [{'name': 'Configurable Features > QuiTizz',
+                              'does': 'Turns QuiTizz ON/OFF for the selected tenant.',
+                              'when': 'Enable when authorized employees are ready to author and host.',
+                              'avoid': 'Enabling the feature does not grant access.',
+                              'result': 'OFF hides navigation and blocks direct routes. ON still requires '
+                                        'explicit campus-scoped permissions.',
+                              'editable': 'Existing system-settings permission is required.'},
+                             {'name': 'Existing RBAC administration',
+                              'does': 'Assigns faculty_portal.access plus quitizz.manage and/or quitizz.host in '
+                                      'the exact tenant and campus. quitizz.view_history is reserved for a '
+                                      'future release.',
+                              'when': 'Grant to an authorized employee regardless of role name.',
+                              'avoid': 'No automatic role or superuser grants; direct DENY takes precedence.',
+                              'result': 'Normal authoring and hosting appear only in Faculty Portal.',
+                              'editable': 'Use existing role/user permission administration.'}],
+                 'avoid': 'Do not look for normal authoring under Admin Tools. Participant joining, scoring and '
+                          'live gameplay are not available yet.',
+                 'next_step': 'Use Faculty Portal > QuiTizz to create or host an owned definition.'}]},
     {
         "code": "departmental-exam-contributors",
         "title": "Departmental Exam Contributor Rosters",

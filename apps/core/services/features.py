@@ -5,6 +5,14 @@ from apps.tenants.models import SystemSetting
 
 
 class FeatureSettingsService:
+    QUITIZZ_ENABLED_KEY = "FEATURE_QUITIZZ_ENABLED"
+
+    @classmethod
+    def is_quitizz_enabled(cls, *, tenant_id: int | None) -> bool:
+        if tenant_id is None:
+            return False
+        return bool(SystemSettingService.get(cls.QUITIZZ_ENABLED_KEY, tenant_id=tenant_id, default=False))
+
     DEPARTMENTAL_EXAM_BUILDER_ENABLED_KEY = "FEATURE_DEPARTMENTAL_EXAM_BUILDER_ENABLED"
     DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED_KEY = (
         "FEATURE_DEPARTMENTAL_EXAM_STRUCTURED_LIFECYCLE_ENABLED"

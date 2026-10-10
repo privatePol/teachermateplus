@@ -2,6 +2,53 @@ from __future__ import annotations
 
 
 FACULTY_HELP_SECTIONS = [
+    {'code': 'quitizz',
+     'title': 'QuiTizz',
+     'topics': [{'code': 'quitizz-author-host',
+                 'title': 'Create and Host QuiTizz',
+                 'purpose': 'Build your own QuiTizzes and launch independent saved sessions. Powered by NCBA '
+                            'TeacherMate+.',
+                 'check_first': ['Ask an administrator to enable QuiTizz in Configurable Features.',
+                                 'Use an account with assigned Faculty Portal access and QuiTizz manage or host '
+                                 'permission in the selected tenant and campus.',
+                                 'Only your own QuiTizzes are available.'],
+                 'actions': [{'name': 'My QuiTizzes / Create QuiTizz',
+                              'does': 'Lists your active and archived definitions in the selected campus. Create '
+                                      'saves a title.',
+                              'when': 'Use it to start or reuse your own collection.',
+                              'avoid': 'Do not share another owner or campus definition.',
+                              'result': 'An owned, campus-scoped QuiTizz is saved.',
+                              'editable': 'Manage permission is required.'},
+                             {'name': 'Edit QuiTizz / Questions',
+                              'does': 'Adds or edits a prompt, exactly four choices A-D, one correct answer and '
+                                      'a positive timer. Move questions up/down and Save question order. Delete '
+                                      'opens a confirmation.',
+                              'when': 'Prepare questions before hosting. 20-25 is a suggested event range, not a '
+                                      'limit.',
+                              'avoid': 'Reload after a stale revision message before saving.',
+                              'result': 'Changes apply to future launches; existing sessions retain their '
+                                        'snapshots.',
+                              'editable': 'Only the owner with manage permission; archived definitions must be '
+                                          'reactivated.'},
+                             {'name': 'Host QuiTizz',
+                              'does': 'Reviews the current title, revision and order, then saves an independent '
+                                      'QuiTizz Session and host preview.',
+                              'when': 'At least one valid question is saved and host permission is assigned.',
+                              'avoid': 'Participant joining and gameplay are not available in this phase.',
+                              'result': 'Immutable saved questions, choices, answers, timers and order. Each '
+                                        'launch is independent.',
+                              'editable': 'The launched snapshot cannot be edited.'},
+                             {'name': 'Archive / Reactivate',
+                              'does': 'Preserves a definition while disabling editing and future launches, or '
+                                      'makes it available again.',
+                              'when': 'Retire or reuse your own collection.',
+                              'avoid': 'Archive does not delete historical sessions.',
+                              'result': 'Existing session snapshots remain available to an authorized host.',
+                              'editable': 'Owner with manage permission.'}],
+                 'avoid': 'QuiTizz does not change grades or use confidential examination questions, course '
+                          'rosters or academic terms.',
+                 'next_step': 'Review your saved host preview. Participant joining and live gameplay require a '
+                              'later release.'}]},
     {
         "code": "departmental-exam-contributions",
         "title": "Departmental Exam Builder",
