@@ -63,7 +63,7 @@
         item.dataset.playerId = player.public_id;
         const name = document.createElement("span"); name.textContent = player.nickname; item.append(name);
         if (commands && !["COMPLETED", "CANCELLED"].includes(state.status)) {
-          const form = document.createElement("form"); form.method = "post"; form.action = commands.action;
+          const form = document.createElement("form"); form.method = "post"; form.setAttribute("action", commands.getAttribute("action"));
           const fields = {csrfmiddlewaretoken: commands.querySelector("[name=csrfmiddlewaretoken]").value, version: state.version, participant: player.public_id};
           Object.entries(fields).forEach(([key, value]) => { const input = document.createElement("input"); input.type = "hidden"; input.name = key; input.value = value; form.append(input); });
           const button = document.createElement("button"); button.name = "action"; button.value = "remove"; button.className = "btn btn-sm btn-outline-danger";
@@ -105,7 +105,7 @@
     const data = new FormData(form, event.submitter);
     pending = true; root.querySelectorAll("button").forEach((button) => { button.disabled = true; });
     try {
-      const response = await fetch(form.action, {method: "POST", credentials: "same-origin", body: data});
+      const response = await fetch(form.getAttribute("action"), {method: "POST", credentials: "same-origin", body: data});
       byId("qt-host-error").hidden = response.ok;
       if (!response.ok) byId("qt-host-error").textContent = "Control could not be accepted. The current session has been recovered; try the available control again.";
     } catch (_) { byId("qt-host-error").hidden = false; byId("qt-host-error").textContent = "Connection interrupted. Recovering current session."; }

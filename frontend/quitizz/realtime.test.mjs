@@ -196,6 +196,146 @@ test("host HTTP 403/404 locks and hides protected UI; late success cannot unlock
   }
 });
 
+// Model the browser's named form-property lookup and successful controls. The
+// old host harness intentionally covers recovery without forms; these fixtures
+// exercise the actual host script's submission and form-regeneration paths.
+// This focused model does not replace real-browser acceptance.
+class HostControlElement {
+  constructor(tag = "div") {
+    this.tagName = tag; this.children = []; this.dataset = {}; this.attributes = {};
+    this.listeners = {}; this.disabled = false; this.hidden = false; this._value = "";
+  }
+  set value(value) { this._value = String(value); }
+  get value() { return this._value; }
+  set textContent(value) { this.text = String(value); this.replaceChildren(); }
+  get textContent() { return this.text || ""; }
+  append(...nodes) { nodes.forEach((node) => { node.parent = this; this.children.push(node); }); }
+  replaceChildren(...nodes) { this.children.forEach((node) => { node.parent = null; }); this.children = []; this.append(...nodes); }
+  remove() { if (this.parent) this.parent.children = this.parent.children.filter((node) => node !== this); this.parent = null; }
+  matches(selector) { const named = /^\[name=([^\]]+)\]$/.exec(selector); return selector === this.tagName || Boolean(named && named[1] === this.name); }
+  querySelectorAll(selector) { return this.children.flatMap((node) => [...(node.matches(selector) ? [node] : []), ...node.querySelectorAll(selector)]); }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+  contains(node) { return node === this || this.children.some((child) => child.contains(node)); }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return this.attributes[name] ?? null; }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  focus() {}
+  get action() {
+    const controls = this.querySelectorAll("[name=action]");
+    if (controls.length === 1) return controls[0];
+    if (controls.length > 1) return {length: controls.length, toString: () => "[object RadioNodeList]"};
+    return this.getAttribute("action");
+  }
+  set action(value) { this.setAttribute("action", value); }
+  toString() { return this.tagName === "button" ? "[object HTMLButtonElement]" : "[object HTMLElement]"; }
+}
+class HostControlFormData {
+  constructor(form, submitter) {
+    this.submitterDisabledAtCapture = submitter.disabled;
+    this.values = [...form.querySelectorAll("input"), ...form.querySelectorAll("button")]
+      .filter((control) => control.name && !control.disabled && (control.tagName !== "button" || control === submitter))
+      .map((control) => [control.name, control.value]);
+  }
+  get(name) { return this.values.find(([key]) => key === name)?.[1] ?? null; }
+  getAll(name) { return this.values.filter(([key]) => key === name).map(([, value]) => value); }
+  entries() { return this.values[Symbol.iterator](); }
+}
+function hostControlHarness({initialParticipant = null} = {}) {
+  const publicId = "11111111-1111-4111-8111-111111111111";
+  const commandUrl = `/faculty/quitizz/sessions/${publicId}/command/`;
+  const elements = new Map(["qt-host", "qt-command", "qt-count", "qt-answered", "qt-session-status", "qt-joining", "qt-participants", "qt-connection", "qt-host-error"]
+    .map((id) => [id, new HostControlElement(id === "qt-command" ? "form" : "div")]));
+  const root = elements.get("qt-host"), commands = elements.get("qt-command"), list = elements.get("qt-participants");
+  root.dataset = {version: "1", stateUrl: `/faculty/quitizz/sessions/${publicId}/state/`, socketUrl: "/host/socket/", qrUrl: "/host/qr/"};
+  root.append(...[...elements].filter(([id]) => id !== "qt-host").map(([, element]) => element));
+  const field = (name, value) => { const input = new HostControlElement("input"); input.type = "hidden"; input.name = name; input.value = value; return input; };
+  const button = (value) => { const control = new HostControlElement("button"); control.name = "action"; control.value = value; return control; };
+  commands.setAttribute("action", commandUrl);
+  commands.append(field("csrfmiddlewaretoken", "csrf-host-token"), field("version", 1), button("open_joining"), button("cancel"));
+  if (initialParticipant) {
+    const item = new HostControlElement("li"), form = new HostControlElement("form"); item.dataset.playerId = initialParticipant.public_id;
+    form.setAttribute("action", commandUrl);
+    form.append(field("csrfmiddlewaretoken", "csrf-host-token"), field("version", 1), field("participant", initialParticipant.public_id), button("remove"));
+    item.append(form); list.append(item);
+  }
+  const requests = []; let callbacks;
+  const document = {getElementById: (id) => elements.get(id) || null, createElement: (tag) => new HostControlElement(tag), activeElement: null};
+  const window = {QuiTizzRealtime(options) { callbacks = options; return {refresh: options.recover, stop() {}}; }};
+  vm.runInNewContext(read("quitizz_host"), {document, window, FormData: HostControlFormData,
+    fetch: (url, options) => new Promise((resolve) => requests.push({url: String(url), options, resolve,
+      allButtonsDisabled: root.querySelectorAll("button").every((control) => control.disabled)}))});
+  const state = (overrides = {}) => ({version: 1, status: "READY", position: 0, question_count: 2,
+    participant_count: initialParticipant ? 1 : 0, participants: initialParticipant ? [initialParticipant] : [],
+    answered_count: 0, joining_open: false, ...overrides});
+  const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+  const reply = (value, status = 200) => { assert.ok(requests.length, "expected an HTTP request"); requests.shift().resolve({ok: status >= 200 && status < 300, status,
+    headers: {get: () => "application/json"}, json: async () => value}); };
+  async function recover(value = state()) { const pending = callbacks.recover(); reply(value); await pending; }
+  function submit(form, action) {
+    const submitter = form.querySelectorAll("button").find((control) => control.value === action);
+    assert.ok(submitter, `missing ${action} control`); assert.equal(submitter.disabled, false);
+    let prevented = false;
+    const pending = root.listeners.submit({target: form, submitter, preventDefault() { prevented = true; }});
+    assert.equal(prevented, true); return pending;
+  }
+  async function finish(pending, value, status = 200) { reply({}, status); await flush(); assert.equal(requests[0]?.url, root.dataset.stateUrl); reply(value); await pending; }
+  return {root, commands, list, requests, commandUrl, state, recover, submit, finish, error: elements.get("qt-host-error")};
+}
+function assertHostCommand(h, action, version, participant = null) {
+  assert.equal(h.requests.length, 1);
+  const {url, options, allButtonsDisabled} = h.requests[0];
+  assert.equal(url, h.commandUrl); assert.ok(!url.includes("[object"));
+  assert.equal(options.method, "POST"); assert.equal(options.credentials, "same-origin");
+  assert.deepEqual(options.body.getAll("action"), [action]);
+  assert.equal(options.body.get("version"), String(version));
+  assert.equal(options.body.get("csrfmiddlewaretoken"), "csrf-host-token");
+  assert.equal(options.body.get("participant"), participant);
+  assert.equal(options.body.submitterDisabledAtCapture, false); assert.equal(allButtonsDisabled, true);
+  assert.equal([...options.body.entries()].length, participant ? 4 : 3);
+}
+const hostCommandStates = {
+  open_joining: {status: "READY"}, close_joining: {status: "LOBBY", joining_open: true},
+  start: {status: "LOBBY"}, open_question: {status: "QUESTION_CLOSED", question_opened: false},
+  close_question: {status: "QUESTION_OPEN"}, reveal: {status: "QUESTION_CLOSED", question_opened: true},
+  next: {status: "ANSWER_REVEALED", position: 1}, complete: {status: "ANSWER_REVEALED", position: 1}, cancel: {status: "READY"},
+};
+for (const [action, overrides] of Object.entries(hostCommandStates)) test(`host command ${action} uses the URL attribute and captures successful controls before locking`, async () => {
+  const h = hostControlHarness(); const state = h.state({...overrides, version: action === "open_joining" ? 1 : 2});
+  await h.recover(state);
+  assert.equal(String(h.commands.action), "[object RadioNodeList]", "fixture must reproduce named-property shadowing");
+  const pending = h.submit(h.commands, action); assertHostCommand(h, action, state.version);
+  await h.finish(pending, state); assert.ok(h.root.querySelectorAll("button").every((control) => !control.disabled));
+});
+test("host initial single-button Remove form posts the attribute URL with participant identity", async () => {
+  const participant = {public_id: "participant-1", nickname: "Player"};
+  const h = hostControlHarness({initialParticipant: participant}); await h.recover();
+  const form = h.list.querySelector("form"); assert.equal(String(form.action), "[object HTMLButtonElement]");
+  const pending = h.submit(form, "remove"); assertHostCommand(h, "remove", 1, participant.public_id);
+  await h.finish(pending, h.state({version: 2, participants: [], participant_count: 0}));
+});
+test("host dynamically created Remove forms copy the URL attribute and submit their own participant", async () => {
+  const h = hostControlHarness(), participants = [{public_id: "participant-1", nickname: "One"}, {public_id: "participant-2", nickname: "Two"}];
+  const state = h.state({version: 2, status: "LOBBY", participants, participant_count: 2}); await h.recover(state);
+  const forms = h.list.querySelectorAll("form"); assert.equal(forms.length, 2);
+  forms.forEach((form) => assert.equal(form.getAttribute("action"), h.commandUrl));
+  const pending = h.submit(forms[1], "remove"); assertHostCommand(h, "remove", 2, participants[1].public_id);
+  await h.finish(pending, h.state({version: 3, participants: [participants[0]], participant_count: 1}));
+  assert.equal(h.list.querySelector("form").getAttribute("action"), h.commandUrl);
+});
+test("host stale-version rejection recovers current controls and subsequent commands post the current version", async () => {
+  const h = hostControlHarness(); await h.recover();
+  const oldButton = h.commands.querySelectorAll("button")[0];
+  const first = h.submit(h.commands, "open_joining"); assertHostCommand(h, "open_joining", 1);
+  const recovered = h.state({version: 2, status: "LOBBY", joining_open: true});
+  await h.finish(first, recovered, 409);
+  assert.equal(h.error.hidden, false); assert.match(h.error.textContent, /current session has been recovered/);
+  assert.ok(!h.commands.querySelectorAll("button").includes(oldButton));
+  assert.deepEqual(h.commands.querySelectorAll("button").map((control) => control.value), ["close_joining", "start", "cancel"]);
+  const second = h.submit(h.commands, "start"); assertHostCommand(h, "start", 2);
+  await h.finish(second, h.state({version: 3, status: "QUESTION_CLOSED", question_opened: false, position: 1}));
+  assert.equal(h.error.hidden, true); assert.equal(h.commands.querySelector("[name=version]").value, "3");
+});
+
 function playerHarness(realTransport = false) {
   const buttons = [];
   const ids = ["qt-play", "qt-message", "qt-error", "qt-join", "qt-question", "qt-answers", "qt-feedback", "qt-connection", "qt-prompt", "qt-countdown"];
