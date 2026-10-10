@@ -108,3 +108,20 @@ def state(request, public_id):
 def answer(request, public_id):
     return JsonResponse(gameplay.submit(public_id, credential(request, public_id), request.POST.get("question", ""),
         request.POST.get("choice", ""), received_at=request.quitizz_received_at))
+
+
+@require_POST
+@endpoint("state")
+@sensitive_variables("value")
+def socket_identity(request, public_id):
+    session = gameplay.resolve(public_id)
+    value = credential(request, public_id)
+    participant = gameplay.identity(session, value)
+    response = JsonResponse({"ready": True})
+    # Original reconnect cookie stays scoped to HTTP play. This HttpOnly bridge
+    # is sent only to this session's player socket, never exposed to JS or URLs.
+    response.set_cookie(cookie_name(public_id, "socket"), value,
+        path=f"/ws/quitizz/{public_id}/player/", httponly=True, samesite="Strict",
+        secure=bool(settings.SESSION_COOKIE_SECURE or request.is_secure()),
+        max_age=max(0, int((participant.reconnect_expires_at - timezone.now()).total_seconds())))
+    return response

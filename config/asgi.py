@@ -14,4 +14,14 @@ except ImportError:
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
-application = get_asgi_application()
+django_application = get_asgi_application()
+
+from channels.auth import AuthMiddlewareStack
+from channels.routing import ProtocolTypeRouter, URLRouter
+from apps.quitizz.routing import websocket_urlpatterns
+from apps.quitizz.consumers import SameOriginValidator
+
+application = ProtocolTypeRouter({
+    "http": django_application,
+    "websocket": SameOriginValidator(AuthMiddlewareStack(URLRouter(websocket_urlpatterns))),
+})

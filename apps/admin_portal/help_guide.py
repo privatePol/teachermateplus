@@ -13,13 +13,16 @@ ADMIN_HELP_SECTIONS = [
                  'permissions': ['system_settings.update'],
                  'purpose': 'Controls tenant availability for Faculty Portal QuiTizz authoring and saved host '
                             'sessions.',
-                 'check_first': ['Select the correct tenant.', 'QuiTizz starts OFF.'],
+                 'check_first': ['Select the correct tenant.', 'QuiTizz starts OFF.',
+                                 'Confirm realtime and shared throttling readiness with operations before rollout. '
+                                 'Players recover automatically through HTTP if realtime disconnects.'],
                  'actions': [{'name': 'Configurable Features > QuiTizz',
                               'does': 'Turns QuiTizz ON/OFF for the selected tenant.',
                               'when': 'Enable when authorized employees are ready to author and host.',
                               'avoid': 'Enabling the feature does not grant access.',
                               'result': 'OFF hides navigation and blocks direct routes, public joining, '
-                                        'participant state, answers and host gameplay. ON still requires '
+                                        'participant state, answers and host gameplay, including connections '
+                                        'still being admitted. ON still requires '
                                         'explicit campus-scoped permissions.',
                               'editable': 'Existing system-settings permission is required.'},
                              {'name': 'Existing RBAC administration',
@@ -28,7 +31,10 @@ ADMIN_HELP_SECTIONS = [
                                       'future release.',
                               'when': 'Grant to an authorized employee regardless of role name.',
                               'avoid': 'No automatic role or superuser grants; direct DENY takes precedence.',
-                              'result': 'Normal authoring and hosting appear only in Faculty Portal.',
+                              'result': 'Normal authoring and hosting appear only in Faculty Portal. Revoked '
+                                        'hosts are denied gameplay on the next HTTP recovery. Realtime carries '
+                                        'only recovery signals, even if closing a revoked socket is delayed; '
+                                        'idle host connections recheck access within 30 seconds.',
                               'editable': 'Use existing role/user permission administration.'}],
                  'avoid': 'Normal authoring and hosting belong in Faculty Portal. Players use the public '
                           'session QR without a TMP login. Keep host answer-key screens private.',

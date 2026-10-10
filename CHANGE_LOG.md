@@ -1,3 +1,33 @@
+## 2026-10-10 - QuiTizz Phase 2B final notification-only remediation (uncommitted)
+
+- Replaced data-bearing socket events with constant `sync_required` wakeups. Removed WebSocket ready and per-event/post-accept authorization checks; browser connection triggers canonical authorized HTTP recovery and never unlocks gameplay itself. Delayed DENY/removal/OFF/expiry transport revocation cannot disclose protected socket data.
+- Host answer counts now come solely from ordered canonical HTTP. Signals debounce over 100ms with one active fetch and at most one follow-up; connected/disconnected recovery cadences and existing cleanup/expiry remain. Denial disables/hides gameplay and cannot be undone by late responses. Expired host state returns generic JSON 404.
+- Final Django 195/195 and Node 18/18 PASS, including retained RBAC/settings/menu regressions, permanent races, actual UI/transport, 100 authorized sockets and query/coalescing probes. Forwarding drops from 16/3 host/player queries to 0/0 at 1/20/100 participants. Full results, 17 changed remediation paths and remaining operational acceptance are in HANDOFF and `docs/QUITIZZ_PHASE2B_REVIEW.md`.
+- No model/migration, normal-local migrate, Phase 2C, Attendance/DTR, secrets, staging, commit, push, deployment or restart. Earlier security/readiness contracts below are superseded; unresolved operational work remains.
+
+## 2026-10-10 - QuiTizz Phase 2B security race remediation 2 (uncommitted)
+
+- Transport acceptance is provisional. Fresh authoritative authorization after accept gates ready; every outbound gameplay event rechecks current authorization. The browser also waits for ready before showing a usable realtime connection. Hosts independently reauthorize every 30 seconds, so direct DENY does not depend on client heartbeat.
+- Registration and cleanup share a per-connection lock, retain pending group intent, and discard any add completed after revocation. One owned shutdown cancels/awaits admission and timers, suppresses queued gameplay and sends at most one close.
+- Added nine permanent Django race regressions and one provisional-browser Node regression. Final combined validation: 182/182 Django (162 QuiTizz + 20 retained), 12/12 Node, 100 authorized sockets with clean groups, checks and migration drift/plan PASS. Exact commands, bounded query increases and operational limits are in `docs/QUITIZZ_PHASE2B_REVIEW.md` and `HANDOFF.md`.
+- Preserved the host answer-count implementation and its five passing Node regressions. No schema change, normal-local migration, Phase 2C, Attendance/DTR, secrets, staging, commit, push, deployment or restart.
+
+## 2026-10-10 - QuiTizz Phase 2B admission/count remediation (uncommitted)
+
+- Closed the authorization-to-subscription gap: internally register groups, then reload authoritative authorization before accept/ready; revocation can cancel pending admission, and rejection immediately discards memberships. Host checks reload the persisted login/user/scope. Heartbeat rechecks authorization after registration and cannot restore a revoked socket.
+- Kept gameplay forwarding query-free and suppressed it before admission or after revocation. Existing HTTP/domain authority, post-commit publication, privacy and origin/direct-DENY protections remain intact.
+- Host counts now guard an in-flight HTTP response with a client answer-event revision only for the same question UUID and lifecycle version. New questions reset normally; fresh canonical recovery can correct counts. Updated the host asset version and both QuiTizz guides.
+- Added permanent admission/heartbeat and frontend ordering regressions. Exact final commands/results and outstanding operational acceptance are in `docs/QUITIZZ_PHASE2B_REVIEW.md` and `HANDOFF.md`. No schema change, normal-local migration, Phase 2C, Attendance/DTR, secrets, staging, commit, push, deployment or restart.
+
+## 2026-10-10 - QuiTizz Phase 2B realtime transport (uncommitted)
+
+- Added read-only host/player WebSockets with same-origin validation, exact host scope/RBAC and a session-specific HttpOnly participant reconnect-cookie bridge. HTTP transactions and database scoring/timing/history remain authoritative; compact safe notifications run only after commit.
+- Host lobby/removal and accepted-answer count update in realtime. Player lifecycle invalidations recover private state through HTTP, keeping keys/feedback behind committed reveal and private authenticated state. Removed/expired participants and feature changes revoke subscriptions; reconnect rechecks authorization.
+- Added connection indicators, automatic reconnect, coalesced/serialized HTTP recovery, five-second disconnected fallback and sixty-second connected recovery. Host controls/answers remain HTTP; countdowns remain local. No Phase 2C effects.
+- Added dedicated Redis Channels/cache configuration, deployment/namespace prefixes, shared throttles with TTL and fail-closed outage behavior, and production-like configuration warnings. LocMem/in-memory fallback is explicitly development-only evidence.
+- Added separate staging/production Daphne unit and Nginx WebSocket source configuration; existing Gunicorn HTTP services retain their commands. No operational configuration was executed. No schema/model change or normal-local migration.
+- Exact validation, inventory and operational acceptance limits are recorded in `docs/QUITIZZ_PHASE2B_REVIEW.md` and `HANDOFF.md`. No staging, commit, push, deployment, service restart, secrets or Faculty Attendance/DTR changes.
+
 ## 2026-10-10 - QuiTizz Phase 2A core gameplay
 
 - Added public session QR fragment exchange, nickname join, digest-backed participant cookies/reconnect, lobby and private HTTP game state. Players do not need TMP accounts; feature OFF blocks public access and game mutations.

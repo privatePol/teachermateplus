@@ -1,5 +1,5 @@
 [Unit]
-Description=teachermateplus Gunicorn Service
+Description=teachermateplus QuiTizz ASGI Service
 After=network.target
 
 [Service]
@@ -9,9 +9,7 @@ Group=teachermateplus
 WorkingDirectory=/opt/teachermateplus
 EnvironmentFile=/etc/teachermateplus/teachermateplus.env
 Environment=QUITIZZ_DEPLOYMENT=production
-ExecStart=/opt/teachermateplus/.venv/bin/gunicorn config.wsgi:application --workers 3 --timeout 120 --bind unix:/run/teachermateplus/gunicorn.sock --access-logfile - --error-logfile -
-RuntimeDirectory=teachermateplus
-RuntimeDirectoryMode=0755
+ExecStart=/opt/teachermateplus/.venv/bin/daphne --proxy-headers -b 127.0.0.1 -p 8001 --websocket_timeout 28800 --ping-interval 30 --ping-timeout 30 config.asgi:application
 Restart=always
 RestartSec=5
 

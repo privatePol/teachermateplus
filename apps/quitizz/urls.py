@@ -9,6 +9,7 @@ urlpatterns = [
     path("quitizz/play/<uuid:public_id>/join/", public_views.join, name="join"),
     path("quitizz/play/<uuid:public_id>/state/", public_views.state, name="state"),
     path("quitizz/play/<uuid:public_id>/answer/", public_views.answer, name="answer"),
+    path("quitizz/play/<uuid:public_id>/socket/", public_views.socket_identity, name="socket_identity"),
     path("faculty/quitizz/", views.quitizz_list, name="list"),
     path("faculty/quitizz/create/", views.create, name="create"),
     path("faculty/quitizz/<uuid:public_id>/edit/", views.edit, name="edit"),

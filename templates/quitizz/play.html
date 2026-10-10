@@ -7,14 +7,16 @@
   <link href="{% static 'css/quitizz.css' %}" rel="stylesheet">
 </head>
 <body class="bg-light">
-<main class="container qt-player py-4" id="qt-play" data-exchange-url="{% url 'quitizz:exchange' public_id=public_id %}" data-join-url="{% url 'quitizz:join' public_id=public_id %}" data-state-url="{% url 'quitizz:state' public_id=public_id %}" data-answer-url="{% url 'quitizz:answer' public_id=public_id %}">
+<main class="container qt-player py-4" id="qt-play" data-exchange-url="{% url 'quitizz:exchange' public_id=public_id %}" data-join-url="{% url 'quitizz:join' public_id=public_id %}" data-state-url="{% url 'quitizz:state' public_id=public_id %}" data-answer-url="{% url 'quitizz:answer' public_id=public_id %}" data-socket-url="/ws/quitizz/{{ public_id }}/player/" data-socket-identity-url="{% url 'quitizz:socket_identity' public_id=public_id %}">
   <header class="qt-brand mb-4"><div><h1 class="h3 mb-1">QuiTizz</h1><p class="small mb-0">Powered by NCBA TeacherMate+</p></div><span class="qt-tagline">Scan. Play. Spark. Win.</span></header>
   <p id="qt-message" role="status" aria-live="polite">Opening your session…</p>
   <p id="qt-error" class="alert alert-danger" role="alert" hidden></p>
+  <p id="qt-connection" class="small text-muted" role="status" aria-live="polite">Waiting to join.</p>
   <form id="qt-join" hidden>{% csrf_token %}<label for="qt-nickname" class="form-label">Nickname</label><input id="qt-nickname" name="nickname" class="form-control mb-3" maxlength="32" required autocomplete="nickname"><button class="btn btn-success w-100" type="submit">Join QuiTizz</button></form>
   <section id="qt-question" hidden aria-labelledby="qt-prompt"><h2 id="qt-prompt" class="h4"></h2><p>Time remaining: <strong id="qt-countdown" role="timer" aria-live="off">0</strong> seconds</p><div id="qt-answers" class="qt-choices"></div></section>
   <p id="qt-feedback" class="alert alert-info mt-3" hidden role="status"></p>
   <noscript><p class="alert alert-warning">JavaScript is required to open the secure QR link and play.</p></noscript>
 </main>
-<script src="{% static 'js/quitizz_play.js' %}"></script>
+<script src="{% static 'js/quitizz_realtime.js' %}?v=20261010-phase2b-notification-only"></script>
+<script src="{% static 'js/quitizz_play.js' %}?v=20261010-phase2b-notification-only"></script>
 </body></html>

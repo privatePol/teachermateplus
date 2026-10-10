@@ -1,4 +1,4 @@
-/* Five-second HTTP transport. Countdown is display-only; never sent to server. */
+/* HTTP mutations and recovery, WebSocket invalidations, local countdown. */
 (() => {
   "use strict";
   const root = document.getElementById("qt-play");
@@ -9,7 +9,7 @@
   const message = byId("qt-message"), error = byId("qt-error");
   const join = byId("qt-join"), question = byId("qt-question"), answers = byId("qt-answers");
   const feedback = byId("qt-feedback");
-  let current = null, pollTimer = null, terminal = false, pending = false, canAnswer = false;
+  let current = null, terminal = false, pending = false, canAnswer = false, transport = null, latest = 0, unavailable = false;
   let deadline = 0, serverOffset = 0;
   const csrf = join.querySelector("[name=csrfmiddlewaretoken]").value;
   function showError(value) { error.textContent = value; error.hidden = false; }
@@ -29,6 +29,8 @@
   }
   function lockButtons() { answers.querySelectorAll("button").forEach((button) => { button.disabled = true; }); }
   function render(state) {
+    if (unavailable || state.version < latest) return;
+    latest = state.version;
     error.hidden = true;
     join.hidden = true;
     terminal = state.status === "COMPLETED" || state.status === "CANCELLED";
@@ -58,7 +60,7 @@
             message.textContent = "Answer submitted and locked. Waiting for reveal.";
           } catch (failure) { showError(failure.message); }
           finally { pending = false; }
-          await refresh();
+          if (transport) await transport.refresh(); else await refresh();
         });
         answers.append(button);
       });
@@ -77,21 +79,27 @@
     }
   }
   async function refresh() {
-    try { render(await request(root.dataset.stateUrl)); }
+    try {
+      const state = await request(root.dataset.stateUrl); render(state);
+      if (terminal && transport) { transport.stop(); byId("qt-connection").textContent = "Session ended."; }
+      return state;
+    }
     catch (failure) {
-      if (failure.status === 404) {
-        terminal = true; question.hidden = true; feedback.hidden = true; lockButtons();
+      if ([401, 403, 404].includes(failure.status)) {
+        unavailable = true; terminal = true; canAnswer = false; current = null;
+        question.hidden = true; feedback.hidden = true; join.hidden = true; lockButtons();
+        message.textContent = "Session unavailable.";
+        if (transport) transport.stop();
+        byId("qt-connection").textContent = "Session unavailable.";
       }
       showError(failure.message);
     }
   }
   function schedule() {
-    window.clearTimeout(pollTimer);
-    if (terminal) return;
-    pollTimer = window.setTimeout(async () => {
-      if (!document.hidden) await refresh();
-      schedule();
-    }, 5000);
+    if (terminal || transport) return;
+    transport = window.QuiTizzRealtime({url: root.dataset.socketUrl,
+      prepare: () => request(root.dataset.socketIdentityUrl, {}), recover: refresh,
+      indicator: byId("qt-connection")});
   }
   join.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -108,7 +116,6 @@
     byId("qt-countdown").textContent = String(remaining);
     if (!remaining) lockButtons();
   }, 250);
-  window.addEventListener("pagehide", () => { window.clearTimeout(pollTimer); });
   (async () => {
     try {
       const state = await request(root.dataset.stateUrl);

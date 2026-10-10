@@ -12,7 +12,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core import signing
-from django.core.cache import cache
+from django.core.cache import caches
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F
@@ -25,6 +25,7 @@ from apps.core.services.features import FeatureSettingsService
 from .access import require_access
 from .models import QuiTizzParticipant, QuiTizzResponse, QuiTizzSession, gameplay_write
 from .services import QuiTizzService, StaleRevision
+from . import realtime
 
 
 HOURS = 8
@@ -67,13 +68,20 @@ def throttle(kind, session_id, identity, limit, seconds=60):
     bucket = int(timezone.now().timestamp()) // seconds
     digest = hashlib.sha256(f"{session_id}:{identity}:{bucket}".encode()).hexdigest()
     key = f"quitizz:{kind}:{digest}"
-    if cache.add(key, 1, timeout=seconds + 1):
-        return
+    cache = caches["quitizz"]
     try:
-        count = cache.incr(key)
-    except ValueError:
-        cache.add(key, 1, timeout=seconds + 1)
-        return
+        if cache.add(key, 1, timeout=seconds + 1):
+            return
+        try:
+            count = cache.incr(key)
+        except ValueError:
+            if cache.add(key, 1, timeout=seconds + 1):
+                return
+            count = cache.incr(key)
+    except Exception:
+        # Fail closed on shared-cache outage; never silently claim enforcement
+        # with a per-worker fallback. No exception/Redis URL in public output.
+        raise RateLimited() from None
     if count > limit:
         raise RateLimited()
 
@@ -175,6 +183,7 @@ def join(public_id, grant, nickname, credential=""):
             QuiTizzParticipant.objects.bulk_create([participant])
     except IntegrityError:
         raise ValidationError("That nickname is already in use. Choose another.")
+    realtime.notify(session, "participant_joined")
     return participant, credential
 
 
@@ -275,6 +284,13 @@ def command(*, public_id, user, tenant_id, campus_id, version, action, participa
     write(session, **changes)
     QuiTizzService.audit("GAME_CONTROL", session, user, request, command=action, state_version=session.state_version,
         participant=str(participant_id) if action == "remove" else None)
+    events = {"open_joining": "joining_opened", "close_joining": "joining_closed", "remove": "participant_removed",
+              "start": "session_started", "next": "question_prepared", "open_question": "question_opened",
+              "close_question": "question_closed", "reveal": "answer_revealed", "complete": "session_completed",
+              "cancel": "session_cancelled"}
+    realtime.notify(session, events[action])
+    if action == "remove":
+        realtime.removed(session, participant)
     return session
 
 
@@ -322,6 +338,8 @@ def submit(public_id, credential, question_id, selected_choice, *, received_at=N
     session.participants.filter(pk=participant.pk).update(total_score=F("total_score") + points,
         correct_count=F("correct_count") + int(correct), cumulative_response_ms=F("cumulative_response_ms") + response.elapsed_ms,
         updated_at=timezone.now())
+    # Retries above return before scheduling the host's constant sync signal.
+    realtime.notify(session, "answer_received")
     return {"accepted": True, "question": str(question.public_id)}
 
 
@@ -354,5 +372,9 @@ def state(public_id, credential):
 def host_state(session):
     # One list query, independent of population; no per-row response lookups.
     participants = list(session.participants.filter(removed_at__isnull=True).values("public_id", "nickname", "joined_at"))
+    question = session.questions.filter(position=session.current_position).first() if session.current_position else None
     return {"status": session.status, "version": session.state_version, "joining_open": session.joining_open,
-        "position": session.current_position, "participant_count": len(participants), "participants": participants}
+        "position": session.current_position, "participant_count": len(participants), "participants": participants,
+        "question_id": str(question.public_id) if question else None,
+        "answered_count": question.responses.count() if question else 0,
+        "question_opened": bool(question and question.opened_at), "question_count": session.questions.count()}

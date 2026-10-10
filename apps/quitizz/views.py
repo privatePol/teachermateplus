@@ -131,7 +131,8 @@ def host(request, public_id):
     session = owned_session(request, public_id)
     state = gameplay.host_state(session)
     return render(request, "quitizz/host.html", {"session": session, "questions": session.questions.all(),
-        "participants": state["participants"], "participant_count": state["participant_count"]})
+        "participants": state["participants"], "participant_count": state["participant_count"],
+        "answered_count": state["answered_count"]})
 
 
 @never_cache
@@ -148,7 +149,10 @@ def host_command(request, public_id):
 @access("host")
 def host_state(request, public_id):
     session = owned_session(request, public_id)
-    gameplay.available(session)
+    try:
+        gameplay.available(session)
+    except gameplay.Unavailable as exc:
+        return JsonResponse({"error": exc.messages[0]}, status=404)
     return JsonResponse(gameplay.host_state(session))
 
 

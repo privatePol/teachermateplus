@@ -44,7 +44,8 @@ FACULTY_HELP_SECTIONS = [
                                       'and join without a TMP login. Refresh restores their participant on the '
                                       'same browser until the session identity expires.',
                               'when': 'After launching an owned session with host permission.',
-                              'avoid': 'A removed player cannot reuse their identity. Joining closes on Start; '
+                              'avoid': 'A removed player cannot reuse their identity. Removal during reconnect '
+                                       'also blocks access. Joining closes on Start; '
                                        'the host may reopen it. Reopening replaces the earlier QR.',
                               'result': 'A waiting lobby and an escaped participant list.',
                               'editable': 'The host can close joining, remove a participant or cancel.'},
@@ -52,13 +53,21 @@ FACULTY_HELP_SECTIONS = [
                               'does': 'Start prepares question 1. Open Question starts its server timer. Close '
                                       'locks answers, Reveal shows feedback, Next prepares the next question. '
                                       'End completes after reveal; Cancel ends without revealing an open key.',
-                              'when': 'Use the controls in order. State refreshes every five seconds.',
+                              'when': 'Use the controls in order. Answer counts follow the current question; '
+                                      'delayed recovery does not replace a newer live count. Answer counts and '
+                                      'gameplay come from current authorized HTTP recovery. Realtime signals '
+                                      'only request recovery; a connected indicator does not grant access. Updates '
+                                      'recover automatically after '
+                                      'brief Wi-Fi interruptions. The connection indicator shows reconnecting '
+                                      'and HTTP recovery if realtime is unavailable.',
                               'avoid': 'The first accepted answer is locked. Late answers fail. Browser '
                                        'countdowns do not decide acceptance; the server does.',
                               'result': 'Wrong answers score 0; correct answers score 700 plus a speed bonus '
                                         'of up to 300. Points appear after reveal, and final private rank '
                                         'appears after completion.',
-                              'editable': 'Only the authorized host; stale controls require a reload.'},
+                              'editable': 'Only the authorized host; stale controls require a reload. Live '
+                                          'recovery blocks gameplay when access is revoked; every recovery '
+                                          'requires current permission.'},
                              {'name': 'Archive / Reactivate',
                               'does': 'Preserves a definition while disabling editing and future launches, or '
                                       'makes it available again.',

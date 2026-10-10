@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from django.conf import settings
-from django.core.cache import cache
+from django.core.cache import caches
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.test import Client, TestCase, TransactionTestCase
@@ -33,7 +33,7 @@ class GameplayTests(TestCase):
     launch = foundation.QuiTizzFoundationTests.launch
 
     def setUp(self):
-        cache.clear()
+        caches["quitizz"].clear()
         self.enable()
         self.client.force_login(self.user)
         quiz = self.quiz()
@@ -566,11 +566,13 @@ class GameplayTests(TestCase):
     def test_no_server_ticks_and_modest_safe_client_transport(self):
         root = Path(settings.BASE_DIR)
         script = (root / "static/js/quitizz_play.js").read_text(encoding="utf-8")
-        self.assertIn("}, 5000)", script)
+        transport = (root / "static/js/quitizz_realtime.js").read_text(encoding="utf-8")
+        self.assertIn("connected ? 60000 : 5000", transport)
         self.assertIn("window.history.replaceState", script)
         self.assertNotIn("innerHTML", script)
         self.assertNotIn("localStorage", script)
-        self.assertNotIn("WebSocket", script)
+        self.assertIn("QuiTizzRealtime", script)
+        self.assertNotIn("setInterval", transport)
 
 
 class GameplayMigrationTests(TransactionTestCase):
