@@ -1,3 +1,14 @@
+## QuiTizz CSS accessibility remediation - 2026-10-11 (uncommitted)
+
+- Corrected player connection-status ID targeting and the important Bootstrap muted-color cascade; strengthened host command keyboard focus with a winning scoped selector and gold outline/dark keyline, including gold pause buttons.
+- Added nine regressions for real template selectors, cascade/source order, gradient contrast, connection messaging and four command categories, retaining gradients, disabled states and layout declarations. Focused 9/9 and full QuiTizz 79/79 PASS; Django/migration-plan checks PASS without applying migrations. Browser-rendered acceptance remains pending; see HANDOFF for exact evidence and limits.
+
+## QuiTizz presentation-polish remediation - 2026-10-11 (uncommitted)
+
+- Strengthened scoped game-show colors, dark gradient panels, answer tiles, command-button hierarchy and gold final-result/podium accents across projector, player and host presentation surfaces.
+- Enlarged responsive kwitis with luminous particles and finite expanding rings; existing 12/36 particle caps, cleanup timers and reduced-motion behavior retained. No gameplay, sound, transport, scheduler or database change.
+- Updated presentation asset cache tokens. Focused frontend 70/70 PASS, Django/migration checks and template/syntax checks PASS using disposable configuration; real staging/browser visual acceptance pending. See the current HANDOFF for evidence and next gate.
+
 ## QuiTizz Phase 3 automatic game show - 2026-10-11 (uncommitted)
 
 - Added explicit, default-OFF Automatic availability in Configurable Features; launch defaults to Manual. Immutable timing snapshots and separate persisted phases retain the existing gameplay lifecycle.

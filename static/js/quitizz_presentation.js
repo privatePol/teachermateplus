@@ -14,11 +14,12 @@
     for (const effect of effects) if (effect.root === root) effect.clear();
     const layer = make("div", undefined, "qt-effects");
     layer.setAttribute("aria-hidden", "true");
+    layer.dataset.finale = String(finale);
     const rocket = icon("rocket"); rocket.setAttribute("class", "qt-icon qt-rocket"); layer.append(rocket);
     for (let i = 0; i < (finale ? 36 : 12); i++) {
       const spark = make("i", undefined, finale && i >= 12 ? "qt-confetti" : "qt-spark");
       spark.style.setProperty("--angle", `${i * 137.5}deg`);
-      spark.style.setProperty("--distance", `${45 + (i % 6) * 22}px`);
+      spark.style.setProperty("--distance", `clamp(100px, ${18 + (i % 6) * 4}vmin, 560px)`);
       spark.style.setProperty("--delay", `${(i % 4) * 70}ms`);
       spark.style.setProperty("--hue", `${36 + (i % 5) * 52}`);
       layer.append(spark);

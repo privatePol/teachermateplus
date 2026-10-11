@@ -75,8 +75,30 @@ for (const count of [0, 1, 2, 5]) test(`final podium handles ${count} zero-score
 test("success effect is bounded, replaced safely and cleaned automatically", () => {
   const h = harness(); const root = h.add("root");
   h.window.QuiTizzPresentation.celebrate(root); assert.equal(root.children[0].children.length, 13); assert.equal(h.timers.size, 1);
+  assert.equal(root.children[0].attributes["aria-hidden"], "true"); assert.equal(root.children[0].dataset.finale, "false");
   h.window.QuiTizzPresentation.celebrate(root, true); assert.equal(root.children.length, 1); assert.equal(root.children[0].children.length, 37); assert.equal(h.timers.size, 1);
+  assert.equal(root.children[0].dataset.finale, "true");
   [...h.timers.values()][0].fn(); assert.equal(root.children.length, 0); assert.equal(h.timers.size, 0);
+});
+test("repeated oversized celebrations keep a single layer and timer per surface", () => {
+  const h = harness(); const projector = h.add("projector"), player = h.add("player");
+  for (let i = 0; i < 100; i++) {
+    h.window.QuiTizzPresentation.celebrate(projector, true);
+    h.window.QuiTizzPresentation.celebrate(player);
+    assert.equal(projector.children.length, 1); assert.equal(player.children.length, 1);
+    assert.equal(projector.children[0].children.length, 37); assert.equal(player.children[0].children.length, 13);
+    assert.equal(h.timers.size, 2);
+  }
+  h.listeners.pagehide.forEach((fn) => fn());
+  assert.equal(projector.children.length, 0); assert.equal(player.children.length, 0); assert.equal(h.timers.size, 0);
+});
+test("pausing projector results removes the whole visual effect and hides revealed content", () => {
+  const h = harness(); const root = h.add("stage"); const view = h.window.QuiTizzPresentation.create(root, {projector: true});
+  const results = state({status: "ANSWER_REVEALED", show_phase: "RESULTS", question: question(), reveal: {correct_choice: "B", distribution: {A: 0, B: 1, C: 0, D: 0}}, leaderboard: leaders(3)});
+  view.render(results); assert.equal(h.timers.size, 1);
+  view.render({...results, version: 4, paused: true, remaining_us: 3000000});
+  assert.equal(h.timers.size, 0); assert.match(root.textContent, /Challenge paused/);
+  assert.doesNotMatch(root.textContent, /Player 1|Correct answer|Alpha/);
 });
 test("reduced motion avoids particles and timers; preference changes clean current effects", () => {
   const reduced = harness(true); const root = reduced.add("root"); reduced.window.QuiTizzPresentation.celebrate(root, true);
