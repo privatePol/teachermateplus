@@ -1262,6 +1262,27 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             3,
         )
 
+    def test_configurable_features_saves_independent_quitizz_automatic_switch(self):
+        from django import forms
+        self.client.force_login(self.admin_user)
+        url = reverse("admin_portal:configurable_features_settings")
+        self.assertFalse(FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=self.tenant.id))
+        response = self.client.get(url)
+        self.assertContains(response, "quitizz_automatic_enabled")
+        form = response.context["form"]
+        data = {name: ("on" if form[name].value() else "") if isinstance(field, forms.BooleanField)
+                else form[name].value() if form[name].value() is not None else ""
+                for name, field in form.fields.items()}
+        data.update(quitizz_enabled="on", quitizz_automatic_enabled="on")
+        result = self.client.post(url, data)
+        self.assertEqual(result.status_code, 302, result.context["form"].errors if result.context else "")
+        self.assertTrue(FeatureSettingsService.is_quitizz_enabled(tenant_id=self.tenant.id))
+        self.assertTrue(FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=self.tenant.id))
+        data["quitizz_automatic_enabled"] = ""
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        self.assertFalse(FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=self.tenant.id))
+        self.assertTrue(FeatureSettingsService.is_quitizz_enabled(tenant_id=self.tenant.id))
+
     def test_configurable_features_rejects_invalid_non_compliance_notice_timing(self):
         self.client.force_login(self.admin_user)
         response = self.client.post(

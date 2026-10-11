@@ -201,7 +201,7 @@ def ranked_participants(session):
 
 
 @transaction.atomic
-def command(*, public_id, user, tenant_id, campus_id, version, action, participant_id=None, request=None):
+def command(*, public_id, user, tenant_id, campus_id, version, action, participant_id=None, mode=None, request=None):
     require_access(user, tenant_id, campus_id, "host")
     session = get_object_or_404(QuiTizzSession.objects.select_for_update(), public_id=public_id,
         tenant_id=tenant_id, campus_id=campus_id, host=user)
@@ -217,6 +217,17 @@ def command(*, public_id, user, tenant_id, campus_id, version, action, participa
     now = timezone.now()
     changes = {"state_version": session.state_version + 1}
     question = session.questions.filter(position=session.current_position).first() if session.current_position else None
+    from . import automation
+    if action in {"pause", "resume", "set_mode", "reveal_now", "next_now", "end_challenge"}:
+        if session.playback_mode == "AUTOMATIC" and action in {"reveal_now", "next_now"}:
+            automation.authorize(session)
+        return automation.host_control(session, question, action, now, mode=mode, request=request)
+    if session.paused_at and action not in {"remove", "open_joining", "close_joining", "complete", "cancel"}:
+        raise ValidationError("Resume the session before progressing.")
+    if session.playback_mode == "AUTOMATIC" and action in {"open_question", "close_question", "reveal", "next"}:
+        automation.authorize(session)
+        if not automation.throttle_healthy():
+            raise ValidationError("Shared gameplay protection is unavailable.")
     if action in {"open_joining", "close_joining"}:
         opening = action == "open_joining"
         if session.joining_open == opening:
@@ -281,6 +292,7 @@ def command(*, public_id, user, tenant_id, campus_id, version, action, participa
         changes.update(status="COMPLETED" if action == "complete" else "CANCELLED", joining_open=False, completed_at=now)
     else:
         raise ValidationError("Unknown session control.")
+    automation.after_command(session, changes, target if action == "open_question" else question, action, now)
     write(session, **changes)
     QuiTizzService.audit("GAME_CONTROL", session, user, request, command=action, state_version=session.state_version,
         participant=str(participant_id) if action == "remove" else None)
@@ -317,11 +329,11 @@ def submit(public_id, credential, question_id, selected_choice, *, received_at=N
         if previous.selected_choice != selected_choice:
             raise ValidationError("Your first accepted answer is locked.")
         return {"accepted": True, "question": str(question.public_id)}
-    if (session.status != "QUESTION_OPEN" or not question.opened_at or question.closed_at
-            or received_at < question.opened_at or received_at > question.deadline_at):
+    if (session.status != "QUESTION_OPEN" or session.paused_at or not question.opened_at or question.closed_at
+            or received_at < (question.active_started_at or question.opened_at) or received_at > question.deadline_at):
         raise ValidationError("The question is closed. This answer cannot be accepted.")
-    elapsed = received_at - question.opened_at
-    elapsed_us = (elapsed.days * 86400 + elapsed.seconds) * 1_000_000 + elapsed.microseconds
+    elapsed = received_at - (question.active_started_at or question.opened_at)
+    elapsed_us = question.active_elapsed_us + (elapsed.days * 86400 + elapsed.seconds) * 1_000_000 + elapsed.microseconds
     correct = selected_choice == question.correct_choice
     points = score(correct, elapsed_us, question.timer_seconds * 1_000_000)
     response = QuiTizzResponse(participant=participant, session_question=question, selected_choice=selected_choice,
@@ -344,12 +356,13 @@ def submit(public_id, credential, question_id, selected_choice, *, received_at=N
 
 
 @sensitive_variables("credential")
-def state(public_id, credential):
+def _state(public_id, credential):
     session = resolve(public_id)
     participant = identity(session, credential)
     now = timezone.now()
     result = {"status": session.status, "version": session.state_version, "server_now": now.isoformat(),
         "nickname": participant.nickname, "title": session.title_snapshot, "joining_open": session.joining_open}
+    result.update(phase_state(session))
     if session.status == "CANCELLED":
         return result
     question = session.questions.filter(position=session.current_position).first() if session.current_position else None
@@ -359,7 +372,7 @@ def state(public_id, credential):
             "deadline": question.deadline_at.isoformat()}
         response = QuiTizzResponse.objects.filter(participant=participant, session_question=question).first()
         result["accepted"] = response is not None
-        result["can_answer"] = session.status == "QUESTION_OPEN" and not response and now <= question.deadline_at
+        result["can_answer"] = session.status == "QUESTION_OPEN" and not session.paused_at and not response and now <= question.deadline_at
         if question.revealed_at and session.status in {"ANSWER_REVEALED", "COMPLETED"}:
             result["feedback"] = {"correct_choice": question.correct_choice, "is_correct": bool(response and response.is_correct),
                 "points": response.awarded_points if response else 0, "answered": response is not None}
@@ -369,17 +382,18 @@ def state(public_id, credential):
     return result
 
 
-def presentation_state(session, question=None, *, counts=None):
+def _presentation_state(session, question=None, *, counts=None):
     """Host-authorized projection. Never include identities beside responses."""
     question = question or (session.questions.filter(position=session.current_position).first() if session.current_position else None)
     result = {"title": session.title_snapshot, "status": session.status, "version": session.state_version,
         "server_now": timezone.now().isoformat(), "joining_open": session.joining_open,
         "position": session.current_position}
+    result.update(phase_state(session))
     result.update(counts if counts is not None else {"question_count": session.questions.count(),
         "participant_count": session.participants.filter(removed_at__isnull=True).count(),
         "answered_count": question.responses.count() if question else 0})
     if question and question.opened_at and session.status != "CANCELLED":
-        result["question"] = {"position": question.position, "prompt": question.prompt,
+        result["question"] = {"id": str(question.public_id), "position": question.position, "prompt": question.prompt,
             "choices": {letter: getattr(question, f"choice_{letter.lower()}") for letter in "ABCD"},
             "deadline": question.deadline_at.isoformat()}
     if question and question.revealed_at and session.status in {"ANSWER_REVEALED", "COMPLETED"}:
@@ -387,18 +401,56 @@ def presentation_state(session, question=None, *, counts=None):
         counts = dict(question.responses.values("selected_choice").annotate(total=Count("pk")).values_list("selected_choice", "total"))
         result["reveal"] = {"correct_choice": question.correct_choice,
             "distribution": {letter: counts.get(letter, 0) for letter in "ABCD"}}
-        result["leaderboard"] = [{"rank": rank, "nickname": player.nickname, "score": player.total_score}
-            for rank, player in enumerate(ranked_participants(session)[:5], 1)]
+        players = ranked_participants(session) if session.status != "COMPLETED" else session.participants.filter(removed_at__isnull=True).order_by("final_rank")
+        result["leaderboard"] = [{"rank": player.final_rank if session.status == "COMPLETED" else rank, "nickname": player.nickname, "score": player.total_score}
+            for rank, player in enumerate(players[:5], 1)]
     return result
 
 
-def host_state(session):
+def _host_state(session):
     # One list query, independent of population; no per-row response lookups.
     participants = list(session.participants.filter(removed_at__isnull=True).values("public_id", "nickname", "joined_at"))
     question = session.questions.filter(position=session.current_position).first() if session.current_position else None
     counts = {"participant_count": len(participants), "question_count": session.questions.count(),
         "answered_count": question.responses.count() if question else 0}
-    return {**presentation_state(session, question, counts=counts), "status": session.status, "version": session.state_version, "joining_open": session.joining_open,
+    return {**_presentation_state(session, question, counts=counts), "status": session.status, "version": session.state_version, "joining_open": session.joining_open,
         "position": session.current_position, "participant_count": len(participants), "participants": participants,
         "question_id": str(question.public_id) if question else None,
-        "question_opened": bool(question and question.opened_at)}
+        "question_opened": bool(question and question.opened_at),
+        "automatic_available": FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=session.tenant_id)}
+
+
+def phase_state(session):
+    return {"playback_mode": session.playback_mode, "show_phase": session.show_phase,
+        "phase_started_at": session.phase_started_at.isoformat() if session.phase_started_at else None,
+        "phase_deadline": session.next_transition_at.isoformat() if session.next_transition_at else None,
+        "paused": bool(session.paused_at), "pause_reason": session.pause_reason,
+        "remaining_us": session.pause_remaining_us}
+
+
+def consistent_snapshot(session, builder):
+    # Optimistic retry avoids holding gameplay locks during projector/player GET.
+    for _ in range(3):
+        result = builder(session)
+        if QuiTizzSession.objects.filter(pk=session.pk, state_version=result["version"]).exists():
+            return result
+        session.refresh_from_db()
+        available(session)
+    raise StaleRevision("Session changed. Recover the current state.")
+
+
+def presentation_state(session):
+    return consistent_snapshot(session, _presentation_state)
+
+
+def host_state(session):
+    return consistent_snapshot(session, _host_state)
+
+
+@sensitive_variables("credential")
+def state(public_id, credential):
+    for _ in range(3):
+        result = _state(public_id, credential)
+        if QuiTizzSession.objects.filter(public_id=public_id, state_version=result["version"]).exists():
+            return result
+    raise StaleRevision("Session changed. Recover the current state.")

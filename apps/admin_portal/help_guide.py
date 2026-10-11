@@ -25,6 +25,12 @@ ADMIN_HELP_SECTIONS = [
                                         'still being admitted. ON still requires '
                                         'explicit campus-scoped permissions.',
                               'editable': 'Existing system-settings permission is required.'},
+                             {'name': 'Configurable Features > Automatic QuiTizz',
+                              'does': 'Allows explicit Automatic selection; defaults OFF independently of the main QuiTizz flag. Manual remains the launch default.',
+                              'when': 'Enable only after the Phase 3 schema, dedicated scheduler, shared Redis protection and staging acceptance are ready.',
+                              'avoid': 'This switch grants no RBAC. Turning it OFF safely pauses active automatic sessions; turning it back ON does not resume them. Confirmed shared-throttle failure also requires authorized resume after recovery.',
+                              'result': 'The server owns timing, scoring and ranking. A lost broadcast recovers through HTTP; a throttle outage cannot promise uninterrupted participation.',
+                              'editable': 'Existing settings save/audit semantics and system-settings permission apply.'},
                              {'name': 'Existing RBAC administration',
                               'does': 'Assigns faculty_portal.access plus quitizz.manage and/or quitizz.host in '
                                       'the exact tenant and campus. quitizz.view_history is reserved for a '

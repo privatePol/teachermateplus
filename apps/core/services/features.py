@@ -10,6 +10,12 @@ class FeatureSettingsService:
         "FEATURE_FACULTY_ATTENDANCE_FACULTY_VISIBILITY_ENABLED"
     )
     QUITIZZ_ENABLED_KEY = "FEATURE_QUITIZZ_ENABLED"
+    QUITIZZ_AUTOMATIC_ENABLED_KEY = "FEATURE_QUITIZZ_AUTOMATIC_ENABLED"
+
+    @classmethod
+    def is_quitizz_automatic_enabled(cls, *, tenant_id: int | None) -> bool:
+        return tenant_id is not None and bool(SystemSettingService.get(
+            cls.QUITIZZ_AUTOMATIC_ENABLED_KEY, tenant_id=tenant_id, default=False))
 
     @classmethod
     def is_quitizz_enabled(cls, *, tenant_id: int | None) -> bool:

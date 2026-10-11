@@ -177,6 +177,9 @@ CACHES = {
 QUITIZZ_REDIS_URL = os.getenv("QUITIZZ_REDIS_URL", "").strip()
 QUITIZZ_REDIS_NAMESPACE = os.getenv("QUITIZZ_REDIS_NAMESPACE", "").strip()
 QUITIZZ_DEPLOYMENT = os.getenv("QUITIZZ_DEPLOYMENT", DJANGO_ENV).strip().lower()
+QUITIZZ_SCHEDULER_ACTIVE_SECONDS = float(os.getenv("QUITIZZ_SCHEDULER_ACTIVE_SECONDS", "0.25"))
+QUITIZZ_SCHEDULER_IDLE_SECONDS = float(os.getenv("QUITIZZ_SCHEDULER_IDLE_SECONDS", "2"))
+QUITIZZ_SCHEDULER_BATCH_SIZE = int(os.getenv("QUITIZZ_SCHEDULER_BATCH_SIZE", "100"))
 if QUITIZZ_DEPLOYMENT not in {"local", "staging", "production"}:
     raise ImproperlyConfigured("QUITIZZ_DEPLOYMENT must be local, staging or production.")
 if QUITIZZ_REDIS_URL and (not QUITIZZ_REDIS_NAMESPACE or not all(

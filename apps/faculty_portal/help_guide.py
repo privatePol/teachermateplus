@@ -79,6 +79,18 @@ FACULTY_HELP_SECTIONS = [
                               'result': 'Correct answers show text and points with a brief kwitis spark. Final '
                                         'results use bounded local fireworks; reduced motion keeps static results.',
                               'editable': 'Presentation only; host controls and scoring remain authoritative HTTP.'},
+                             {'name': 'Automatic game show / Pause / Resume',
+                              'does': 'Manual remains the default. If Automatic is enabled, select it explicitly. Start and Open Question open the first question; the server then closes at the cutoff, runs 5 seconds suspense, 7 seconds results and 5 seconds preparation, and opens the next question. Final results complete without preparation.',
+                              'when': 'Use only after operations has activated the scheduler and shared protection.',
+                              'avoid': 'A browser countdown never advances gameplay. During pause answers are rejected and remaining time freezes. Resume requires current permission and healthy protection. Reveal Now and Next Now replace the scheduled action; early End Challenge cancels without a winner.',
+                              'result': 'Speed scoring counts active answering time and excludes pauses; saved scores remain intact.',
+                              'editable': 'Authorized owner only. Switching mode preserves the current question and scores.'},
+                             {'name': 'Copy Join Link / Enable Sound',
+                              'does': 'Copy Join Link retrieves the current full capability fragment only while joining is open. If copying fails, select the complete link in the fallback field. Enable Sound directly in the projector tab; Mute and Volume may be controlled from the same-browser host tab.',
+                              'when': 'Share the join link with intended players. Sound is optional.',
+                              'avoid': 'Do not share the private host URL or log the capability. Synthetic drum and champion fanfare are available; no applause asset is supplied. Refresh and reconnect do not replay cues.',
+                              'result': 'Local finite effects respect reduced motion; sound failure leaves the game usable.',
+                              'editable': 'Joining closure or rotation clears the retained selectable link.'},
                              {'name': 'Archive / Reactivate',
                               'does': 'Preserves a definition while disabling editing and future launches, or '
                                       'makes it available again.',

@@ -1,9 +1,10 @@
 /* Read-only event transport. HTTP recovery owns every game-state decision. */
 (() => {
   "use strict";
-  window.QuiTizzRealtime = function ({url, prepare, recover, indicator}) {
+  window.QuiTizzRealtime = function ({url, prepare, recover, indicator, onDisconnect}) {
     let socket = null, stopped = false, connected = false, attempt = 0;
     let recoveryTimer, retryTimer, heartbeatTimer, pongTimer, eventTimer;
+    let boundaryTimer, boundaryKey = "", boundaryRetries = 0;
     let recovering = false, dirty = false;
     const label = (text) => { if (indicator) indicator.textContent = text; };
     async function refresh() {
@@ -12,13 +13,28 @@
       if (recovering) { dirty = true; return; }
       recovering = true;
       try {
-        return await recover();
+        const state = await recover();
+        if (state) phaseBoundary(state);
+        return state;
       } catch (_) {
         // Recovery failures retain the modest fallback cadence.
       } finally {
         recovering = false;
         if (dirty) { dirty = false; queueRecovery(); }
       }
+    }
+    function phaseBoundary(state) {
+      const nextKey = `${state.version}:${state.phase_deadline}:${Boolean(state.paused)}`;
+      if (nextKey !== boundaryKey) { boundaryRetries = 0; boundaryKey = nextKey; }
+      window.clearTimeout(boundaryTimer);
+      if (stopped || state.paused || !state.phase_deadline || ["COMPLETED", "CANCELLED"].includes(state.status)) return;
+      const remaining = Date.parse(state.phase_deadline) - Date.parse(state.server_now);
+      if (!Number.isFinite(remaining)) return;
+      // One timer, capped retries, single existing HTTP recovery path. The
+      // browser cannot reveal/advance even when this display deadline expires.
+      if (remaining <= 0 && boundaryRetries++ >= 5) return;
+      boundaryTimer = window.setTimeout(() => { boundaryTimer = null; queueRecovery(); },
+        remaining > 0 ? remaining + 100 : Math.min(5000, 500 * 2 ** Math.min(boundaryRetries, 3)));
     }
     function queueRecovery() {
       if (recovering) { dirty = true; return; }
@@ -77,6 +93,8 @@
     }
     function disconnected() {
       connected = false;
+      onDisconnect?.();
+      window.clearTimeout(boundaryTimer); boundaryKey = "";
       window.clearTimeout(heartbeatTimer); window.clearTimeout(pongTimer);
       if (stopped) return;
       label("Reconnecting; HTTP recovery active.");
@@ -86,7 +104,7 @@
     }
     function stop() {
       stopped = true;
-      [recoveryTimer, retryTimer, heartbeatTimer, pongTimer, eventTimer].forEach(window.clearTimeout);
+      [recoveryTimer, retryTimer, heartbeatTimer, pongTimer, eventTimer, boundaryTimer].forEach(window.clearTimeout);
       if (socket) socket.close();
     }
     window.addEventListener("pagehide", stop);

@@ -220,6 +220,7 @@ class HostControlElement {
   getAttribute(name) { return this.attributes[name] ?? null; }
   addEventListener(name, fn) { this.listeners[name] = fn; }
   focus() {}
+  select() { this.selected = true; }
   get action() {
     const controls = this.querySelectorAll("[name=action]");
     if (controls.length === 1) return controls[0];
@@ -240,13 +241,13 @@ class HostControlFormData {
   getAll(name) { return this.values.filter(([key]) => key === name).map(([, value]) => value); }
   entries() { return this.values[Symbol.iterator](); }
 }
-function hostControlHarness({initialParticipant = null} = {}) {
+function hostControlHarness({initialParticipant = null, clipboard = null} = {}) {
   const publicId = "11111111-1111-4111-8111-111111111111";
   const commandUrl = `/faculty/quitizz/sessions/${publicId}/command/`;
   const elements = new Map(["qt-host", "qt-command", "qt-count", "qt-answered", "qt-session-status", "qt-joining", "qt-participants", "qt-connection", "qt-host-error"]
     .map((id) => [id, new HostControlElement(id === "qt-command" ? "form" : "div")]));
   const root = elements.get("qt-host"), commands = elements.get("qt-command"), list = elements.get("qt-participants");
-  root.dataset = {version: "1", stateUrl: `/faculty/quitizz/sessions/${publicId}/state/`, socketUrl: "/host/socket/", qrUrl: "/host/qr/"};
+  root.dataset = {version: "1", stateUrl: `/faculty/quitizz/sessions/${publicId}/state/`, socketUrl: "/host/socket/", qrUrl: "/host/qr/", joinLinkUrl: "/host/join-link/"};
   root.append(...[...elements].filter(([id]) => id !== "qt-host").map(([, element]) => element));
   const field = (name, value) => { const input = new HostControlElement("input"); input.type = "hidden"; input.name = name; input.value = value; return input; };
   const button = (value) => { const control = new HostControlElement("button"); control.name = "action"; control.value = value; return control; };
@@ -259,9 +260,11 @@ function hostControlHarness({initialParticipant = null} = {}) {
     item.append(form); list.append(item);
   }
   const requests = []; let callbacks;
-  const document = {getElementById: (id) => elements.get(id) || null, createElement: (tag) => new HostControlElement(tag), activeElement: null};
-  const window = {QuiTizzRealtime(options) { callbacks = options; return {refresh: options.recover, stop() {}}; }};
-  vm.runInNewContext(read("quitizz_host"), {document, window, FormData: HostControlFormData,
+  const find = (node, id) => node.id === id ? node : node.children.map((child) => find(child, id)).find(Boolean);
+  const document = {getElementById: (id) => elements.get(id) || find(root, id) || null, createElement: (tag) => new HostControlElement(tag), activeElement: null};
+  const window = {location: {href: "https://example.test/host/", origin: "https://example.test"}, navigator: {clipboard},
+    QuiTizzRealtime(options) { callbacks = options; return {refresh: options.recover, stop() {}}; }};
+  vm.runInNewContext(read("quitizz_host"), {document, window, URL, FormData: HostControlFormData,
     fetch: (url, options) => new Promise((resolve) => requests.push({url: String(url), options, resolve,
       allButtonsDisabled: root.querySelectorAll("button").every((control) => control.disabled)}))});
   const state = (overrides = {}) => ({version: 1, status: "READY", position: 0, question_count: 2,
@@ -279,8 +282,62 @@ function hostControlHarness({initialParticipant = null} = {}) {
     assert.equal(prevented, true); return pending;
   }
   async function finish(pending, value, status = 200) { reply({}, status); await flush(); assert.equal(requests[0]?.url, root.dataset.stateUrl); reply(value); await pending; }
-  return {root, commands, list, requests, commandUrl, state, recover, submit, finish, error: elements.get("qt-host-error")};
+  return {root, commands, list, requests, commandUrl, state, recover, submit, finish, reply, document, error: elements.get("qt-host-error")};
 }
+
+test("copy join link retains the exact fragment, uses uncached HTTP and confirms only clipboard success", async () => {
+  const copied = [], h = hostControlHarness({clipboard: {async writeText(value) { copied.push(value); }}});
+  await h.recover(h.state({version: 2, status: "LOBBY", joining_open: true}));
+  const pending = h.root.listeners.click({target: {id: "qt-copy-link"}});
+  assert.equal(h.requests[0].url, "/host/join-link/"); assert.equal(h.requests[0].options.cache, "no-store");
+  const url = "https://example.test/quitizz/play/session/#full.signed-capability";
+  h.reply({join_url: url}); await pending;
+  assert.deepEqual(copied, [url]); assert.equal(h.document.getElementById("qt-copy-status").textContent, "Join link copied");
+});
+
+test("clipboard unavailable or rejected provides a selectable full-fragment fallback without a success claim", async () => {
+  for (const clipboard of [null, {async writeText() { throw new Error("denied"); }}]) {
+    const h = hostControlHarness({clipboard}); await h.recover(h.state({version: 2, joining_open: true}));
+    const pending = h.root.listeners.click({target: {id: "qt-copy-link"}});
+    const url = "https://example.test/quitizz/play/session/#capability"; h.reply({join_url: url}); await pending;
+    const status = h.document.getElementById("qt-copy-status"), field = status.querySelector("textarea");
+    assert.doesNotMatch(status.textContent, /Join link copied/); assert.equal(field.value, url);
+    assert.equal(field.readOnly, true); assert.equal(field.selected, true);
+    await h.recover(h.state({version: 3, joining_open: false}));
+    assert.equal(h.document.getElementById("qt-copy-status"), null);
+  }
+});
+
+test("joining closure or capability version change during link retrieval prevents copying", async () => {
+  for (const joining_open of [false, true]) {
+    const copied = [], h = hostControlHarness({clipboard: {async writeText(url) { copied.push(url); }}});
+    await h.recover(h.state({version: 2, joining_open: true}));
+    const pending = h.root.listeners.click({target: {id: "qt-copy-link"}});
+    const linkRequest = h.requests.shift(); await h.recover(h.state({version: 3, joining_open}));
+    linkRequest.resolve({ok: true, json: async () => ({join_url: "https://example.test/play/#obsolete"})}); await pending;
+    assert.deepEqual(copied, []);
+  }
+});
+
+test("copy join link rejects query-string capabilities and foreign origins", async () => {
+  for (const url of ["https://example.test/play/?cap=secret#token", "https://other.test/play/#token", "https://example.test/play/"]) {
+    const copied = [], h = hostControlHarness({clipboard: {async writeText(value) { copied.push(value); }}});
+    await h.recover(h.state({version: 2, joining_open: true}));
+    const pending = h.root.listeners.click({target: {id: "qt-copy-link"}}); h.reply({join_url: url}); await pending;
+    assert.deepEqual(copied, []); assert.match(h.document.getElementById("qt-copy-status").textContent, /unavailable/);
+  }
+});
+
+test("manual fallback retains Resume after automatic availability is disabled", async () => {
+  const h = hostControlHarness();
+  await h.recover(h.state({version: 2, status: "QUESTION_OPEN", playback_mode: "MANUAL", paused: true,
+    automatic_available: false, show_phase: "ANSWERING", question_opened: true}));
+  const controls = h.commands.querySelectorAll("button").map((control) => control.value);
+  assert.ok(controls.includes("resume")); assert.ok(!controls.includes("pause"));
+  for (const action of ["close_question", "reveal", "reveal_now", "next", "next_now", "start"]) assert.ok(!controls.includes(action));
+  const pending = h.submit(h.commands, "resume"); assertHostCommand(h, "resume", 2);
+  await h.finish(pending, h.state({version: 3, status: "QUESTION_OPEN", playback_mode: "MANUAL", paused: false}));
+});
 function assertHostCommand(h, action, version, participant = null) {
   assert.equal(h.requests.length, 1);
   const {url, options, allButtonsDisabled} = h.requests[0];
@@ -330,7 +387,7 @@ test("host stale-version rejection recovers current controls and subsequent comm
   await h.finish(first, recovered, 409);
   assert.equal(h.error.hidden, false); assert.match(h.error.textContent, /current session has been recovered/);
   assert.ok(!h.commands.querySelectorAll("button").includes(oldButton));
-  assert.deepEqual(h.commands.querySelectorAll("button").map((control) => control.value), ["close_joining", "start", "cancel"]);
+  assert.deepEqual(h.commands.querySelectorAll("button").map((control) => control.value), ["close_joining", "start", "set_mode", "end_challenge", "cancel"]);
   const second = h.submit(h.commands, "start"); assertHostCommand(h, "start", 2);
   await h.finish(second, h.state({version: 3, status: "QUESTION_CLOSED", question_opened: false, position: 1}));
   assert.equal(h.error.hidden, true); assert.equal(h.commands.querySelector("[name=version]").value, "3");
@@ -389,4 +446,15 @@ test("player HTTP 403/404 revocation hides gameplay and disables answers; late s
     const late = h.callbacks.recover(); h.reply(h.open()); await late;
     assert.equal(h.elements.get("qt-question").hidden, true); assert.equal(h.buttons[0].disabled, true);
   }
+});
+
+test("authoritative phase boundary adds one coalesced HTTP recovery and bounded retries", async () => {
+  const h = harness({recover: () => ({version: 5, status: "QUESTION_OPEN", paused: false, phase_deadline: "2026-10-11T00:00:01Z", server_now: "2026-10-11T00:00:00Z"})});
+  await h.flush(); h.sockets[0].open(); await h.flush(); assert.equal(h.calls, 1);
+  await h.advance(1200); assert.equal(h.calls, 2);
+  h.transport.stop(); assert.equal(h.timers.size, 0);
+});
+test("paused snapshots never schedule deadline recovery", async () => {
+  const h = harness({recover: () => ({version: 5, paused: true, status: "QUESTION_OPEN", phase_deadline: "2026-10-11T00:00:01Z", server_now: "2026-10-11T00:00:00Z"})});
+  await h.flush(); h.sockets[0].open(); await h.flush(); await h.advance(2000); assert.equal(h.calls, 1); h.transport.stop();
 });

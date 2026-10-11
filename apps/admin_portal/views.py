@@ -4620,6 +4620,7 @@ def configurable_features_settings_view(request):
             default=False,
         )
     )
+    current_quitizz_automatic_enabled = FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=tenant_id)
     current_quitizz_enabled = FeatureSettingsService.is_quitizz_enabled(tenant_id=tenant_id)
     current_exit_pulse_enabled = FeatureSettingsService.is_exit_pulse_enabled(
         tenant_id=tenant_id,
@@ -4884,6 +4885,7 @@ def configurable_features_settings_view(request):
             "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
             "faculty_quick_score_encoding_enabled": current_faculty_quick_score_encoding_enabled,
             "quitizz_enabled": current_quitizz_enabled,
+            "quitizz_automatic_enabled": current_quitizz_automatic_enabled,
             "exit_pulse_enabled": current_exit_pulse_enabled,
             "orientation_feedback_enabled": current_orientation_feedback_enabled,
             "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
@@ -5232,12 +5234,19 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            FeatureSettingsService.QUITIZZ_AUTOMATIC_ENABLED_KEY,
+            bool(form.cleaned_data["quitizz_automatic_enabled"]), tenant_id=tenant_id, value_type="BOOL",
+        )
+        SystemSettingService.set(
             FeatureSettingsService.QUITIZZ_ENABLED_KEY,
             bool(form.cleaned_data["quitizz_enabled"]),
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
         )
+        if not form.cleaned_data["quitizz_enabled"] or not form.cleaned_data["quitizz_automatic_enabled"]:
+            from apps.quitizz.automation import suspend_tenant
+            suspend_tenant(tenant_id)
         SystemSettingService.set(
             FeatureSettingsService.EXIT_PULSE_ENABLED_KEY,
             bool(form.cleaned_data["exit_pulse_enabled"]),
@@ -5589,6 +5598,7 @@ def configurable_features_settings_view(request):
                 "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
                 "faculty_quick_score_encoding_enabled": current_faculty_quick_score_encoding_enabled,
                 "quitizz_enabled": current_quitizz_enabled,
+                "quitizz_automatic_enabled": current_quitizz_automatic_enabled,
                 "exit_pulse_enabled": current_exit_pulse_enabled,
                 "orientation_feedback_enabled": current_orientation_feedback_enabled,
                 "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
@@ -5695,6 +5705,7 @@ def configurable_features_settings_view(request):
                     form.cleaned_data["faculty_quick_score_encoding_enabled"]
                 ),
                 "quitizz_enabled": bool(form.cleaned_data["quitizz_enabled"]),
+                "quitizz_automatic_enabled": bool(form.cleaned_data["quitizz_automatic_enabled"]),
                 "exit_pulse_enabled": bool(form.cleaned_data["exit_pulse_enabled"]),
                 "orientation_feedback_enabled": bool(
                     form.cleaned_data["orientation_feedback_enabled"]

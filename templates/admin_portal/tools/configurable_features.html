@@ -342,7 +342,9 @@
     <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-quitizz" aria-expanded="false" aria-controls="feature-card-quitizz"><span class="settings-card-summary-title">QuiTizz</span><span class="settings-card-summary-text">Faculty authoring and saved host sessions. Powered by TeacherMate+.</span></button>
     <div id="feature-card-quitizz" class="collapse"><div class="card-body"><div class="form-check form-switch">
       {{ form.quitizz_enabled }}<label class="form-check-label" for="{{ form.quitizz_enabled.id_for_label }}">{{ form.quitizz_enabled.label }}</label>
-      <div class="form-text">{{ form.quitizz_enabled.help_text }}</div>{{ form.quitizz_enabled.errors }}
+      <div class="form-text">{{ form.quitizz_enabled.help_text }}</div>{{ form.quitizz_enabled.errors }}</div><div class="form-check form-switch mt-3">
+      {{ form.quitizz_automatic_enabled }}<label class="form-check-label" for="{{ form.quitizz_automatic_enabled.id_for_label }}">{{ form.quitizz_automatic_enabled.label }}</label>
+      <div class="form-text">{{ form.quitizz_automatic_enabled.help_text }}</div>{{ form.quitizz_automatic_enabled.errors }}
     </div></div></div>
   </div>
   <div class="card border-0 shadow-sm settings-card is-collapsed">

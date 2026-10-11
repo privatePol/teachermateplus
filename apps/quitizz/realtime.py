@@ -17,7 +17,7 @@ from apps.core.services.features import FeatureSettingsService
 logger = logging.getLogger(__name__)
 HOST_EVENTS = {"participant_joined", "participant_removed", "answer_received", "joining_opened", "joining_closed"}
 PLAYER_EVENTS = {"session_started", "question_prepared", "question_opened", "question_closed", "answer_revealed",
-                 "session_completed", "session_cancelled"}
+                 "session_completed", "session_cancelled", "phase_changed"}
 
 
 def group(session_id, audience):
@@ -43,21 +43,22 @@ def send(group_name, event):
         logger.warning("QuiTizz realtime notification unavailable; HTTP recovery remains authoritative.")
 
 
-def notify(session, name, **payload):
+def notify(session, name, *, dispatch=None, **payload):
     if name not in HOST_EVENTS | PLAYER_EVENTS:
         raise ValueError("Unknown QuiTizz event")
     if payload:
         raise ValueError("Unsafe QuiTizz event payload")
     session_id, tenant_id = session.pk, session.tenant_id
     event = {"type": "quitizz.event", "event": "sync_required"}
+    publish = dispatch or send
 
     def committed():
         try:
             if not FeatureSettingsService.is_quitizz_enabled(tenant_id=tenant_id):
                 return
-            send(group(session_id, "host"), event)
+            publish(group(session_id, "host"), event)
             if name in PLAYER_EVENTS:
-                send(group(session_id, "players"), event)
+                publish(group(session_id, "players"), event)
         except Exception:
             logger.warning("QuiTizz realtime notification unavailable; recover through HTTP.")
     transaction.on_commit(committed)

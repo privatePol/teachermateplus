@@ -603,5 +603,13 @@ class GameplayMigrationTests(TransactionTestCase):
             self.assertEqual([(row.prompt, row.correct_choice, row.timer_seconds) for row in rows], [("Prompt 1", "B", 30), ("Prompt 2", "B", 30)])
             saved = apps.get_model("quitizz", "QuiTizzSession").objects.get(pk=session.pk)
             self.assertEqual((saved.status, saved.scoring_policy_snapshot, saved.joining_open, saved.expires_at), ("READY", {}, False, None))
+            latest = [("quitizz", "0005_automatic_game_show")]
+            executor = MigrationExecutor(connection); executor.migrate(latest)
+            latest_apps = executor.loader.project_state(latest).apps
+            preserved = latest_apps.get_model("quitizz", "QuiTizzSession").objects.get(pk=session.pk)
+            self.assertEqual((preserved.playback_mode, preserved.show_phase, preserved.automation_policy_snapshot), ("MANUAL", "NONE", {}))
+            self.assertIsNone(preserved.next_transition_at); self.assertIsNone(preserved.paused_at)
+            for row in latest_apps.get_model("quitizz", "QuiTizzSessionQuestion").objects.filter(session_id=session.pk):
+                self.assertEqual(row.active_elapsed_us, 0); self.assertIsNone(row.active_started_at)
         finally:
-            MigrationExecutor(connection).migrate(after)
+            MigrationExecutor(connection).migrate([("quitizz", "0005_automatic_game_show")])

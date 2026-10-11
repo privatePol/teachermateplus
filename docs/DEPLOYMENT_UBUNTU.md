@@ -908,3 +908,21 @@ If you want a next step after this guide, the best follow-up would be:
 - a ready-to-use **production env template**
 
 Those are the most helpful pieces to generate next.
+
+
+## QuiTizz Phase 3 scheduler (source only; separate activation approval)
+
+Automatic availability defaults OFF; keep it OFF during schema and process rollout. The main QuiTizz flag remains an independent outer gate. Deployment, database migration, systemd installation and restart were not performed in this implementation session.
+
+For a separately approved staging rollout:
+
+1. Back up and inspect the database/migration plan. Validate on a disposable MariaDB/InnoDB database first, including duplicate scheduler/host races and migration checks. Deploy compatible HTTP/ASGI assets while preventing older code from mutating newly automatic sessions.
+2. Apply `quitizz.0005_automatic_game_show` under that separate operational gate. It follows `quitizz.0004_quitizzparticipant_quitizzresponse_and_more` (plus the generated tenant/user graph dependencies). Keep Attendance migrations 0001-0020 unchanged.
+3. Verify shared Redis cache/throttle and Channels, distinct staging namespace/deployment, scheduler/HTTP/ASGI database identity, clock synchronization and exact scope authorization. Do not substitute process-local throttling for Redis failure. Phase 3 automation rejects a non-Redis dedicated throttle backend in staging/production instead of treating a LocMem probe as healthy.
+4. Install/enable the reviewed scheduler source only after approval: `ops/systemd/teachermateplus-staging-quitizz-scheduler.service`. It uses `/opt/teachermateplus_staging/.venv/bin/python manage.py run_quitizz_scheduler`, working directory `/opt/teachermateplus_staging`, environment file `/etc/teachermateplus_staging/teachermateplus_staging.env` and staging user/group. Nginx/Gunicorn/Daphne routing is unchanged; Attendance stays on Gunicorn.
+5. Scheduler defaults: active interval 0.25s, idle 2s, candidate batch 100; settings are `QUITIZZ_SCHEDULER_ACTIVE_SECONDS`, `QUITIZZ_SCHEDULER_IDLE_SECONDS`, `QUITIZZ_SCHEDULER_BATCH_SIZE`. One process is recommended; locking/idempotency protects duplicates on a locking backend. SIGTERM/SIGINT gracefully stop and close connections; systemd restarts failures after 5s. The command `--once` is for disposable validation, not an operational activation shortcut.
+6. Exercise browser/mobile/projector, clipboard fallback, audio unlock and mute, reduced motion, pause scoring, missed notifications, scheduler restart and confirmed Redis throttling failure. Verify logs contain no capability/credential data. Only then enable Automatic for the intended tenant and explicitly launch/select an automatic session.
+
+Each overdue transition executes once and grants the next interval its full duration; expired answers retain their original cutoff. Safety checks inspect bounded batches every 2s, so detection latency grows with active-session batches and contention. Scheduler delivery is a bounded/coalesced 256-group queue; dropped or failed wakeups recover through canonical HTTP. A broadcast outage alone is tolerated; confirmed shared-throttle outage rejects public activity and persists suspension, requiring authorized resume after protection recovers.
+
+Rollback: first disable Automatic and verify persisted suspension; keep compatible Phase 3 code to allow an authorized host to switch to Manual and resume without losing scores. Do not roll older code onto active automatic sessions. Stopping the scheduler alone leaves unanswered deadlines expired and phases waiting. Preserve the schema and snapshots; reversing 0005 removes timing/pause metadata and needs a separate backed-up operational decision. Never roll back Attendance migrations as part of this feature. Do not promise production acceptance from SQLite/Node evidence.

@@ -39,14 +39,19 @@
     use.setAttribute("href", `${window.QuiTizzIcons || "/static/quitizz/icons.svg"}#${name}`); svg.append(use); return svg;
   }
   function create(root, {projector = false, qrUrl} = {}) {
-    let lastKey = "", deadline = 0, offset = 0, status = "", finaleKey = "";
+    let lastKey = "", deadline = 0, offset = 0, status = "", phase = "", paused = false, remaining = 0, finaleKey = "", revealKey = "", effectPhase = "";
     const timer = make("strong", "0", "qt-timer"); timer.setAttribute("role", "timer"); timer.setAttribute("aria-live", "off");
     function render(state) {
       status = state.status;
-      deadline = Date.parse(state.question?.deadline); offset = Date.parse(state.server_now) - Date.now();
+      phase = state.show_phase || "NONE"; paused = Boolean(state.paused); remaining = (state.remaining_us || 0) / 1000000;
+      deadline = Date.parse(state.phase_deadline || state.question?.deadline); offset = Date.parse(state.server_now) - Date.now();
       const key = JSON.stringify(state, (key, value) => key === "server_now" ? undefined : value);
       if (key === lastKey) return;
-      lastKey = key; root.replaceChildren(); root.dataset.phase = status;
+      lastKey = key;
+      const phaseKey = `${state.question?.id || state.position}:${phase}:${status}:${paused}`;
+      if (phaseKey !== effectPhase) { cleanup(); effectPhase = phaseKey; }
+      root.replaceChildren(); root.dataset.phase = paused ? "PAUSED" : phase === "NONE" ? status : phase;
+      if (paused) { root.append(make("h2", "Challenge paused", "qt-section-title"), make("p", "Waiting for an authorized resume."), timer); tick(); return; }
       root.append(make("p", `${state.participant_count} joined · ${state.answered_count} answered · Question ${state.position} / ${state.question_count}`, "qt-metrics"));
       if (["READY", "LOBBY"].includes(status)) {
         root.append(make("h2", state.title, "qt-welcome-title"), make("p", "Ready to spark? Waiting for the host.", "qt-waiting"));
@@ -59,7 +64,7 @@
       }
       if (status === "CANCELLED") { root.append(make("h2", "Session cancelled.")); return; }
       if (status === "COMPLETED") {
-        root.append(make("h2", "Final Top 3", "qt-section-title"));
+        root.append(make("h2", "And the QuiTizz Champion is...", "qt-finale-announcement"), make("h2", "Final Top 3", "qt-section-title"));
         const podium = make("ol", undefined, "qt-podium");
         (state.leaderboard || []).slice(0, 3).forEach((player, index) => {
           const item = make("li", undefined, `qt-place qt-place-${index + 1}`);
@@ -68,10 +73,19 @@
           if (index === 0) item.append(icon("crown"));
           podium.append(item);
         });
+        if (state.leaderboard?.length) {
+          const champion = make("section", undefined, "qt-champion-spotlight");
+          champion.append(icon("trophy"), make("h2", state.leaderboard[0].nickname), make("strong", `${state.leaderboard[0].score} points`)); root.append(champion);
+        }
         root.append(podium);
         if (!podium.children.length) root.append(make("p", "No participants. Thanks for playing!"));
         if (state.leaderboard?.length && finaleKey !== String(state.version)) { finaleKey = String(state.version); celebrate(root, true); }
         return;
+      }
+      if (["SUSPENSE", "PREPARING"].includes(phase) && state.playback_mode === "AUTOMATIC") {
+        root.append(icon(phase === "SUSPENSE" ? "spark" : "rocket"),
+          make("h2", phase === "SUSPENSE" ? "AND THE CORRECT ANSWER IS..." : "BE READY FOR THE NEXT CHALLENGE!", "qt-section-title"), timer);
+        tick(); return;
       }
       if (!state.question) { root.append(make("h2", "Get ready for the next question.")); return; }
       root.append(make("h2", state.question.prompt, "qt-presentation-prompt"));
@@ -84,6 +98,8 @@
       if (status === "QUESTION_OPEN") { root.append(make("p", "Seconds remaining", "qt-timer-label"), timer); tick(); }
       else root.append(make("p", status === "ANSWER_REVEALED" ? `Correct answer: ${state.reveal?.correct_choice || ""}` : "Answers locked. Waiting for reveal.", "qt-state-label"));
       if (state.reveal) {
+        const currentReveal = String(state.question.id || state.position);
+        if (revealKey !== currentReveal) { revealKey = currentReveal; celebrate(root); }
         const distribution = make("section", undefined, "qt-distribution"); distribution.setAttribute("aria-label", "Answer distribution");
         distribution.append(make("h3", "Answer distribution"));
         const total = Object.values(state.reveal.distribution).reduce((sum, value) => sum + value, 0);
@@ -97,13 +113,18 @@
         root.append(distribution);
         const leaderboard = make("section", undefined, "qt-leaderboard"); leaderboard.append(make("h3", "Top 5"));
         const list = make("ol");
+        const maximum = Math.max(1, ...(state.leaderboard || []).map((player) => player.score));
         (state.leaderboard || []).forEach((player) => {
-          const item = make("li"); item.append(make("span", `${player.rank}. ${player.nickname}`), make("strong", `${player.score} points`)); list.append(item);
+          const item = make("li"); item.append(make("span", `${player.rank}. ${player.nickname}`), make("strong", `${player.score} points`));
+          const bar = make("div", undefined, "qt-bar qt-score-bar"); bar.style.setProperty("--percent", `${player.score / maximum * 100}%`); bar.setAttribute("aria-hidden", "true"); item.append(bar); list.append(item);
         }); leaderboard.append(list); root.append(leaderboard);
       }
       if (projector) root.setAttribute("aria-label", "QuiTizz presentation");
     }
-    function tick() { if (status === "QUESTION_OPEN") timer.textContent = String(Math.max(0, Math.ceil((deadline - Date.now() - offset) / 1000))); }
+    function tick() {
+      if (paused || status === "QUESTION_OPEN" || ["SUSPENSE", "PREPARING"].includes(phase))
+        timer.textContent = String(paused ? Math.ceil(remaining) : Math.max(0, Math.ceil((deadline - Date.now() - offset) / 1000)));
+    }
     const interval = window.setInterval(tick, 250);
     function clear() { window.clearInterval(interval); cleanup(); }
     window.addEventListener("pagehide", clear);

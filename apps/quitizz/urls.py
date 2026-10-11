@@ -25,4 +25,5 @@ urlpatterns = [
     path("faculty/quitizz/sessions/<uuid:public_id>/command/", views.host_command, name="host_command"),
     path("faculty/quitizz/sessions/<uuid:public_id>/state/", views.host_state, name="host_state"),
     path("faculty/quitizz/sessions/<uuid:public_id>/qr/", views.host_qr, name="host_qr"),
+    path("faculty/quitizz/sessions/<uuid:public_id>/join-link/", views.host_join_link, name="host_join_link"),
 ]

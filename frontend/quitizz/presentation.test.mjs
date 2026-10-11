@@ -124,7 +124,7 @@ test("player lobby/open/submitted/reveal/final states include text and private a
   assert.equal(h.elements.get("qt-timer-block").hidden, true);
   assert.match(h.elements.get("qt-feedback").textContent, /Correct! Correct answer: B. \+930 points/); assert.equal(h.timers.size, 1);
   const complete = h.transport.recover(); h.reply({...open, status: "COMPLETED", feedback: {answered: true, is_correct: true, correct_choice: "B", points: 930}, summary: {total_score: 930, correct_count: 1, rank: 2}}); await complete;
-  assert.match(h.elements.get("qt-feedback").textContent, /Your rank: 2/); assert.equal(h.timers.size, 1);
+  assert.match(h.elements.get("qt-feedback").textContent, /Your rank: 2/); assert.equal(h.timers.size, 0);
   h.listeners.pagehide.forEach((fn) => fn()); assert.equal(h.timers.size, 0); assert.equal(h.intervals.size, 0);
 });
 test("answer click locks every button before HTTP and never reveals from acknowledgment", async () => {
@@ -161,4 +161,44 @@ test("authorized private champion result has one finale and revocation hides the
   assert.equal(h.elements.get("qt-play").children[0].children.length, 37);
   [...h.timers.values()][0].fn(); const repeat = h.transport.recover(); h.reply(final); await repeat; assert.equal(h.timers.size, 0);
   const denied = h.transport.recover(); h.reply({error: "Unavailable"}, 404); await denied; assert.equal(h.elements.get("qt-result").hidden, true);
+  assert.equal(h.intervals.size, 0); assert.equal(h.timers.size, 0);
+});
+
+test("automatic suspense and preparation use HTTP phase deadline and hide protected content", () => {
+  const h = harness(); const root = h.add("stage"); const view = h.window.QuiTizzPresentation.create(root);
+  for (const phase of ["SUSPENSE", "PREPARING"]) {
+    view.render(state({status: phase === "SUSPENSE" ? "QUESTION_CLOSED" : "ANSWER_REVEALED", playback_mode: "AUTOMATIC", show_phase: phase,
+      phase_deadline: new Date(Date.now() + 5000).toISOString(), question: question()}));
+    assert.match(root.textContent, phase === "SUSPENSE" ? /AND THE CORRECT ANSWER IS/ : /BE READY FOR THE NEXT CHALLENGE/);
+    assert.ok(!root.textContent.includes("Alpha"));
+  }
+});
+test("paused phase freezes visual time without revealing or opening next", () => {
+  const h = harness(); const root = h.add("stage"); h.window.QuiTizzPresentation.create(root).render(state({paused: true, remaining_us: 3200000, status: "QUESTION_OPEN", question: question()}));
+  assert.match(root.textContent, /Challenge paused/); assert.match(root.textContent, /4/); assert.ok(!root.textContent.includes("Alpha"));
+});
+
+test("player automatic interludes and pause hide answers, freeze controls and clean celebrations", async () => {
+  const h = player(); h.reply(state({nickname: "You"})); await h.flush();
+  for (const show_phase of ["SUSPENSE", "PREPARING", "ANSWERING"]) {
+    const pending = h.transport.recover(); h.reply(state({version: 8, status: "QUESTION_CLOSED", playback_mode: "AUTOMATIC", show_phase,
+      paused: show_phase === "ANSWERING", remaining_us: 4000000, question: {...question(), id: "q1"},
+      phase_deadline: new Date(Date.now() + 5000).toISOString()})); await pending;
+    assert.equal(h.elements.get("qt-answers").hidden, true); assert.equal(h.elements.get("qt-feedback").hidden, true);
+    assert.equal(h.elements.get("qt-countdown").textContent, show_phase === "ANSWERING" ? "4" : "5");
+    assert.doesNotMatch(h.elements.get("qt-prompt").textContent, /Alpha/); assert.equal(h.timers.size, 0);
+  }
+});
+
+test("manual closed question retains locked-answer feedback and has no automatic phase countdown", async () => {
+  const h = player(); h.reply(state({nickname: "You", status: "QUESTION_CLOSED", playback_mode: "MANUAL", show_phase: "SUSPENSE",
+    accepted: true, can_answer: false, question: {...question(), id: "q1"}})); await h.flush();
+  assert.equal(h.elements.get("qt-timer-block").hidden, true); assert.equal(h.elements.get("qt-answers").hidden, false);
+  assert.match(h.elements.get("qt-message").textContent, /submitted and locked/);
+});
+test("phase exit cleans reveal celebration; score bars do not rerank", () => {
+  const h = harness(); const root = h.add("stage"); const view = h.window.QuiTizzPresentation.create(root);
+  view.render(state({status: "ANSWER_REVEALED", show_phase: "RESULTS", question: question(), reveal: {correct_choice: "B", distribution: {A: 0, B: 1, C: 0, D: 0}}, leaderboard: [{rank: 1, nickname: "First", score: 900}, {rank: 2, nickname: "Second", score: 500}]}));
+  const scores = root.querySelectorAll("div").filter((el) => el.className === "qt-bar qt-score-bar"); assert.equal(scores[0].style["--percent"], "100%");
+  view.render(state({status: "ANSWER_REVEALED", playback_mode: "AUTOMATIC", show_phase: "PREPARING", question: question()})); assert.equal(h.timers.size, 0);
 });

@@ -1,3 +1,11 @@
+## QuiTizz Phase 3 automatic game show - 2026-10-11 (uncommitted)
+
+- Added explicit, default-OFF Automatic availability in Configurable Features; launch defaults to Manual. Immutable timing snapshots and separate persisted phases retain the existing gameplay lifecycle.
+- Added a database scheduler, bounded post-commit notification queue, safe suspension, host pause/resume/overrides, active-time speed scoring, and consistent canonical HTTP recovery. WebSockets remain constant notifications only.
+- Refreshed scoped projector visuals, Top 5 score bars, final champion/podium and larger finite local effects. Optional original Web Audio drum/fanfare requires projector interaction; no applause asset exists.
+- Added host-only uncached Copy Join Link with full fragment, current-generation checks and selectable clipboard fallback. Retained the host form-action URL hotfix.
+- New schema: `quitizz.0005_automatic_game_show`; only disposable validation databases were migrated. Scheduler unit source is supplied, not installed or started. See `docs/QUITIZZ_PHASE3_REVIEW.md` for exact evidence, inventory and outstanding operational gates. Attendance/DTR functional source is unchanged.
+
 ## QuiTizz and Faculty Attendance integration review - 2026-10-10 (uncommitted)
 
 - Integrated QuiTizz tip `23a377235aadc4af149551346c1a2988194caa6f` into an isolated worktree based on Faculty Attendance baseline `8724304a506b641722407e584b325054f620ae36`. Attendance/DTR content and the complete Phase 1–2C QuiTizz source are retained.

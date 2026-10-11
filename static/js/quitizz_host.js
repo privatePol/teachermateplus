@@ -5,6 +5,8 @@
   const byId = (id) => document.getElementById(id);
   const stage = byId("qt-presentation");
   const presentation = stage && window.QuiTizzPresentation?.create(stage);
+  const audio = window.QuiTizzAudio?.(byId("qt-audio"), {speaker: false, sessionId: root.dataset.sessionId});
+  let joiningOpen = false;
   let latest = 0, pending = false, available = false;
   let requested = 0, rendered = 0, unavailable = false;
   function lockControls() {
@@ -20,6 +22,9 @@
     const changed = String(state.version) !== root.dataset.version;
     root.dataset.version = String(state.version);
     presentation?.render(state);
+    joiningOpen = Boolean(state.joining_open);
+    const mode = byId("qt-playback-mode");
+    if (mode) { mode.value = state.playback_mode || "MANUAL"; const auto = mode.querySelector('[value="AUTOMATIC"]'); if (auto) auto.disabled = !state.automatic_available; }
     byId("qt-count").textContent = String(state.participant_count);
     byId("qt-answered").textContent = String(state.answered_count);
     byId("qt-session-status").textContent = `${state.status.replaceAll("_", " ")} · Current question: ${state.position}`;
@@ -35,13 +40,23 @@
       commands.hidden = terminal;
       if (!terminal) {
         add(state.joining_open ? "close_joining" : "open_joining", state.joining_open ? "Close joining" : "Open joining");
-        if (state.status === "LOBBY") add("start", "Start");
-        if (state.status === "QUESTION_CLOSED") add(state.question_opened ? "reveal" : "open_question", state.question_opened ? "Reveal answer" : "Open Question");
-        if (state.status === "QUESTION_OPEN") add("close_question", "Close Question");
-        if (state.status === "ANSWER_REVEALED") {
-          if (state.position < state.question_count) add("next", "Next Question");
-          add("complete", "End / Complete");
+        if (!state.paused) {
+          if (state.status === "LOBBY") add("start", "Start");
+          if (state.status === "QUESTION_CLOSED") add(state.question_opened ? "reveal" : "open_question", state.question_opened ? "Reveal answer" : "Open Question");
+          if (state.status === "QUESTION_OPEN") add("close_question", "Close Question");
+          if (state.status === "ANSWER_REVEALED") {
+            if (state.position < state.question_count) add("next", "Next Question");
+            add("complete", "End / Complete");
+          }
         }
+        if (state.paused) add("resume", "Resume");
+        else if (state.playback_mode === "AUTOMATIC" && state.show_phase !== "NONE") add("pause", "Pause");
+        if (state.playback_mode === "AUTOMATIC" && !state.paused) {
+          if (["QUESTION_OPEN", "QUESTION_CLOSED"].includes(state.status) && state.question_opened) add("reveal_now", "Reveal Now");
+          if (state.status === "ANSWER_REVEALED" && state.position < state.question_count) add("next_now", "Next Now");
+        }
+        add("set_mode", "Apply playback mode");
+        add("end_challenge", "End Challenge");
         add("cancel", "Cancel session");
       }
       const joining = byId("qt-joining"); joining.replaceChildren();
@@ -49,6 +64,8 @@
         const image = document.createElement("img"); image.className = "qt-qr";
         image.src = `${root.dataset.qrUrl}?v=${state.version}`; image.alt = "Scan this QR code to join this QuiTizz session";
         joining.append(image);
+        const copy = document.createElement("button"); copy.type = "button"; copy.id = "qt-copy-link"; copy.className = "btn btn-outline-success"; copy.textContent = "Copy Join Link"; joining.append(copy);
+        const confirmation = document.createElement("p"); confirmation.id = "qt-copy-status"; confirmation.setAttribute("role", "status"); joining.append(confirmation);
       }
       const label = document.createElement("p"); label.textContent = state.joining_open ? "Joining is open. Scan, enter a nickname, and wait in the lobby." : "Joining is closed."; joining.append(label);
     }
@@ -88,7 +105,7 @@
         if ([401, 403, 404].includes(response.status) || response.redirected || response.ok) {
           unavailable = true; available = false; lockControls();
           root.querySelectorAll("#qt-joining, #qt-participants, #qt-presentation, details").forEach((element) => { element.hidden = true; });
-          presentation?.clear();
+          presentation?.clear(); audio?.clear();
           transport.stop(); byId("qt-connection").textContent = "Session unavailable.";
         }
         return;
@@ -96,6 +113,27 @@
       const state = await response.json(); render(state, sequence); return state;
     } catch (_) { /* Transport will recover. */ }
   }
+  root.addEventListener("click", async (event) => {
+    if (event.target.id !== "qt-copy-link" || !available || !joiningOpen) return;
+    const version = latest, status = byId("qt-copy-status");
+    try {
+      const response = await fetch(root.dataset.joinLinkUrl, {credentials: "same-origin", cache: "no-store"});
+      if (!response.ok) throw new Error();
+      const {join_url: url} = await response.json();
+      if (!joiningOpen || version !== latest || unavailable) return;
+      const target = new URL(url, window.location.href);
+      if (!target.hash || target.search || target.origin !== window.location.origin) throw new Error();
+      try {
+        if (!window.navigator?.clipboard?.writeText) throw new Error();
+        await window.navigator.clipboard.writeText(url);
+        if (joiningOpen && version === latest && status) status.textContent = "Join link copied";
+      } catch (_) {
+        if (!joiningOpen || version !== latest || !status) return;
+        status.textContent = "Copy unavailable. Select and copy the complete link below.";
+        const field = document.createElement("textarea"); field.readOnly = true; field.value = url; field.setAttribute("aria-label", "Complete join link including capability fragment"); status.append(field); field.focus(); field.select();
+      }
+    } catch (_) { if (status) status.textContent = "Join link unavailable. Recover the current joining state."; }
+  });
   const transport = window.QuiTizzRealtime({url: root.dataset.socketUrl, recover: refresh, indicator: byId("qt-connection")});
   root.addEventListener("submit", async (event) => {
     const form = event.target;

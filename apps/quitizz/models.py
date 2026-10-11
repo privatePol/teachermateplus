@@ -156,6 +156,18 @@ class ImmutableModel(ValidatedModel):
 
 
 class QuiTizzSession(ImmutableModel):
+    class PlaybackMode(models.TextChoices):
+        MANUAL = "MANUAL", "Manual"
+        AUTOMATIC = "AUTOMATIC", "Automatic"
+
+    class ShowPhase(models.TextChoices):
+        NONE = "NONE", "None"
+        ANSWERING = "ANSWERING", "Answering"
+        SUSPENSE = "SUSPENSE", "Suspense"
+        RESULTS = "RESULTS", "Results"
+        PREPARING = "PREPARING", "Preparing"
+        FINISHED = "FINISHED", "Finished"
+
     class Status(models.TextChoices):
         READY = "READY", "Ready"
         LOBBY = "LOBBY", "Lobby"
@@ -166,7 +178,18 @@ class QuiTizzSession(ImmutableModel):
         CANCELLED = "CANCELLED", "Cancelled"
 
     GAMEPLAY_FIELDS = frozenset({"status", "joining_open", "join_generation", "expires_at", "completed_at",
-        "current_position", "state_version", "scoring_policy_snapshot", "updated_at"})
+        "current_position", "state_version", "scoring_policy_snapshot", "updated_at",
+        "playback_mode", "show_phase", "phase_started_at", "next_transition_at",
+        "paused_at", "pause_remaining_us", "pause_reason"})
+
+    playback_mode = models.CharField(max_length=16, choices=PlaybackMode.choices, default=PlaybackMode.MANUAL)
+    show_phase = models.CharField(max_length=16, choices=ShowPhase.choices, default=ShowPhase.NONE)
+    phase_started_at = models.DateTimeField(null=True, blank=True)
+    next_transition_at = models.DateTimeField(null=True, blank=True)
+    paused_at = models.DateTimeField(null=True, blank=True)
+    pause_remaining_us = models.PositiveBigIntegerField(null=True, blank=True)
+    pause_reason = models.CharField(max_length=24, default="", blank=True)
+    automation_policy_snapshot = models.JSONField(default=dict, blank=True)
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     source = models.ForeignKey(QuiTizz, on_delete=models.PROTECT, related_name="sessions")
@@ -186,8 +209,16 @@ class QuiTizzSession(ImmutableModel):
 
     class Meta:
         ordering = ["-created_at", "-id"]
-        indexes = [models.Index(fields=["tenant", "campus", "host", "status"], name="qts_host_scope_idx")]
+        indexes = [models.Index(fields=["tenant", "campus", "host", "status"], name="qts_host_scope_idx"),
+            models.Index(fields=["playback_mode", "next_transition_at"], name="qts_auto_due_idx")]
         constraints = [
+            models.CheckConstraint(condition=models.Q(playback_mode__in=["MANUAL", "AUTOMATIC"]), name="qts_playback_valid"),
+            models.CheckConstraint(condition=models.Q(show_phase__in=["NONE", "ANSWERING", "SUSPENSE", "RESULTS", "PREPARING", "FINISHED"]), name="qts_phase_valid"),
+            models.CheckConstraint(condition=(models.Q(paused_at__isnull=True, pause_remaining_us__isnull=True, pause_reason="") |
+                (models.Q(paused_at__isnull=False, pause_remaining_us__isnull=False, next_transition_at__isnull=True) & ~models.Q(pause_reason=""))), name="qts_pause_consistent"),
+            models.CheckConstraint(condition=(~models.Q(status__in=["COMPLETED", "CANCELLED"]) |
+                models.Q(next_transition_at__isnull=True, paused_at__isnull=True)), name="qts_terminal_unscheduled"),
+            models.CheckConstraint(condition=models.Q(playback_mode="AUTOMATIC") | models.Q(next_transition_at__isnull=True), name="qts_manual_unscheduled"),
             models.CheckConstraint(condition=models.Q(source_revision__gt=0) & models.Q(state_version__gt=0), name="qts_versions_positive"),
             models.CheckConstraint(condition=models.Q(status__in=["READY", "LOBBY", "QUESTION_OPEN", "QUESTION_CLOSED", "ANSWER_REVEALED", "COMPLETED", "CANCELLED"]), name="qts_gameplay_status"),
         ]
@@ -198,7 +229,9 @@ class QuiTizzSession(ImmutableModel):
 
 
 class QuiTizzSessionQuestion(QuestionContent, ImmutableModel):
-    GAMEPLAY_FIELDS = frozenset({"opened_at", "deadline_at", "closed_at", "revealed_at", "updated_at"})
+    GAMEPLAY_FIELDS = frozenset({"opened_at", "deadline_at", "closed_at", "revealed_at", "updated_at", "active_started_at", "active_elapsed_us"})
+    active_started_at = models.DateTimeField(null=True, blank=True)
+    active_elapsed_us = models.PositiveBigIntegerField(default=0)
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     session = models.ForeignKey(QuiTizzSession, on_delete=models.PROTECT, related_name="questions")
     opened_at = models.DateTimeField(null=True, blank=True)

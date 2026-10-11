@@ -16,6 +16,7 @@ from .access import require_access
 from .forms import QuestionForm, QuiTizzForm
 from .models import QuiTizzSession
 from .services import CONTENT_FIELDS, QuiTizzService, StaleRevision
+from apps.core.services.features import FeatureSettingsService
 
 
 def access(capability=None):
@@ -114,9 +115,10 @@ def archive(request, public_id):
 def launch(request, public_id):
     obj = owned(request, public_id)
     if request.method == "POST":
-        session = QuiTizzService.launch(**mutation_args(request, public_id))
+        session = QuiTizzService.launch(**mutation_args(request, public_id), playback_mode=request.POST.get("playback_mode", "MANUAL"))
         return redirect("quitizz:host", public_id=session.public_id)
-    return render(request, "quitizz/launch.html", {"quiz": obj, "questions": obj.questions.all()})
+    return render(request, "quitizz/launch.html", {"quiz": obj, "questions": obj.questions.all(),
+        "automatic_available": FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=request.quitizz_scope["tenant_id"])})
 
 
 def owned_session(request, public_id):
@@ -132,7 +134,7 @@ def host(request, public_id):
     state = gameplay.host_state(session)
     return render(request, "quitizz/host.html", {"session": session, "questions": session.questions.all(),
         "participants": state["participants"], "participant_count": state["participant_count"],
-        "answered_count": state["answered_count"]})
+        "answered_count": state["answered_count"], "automatic_available": state["automatic_available"]})
 
 
 @never_cache
@@ -140,7 +142,7 @@ def host(request, public_id):
 @access("host")
 def host_command(request, public_id):
     gameplay.command(**request.quitizz_scope, public_id=public_id, version=request.POST.get("version"),
-        action=request.POST.get("action"), participant_id=request.POST.get("participant"), request=request)
+        action=request.POST.get("action"), participant_id=request.POST.get("participant"), mode=request.POST.get("playback_mode"), request=request)
     return redirect("quitizz:host", public_id=public_id)
 
 
@@ -181,10 +183,24 @@ def projector_state(request, public_id):
 @access("host")
 def host_qr(request, public_id):
     session = owned_session(request, public_id)
-    url = request.build_absolute_uri(reverse("quitizz:play", kwargs={"public_id": public_id}))
-    qr = QrCodeWidget(f"{url}#{gameplay.capability(session)}")
+    qr = QrCodeWidget(join_url(request, session))
     x1, y1, x2, y2 = qr.getBounds()
     size = 320
     drawing = Drawing(size, size, transform=[size / (x2 - x1), 0, 0, size / (y2 - y1), 0, 0])
     drawing.add(qr)
     return HttpResponse(renderSVG.drawToString(drawing), content_type="image/svg+xml")
+
+
+def join_url(request, session):
+    url = request.build_absolute_uri(reverse("quitizz:play", kwargs={"public_id": session.public_id}))
+    return f"{url}#{gameplay.capability(session)}"
+
+
+@never_cache
+@require_http_methods(["GET"])
+@access("host")
+def host_join_link(request, public_id):
+    response = JsonResponse({"join_url": join_url(request, owned_session(request, public_id))})
+    response["Referrer-Policy"] = "no-referrer"
+    response["X-Robots-Tag"] = "noindex,nofollow,noarchive"
+    return response
