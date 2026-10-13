@@ -51,6 +51,7 @@ from .views import (
     admin_guide_view,
     grading_setup_guide_view,
     grade_distribution_monitor_view,
+    grade_distribution_monitor_detail_view,
     grade_submission_readiness_detail_view,
     grade_submission_readiness_view,
     grading_analytics_view,
@@ -230,6 +231,11 @@ urlpatterns = [
         "admin-portal/grading/grade-distribution-monitor/",
         grade_distribution_monitor_view,
         name="grade_distribution_monitor",
+    ),
+    path(
+        "admin-portal/grading/grade-distribution-monitor/<int:offering_id>/<int:period_id>/analytics/",
+        grade_distribution_monitor_detail_view,
+        name="grade_distribution_monitor_detail",
     ),
     path("admin-portal/guide/", admin_guide_view, name="guide"),
     path(

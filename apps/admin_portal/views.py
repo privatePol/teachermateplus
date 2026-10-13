@@ -3370,76 +3370,97 @@ def academic_intervention_monitor_detail_view(request, case_id):
 
 @portal_required("ADMIN")
 @permission_required("grade_distribution_monitor.read")
+@require_GET
 def grade_distribution_monitor_view(request):
+    if request.GET.get("options") == "1":
+        from apps.admin_portal.grade_distribution_selection import MonitorSelection
+        options = MonitorSelection(request).options
+        return JsonResponse({key: options[key] for key in ("faculty", "departments")} | {
+            "terms": [{"id": t.id, "label": f"{t.academic_year.code} / {t.name}"} for t in options["terms"]]
+        })
     context = GradeDistributionMonitorService.build_context(request)
     if request.GET.get("export") == "csv":
+        if context["errors"] or not context["searched"]:
+            return JsonResponse({"errors": context["errors"] or ["Apply Filters before exporting."]}, status=400)
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="grade_distribution_monitor.csv"'
         writer = csv.writer(response)
-        csv_number = lambda value: value if value is not None else ""
-        writer.writerow(
-            [
-                "Faculty",
-                "Campus",
-                "Department",
-                "Course",
-                "Section",
-                "Term",
-                "Period",
-                "Level",
-                "Activity",
-                "Passing Threshold",
-                "Active Enrollment",
-                "Usable Stored Scores",
-                "No Stored Score",
-                "Coverage % (usable/active)",
-                "Class Average",
-                "Threshold-aware distribution (count/usable denominator)",
-                "Below Passing %",
-                "Exact 100 %",
-                "Highest",
-                "Lowest",
-            ]
-        )
+        writer.writerow([
+            'Faculty',
+            'Campus',
+            'Offering Department',
+            'Course',
+            'Section',
+            'Academic Year / Term',
+            'Period',
+            'Physical Period',
+            'Grade Status',
+            'Threshold',
+            'Threshold Source',
+            'Eligible Enrollment',
+            'Saved Grades (selected status)',
+            'Missing Period Grades',
+            'Saved Grades Excluded by Status',
+            'Coverage % (all saved grades)',
+            'Class Ave.',
+            'Minimum',
+            'Maximum',
+            'Exactly 100 Count',
+            'Exactly 100 %',
+            'All Graded Values Exactly 100',
+            'Threshold-Aware Distribution',
+            'Historical',
+            'Limitations',
+            'Analytics Availability',
+            'Privacy Explanation',
+        ])
         for row in context["rows"]:
-            writer.writerow(
-                [
-                    csv_safe(row["faculty_name"]),
-                    csv_safe(row["campus"]),
-                    csv_safe(row["department"]),
-                    csv_safe(f'{row["course_code"]} - {row["course_title"]}'),
-                    csv_safe(row["section"]),
-                    csv_safe(f'{row["school_year"]} / {row["term"]}'),
-                    csv_safe(row["period"]),
-                    csv_safe(row["level_label"]),
-                    csv_safe(row["activity_title"]),
-                    csv_number(row["passing_threshold"]),
-                    csv_number(row["active_count"]),
-                    csv_number(row["graded_count"]),
-                    csv_number(row["no_grade_count"]),
-                    csv_number(row["coverage_rate"]),
-                    csv_number(row["average"]),
-                    csv_safe("; ".join(
-                        f'{band["label"]}: {band["count"]}/{band["denominator"]} ({band["percentage"]}%)'
-                        for band in row["distribution"]
-                    )),
-                    csv_number(row["below_passing_pct"]),
-                    csv_number(row["exact_100_pct"]),
-                    csv_number(row["highest"]),
-                    csv_number(row["lowest"]),
-                ]
-            )
+            values = [
+                row['faculty_name'],
+                row['campus'],
+                row['department'],
+                f"{row['course_code']} - {row['course_title']}",
+                row['section'],
+                f"{row['school_year']} / {row['term']}",
+                row['period'],
+                row['physical_period_label'],
+                row['status'],
+                row['passing_threshold'],
+                row['threshold_source'],
+                row['eligible_count'],
+                row['graded_count'],
+                row['missing_count'],
+                row['status_excluded_count'],
+                row['coverage_rate'],
+                row['average'],
+                row['minimum'],
+                row['maximum'],
+                row['exact_100_count'],
+                row['exact_100_percentage'],
+                row['all_100'],
+                '; '.join((f"{b['label']} ({b['range']}): " + (f"{b['count']} ({b['percentage']}%)" if row['analytics_state'] == 'disclosed' else 'Withheld') for b in row['distribution'])),
+                row['historical'],
+                '; '.join(row['notes']),
+                row['analytics_state'],
+                row['privacy_message'],
+            ]
+            writer.writerow([csv_safe(v) if isinstance(v, str) else (v if v is not None else "") for v in values])
         return response
-
-    paginator = Paginator(context["rows"], 25)
-    page_obj = paginator.get_page(request.GET.get("page"))
-    page_query = GradeDistributionMonitorService.sanitized_query(request)
-    page_query.pop("page", None)
-    context["page_obj"] = page_obj
-    context["rows"] = page_obj.object_list
-    context["page_query"] = page_query.urlencode()
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/grade_distribution_monitor.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grade_distribution_monitor.read")
+@require_GET
+def grade_distribution_monitor_detail_view(request, offering_id, period_id):
+    try:
+        row = GradeDistributionMonitorService.detail(request, offering_id, period_id)
+    except ValidationError as exc:
+        return JsonResponse({"errors": exc.messages}, status=400)
+    if row is None:
+        return JsonResponse({"errors": ["Class or saved physical period is unavailable in this search."]}, status=404)
+    return JsonResponse(row)
 
 
 @portal_required("ADMIN")
