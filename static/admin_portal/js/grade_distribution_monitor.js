@@ -14,6 +14,22 @@ document.addEventListener("DOMContentLoaded", () => {
     return el;
   };
   const display = value => value === null || value === undefined ? "Unavailable" : String(value);
+  const percent = value => value === null || value === undefined ? "Withheld" : `${Number(value).toFixed(2)}%`;
+  const loading = label => {
+    const wrap = node("div", undefined, "gdm-loading");
+    wrap.append(node("span", label, "small text-success"));
+    const progress = node("div", undefined, "progress mt-2");
+    const bar = node("div", undefined, "progress-bar bg-success gdm-indeterminate");
+    bar.setAttribute("role", "progressbar"); bar.setAttribute("aria-label", label);
+    // Indeterminate: no aria-valuenow or fabricated numerical percentage.
+    progress.append(bar); wrap.append(progress); return wrap;
+  };
+  const tile = (label, value, detail, gold = false) => {
+    const card = node("div", undefined, `gdm-metric${gold ? " gdm-exact-100" : ""}`);
+    card.append(node("div", label, "small fw-semibold"), node("div", value, "h5 mb-1"));
+    if (detail) card.append(node("div", detail, "small"));
+    return card;
+  };
   const table = (headings, rows, caption) => {
     const wrap = node("div", undefined, "table-responsive");
     const t = node("table", undefined, "table table-sm");
@@ -60,15 +76,33 @@ document.addEventListener("DOMContentLoaded", () => {
       section.append(table(["Reference category", "Numerical range", "Count", "% of graded"], measure.distribution.map(b => [b.label, b.range, "Withheld", "Withheld"]), `${title}: reference definitions only`));
       return section;
     }
-    section.append(node("p", `Class Ave.: ${display(measure.average)} · Eligible graded: ${measure.graded_count} · Min: ${display(measure.minimum)} · Max: ${display(measure.maximum)} · Exactly 100: ${measure.exact_100_count} (${measure.exact_100_percentage}%)${measure.all_100 ? " · All eligible graded values are 100" : ""}`));
+    if (measure.equivalent_to) {
+      section.append(node("p", `Same students and grades as ${measure.equivalent_to}. Use that measure's statistics below its heading.`, "small text-muted"));
+      return section;
+    }
+    const high = measure.high_grade_breakdown || [];
+    const combined = high.find(item => item.grade === "Combined 95–99");
+    const above = high.find(item => item.grade === "90 and above");
+    const tiles = node("div", undefined, "gdm-summary mb-3");
+    tiles.append(tile("Class Ave.", display(measure.average), title),
+      tile("Graded Students", display(measure.graded_count), "Eligible saved/configured values"),
+      tile("Lowest / Highest", `${display(measure.minimum)} / ${display(measure.maximum)}`, title),
+      tile("Exactly 100", `${display(measure.exact_100_count)} / ${measure.graded_count}`, `${percent(measure.exact_100_percentage)} · ${title}`, true),
+      tile("95–99", `${display(combined?.count)} / ${measure.graded_count}`, `${percent(combined?.percentage)} · 95 to below 100`),
+      tile("90 and above", `${display(above?.count)} / ${measure.graded_count}`, percent(above?.percentage)));
+    section.append(tiles);
+    if (measure.all_100) section.append(node("p", "All eligible graded values are 100 for this measure.", "small"));
     if (measure.finalized_count || measure.unfinalized_count) section.append(node("p", `Saved status: ${measure.status}; ${measure.finalized_count} finalized, ${measure.unfinalized_count} unfinalized.`, "small"));
     if (!measure.graded_count) section.append(node("p", "No eligible values are available for this measure.", "text-muted"));
+    section.append(table(["Grade", "Count", "Total graded students", "Percentage"],
+      high.map(item => [item.grade, item.count, item.total_graded_students, percent(item.percentage)]), `${title}: high-grade breakdown`));
+    section.append(node("p", "Combined categories overlap; do not add their counts. Grades are compared without rounding. Exactly 100 refers to this measure, not necessarily a perfect raw examination score.", "small text-muted"));
     const bands = measure.distribution.map((b, i) => ({...b, label: b.range, shortLabel: ["Strongly above", "Above", "Near", "Below", "Well below"][i]}));
     section.append(chart(bands, `${title}: distribution`, "Threshold reference range"));
     section.append(table(["Reference category", "Numerical range", "Count", "% of graded"], measure.distribution.map(b => [b.label, b.range, b.count, b.percentage]), `${title} — accessible distribution data`));
     if (includeFrequency && measure.frequency.length) {
       // A frequency chart adds exact-value concentration to the range chart.
-      const details = node("details"); details.append(node("summary", "Exact-grade frequency"));
+      const details = node("details", undefined, "gdm-collapsible"); details.append(node("summary", "Exact-grade frequency"));
       const frequencyChart = node("div");
       let offset = 0;
       const drawFrequency = () => frequencyChart.replaceChildren(chart(measure.frequency.slice(offset, offset + 25).map(f => ({...f, label: String(f.grade)})), `${title}: exact frequency (${offset + 1}–${Math.min(offset + 25, measure.frequency.length)})`, "Exact grade"));
@@ -90,8 +124,10 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   form.addEventListener("change", async event => {
     results.hidden = true;
+    form.removeAttribute("aria-busy");
     detailAbort?.abort();
     body.replaceChildren();
+    body.removeAttribute("aria-busy");
     window.bootstrap?.Modal.getInstance(modal)?.hide();
     status.textContent = "Filters changed. Click Apply Filters to refresh results.";
     if (!["campus_id", "academic_year_id"].includes(event.target.name)) return;
@@ -115,34 +151,59 @@ document.addEventListener("DOMContentLoaded", () => {
       if (error.name !== "AbortError") status.textContent = error.message;
     } finally { if (optionsAbort === thisAbort) button.disabled = false; }
   });
-  form.addEventListener("submit", () => { results.hidden = true; status.textContent = "Loading grade distribution…"; form.setAttribute("aria-busy", "true"); });
+  const beginSearch = () => { results.hidden = true; status.replaceChildren(loading("Retrieving grade distribution")); form.setAttribute("aria-busy", "true"); };
+  form.addEventListener("submit", beginSearch);
+  results.addEventListener("click", event => {
+    if (event.target.closest('.pagination a.page-link') && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) beginSearch();
+  });
   modal.addEventListener("show.bs.modal", async event => {
     opener = event.relatedTarget;
     detailAbort?.abort(); detailAbort = new AbortController();
     const thisAbort = detailAbort;
-    body.replaceChildren(node("p", "Loading class analytics…", "text-muted")); body.setAttribute("aria-busy", "true");
+    body.replaceChildren(loading("Retrieving class analytics")); body.setAttribute("aria-busy", "true");
     try {
       const response = await fetch(opener.dataset.analyticsUrl, {signal: thisAbort.signal, cache: "no-store", headers: {Accept: "application/json"}});
       const data = await response.json();
       if (thisAbort.signal.aborted || detailAbort !== thisAbort) return;
       if (!response.ok) throw new Error(data.errors?.join(" ") || "Analytics are unavailable. Apply Filters again.");
-      body.replaceChildren(node("p", `${data.faculty_name} · ${data.course_code} — ${data.course_title} · ${data.section} · ${data.campus} · ${data.school_year} / ${data.term} · ${data.period} · ${data.physical_period_label} · ${data.status}`));
-      body.append(node("p", `Coverage: ${data.graded_count}/${data.eligible_count} selected saved grades; ${data.missing_count} missing; ${data.status_excluded_count} excluded by status. Finalized: ${data.finalized_count}; unfinalized: ${data.unfinalized_count}. Incomplete underlying assessment sources: ${display(data.incomplete_source_count)}. Threshold: ${data.passing_threshold} (${data.threshold_source}).`));
-      data.notes.forEach(note => body.append(node("p", note, "small text-muted")));
+      const header = node("header", undefined, "gdm-class-header");
+      const labels = node("dl", undefined, "row mb-0");
+      for (const [label, value] of [["Faculty", data.faculty_name], ["Course", `${data.course_code} — ${data.course_title}`],
+        ["Class/section", data.section], ["Campus", data.campus], ["Academic year and term", `${data.school_year} / ${data.term}`],
+        ["Grading period", data.period], ["Grade status", data.status]]) {
+        labels.append(node("dt", label, "col-sm-4"));
+        const dd = node("dd", undefined, "col-sm-8");
+        dd.append(node(label === "Faculty" ? "h5" : "span", value, label === "Faculty" ? "mb-0" : "")); labels.append(dd);
+      }
+      header.append(labels); body.replaceChildren(header);
+      const coverage = node("dl", undefined, "gdm-coverage");
+      for (const [label, value] of [["Selected saved grades / eligible students", `${data.graded_count} / ${data.eligible_count}`],
+        ["Missing period grades", data.missing_count], ["Excluded by status", data.status_excluded_count],
+        ["Incomplete assessment sources", display(data.incomplete_source_count)],
+        ["Threshold reference", `${data.passing_threshold} (${data.threshold_source})`]]) {
+        const row = node("div"); row.append(node("dt", label), node("dd", value)); coverage.append(row);
+      }
+      body.append(coverage);
       body.append(renderMeasure(data, "Period grade", true));
       data.measures.forEach((measure, index) => {
         const section = renderMeasure(measure, measure.label, false);
         if (index < 2) body.append(section); // Saved examination and class-standing comparisons.
         else {
-          const details = node("details", undefined, "mb-3");
+          const details = node("details", undefined, "gdm-collapsible mb-3");
           details.append(node("summary", measure.analytics_state && measure.analytics_state !== "disclosed" ? `${measure.label}: ${measure.privacy_suppressed ? "Privacy suppressed" : "Unavailable"}` : `${measure.label}: Class Ave. ${display(measure.average)}; exactly 100: ${measure.exact_100_count}`), section);
           body.append(details);
         }
       });
+      const notes = node("details", undefined, "gdm-collapsible gdm-data-notes mt-3");
+      notes.append(node("summary", "Data Notes"));
+      const notesBody = node("div", undefined, "p-3");
+      notesBody.append(node("p", `Technical period: ${data.physical_period_label}. Finalized: ${data.finalized_count}; unfinalized: ${data.unfinalized_count}.`, "small"));
+      data.notes.forEach(note => notesBody.append(node("p", note, "small text-muted")));
+      notes.append(notesBody); body.append(notes);
     } catch (error) {
       if (error.name !== "AbortError") { const msg = node("div", error.message, "alert alert-warning"); msg.setAttribute("role", "alert"); body.replaceChildren(msg); }
     } finally { if (detailAbort === thisAbort) body.removeAttribute("aria-busy"); }
   });
-  modal.addEventListener("hidden.bs.modal", () => { detailAbort?.abort(); body.replaceChildren(); if (opener?.isConnected && !results.hidden) opener.focus(); });
-  window.addEventListener("pageshow", event => { if (event.persisted) { results.hidden = true; body.replaceChildren(); form.removeAttribute("aria-busy"); status.textContent = "Apply Filters again to refresh authorized results."; } });
+  modal.addEventListener("hidden.bs.modal", () => { detailAbort?.abort(); body.replaceChildren(); body.removeAttribute("aria-busy"); if (opener?.isConnected && !results.hidden) opener.focus(); });
+  window.addEventListener("pageshow", event => { form.removeAttribute("aria-busy"); status.replaceChildren(); if (event.persisted) { results.hidden = true; body.replaceChildren(); status.textContent = "Apply Filters again to refresh authorized results."; } });
 });

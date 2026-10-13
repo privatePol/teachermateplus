@@ -3406,6 +3406,9 @@ def grade_distribution_monitor_view(request):
             'Maximum',
             'Exactly 100 Count',
             'Exactly 100 %',
+            'Exactly 100 Total Graded Students',
+            *[f'{grade} {column}' for grade in ('Exactly 99', 'Exactly 98', 'Exactly 97', 'Exactly 96', 'Exactly 95', 'Combined 95–99', '90 and above')
+              for column in ('Count', 'Total Graded Students', '%')],
             'All Graded Values Exactly 100',
             'Threshold-Aware Distribution',
             'Historical',
@@ -3436,6 +3439,9 @@ def grade_distribution_monitor_view(request):
                 row['maximum'],
                 row['exact_100_count'],
                 row['exact_100_percentage'],
+                row['graded_count'],
+                *[item[column] for item in row['high_grade_breakdown'][1:]
+                  for column in ('count', 'total_graded_students', 'percentage')],
                 row['all_100'],
                 '; '.join((f"{b['label']} ({b['range']}): " + (f"{b['count']} ({b['percentage']}%)" if row['analytics_state'] == 'disclosed' else 'Withheld') for b in row['distribution'])),
                 row['historical'],
