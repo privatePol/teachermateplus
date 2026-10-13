@@ -638,3 +638,13 @@ class AdminHelpGuideTests(TestCase):
         response = self.client.get(reverse("admin_portal:guide"))
 
         self.assertNotContains(response, "Change a Published Template Using a Hotfix")
+
+
+class GradeDistributionGuideContentTests(TestCase):
+    def test_monitor_guide_explains_saved_status_scope_privacy_and_limits(self):
+        from apps.admin_portal.help_guide import ADMIN_HELP_SECTIONS
+        text = str(ADMIN_HELP_SECTIONS)
+        for phrase in ("Grade Distribution Monitor starts empty", "Apply Filters", "saved finalized and unfinalized", "not the department owning", "No individual student records", "500", "2,000", "not official grade equivalents", "Prelim", "Midterm, Pre-Final or Final", "five distinct students", "Complementary suppression", "nine", "suppressed analytics are never added to the missing-grade count"):
+            self.assertIn(phrase, text)
+        for phrase in ("Formula privacy", "weighted period", "affected analytic family", "Safely independent measures", "Unresolved formula dependencies"):
+            self.assertIn(phrase, text)

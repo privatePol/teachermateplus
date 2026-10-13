@@ -2,30 +2,28 @@ from __future__ import annotations
 
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlencode
 
-from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import models
-from django.db.models import Count
+from django.core.paginator import Paginator
+from django.db.models import BooleanField, Case, Count, F, Q, Value, When
+from django.utils import timezone
 
-from apps.academics.models import CourseOffering, FacultyAssignment
-from apps.admin_portal.services import AdminScopeService
-from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
+from apps.academics.models import CourseOffering
+from apps.admin_portal.grade_distribution_selection import MonitorSelection, faculty_name, logical_period
+from apps.admin_portal.grade_distribution_metrics import PrivacyFamily, component_measures, percentage, threshold_for
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
-from apps.grading.models import GradeActivity, GradingTemplatePeriod, StudentActivityScore, StudentPeriodGrade
-from apps.grading.services import FacultyGradingService, GradingGovernanceService
-
-User = get_user_model()
+from apps.grading.models import GradingTemplatePeriod, StudentPeriodGrade
+from apps.grading.services import GradingGovernanceService
 
 
 class GradeDistributionMonitorService:
-    """Read-only grade distribution analytics for academic governance monitoring."""
-
-    SOURCE_PERIOD = "period"
-    SOURCE_ACTIVITY = "activity"
-    REMOVED_FILTER_KEYS = ("course_id", "offering_id", "component_id", "subcomponent_id")
+    """Read-only, bounded class/physical-period aggregate analytics."""
+    PAGE_SIZE = 25
+    MAX_CLASS_ROWS = 500
+    MAX_SAVED_ROWS = 50000
+    MAX_ROSTER_ROWS = 50000
+    MAX_CLASS_STUDENTS = 2000
 
     DEFAULTS = {
         "high_grade_band_min": Decimal("90"),
@@ -47,564 +45,194 @@ class GradeDistributionMonitorService:
         "minimum_student_count_for_flag": "GRADE_DISTRIBUTION_MINIMUM_STUDENT_COUNT_FOR_FLAG",
     }
 
+    @staticmethod
+    def historical_offering_q(prefix=""):
+        """Same retained-history decision for saved records, limits and row rosters."""
+        today = timezone.localdate()
+        q = Q(**{prefix + "status__in": ("CLOSED", "ARCHIVED")})
+        q |= Q(**{prefix + "term__end_date__lt": today})
+        q |= Q(**{prefix + "term__end_date__isnull": True, prefix + "academic_year__end_date__lt": today})
+        for field in ("is_active", "academic_year__is_active", "term__is_active",
+                      "course__is_active", "section__is_active", "department__is_active", "program__is_active"):
+            q |= Q(**{prefix + field: False})
+        return q
+
+    @staticmethod
+    def retained_roster(offerings, tenant_id):
+        # Current student tenant is a defense against cross-tenant disclosure.
+        # Campus/year/term authority comes from the original enrollment and offering.
+        return Enrollment.objects.filter(
+            course_offering_id__in=offerings.values("id"), tenant_id=tenant_id,
+            campus_id=F("course_offering__campus_id"),
+            academic_year_id=F("course_offering__academic_year_id"),
+            term_id=F("course_offering__term_id"), student__tenant_id=tenant_id,
+        ).exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
+
+    @staticmethod
+    def live_roster_q():
+        return (Q(is_active=True, student__is_active=True, student__department__is_active=True,
+                  student__campus_id=F("course_offering__campus_id"))
+                & (Q(student__program__isnull=True) | Q(student__program__is_active=True)))
+
+    @classmethod
+    def validate_class_sizes(cls, offerings, saved, groups, tenant_id):
+        # At most MAX_CLASS_ROWS offering aggregates; no student IDs are loaded.
+        candidates = offerings.filter(id__in=groups.values("offering_id"))
+        historical_ids = set(candidates.filter(
+            Q(monitor_historical=True) | Q(id__in=saved.filter(template_period__is_active=False).values("offering_id"))
+        ).values_list("id", flat=True))
+        counts = cls.retained_roster(candidates, tenant_id).order_by().values("course_offering_id").annotate(
+            historical_count=Count("student_id", distinct=True),
+            live_count=Count("student_id", distinct=True, filter=cls.live_roster_q()),
+        )
+        for row in counts:
+            size = row["historical_count" if row["course_offering_id"] in historical_ids else "live_count"]
+            if size > cls.MAX_CLASS_STUDENTS:
+                raise ValidationError(f"A class exceeds the {cls.MAX_CLASS_STUDENTS:,} student analysis limit. Narrow your criteria; no records were truncated.")
+
+    @classmethod
+    def prepare(cls, request, selection=None, require_context=False):
+        selection = selection or MonitorSelection(request)
+        selection.validate()
+        if require_context or request.GET.get("context") or request.GET.get("page") or request.GET.get("export") or request.GET.get("detail"):
+            selection.validate_token()
+        elif request.GET.get("apply") != "1":
+            raise ValidationError("Select criteria and click Apply Filters.")
+        assignments = selection.filtered_assignments()
+        offerings = CourseOffering.objects.filter(id__in=assignments.values("offering_id")).annotate(
+            monitor_historical=Case(When(cls.historical_offering_q(), then=Value(True)),
+                                    default=Value(False), output_field=BooleanField())
+        ).order_by("id")
+        saved = StudentPeriodGrade.objects.filter(
+            offering_id__in=offerings.values("id"), tenant_id=selection.tenant_id,
+            campus_id=F("offering__campus_id"), template_period__template__tenant_id=selection.tenant_id,
+            student__tenant_id=selection.tenant_id,
+        ).filter(Q(student__campus_id=F("offering__campus_id")) | cls.historical_offering_q("offering__")
+                 | Q(template_period__is_active=False)).order_by()
+        # Period identities are resolved only after Apply; physical records remain
+        # distinct even if multiple templates share a logical period.
+        periods = list(GradingTemplatePeriod.objects.filter(id__in=saved.values("template_period_id"))[:2001])
+        if len(periods) > 2000:
+            raise ValidationError("Period mapping limit exceeded. Narrow the campus, faculty or department criteria.")
+        unresolved = sum(logical_period(p) is None for p in periods)
+        period_map = {p.id: p for p in periods if logical_period(p) == selection.selected["period"]}
+        saved = saved.filter(template_period_id__in=period_map)
+        if saved.count() > cls.MAX_SAVED_ROWS:
+            raise ValidationError(f"Search/export limit is {cls.MAX_SAVED_ROWS:,} saved grade records. Narrow your criteria.")
+        groups = saved.values("offering_id", "template_period_id").annotate(saved_count=Count("id")).order_by("offering_id", "template_period_id")
+        count = groups.count()
+        if count > cls.MAX_CLASS_ROWS:
+            raise ValidationError(f"Search/export limit is {cls.MAX_CLASS_ROWS} class/period rows. Narrow your criteria.")
+        if Enrollment.objects.filter(course_offering_id__in=offerings.values("id")).count() > cls.MAX_ROSTER_ROWS:
+            raise ValidationError(f"Search/export roster limit is {cls.MAX_ROSTER_ROWS:,} records. Narrow your criteria.")
+        cls.validate_class_sizes(offerings, saved, groups, selection.tenant_id)
+        return selection, assignments, offerings, saved, groups, period_map, unresolved, count
+
     @classmethod
     def build_context(cls, request):
-        selected = cls._selected_filters(request)
-        offerings_qs = cls._filtered_offerings(request, selected)
-        offerings = list(offerings_qs.distinct())
-        offering_ids = [offering.id for offering in offerings]
-        offering_map = {offering.id: offering for offering in offerings}
-
-        faculty_by_offering = cls._faculty_by_offering(offering_ids)
-        eligible_student_ids = cls._eligible_student_ids_by_offering(offering_ids)
-        active_counts = {
-            offering_id: len(student_ids)
-            for offering_id, student_ids in eligible_student_ids.items()
-        }
-        threshold_info = cls._passing_thresholds(offerings)
-        thresholds = threshold_info["thresholds"]
-        missing_template_offering_ids = threshold_info["missing_template_offering_ids"]
-        settings = cls._threshold_settings(request)
-
-        if selected["source"] == cls.SOURCE_ACTIVITY:
-            rows = cls._activity_rows(
-                offering_ids=offering_ids,
-                offering_map=offering_map,
-                faculty_by_offering=faculty_by_offering,
-                active_counts=active_counts,
-                eligible_student_ids=eligible_student_ids,
-                thresholds=thresholds,
-                missing_template_offering_ids=missing_template_offering_ids,
-                settings=settings,
-                selected=selected,
-            )
-        else:
-            rows = cls._period_rows(
-                offering_ids=offering_ids,
-                offering_map=offering_map,
-                faculty_by_offering=faculty_by_offering,
-                active_counts=active_counts,
-                eligible_student_ids=eligible_student_ids,
-                thresholds=thresholds,
-                missing_template_offering_ids=missing_template_offering_ids,
-                settings=settings,
-                selected=selected,
-            )
-
-        rows = cls._attach_comparison_averages(rows)
-        summary = cls._summary(rows, len(offering_ids), len(missing_template_offering_ids))
-        filter_options = cls._filter_options(request, offerings_qs, selected)
-
-        query_params = cls.sanitized_query(request)
-        query_params["export"] = "csv"
-
-        return {
-            "selected": selected,
-            "filter_options": filter_options,
-            "settings": settings,
-            "summary": summary,
-            "rows": rows,
-            "export_query": query_params.urlencode(),
-        }
+        selection = MonitorSelection(request)
+        context = {"selected": selection.selected, "filter_options": selection.options, "rows": [],
+                   "searched": False, "errors": [], "page_obj": None, "page_query": "", "export_query": ""}
+        if request.GET.get("apply") != "1" and not any(request.GET.get(k) for k in ("export", "page", "context")):
+            return context
+        try:
+            selection, assignments, offerings, saved, groups, periods, unresolved, count = cls.prepare(request, selection)
+            context["searched"] = True
+            if request.GET.get("export"):
+                candidates = list(groups)
+            else:
+                paginator = Paginator(groups, cls.PAGE_SIZE)
+                paginator.count = count  # Reuse the scope-wide grouped count; keep SQL LIMIT/OFFSET.
+                page = paginator.get_page(request.GET.get("page"))
+                candidates = list(page.object_list)
+                context["page_obj"] = page
+            context["rows"] = cls.rows(selection, assignments, offerings, saved, candidates, periods)
+            query = selection.query(selection.token())
+            context["page_query"] = query.urlencode()
+            query["export"] = "csv"
+            context["export_query"] = query.urlencode()
+            context["mapping_note"] = (f"{unresolved} saved physical period mapping(s) are unresolved and unavailable; sequence alone is not used." if unresolved else "")
+            context["result_count"] = count
+        except ValidationError as exc:
+            context["errors"] = exc.messages
+            context["searched"] = False
+            context["rows"] = []
+            context["page_obj"] = None
+        return context
 
     @classmethod
-    def _selected_filters(cls, request):
-        source = request.GET.get("source") or cls.SOURCE_PERIOD
-        if source not in {cls.SOURCE_PERIOD, cls.SOURCE_ACTIVITY}:
-            source = cls.SOURCE_PERIOD
-        campus_filter_value = (request.GET.get("campus_id") or "").strip().lower()
-        all_campuses = campus_filter_value == "all"
-        scope_campus_id = getattr(request, "scope", {}).get("campus_id")
-        return {
-            "source": source,
-            "campus_id": None if all_campuses else (cls._safe_int(request.GET.get("campus_id")) or scope_campus_id),
-            "all_campuses": all_campuses,
-            "department_id": cls._safe_int(request.GET.get("department_id")),
-            "academic_year_id": cls._safe_int(request.GET.get("academic_year_id")),
-            "term_id": cls._safe_int(request.GET.get("term_id")),
-            "faculty_id": cls._safe_int(request.GET.get("faculty_id")),
-            "period_id": cls._safe_int(request.GET.get("period_id")),
-        }
-
-    @classmethod
-    def _filtered_offerings(cls, request, selected):
-        assignment_qs = AdminScopeService.scoped_faculty_assignments(
-            request,
-            include_all_campuses=selected["all_campuses"],
-        ).filter(
-            is_active=True,
-            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
-            offering__status=CourseOffering.Status.OPEN,
-        )
-        if selected["campus_id"]:
-            assignment_qs = assignment_qs.filter(offering__campus_id=selected["campus_id"])
-        if selected["department_id"]:
-            department_ids = AdminScopeService.expand_department_filter_ids(
-                selected["department_id"],
-                campus_id=selected["campus_id"],
-            )
-            department_faculty_ids = User.objects.filter(
-                models.Q(default_department_id__in=department_ids)
-                | models.Q(
-                    user_roles__role__code="FACULTY",
-                    user_roles__is_active=True,
-                    user_roles__role__is_active=True,
-                    user_roles__department_id__in=department_ids,
-                )
-            ).values("id")
-            assignment_qs = assignment_qs.filter(faculty_user_id__in=department_faculty_ids)
-        if selected["academic_year_id"]:
-            assignment_qs = assignment_qs.filter(offering__academic_year_id=selected["academic_year_id"])
-        if selected["term_id"]:
-            assignment_qs = assignment_qs.filter(offering__term_id=selected["term_id"])
-        if selected["faculty_id"]:
-            assignment_qs = assignment_qs.filter(faculty_user_id=selected["faculty_id"])
-        offering_ids = assignment_qs.values("offering_id")
-        return CourseOffering.objects.filter(id__in=offering_ids).select_related(
-            "tenant",
-            "campus",
-            "department",
-            "program",
-            "academic_year",
-            "term",
-            "course",
-            "section",
-        )
-
-    @classmethod
-    def _faculty_by_offering(cls, offering_ids):
-        assignments = (
-            FacultyAssignment.objects.filter(
-                offering_id__in=offering_ids,
-                is_active=True,
-                response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
-            )
-            .select_related("faculty_user")
-            .order_by("offering_id", "-is_primary", "-accepted_at", "-assigned_at")
-        )
-        faculty_by_offering = {}
-        for assignment in assignments:
-            faculty_by_offering.setdefault(assignment.offering_id, assignment.faculty_user)
-        return faculty_by_offering
-
-    @classmethod
-    def _eligible_student_ids_by_offering(cls, offering_ids):
-        rows = (
-            Enrollment.objects.filter(
-                course_offering_id__in=offering_ids,
-                is_active=True,
-                student__is_active=True,
-                student__department__is_active=True,
-            )
-            .filter(
-                models.Q(student__program__isnull=True)
-                | models.Q(student__program__is_active=True)
-            )
-            .exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
-            .values_list("course_offering_id", "student_id")
-        )
-        student_ids = {offering_id: set() for offering_id in offering_ids}
-        for offering_id, student_id in rows:
-            student_ids.setdefault(offering_id, set()).add(student_id)
-        return student_ids
-
-    @staticmethod
-    def _eligible_period_grade_filter(eligible_student_ids):
-        query = models.Q(pk__in=[])
-        for offering_id, student_ids in eligible_student_ids.items():
-            if student_ids:
-                query |= models.Q(offering_id=offering_id, student_id__in=student_ids)
-        return query
-
-    @staticmethod
-    def _eligible_activity_score_filter(eligible_student_ids):
-        query = models.Q(pk__in=[])
-        for offering_id, student_ids in eligible_student_ids.items():
-            if student_ids:
-                query |= models.Q(
-                    activity__offering_id=offering_id,
-                    student_id__in=student_ids,
-                )
-        return query
-
-    @classmethod
-    def _passing_thresholds(cls, offerings):
-        thresholds = {}
-        missing_template_offering_ids = set()
-        tenant_threshold_cache = {}
-        for offering in offerings:
-            try:
-                thresholds[offering.id] = FacultyGradingService.resolve_passing_threshold(offering)
-            except ValidationError:
-                missing_template_offering_ids.add(offering.id)
-                if offering.tenant_id not in tenant_threshold_cache:
-                    tenant_raw = SystemSettingService.get(
-                        "PASSING_GRADE_THRESHOLD",
-                        tenant_id=offering.tenant_id,
-                        default="75",
-                    )
-                    tenant_threshold_cache[offering.tenant_id] = GradingGovernanceService._round(
-                        cls._decimal(tenant_raw, Decimal("75.00"))
-                    )
-                thresholds[offering.id] = tenant_threshold_cache[offering.tenant_id]
-        return {
-            "thresholds": thresholds,
-            "missing_template_offering_ids": missing_template_offering_ids,
-        }
-
-    @classmethod
-    def _period_rows(
-        cls,
-        offering_ids,
-        offering_map,
-        faculty_by_offering,
-        active_counts,
-        eligible_student_ids,
-        thresholds,
-        missing_template_offering_ids,
-        settings,
-        selected,
-    ):
-        grades = StudentPeriodGrade.objects.filter(
-            offering_id__in=offering_ids,
-            period_grade__isnull=False,
-        ).filter(cls._eligible_period_grade_filter(eligible_student_ids))
-        if selected["period_id"]:
-            grades = grades.filter(template_period_id=selected["period_id"])
-
-        grouped = defaultdict(list)
-        period_names = {}
-        for row in grades.values(
-            "offering_id",
-            "template_period_id",
-            "template_period__name",
-            "student__student_no",
-            "student__first_name",
-            "student__last_name",
-            "period_grade",
-        ):
-            group_key = (row["offering_id"], row["template_period_id"])
-            grouped[group_key].append(
-                cls._grade_detail(
-                    student_no=row["student__student_no"],
-                    first_name=row["student__first_name"],
-                    last_name=row["student__last_name"],
-                    value=row["period_grade"],
-                )
-            )
-            period_names[group_key] = row["template_period__name"]
-
+    def rows(cls, selection, assignments, offerings, saved, candidates, periods, detail=False):
+        offering_ids = {c["offering_id"] for c in candidates}
+        offering_map = {o.id: o for o in offerings.filter(id__in=offering_ids).select_related(
+            "campus", "tenant", "department", "program", "course", "section", "academic_year", "term")}
+        faculty_map = defaultdict(list)
+        for a in assignments.filter(offering_id__in=offering_ids).select_related("faculty_user").order_by("faculty_user__last_name", "faculty_user__first_name", "faculty_user_id"):
+            faculty_map[a.offering_id].append(faculty_name(a.faculty_user))
         rows = []
-        for (offering_id, period_id), values in grouped.items():
-            offering = offering_map.get(offering_id)
-            if not offering:
-                continue
-            period_name = period_names.get((offering_id, period_id))
-            rows.append(
-                cls._build_metric_row(
-                    source_label="Period Grade",
-                    level_label="Period Grade",
-                    activity_title="",
-                    offering=offering,
-                    faculty=faculty_by_offering.get(offering_id),
-                    period_name=period_name or "-",
-                    component_name="",
-                    subcomponent_name="",
-                    grade_details=values,
-                    active_count=active_counts.get(offering_id, 0),
-                    passing_threshold=thresholds.get(offering_id, Decimal("75.00")),
-                    missing_template=offering_id in missing_template_offering_ids,
-                    settings=settings,
+        for candidate in candidates:
+            offering = offering_map[candidate["offering_id"]]
+            period = periods[candidate["template_period_id"]]
+            historical = offering.monitor_historical or not period.is_active
+            enrollment_qs = cls.retained_roster(offerings.filter(id=offering.id), offering.tenant_id)
+            if not historical:
+                enrollment_qs = enrollment_qs.filter(cls.live_roster_q())
+            student_ids = set(enrollment_qs.values_list("student_id", flat=True).distinct()[:cls.MAX_CLASS_STUDENTS + 1])
+            if len(student_ids) > cls.MAX_CLASS_STUDENTS:
+                raise ValidationError(f"A class exceeds the {cls.MAX_CLASS_STUDENTS:,} student analysis limit. Narrow your criteria; no records were truncated.")
+            records = list(saved.filter(offering=offering, template_period=period, student_id__in=student_ids).values(
+                "student_id", "period_grade", "exam_grade", "class_standing_grade", "is_finalized"))
+            status = selection.selected["status"]
+            chosen = [r for r in records if status == "all" or r["is_finalized"] == (status == "finalized")]
+            valued = [r for r in chosen if r["period_grade"] is not None]
+            t, source = threshold_for(offering)
+            privacy = PrivacyFamily({r["student_id"]: r["is_finalized"] for r in records}, status, t)
+            # Plan all sources before even the summary/CSV statistic is released.
+            period_metrics, measures, notes, incomplete = component_measures(
+                offering, period, records, student_ids, t, historical, privacy)
+            saved_ids = {r["student_id"] for r in records if r["period_grade"] is not None}
+            excluded = sum(r["period_grade"] is not None for r in records) - len(valued)
+            row = {
+                "offering_id": offering.id, "physical_period_id": period.id,
+                "faculty_name": "; ".join(faculty_map[offering.id]), "campus": offering.campus.code,
+                "department": offering.department.code, "course_code": offering.course.code, "course_title": offering.course.title,
+                "section": offering.section.code, "school_year": offering.academic_year.code, "term": offering.term.code,
+                "period": next(p["label"] for p in selection.options["periods"] if p["id"] == logical_period(period)),
+                "physical_period_label": f"Physical period #{period.id}",
+                "passing_threshold": t, "threshold_source": source,
+                "missing_count": max(len(student_ids) - len(saved_ids), 0), "status_excluded_count": excluded,
+                "coverage_rate": percentage(len(saved_ids), len(student_ids)),
+                "historical": historical,
+                "notes": (["Historical roster uses retained enrollment associations, including inactive records except non-grading statuses. Current student campus, department and program do not alter this retained cohort. Original roster and threshold snapshots are unavailable. Threshold shown is currently resolved."] if historical else []),
+                **period_metrics,
+            }
+            row["detail_query"] = selection.query(selection.token()).urlencode()
+            if candidate["saved_count"] > len(records):
+                row["notes"].append(
+                    f'{candidate["saved_count"] - len(records)} saved record(s) are outside the dependable eligible roster and are omitted.'
                 )
-            )
+            if historical and not student_ids:
+                row["notes"].append("No dependable eligible enrollment associations remain; saved grades cannot establish an original roster on their own.")
+            if detail:
+                row["measures"], row["incomplete_source_count"] = measures, incomplete
+                row["notes"].extend(notes)
+                row["notes"].append("Saved unfinalized grades may change. Monitor ranges are reference categories, not official grade equivalents. Percentages round independently to two decimal places.")
+            rows.append(row)
         return rows
 
     @classmethod
-    def _activity_rows(
-        cls,
-        offering_ids,
-        offering_map,
-        faculty_by_offering,
-        active_counts,
-        eligible_student_ids,
-        thresholds,
-        missing_template_offering_ids,
-        settings,
-        selected,
-    ):
-        scores = StudentActivityScore.objects.filter(
-            activity__offering_id__in=offering_ids,
-            activity__is_active=True,
-            is_active=True,
-            computed_score__isnull=False,
-        ).filter(cls._eligible_activity_score_filter(eligible_student_ids))
-        if selected["period_id"]:
-            scores = scores.filter(activity__template_period_id=selected["period_id"])
-
-        activity_ids = list(scores.values_list("activity_id", flat=True).distinct())
-        activity_map = {
-            activity.id: activity
-            for activity in GradeActivity.objects.filter(id__in=activity_ids).select_related(
-                "offering",
-                "template_period",
-                "template_component",
-                "template_subcomponent",
-                "template_detail",
-            )
-        }
-        grouped = defaultdict(list)
-        for row in scores.values(
-            "activity_id",
-            "student__student_no",
-            "student__first_name",
-            "student__last_name",
-            "computed_score",
-        ):
-            grouped[row["activity_id"]].append(
-                cls._grade_detail(
-                    student_no=row["student__student_no"],
-                    first_name=row["student__first_name"],
-                    last_name=row["student__last_name"],
-                    value=row["computed_score"],
-                )
-            )
-
-        rows = []
-        for activity_id, values in grouped.items():
-            activity = activity_map.get(activity_id)
-            if not activity:
-                continue
-            offering = offering_map.get(activity.offering_id)
-            if not offering:
-                continue
-            rows.append(
-                cls._build_metric_row(
-                    source_label="Activity Score",
-                    level_label="Activity",
-                    activity_title=activity.title,
-                    offering=offering,
-                    faculty=faculty_by_offering.get(activity.offering_id),
-                    period_name=activity.template_period.name,
-                    component_name=activity.template_component.name,
-                    subcomponent_name=activity.template_subcomponent.name if activity.template_subcomponent else "",
-                    grade_details=values,
-                    active_count=active_counts.get(activity.offering_id, 0),
-                    passing_threshold=thresholds.get(activity.offering_id, Decimal("75.00")),
-                    missing_template=activity.offering_id in missing_template_offering_ids,
-                    settings=settings,
-                )
-            )
-        return rows
-
-    @classmethod
-    def _build_metric_row(
-        cls,
-        *,
-        source_label,
-        level_label,
-        activity_title,
-        offering,
-        faculty,
-        period_name,
-        component_name,
-        subcomponent_name,
-        grade_details,
-        active_count,
-        passing_threshold,
-        missing_template,
-        settings,
-    ):
-        grade_details = sorted(
-            grade_details,
-            key=lambda item: (item["masked_name"], item["masked_student_no"], item["grade"]),
-        )
-        values = [detail["grade"] for detail in grade_details]
-        graded_count = len(values)
-        average = cls._round(sum(values) / Decimal(graded_count)) if graded_count else None
-        highest = max(values) if values else None
-        lowest = min(values) if values else None
-        spread = cls._round(highest - lowest) if highest is not None and lowest is not None else None
-        high_min = settings["high_grade_band_min"]
-        high_max = settings["high_grade_band_max"]
-        high_count = sum(1 for value in values if high_min <= value <= high_max)
-        below_passing = sum(1 for value in values if value < passing_threshold)
-        exact_100 = sum(1 for value in values if value == Decimal("100"))
-        incomplete = active_count > 0 and graded_count < active_count
-        flags = cls._flags(
-            graded_count=graded_count,
-            high_pct=cls._pct(high_count, graded_count),
-            exact_100_pct=cls._pct(exact_100, graded_count),
-            spread=spread,
-            incomplete=incomplete,
-            missing_template=missing_template,
-            settings=settings,
-        )
-        return {
-            "source_label": source_label,
-            "level_label": level_label,
-            "activity_title": activity_title,
-            "faculty_name": cls._user_name(faculty),
-            "campus": offering.campus.code,
-            "department": offering.department.code,
-            "course_code": offering.course.code,
-            "course_title": offering.course.title,
-            "section": offering.section.code,
-            "school_year": offering.academic_year.code,
-            "term": offering.term.code,
-            "period": period_name,
-            "component": component_name,
-            "subcomponent": subcomponent_name,
-            "graded_count": graded_count,
-            "active_count": active_count,
-            "average": average,
-            "highest": cls._round(highest) if highest is not None else None,
-            "lowest": cls._round(lowest) if lowest is not None else None,
-            "spread": spread,
-            "high_pct": cls._pct(high_count, graded_count),
-            "below_passing_pct": cls._pct(below_passing, graded_count),
-            "distribution": AcademicPerformanceInsightService._distribution(values, passing_threshold),
-            "passing_threshold": passing_threshold,
-            "no_grade_count": max(active_count - graded_count, 0),
-            "coverage_rate": cls._pct(graded_count, active_count),
-            "exact_100_pct": cls._pct(exact_100, graded_count),
-            "flags": flags,
-            "missing_template": missing_template,
-            "grade_details": [
-                {
-                    "masked_student_no": detail["masked_student_no"],
-                    "masked_name": detail["masked_name"],
-                    "grade": cls._round(detail["grade"]),
-                }
-                for detail in grade_details
-            ],
-            "has_review_flag": any(flag["kind"] == "review" for flag in flags),
-            "department_key": (offering.campus_id, offering.department_id, period_name),
-            "course_key": (offering.course_id, period_name),
-        }
-
-    @classmethod
-    def _flags(cls, *, graded_count, high_pct, exact_100_pct, spread, incomplete, missing_template, settings):
-        flags = []
-        if missing_template:
-            flags.append({"label": "No template", "class": "text-bg-warning", "kind": "status"})
-        min_count = settings["minimum_student_count_for_flag"]
-        if graded_count == 0 or incomplete:
-            flags.append({"label": "Incomplete Data", "class": "text-bg-secondary", "kind": "status"})
-            return flags
-        if graded_count < min_count:
-            flags.append({"label": "Small Sample", "class": "text-bg-info", "kind": "status"})
-            return flags
-        if high_pct >= settings["high_grade_concentration_threshold_percent"]:
-            flags.append({"label": "High Grade Concentration", "class": "text-bg-warning", "kind": "review"})
-        if exact_100_pct >= settings["exact_100_threshold_percent"]:
-            flags.append({"label": "High Perfect Score Rate", "class": "text-bg-warning", "kind": "review"})
-        if spread is not None and spread <= settings["low_variation_threshold"]:
-            flags.append({"label": "Low Grade Variation", "class": "text-bg-warning", "kind": "review"})
-        if not flags:
-            flags.append({"label": "No Review Flag", "class": "text-bg-success", "kind": "status"})
-        return flags
-
-    @classmethod
-    def _attach_comparison_averages(cls, rows):
-        department_values = defaultdict(list)
-        course_values = defaultdict(list)
-        for row in rows:
-            if row["average"] is not None:
-                department_values[row["department_key"]].append(row["average"])
-                course_values[row["course_key"]].append(row["average"])
-        for row in rows:
-            dept_values = department_values.get(row["department_key"], [])
-            course_values_for_row = course_values.get(row["course_key"], [])
-            row["department_average"] = cls._round(sum(dept_values) / Decimal(len(dept_values))) if dept_values else None
-            row["subject_average"] = (
-                cls._round(sum(course_values_for_row) / Decimal(len(course_values_for_row)))
-                if course_values_for_row
-                else None
-            )
-        return sorted(
-            rows,
-            key=lambda row: (
-                0 if row["has_review_flag"] else 1,
-                0 if any(flag["label"] == "Incomplete Data" for flag in row["flags"]) else 1,
-                -row["high_pct"],
-                row["faculty_name"],
-                row["course_code"],
-            ),
-        )
-
-    @classmethod
-    def _summary(cls, rows, offering_count, missing_template_offering_count=0):
-        review_rows = sum(1 for row in rows if row["has_review_flag"])
-        incomplete_rows = sum(1 for row in rows if any(flag["label"] == "Incomplete Data" for flag in row["flags"]))
-        high_concentration_rows = sum(
-            1 for row in rows if any(flag["label"] == "High Grade Concentration" for flag in row["flags"])
-        )
-        high_perfect_rows = sum(
-            1 for row in rows if any(flag["label"] == "High Perfect Score Rate" for flag in row["flags"])
-        )
-        return {
-            "offerings": offering_count,
-            "rows": len(rows),
-            "review_rows": review_rows,
-            "incomplete_rows": incomplete_rows,
-            "high_concentration_rows": high_concentration_rows,
-            "high_perfect_rows": high_perfect_rows,
-            "missing_template_offerings": missing_template_offering_count,
-        }
-
-    @classmethod
-    def _filter_options(cls, request, offerings_qs, selected):
-        scoped_offerings = list(offerings_qs.distinct()[:500])
-        offering_ids = [offering.id for offering in scoped_offerings]
-        template_ids = set()
-        for offering in scoped_offerings[:200]:
-            try:
-                template = FacultyGradingService.resolve_template_for_offering(offering)
-            except ValidationError:
-                template = None
-            if template:
-                template_ids.add(template.id)
-        recorded_period_ids = set(
-            StudentPeriodGrade.objects.filter(offering_id__in=offering_ids).values_list(
-                "template_period_id",
-                flat=True,
-            )
-        )
-        recorded_period_ids.update(
-            GradeActivity.objects.filter(offering_id__in=offering_ids).values_list(
-                "template_period_id",
-                flat=True,
-            )
-        )
-        periods = (
-            GradingTemplatePeriod.objects.filter(
-                models.Q(template_id__in=template_ids) | models.Q(id__in=recorded_period_ids),
-                is_active=True,
-            )
-            .select_related("template", "template__tenant")
-            .distinct()
-        )
-        return {
-            "campuses": AdminScopeService.active_scoped_campuses(request).order_by("code"),
-            "departments": AdminScopeService.active_scoped_departments(request).order_by("code"),
-            "academic_years": AdminScopeService.active_scoped_academic_years(request).order_by("-start_date"),
-            "terms": AdminScopeService.active_scoped_terms(request).order_by("-academic_year__start_date", "sequence_no"),
-            "faculty": User.objects.filter(
-                id__in=AdminScopeService.scoped_faculty_users(
-                    request,
-                    include_all_campuses=selected["all_campuses"],
-                )
-            )
-            .filter(id__in=FacultyAssignment.objects.filter(offering_id__in=offering_ids).values("faculty_user_id"))
-            .order_by("last_name", "first_name", "username"),
-            "periods": periods.order_by("template__name", "sequence_no"),
-        }
+    def detail(cls, request, offering_id, period_id):
+        selection, assignments, offerings, saved, groups, periods, unresolved, count = cls.prepare(request, require_context=True)
+        candidates = list(groups.filter(offering_id=offering_id, template_period_id=period_id)[:1])
+        if not candidates:
+            return None
+        return cls.rows(selection, assignments, offerings, saved, candidates, periods, detail=True)[0]
 
     @classmethod
     def sanitized_query(cls, request):
         query = request.GET.copy()
-        for key in cls.REMOVED_FILTER_KEYS:
-            query.pop(key, None)
+        for key in list(query):
+            if key not in {*MonitorSelection.FILTER_KEYS, "apply", "context", "page", "export"}:
+                query.pop(key)
         return query
 
     @classmethod
@@ -637,51 +265,3 @@ class GradeDistributionMonitorService:
     @staticmethod
     def _round(value):
         return GradingGovernanceService._round(Decimal(value))
-
-    @classmethod
-    def _grade_detail(cls, *, student_no, first_name, last_name, value):
-        return {
-            "masked_student_no": cls._mask_student_no(student_no),
-            "masked_name": cls._mask_student_name(first_name=first_name, last_name=last_name),
-            "grade": cls._decimal(value, Decimal("0")),
-        }
-
-    @staticmethod
-    def _mask_student_no(value):
-        raw = str(value or "").strip()
-        if not raw:
-            return "Masked"
-        visible = raw[-3:] if len(raw) > 3 else ""
-        masked_length = max(len(raw) - len(visible), 3)
-        return f"{'*' * masked_length}{visible}"
-
-    @staticmethod
-    def _mask_name_part(value):
-        raw = str(value or "").strip()
-        if not raw:
-            return "***"
-        return f"{raw[:1].upper()}***"
-
-    @classmethod
-    def _mask_student_name(cls, *, first_name, last_name):
-        return f"{cls._mask_name_part(first_name)} {cls._mask_name_part(last_name)}"
-
-    @staticmethod
-    def _pct(value, total):
-        if not total:
-            return Decimal("0.0")
-        return ((Decimal(value) / Decimal(total)) * Decimal("100")).quantize(Decimal("0.1"))
-
-    @staticmethod
-    def _user_name(user):
-        if not user:
-            return "Unassigned"
-        full_name = f"{user.first_name} {user.last_name}".strip()
-        return full_name or user.username
-
-
-def build_grade_distribution_query(base_query, **extra):
-    query = base_query.copy()
-    for key, value in extra.items():
-        query[key] = value
-    return urlencode(query, doseq=True)

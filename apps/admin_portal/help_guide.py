@@ -796,6 +796,57 @@ ADMIN_HELP_SECTIONS = [
                     ),
                     "Set the campus, academic year, term, period, course, or status filters before reviewing results.",
                     (
+                        "Complementary suppression also applies when comparing All Statuses, Finalized, Unfinalized or "
+                        "overlapping measure populations could isolate fewer than five students. For example, nine "
+                        "finalized plus one unfinalized prevents disclosure for all three selections. Different measures "
+                        "can have different availability; suppressed analytics are never added to the missing-grade count."
+                    ),
+                    (
+                        "Formula privacy also considers saved examination and class-standing totals, weighted period "
+                        "grades, components, activities and attendance sources before any statistics are returned. "
+                        "If a small source could be reconstructed through related grading formulas, the affected analytic family "
+                        "has its dependent totals and unsafe breakdowns withheld, including otherwise large totals. "
+                        "Safely independent measures, safe sibling breakdowns and unaffected classes remain available. Unresolved formula dependencies are handled "
+                        "conservatively; withheld statistics are never sent to charts or hidden in the browser."
+                    ),
+                    (
+                        "Detailed grade analytics require at least five distinct students with eligible non-null saved "
+                        "values for each measure; zero counts as a saved value. Classes stay visible, and privacy suppression "
+                        "is separate from missing grades or unavailable assessment sources. Summary, modal, charts and CSV "
+                        "withhold averages, min/max, exact frequencies, band counts/percentages and exact-100 analytics "
+                        "when suppressed. General threshold definitions and coverage remain visible."
+                    ),
+
+                    (
+                        "Grade Distribution Monitor starts empty. Select Academic Year, Term and one of Prelim, "
+                        "Midterm, Pre-Final or Final, then click Apply Filters. Final Exam belongs within Final. "
+                        "Changing criteria clears displayed results; Clear returns to the empty state. Faculty Department "
+                        "filters supervised faculty relationships, not the department owning the course offering."
+                    ),
+                    (
+                        "All Statuses includes current saved finalized and unfinalized period grades. Saved unfinalized "
+                        "grades may change. Missing grades, genuine zeroes and values excluded by a status filter are "
+                        "separate. Class Ave. is the arithmetic mean of eligible saved non-null period grades."
+                    ),
+                    (
+                        "Use View Analytics for aggregate distributions, coverage, minimum/maximum and exactly-100 "
+                        "counts. Additional component charts are collapsed. No individual student records or masked identifiers are shown or exported. Numerical "
+                        "threshold ranges and counts are visible in the main table. They are monitor reference categories, not official grade equivalents or misconduct judgments."
+                    ),
+                    (
+                        "Examination and class-standing saved totals can exceed 100 when major components are added. "
+                        "Current component grades and actual raw examination percentages are shown separately when reliable; "
+                        "configured grades of 100 do not necessarily mean a perfect raw examination. Historical ended terms and closed or "
+                        "archived classes use retained accepted assignments and enrollment associations despite same-tenant student campus, department or program transfers; unavailable original "
+                        "rosters, formulas, thresholds and physical-period mappings are explained without inventing calculations."
+                    ),
+                    (
+                        "Monitor pages show 25 class/physical-period rows. Search and CSV exports are limited to 500 "
+                        "class/period rows, 50,000 saved grades and roster associations, and 2,000 students per class. "
+                        "Narrow criteria when a limit is exceeded. Exports and detail requests require a valid authorized "
+                        "search context, valid for one hour; Apply Filters again after expiration or scope changes."
+                    ),
+                    (
                         "For Midterm Exam Performance, select the Midterm examination cycle, then use Load more "
                         "to show additional course tables and sections. Each heading shows COURSE CODE | COURSE TITLE; "
                         "ranked sections appear in numeric rank order, followed by unranked sections. An exact Course "

@@ -1,354 +1,73 @@
 {% extends "admin_portal/base.html" %}
-
+{% load static %}
 {% block admin_content %}
 <style>
-  .grade-distribution-loading-overlay {
-    align-items: center;
-    background: rgba(255, 255, 255, 0.78);
-    bottom: 0;
-    display: none;
-    justify-content: center;
-    left: 0;
-    position: fixed;
-    right: 0;
-    top: 0;
-    z-index: 1080;
-  }
-  .grade-distribution-loading-overlay.is-visible {
-    display: flex;
-  }
-  .grade-distribution-loading-panel {
-    background: #fff;
-    border: 1px solid rgba(25, 70, 42, 0.14);
-    border-radius: 8px;
-    box-shadow: 0 18px 40px rgba(21, 48, 31, 0.18);
-    max-width: 380px;
-    padding: 1.1rem;
-    width: calc(100% - 2rem);
-  }
-  .grade-distribution-loading-bar {
-    height: 4px;
-    overflow: hidden;
-  }
-  .distribution-detail-trigger {
-    color: #0f5132;
-    font-weight: 700;
-    line-height: 1.2;
-    text-decoration: none;
-  }
-  .distribution-detail-trigger:hover,
-  .distribution-detail-trigger:focus {
-    color: #0a3622;
-    text-decoration: underline;
-  }
-  .distribution-detail-table th,
-  .distribution-detail-table td {
-    white-space: nowrap;
-  }
+.gdm-band-ranges{min-width:15rem}.gdm-band-ranges>div{display:flex;gap:.5rem;justify-content:space-between}
+.gdm-distribution {display:flex;min-width:9rem;height:1rem;border-radius:.25rem;overflow:hidden;background:#eee}
+.gdm-distribution span:nth-child(1) {background:#14532d}.gdm-distribution span:nth-child(2) {background:#29814a}.gdm-distribution span:nth-child(3) {background:#a67800}.gdm-distribution span:nth-child(4) {background:#b45309}.gdm-distribution span:nth-child(5) {background:#9f1239}
+.gdm-chart {width:100%;height:auto;max-height:280px}.gdm-chart text {font-size:12px;fill:#28352e}.gdm-chart rect {fill:#20613c}
+.gdm-measure {border-top:1px solid #ddd;padding-top:1rem;margin-top:1rem}.gdm-chart-wrap {overflow-x:auto}.gdm-summary {display:flex;flex-wrap:wrap;gap:1rem}
 </style>
-
-<div class="grade-distribution-loading-overlay" id="gradeDistributionLoadingOverlay" aria-live="polite" aria-hidden="true">
-  <div class="grade-distribution-loading-panel">
-    <div class="d-flex align-items-center gap-2 mb-3">
-      <div class="spinner-border spinner-border-sm text-success" role="status" aria-hidden="true"></div>
-      <strong>Loading grade distribution</strong>
-    </div>
-    <div class="progress grade-distribution-loading-bar" role="progressbar" aria-label="Loading grade distribution">
-      <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="width: 100%"></div>
-    </div>
+<div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+  <div><h2 class="h4 mb-1">Faculty Grade Distribution Monitor</h2><p class="text-muted small mb-0">Read-only class aggregates for faculty under your supervision. Saved unfinalized grades may change.</p></div>
+  <a class="btn btn-sm btn-outline-secondary align-self-start" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+</div>
+<form method="get" class="card card-body mb-3" id="gradeDistributionFilterForm">
+  <input type="hidden" name="apply" value="1">
+  <div class="row g-3">
+    <div class="col-sm-6 col-lg-3"><label class="form-label" for="gdm-campus">Campus</label><select id="gdm-campus" class="form-select" name="campus_id" required>
+      <option value="all" {% if selected.campus_id == "all" %}selected{% endif %}>All Authorized Campuses</option>
+      {% for c in filter_options.campuses %}<option value="{{ c.id }}" {% if selected.campus_id == c.id|stringformat:"s" %}selected{% endif %}>{{ c.code }}</option>{% endfor %}
+    </select></div>
+    <div class="col-sm-6 col-lg-3"><label class="form-label" for="gdm-year">Academic Year</label><select id="gdm-year" class="form-select" name="academic_year_id" required><option value="">Select Academic Year</option>
+      {% for y in filter_options.academic_years %}<option value="{{ y.id }}" {% if selected.academic_year_id == y.id|stringformat:"s" %}selected{% endif %}>{{ y.code }}</option>{% endfor %}
+    </select></div>
+    <div class="col-sm-6 col-lg-3"><label class="form-label" for="gdm-term">Term</label><select id="gdm-term" class="form-select" name="term_id" required><option value="">Select Term</option>
+      {% for t in filter_options.terms %}<option value="{{ t.id }}" {% if selected.term_id == t.id|stringformat:"s" %}selected{% endif %}>{{ t.academic_year.code }} / {{ t.name }}</option>{% endfor %}
+    </select></div>
+    <div class="col-sm-6 col-lg-3"><label class="form-label" for="gdm-period">Grading Period</label><select id="gdm-period" class="form-select" name="period" required><option value="">Select Grading Period</option>
+      {% for p in filter_options.periods %}<option value="{{ p.id }}" {% if selected.period == p.id %}selected{% endif %}>{{ p.label }}</option>{% endfor %}
+    </select><div class="form-text">FINAL EXAM is a component within FINAL.</div></div>
+    <div class="col-sm-6 col-lg-4"><label class="form-label" for="gdm-faculty">Faculty</label><select id="gdm-faculty" class="form-select" name="faculty_id"><option value="">All Eligible Faculty</option>
+      {% for f in filter_options.faculty %}<option value="{{ f.id }}" {% if selected.faculty_id == f.id|stringformat:"s" %}selected{% endif %}>{{ f.label }}</option>{% endfor %}
+    </select></div>
+    <div class="col-sm-6 col-lg-4"><label class="form-label" for="gdm-department">Faculty Department</label><select id="gdm-department" class="form-select" name="department_id"><option value="">All Eligible Departments</option>
+      {% for d in filter_options.departments %}<option value="{{ d.id }}" {% if selected.department_id == d.id|stringformat:"s" %}selected{% endif %}>{{ d.label }}</option>{% endfor %}
+    </select></div>
+    <div class="col-sm-6 col-lg-4"><label class="form-label" for="gdm-status">Saved Grade Status</label><select id="gdm-status" class="form-select" name="status">
+      <option value="all" {% if selected.status == "all" %}selected{% endif %}>All Statuses</option><option value="finalized" {% if selected.status == "finalized" %}selected{% endif %}>Finalized</option><option value="unfinalized" {% if selected.status == "unfinalized" %}selected{% endif %}>Unfinalized</option>
+    </select></div>
   </div>
+  <div class="d-flex gap-2 mt-3"><button type="submit" class="btn btn-success">Apply Filters</button><a class="btn btn-outline-secondary" href="{% url 'admin_portal:grade_distribution_monitor' %}">Clear</a></div>
+  <p class="small text-muted mt-2 mb-0">25 rows per page. Search/export limits: 500 class/period rows, 50,000 saved grades and roster associations, 2,000 students per class. Narrow criteria if a limit is exceeded.</p>
+</form>
+<div id="gdm-filter-status" role="status" aria-live="polite" class="mb-3"></div>
+{% for error in errors %}<div class="alert alert-warning" role="alert">{{ error }}</div>{% endfor %}
+<div id="gdm-results">
+{% if searched %}
+  {% if mapping_note %}<p class="alert alert-info">{{ mapping_note }}</p>{% endif %}
+  <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><p class="mb-0">{{ result_count }} class/period rows. Separate physical periods remain separate rows.</p><a class="btn btn-sm btn-outline-success" href="?{{ export_query }}">Export CSV</a></div>
+  <div class="table-responsive"><table class="table table-sm align-middle"><caption>Threshold-Aware Distribution of eligible saved period grades. Reference categories are not official grade equivalents.</caption>
+  <thead><tr><th scope="col">Faculty</th><th scope="col">Class / Course</th><th scope="col">Grading Period</th><th scope="col">Coverage</th><th scope="col">Threshold</th><th scope="col">Class Ave.</th><th scope="col">Threshold-Aware Distribution</th><th scope="col">View Analytics</th></tr></thead>
+  <tbody>{% for row in rows %}<tr>
+    <td>{{ row.faculty_name }}</td><td><strong>{{ row.course_code }}</strong><div class="small">{{ row.course_title }} &middot; {{ row.section }} &middot; {{ row.campus }}</div>{% if row.historical %}<span class="badge text-bg-secondary">Historical</span>{% endif %}</td>
+    <td>{{ row.period }}<div class="small text-muted">{{ row.physical_period_label }}</div><span class="small">{{ row.status }}</span></td>
+    <td>{{ row.graded_count }} / {{ row.eligible_count }}<div class="small">{{ row.missing_count }} missing{% if row.status_excluded_count %}; {{ row.status_excluded_count }} excluded by status{% endif %}</div></td>
+    <td>{{ row.passing_threshold }}{% if row.historical %}<div class="small">Current reference</div>{% endif %}<div class="small text-muted">{{ row.threshold_source }}</div></td><td>{% if row.privacy_suppressed %}<span class="text-muted">Privacy suppressed</span>{% else %}{{ row.average|default_if_none:"Unavailable" }}{% endif %}</td>
+    <td>{% if row.analytics_state == "disclosed" %}<div class="gdm-distribution" aria-hidden="true">{% for b in row.distribution %}<span style="width:{{ b.percentage }}%"></span>{% endfor %}</div>{% else %}<p class="small text-muted mb-1">{{ row.privacy_message }}</p>{% endif %}
+      <dl class="gdm-band-ranges small mt-1 mb-0">{% for b in row.distribution %}<div><dt class="fw-normal">{{ b.label }} <span class="text-muted">({{ b.range }})</span></dt><dd class="mb-0 fw-semibold">{{ b.count|default_if_none:"Withheld" }}</dd></div>{% endfor %}</dl>
+      {% if row.analytics_state == "disclosed" %}<span class="visually-hidden">{% for b in row.distribution %}{{ b.label }} ({{ b.range }}): {{ b.count }}, {{ b.percentage }}%. {% endfor %}</span>{% endif %}
+    </td><td><button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#gradeDistributionAnalyticsModal" data-analytics-url="{% url 'admin_portal:grade_distribution_monitor_detail' row.offering_id row.physical_period_id %}?{{ row.detail_query }}">View Analytics<span class="visually-hidden"> for {{ row.course_code }} {{ row.section }}</span></button></td>
+  </tr>{% empty %}<tr><td colspan="8">No saved grading records match these criteria. Unresolved physical period identities are unavailable.</td></tr>{% endfor %}</tbody></table></div>
+  <p class="small text-muted">Band order: Strongly Above / Above / Near / Below / Well Below. Counts use the selected saved grade status; missing values are separate. Coverage uses all saved non-null period grades.</p>
+  {% if page_obj.has_other_pages %}<nav aria-label="Grade distribution pages"><ul class="pagination">
+    {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?{{ page_query }}&amp;page={{ page_obj.previous_page_number }}">Previous</a></li>{% endif %}<li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>{% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?{{ page_query }}&amp;page={{ page_obj.next_page_number }}">Next</a></li>{% endif %}
+  </ul></nav>{% endif %}
+{% else %}<div class="card card-body text-muted">Select criteria and click Apply Filters to view grade distributions.</div>{% endif %}
 </div>
-
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <div>
-    <h2 class="h4 mb-1">Faculty Grade Distribution Monitor</h2>
-    <div class="text-muted small">Read-only overview of grade patterns for faculty and classes under your supervision.</div>
-  </div>
-  <div class="d-flex gap-2">
-    <a class="btn btn-sm btn-outline-success" href="?{{ export_query }}">Export CSV</a>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
-  </div>
-</div>
-
-<div class="card border-0 shadow-sm mb-3">
-  <div class="card-body">
-    <form method="get" class="row g-2 align-items-end" id="gradeDistributionFilterForm">
-      <div class="col-md-2">
-        <label class="form-label mb-1">Data Level</label>
-        <select class="form-select" name="source">
-          <option value="period" {% if selected.source == "period" %}selected{% endif %}>Period Grades</option>
-          <option value="activity" {% if selected.source == "activity" %}selected{% endif %}>Activity Scores</option>
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label mb-1">Campus</label>
-        <select class="form-select" name="campus_id">
-          <option value="all" {% if selected.all_campuses %}selected{% endif %}>All Campuses</option>
-          {% for campus in filter_options.campuses %}
-          <option value="{{ campus.id }}" {% if selected.campus_id == campus.id %}selected{% endif %}>{{ campus.code }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label mb-1">Department</label>
-        <select class="form-select" name="department_id">
-          <option value="">All Departments</option>
-          {% for department in filter_options.departments %}
-          <option value="{{ department.id }}" {% if selected.department_id == department.id %}selected{% endif %}>{% if not selected.campus_id %}{{ department.campus.code }} / {% endif %}{{ department.code }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label mb-1">Academic Year</label>
-        <select class="form-select" name="academic_year_id">
-          <option value="">All Years</option>
-          {% for ay in filter_options.academic_years %}
-          <option value="{{ ay.id }}" {% if selected.academic_year_id == ay.id %}selected{% endif %}>{{ ay.code }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label mb-1">Term</label>
-        <select class="form-select" name="term_id">
-          <option value="">All Terms</option>
-          {% for term in filter_options.terms %}
-          <option value="{{ term.id }}" {% if selected.term_id == term.id %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label mb-1">Faculty</label>
-        <select class="form-select" name="faculty_id">
-          <option value="">All Faculty</option>
-          {% for faculty in filter_options.faculty %}
-          <option value="{{ faculty.id }}" {% if selected.faculty_id == faculty.id %}selected{% endif %}>
-            {% firstof faculty.get_full_name faculty.username %}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="col-md-2">
-        <label class="form-label mb-1">Grading Period</label>
-        <select class="form-select" name="period_id">
-          <option value="">All Periods</option>
-          {% for period in filter_options.periods %}
-          <option value="{{ period.id }}" {% if selected.period_id == period.id %}selected{% endif %}>{{ period.template.code }} / {{ period.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="col-md-3 d-flex gap-2">
-        <button class="btn btn-outline-success w-100" type="submit">Apply Filters</button>
-        <a class="btn btn-outline-secondary" data-grade-distribution-loading href="{% url 'admin_portal:grade_distribution_monitor' %}">Clear</a>
-      </div>
-    </form>
-  </div>
-</div>
-
-{% if summary.offerings == 0 %}
-<div class="alert alert-secondary border mb-3">
-  No accepted faculty assignments were found under your current campus, department, and selected filters.
-</div>
-{% elif summary.rows == 0 %}
-<div class="alert alert-info border mb-3">
-  Accepted classes were found, but no grade distribution data is available for the selected filters yet.
-</div>
-{% endif %}
-
-{% if summary.missing_template_offerings %}
-<div class="alert alert-warning border mb-3">
-  {{ summary.missing_template_offerings }} class{% if summary.missing_template_offerings != 1 %}es{% endif %}
-  in this monitor scope currently {% if summary.missing_template_offerings == 1 %}has{% else %}have{% endif %}
-  no published grading template assigned. The monitor will still load using the tenant passing threshold fallback,
-  but period filters and template-based interpretation may be incomplete until template coverage is fixed.
-</div>
-{% endif %}
-
-{% if summary.missing_template_offerings %}
-<div class="card border-0 shadow-sm mb-3">
-  <div class="card-body py-2">
-    <span class="badge text-bg-warning">No template: {{ summary.missing_template_offerings }}</span>
-  </div>
-</div>
-{% endif %}
-
-<div class="card border-0 shadow-sm">
-  <div class="card-header bg-white fw-semibold">Grade Distribution Results</div>
-  <div class="table-responsive">
-    <table class="table table-sm align-middle mb-0">
-      <thead>
-      <tr>
-        <th>Faculty</th>
-        <th>Class</th>
-        <th>Period / Level</th>
-        <th>Coverage</th>
-        <th>Threshold</th>
-        <th>Average</th>
-        <th>Threshold-aware Distribution</th>
-        <th>Review Flags</th>
-      </tr>
-      </thead>
-      <tbody>
-      {% for row in rows %}
-      <tr>
-        <td>{{ row.faculty_name }}</td>
-        <td>
-          <div class="fw-semibold">{{ row.course_code }} / {{ row.section }}</div>
-          <div class="small text-muted">{{ row.course_title }}</div>
-          <div class="small text-muted">{{ row.campus }} / {{ row.department }} / {{ row.school_year }} {{ row.term }}</div>
-        </td>
-        <td>
-          <button
-            class="btn btn-link distribution-detail-trigger p-0 text-start"
-            type="button"
-            data-bs-toggle="modal"
-            data-bs-target="#gradeDistributionDetailModal{{ forloop.counter }}"
-          >
-            {{ row.period }}
-          </button>
-          <div class="small text-muted">{{ row.level_label }}{% if row.component %} / {{ row.component }}{% endif %}{% if row.subcomponent %} / {{ row.subcomponent }}{% endif %}</div>
-          {% if row.activity_title %}<div class="small text-muted">{{ row.activity_title }}</div>{% endif %}
-        </td>
-        <td>{{ row.graded_count }} / {{ row.active_count }}<div class="small text-muted">{{ row.coverage_rate }}% coverage; {{ row.no_grade_count }} without stored score</div></td>
-        <td>{{ row.passing_threshold|floatformat:2 }}</td>
-        <td>{% if row.average is not None %}{{ row.average|floatformat:2 }}{% else %}-{% endif %}</td>
-        <td>
-          {% for band in row.distribution %}<div class="small">{{ band.label }}: <strong>{{ band.count }} / {{ band.denominator }}</strong> ({{ band.percentage }}%)</div>{% endfor %}
-        </td>
-        <td>{% for flag in row.flags %}<span class="badge {{ flag.class }}">{{ flag.label }}</span>{% endfor %}</td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="8" class="text-center text-muted py-4">No grade distribution data is available for the selected filters.</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% if page_obj.paginator.num_pages > 1 %}
-  <div class="card-footer bg-white d-flex justify-content-between align-items-center">
-    <div class="small text-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
-    <div class="btn-group btn-group-sm">
-      {% if page_obj.has_previous %}
-      <a class="btn btn-outline-secondary" data-grade-distribution-loading href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
-      {% else %}
-      <span class="btn btn-outline-secondary disabled">Previous</span>
-      {% endif %}
-      {% if page_obj.has_next %}
-      <a class="btn btn-outline-secondary" data-grade-distribution-loading href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
-      {% else %}
-      <span class="btn btn-outline-secondary disabled">Next</span>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
-</div>
-
-{% for row in rows %}
-<div class="modal fade" id="gradeDistributionDetailModal{{ forloop.counter }}" tabindex="-1" aria-labelledby="gradeDistributionDetailModalLabel{{ forloop.counter }}" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <div>
-          <h5 class="modal-title" id="gradeDistributionDetailModalLabel{{ forloop.counter }}">
-            {{ row.period }} Grade Details
-          </h5>
-          <div class="small text-muted">
-            {{ row.course_code }} / {{ row.section }} |
-            {{ row.level_label }}{% if row.component %} / {{ row.component }}{% endif %}{% if row.subcomponent %} / {{ row.subcomponent }}{% endif %}
-            {% if row.activity_title %} / {{ row.activity_title }}{% endif %}
-          </div>
-        </div>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="alert alert-light border small mb-3">
-          Student identifiers are masked for privacy. Use this detail view for distribution review only.
-        </div>
-        <div class="row g-2 mb-3">
-          <div class="col-sm-3">
-            <div class="border rounded p-2 h-100">
-              <div class="small text-muted">Graded</div>
-              <div class="fw-semibold">{{ row.graded_count }}{% if row.active_count %} / {{ row.active_count }}{% endif %}</div>
-            </div>
-          </div>
-          <div class="col-sm-3">
-            <div class="border rounded p-2 h-100">
-              <div class="small text-muted">Average</div>
-              <div class="fw-semibold">{% if row.average is not None %}{{ row.average|floatformat:2 }}{% else %}-{% endif %}</div>
-            </div>
-          </div>
-          <div class="col-sm-3">
-            <div class="border rounded p-2 h-100">
-              <div class="small text-muted">Highest</div>
-              <div class="fw-semibold">{% if row.highest is not None %}{{ row.highest|floatformat:2 }}{% else %}-{% endif %}</div>
-            </div>
-          </div>
-          <div class="col-sm-3">
-            <div class="border rounded p-2 h-100">
-              <div class="small text-muted">Lowest</div>
-              <div class="fw-semibold">{% if row.lowest is not None %}{{ row.lowest|floatformat:2 }}{% else %}-{% endif %}</div>
-            </div>
-          </div>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-sm table-striped align-middle mb-0 distribution-detail-table">
-            <thead>
-              <tr>
-                <th>No.</th>
-                <th>Masked Student No.</th>
-                <th>Masked Name</th>
-                <th class="text-end">Grade</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for detail in row.grade_details %}
-              <tr>
-                <td>{{ forloop.counter }}</td>
-                <td>{{ detail.masked_student_no }}</td>
-                <td>{{ detail.masked_name }}</td>
-                <td class="text-end fw-semibold">{{ detail.grade|floatformat:2 }}</td>
-              </tr>
-              {% empty %}
-              <tr>
-                <td colspan="4" class="text-center text-muted py-3">No grade details are available for this row.</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-      </div>
-    </div>
-  </div>
-</div>
-{% endfor %}
-
-<script>
-  (function () {
-    const overlay = document.getElementById("gradeDistributionLoadingOverlay");
-    const form = document.getElementById("gradeDistributionFilterForm");
-    const showLoading = function () {
-      if (!overlay) return;
-      overlay.classList.add("is-visible");
-      overlay.setAttribute("aria-hidden", "false");
-    };
-    const hideLoading = function () {
-      if (!overlay) return;
-      overlay.classList.remove("is-visible");
-      overlay.setAttribute("aria-hidden", "true");
-    };
-
-    if (form) {
-      form.addEventListener("submit", showLoading);
-    }
-    document.querySelectorAll("[data-grade-distribution-loading]").forEach(function (link) {
-      link.addEventListener("click", showLoading);
-    });
-    window.addEventListener("pageshow", hideLoading);
-  })();
-</script>
+<div class="modal fade" id="gradeDistributionAnalyticsModal" tabindex="-1" aria-labelledby="gdm-modal-title" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-sm-down"><div class="modal-content">
+  <div class="modal-header"><h3 class="modal-title h5" id="gdm-modal-title">Class Analytics</h3><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close analytics"></button></div>
+  <div class="modal-body" id="gdm-modal-body" aria-live="polite"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+</div></div></div>
+<script src="{% static 'admin_portal/js/grade_distribution_monitor.js' %}?v=20261012-privacy5" defer></script>
 {% endblock %}
