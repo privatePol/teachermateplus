@@ -3379,78 +3379,18 @@ def grade_distribution_monitor_view(request):
             "terms": [{"id": t.id, "label": f"{t.academic_year.code} / {t.name}"} for t in options["terms"]]
         })
     context = GradeDistributionMonitorService.build_context(request)
-    if request.GET.get("export") == "csv":
+    if request.GET.get("export") in ("xlsx", "csv"):
         if context["errors"] or not context["searched"]:
             return JsonResponse({"errors": context["errors"] or ["Apply Filters before exporting."]}, status=400)
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="grade_distribution_monitor.csv"'
-        writer = csv.writer(response)
-        writer.writerow([
-            'Faculty',
-            'Campus',
-            'Offering Department',
-            'Course',
-            'Section',
-            'Academic Year / Term',
-            'Period',
-            'Physical Period',
-            'Grade Status',
-            'Threshold',
-            'Threshold Source',
-            'Eligible Enrollment',
-            'Saved Grades (selected status)',
-            'Missing Period Grades',
-            'Saved Grades Excluded by Status',
-            'Coverage % (all saved grades)',
-            'Class Ave.',
-            'Minimum',
-            'Maximum',
-            'Exactly 100 Count',
-            'Exactly 100 %',
-            'Exactly 100 Total Graded Students',
-            *[f'{grade} {column}' for grade in ('Exactly 99', 'Exactly 98', 'Exactly 97', 'Exactly 96', 'Exactly 95', 'Combined 95–99', '90 and above')
-              for column in ('Count', 'Total Graded Students', '%')],
-            'All Graded Values Exactly 100',
-            'Threshold-Aware Distribution',
-            'Historical',
-            'Limitations',
-            'Analytics Availability',
-            'Privacy Explanation',
-        ])
-        for row in context["rows"]:
-            values = [
-                row['faculty_name'],
-                row['campus'],
-                row['department'],
-                f"{row['course_code']} - {row['course_title']}",
-                row['section'],
-                f"{row['school_year']} / {row['term']}",
-                row['period'],
-                row['physical_period_label'],
-                row['status'],
-                row['passing_threshold'],
-                row['threshold_source'],
-                row['eligible_count'],
-                row['graded_count'],
-                row['missing_count'],
-                row['status_excluded_count'],
-                row['coverage_rate'],
-                row['average'],
-                row['minimum'],
-                row['maximum'],
-                row['exact_100_count'],
-                row['exact_100_percentage'],
-                row['graded_count'],
-                *[item[column] for item in row['high_grade_breakdown'][1:]
-                  for column in ('count', 'total_graded_students', 'percentage')],
-                row['all_100'],
-                '; '.join((f"{b['label']} ({b['range']}): " + (f"{b['count']} ({b['percentage']}%)" if row['analytics_state'] == 'disclosed' else 'Withheld') for b in row['distribution'])),
-                row['historical'],
-                '; '.join(row['notes']),
-                row['analytics_state'],
-                row['privacy_message'],
-            ]
-            writer.writerow([csv_safe(v) if isinstance(v, str) else (v if v is not None else "") for v in values])
+        from apps.admin_portal.grade_distribution_export import grade_distribution_workbook
+        try:
+            workbook = grade_distribution_workbook(context["rows"])
+        except ValidationError as exc:
+            return JsonResponse({"errors": exc.messages}, status=400)
+        response = HttpResponse(workbook,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = 'attachment; filename="grade_distribution_monitor.xlsx"'
+        response["Cache-Control"] = "private, no-store"
         return response
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/grade_distribution_monitor.html", context)

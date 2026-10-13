@@ -178,12 +178,12 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(row["graded_count"], 10)
         self.assertEqual(row["status"], "Unfinalized")
         self.assertEqual(sum(b["count"] for b in row["distribution"]), 10)
-        self.assertContains(response, "Class Ave.")
+        self.assertContains(response, "Average Grade")
         self.assertNotContains(response, "Review Flags")
         self.assertNotContains(response, "Masked Student")
         self.assertNotIn("grade_details", row)
 
-    def test_high_grade_html_json_csv_parity_and_unrounded_denominators(self):
+    def test_high_grade_html_json_xlsx_parity_and_unrounded_denominators(self):
         grades = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id"))
         StudentPeriodGrade.objects.filter(offering=self.offering).update(exam_grade=None, class_standing_grade=None)
         for grade, value in zip(grades, (100, 99, 98, 97, 96, 95, Decimal("99.75"), 90, 89, None)):
@@ -192,7 +192,7 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.search()
         row = response.context["rows"][0]
         data = self.detail(response).json()
-        export = self._privacy_csv_row(self.client.get(self.url + "?" + response.context["export_query"]))
+        export = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]))
         self.assertEqual([item["count"] for item in row["high_grade_breakdown"]], [1, 1, 1, 1, 1, 1, 6, 8])
         self.assertContains(response, "gdm-metric gdm-exact-100")
         self.assertContains(response, "11.11%")
@@ -202,45 +202,31 @@ class GradeDistributionMonitorTests(TestCase):
             self.assertEqual(public["total_graded_students"], 9)
             self.assertEqual(Decimal(public["percentage"]), local["percentage"])
             self.assertEqual(export[f"{label} Count"], str(local["count"]))
-            self.assertEqual(export[f"{label} Total Graded Students"], "9")
+            self.assertEqual(export["Graded Students"], "9")
             self.assertEqual(export[f"{label} %"], str(local["percentage"]))
         self.assertNotIn("Actual examination percentage", json.dumps(data))
         self.assertEqual(data["missing_count"], 1)
 
-    def test_configured_exact_100_is_not_a_perfect_raw_exam_and_equivalence_is_proven(self):
+    def test_gradebook_activity_equivalence_requires_full_maps_not_matching_averages(self):
         exam = GradingTemplateComponent.objects.create(template_period=self.period, code="EXAM", name="Exam", weight_percentage=100, is_exam_component=True)
         activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
-            template_period=self.period, template_component=exam, title="Midterm Exam", total_score=100, created_by_user=self.faculty_user)
-        for student in Student.objects.filter(enrollments__course_offering=self.offering):
-            StudentActivityScore.objects.create(activity=activity, student=student, raw_score=50, computed_score=100)
-        StudentPeriodGrade.objects.filter(offering=self.offering).update(exam_grade=100, class_standing_grade=None)
-        before = list(StudentActivityScore.objects.filter(activity=activity).values())
+            template_period=self.period, template_component=exam, title="Midterm Exam", total_score=100)
+        for grade in StudentPeriodGrade.objects.filter(offering=self.offering):
+            StudentActivityScore.objects.create(activity=activity, student_id=grade.student_id, raw_score=50, computed_score=100)
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=100, exam_grade=100, class_standing_grade=None)
         self.client.force_login(self.admin_user)
         data = self.detail(self.search()).json()
-        for measure in data["measures"]:
-            if measure["analytics_state"] == "disclosed":
-                self.assertEqual(measure["high_grade_breakdown"][0]["count"], 10)
-                self.assertEqual(measure["high_grade_breakdown"][0]["total_graded_students"], 10)
-                self.assertEqual(Decimal(measure["high_grade_breakdown"][0]["percentage"]), 100)
-        component = next(m for m in data["measures"] if m["label"] == "Examination - Exam")
-        configured = next(m for m in data["measures"] if m["label"] == "Midterm Exam - Saved configured activity grade")
-        self.assertEqual(component["equivalent_to"], data["measures"][0]["label"])
-        self.assertEqual(configured["equivalent_to"], data["measures"][0]["label"])
-        self.assertNotIn("Actual examination percentage", json.dumps(data))
-        self.assertEqual(list(StudentActivityScore.objects.filter(activity=activity).values()), before)
-        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=100)
-        data = self.detail(self.search()).json()
-        disclosed = [m for m in data["measures"] if m["analytics_state"] == "disclosed"]
-        self.assertTrue(all(m["equivalent_to"] == "Period grade" for m in disclosed))
-        # A matching average is insufficient: keep a different student/value map.
+        self.assertEqual([m["label"] for m in data["measures"]], ["Examination Grades", "Class Standing Grades", "Midterm Exam"])
+        configured = data["measures"][-1]
+        self.assertEqual(configured["equivalent_to"], "Period Grades")
+        self.assertEqual(configured["high_grade_breakdown"][0]["count"], 10)
         scores = list(StudentActivityScore.objects.filter(activity=activity).order_by("id"))
         for index, score in enumerate(scores):
             StudentActivityScore.objects.filter(pk=score.pk).update(computed_score=99 if index < 5 else 101)
-        data = self.detail(self.search()).json()
-        component = next(m for m in data["measures"] if m["label"] == "Examination - Exam")
-        self.assertEqual(Decimal(component["average"]), 100)
-        self.assertEqual(component["equivalent_to"], "")
-        self.assertEqual(component["high_grade_breakdown"][0]["count"], 0)
+        configured = self.detail(self.search()).json()["measures"][-1]
+        self.assertEqual(Decimal(configured["average"]), 100)
+        self.assertEqual(configured["equivalent_to"], "")
+        self.assertEqual(configured["high_grade_breakdown"][0]["count"], 0)
 
     def test_modal_template_has_accessible_responsive_collapsible_and_loading_styles(self):
         self.client.force_login(self.admin_user)
@@ -339,19 +325,19 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(faculty[1]["label"], f"Zulu, Ana (#{self.faculty_user.id})")
         self.assertNotIn("@", str(faculty))
 
-    def test_privacy_html_json_csv_have_no_student_identities(self):
+    def test_privacy_html_json_xlsx_have_no_student_identities(self):
         self.client.force_login(self.admin_user)
         response = self.search()
         detail = self.detail(response)
         export = self.client.get(self.url + "?" + response.context["export_query"])
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(export.status_code, 200)
-        for content in (response.content.decode(), detail.content.decode(), export.content.decode()):
+        for content in (response.content.decode(), detail.content.decode(), self._export_text(export)):
             for forbidden in ("ACC101-001", "Student1", "student_id", "student_no", "masked_name", "masked_student", "@example.com"):
                 self.assertNotIn(forbidden, content)
         payload = detail.json()
         self.assertEqual(sum(f["count"] for f in payload["frequency"]), payload["graded_count"])
-        self.assertContains(export, "Class Ave.")
+        self.assertIn("Average Grade", self._export_text(export))
 
     def _privacy_assert_payload(self, payload):
         self.assertTrue(payload["privacy_suppressed"])
@@ -362,15 +348,38 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertTrue(all(item["count"] is None and item["percentage"] is None
                             for item in payload["high_grade_breakdown"]))
         self.assertNotIn("equivalent_to", payload)
+        self.assertNotIn("equivalent_dataset_id", payload)
+        self.assertNotIn("equivalent_context", payload)
         self.assertTrue(all(b["count"] is None and b["percentage"] is None for b in payload["distribution"]))
         self.assertNotIn("student_id", payload)
 
-    def _privacy_csv_row(self, response):
-        import csv
-        import io
-        return next(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+    def _workbook(self, response):
+        from io import BytesIO
+        from openpyxl import load_workbook
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        return load_workbook(BytesIO(response.content))
 
-    def test_privacy_zero_one_to_four_five_and_six_html_json_csv_parity(self):
+    def _export_text(self, response):
+        return str({sheet.title: list(sheet.values) for sheet in self._workbook(response)})
+
+    def _privacy_xlsx_row(self, response):
+        sheet = self._workbook(response)["Grade summaries"]
+        result = {}
+        for heading, cell in zip(sheet[1], sheet[2]):
+            value = cell.value
+            if value is None:
+                text = ""
+            elif "%" in str(heading.value):
+                text = format(Decimal(str(value)) * 100, ".2f")
+            elif heading.value in ("Average Grade", "Minimum", "Maximum"):
+                text = format(Decimal(str(value)), ".2f")
+            else:
+                text = str(value)
+            result[heading.value] = text
+        return result
+
+    def test_privacy_zero_one_to_four_five_and_six_html_json_xlsx_parity(self):
         self.client.force_login(self.admin_user)
         grades = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id"))
         for count in range(7):
@@ -381,7 +390,7 @@ class GradeDistributionMonitorTests(TestCase):
                 row = response.context["rows"][0]
                 modal = self.detail(response).json()
                 csv_response = self.client.get(self.url + "?" + response.context["export_query"])
-                csv_row = self._privacy_csv_row(csv_response)
+                csv_row = self._privacy_xlsx_row(csv_response)
                 self.assertEqual((row["graded_count"], row["missing_count"]), (count, 10 - count))
                 self.assertEqual(row["analytics_state"], modal["analytics_state"])
                 self.assertEqual(row["analytics_state"], csv_row["Analytics Availability"])
@@ -390,15 +399,15 @@ class GradeDistributionMonitorTests(TestCase):
                     self._privacy_assert_payload(modal)
                     self.assertContains(response, "fewer than five students")
                     self.assertNotContains(response, "83.27")
-                    self.assertNotContains(csv_response, "83.27")
+                    self.assertNotIn("83.27", self._export_text(csv_response))
                     self.assertNotIn("83.27", str(modal))
                     self.assertNotContains(response, 'class="gdm-distribution"')
-                    for column in ("Class Ave.", "Minimum", "Maximum", "Exactly 100 Count", "Exactly 100 %", "All Graded Values Exactly 100"):
+                    for column in ("Average Grade", "Minimum", "Maximum", "Exactly 100 Count", "Exactly 100 %"):
                         self.assertEqual(csv_row[column], "")
                     for category in row["high_grade_breakdown"]:
                         self.assertEqual(csv_row[f'{category["grade"]} Count'], "")
                         self.assertEqual(csv_row[f'{category["grade"]} %'], "")
-                    self.assertIn("Withheld", csv_row["Threshold-Aware Distribution"])
+                    self.assertIn("five", csv_row["Privacy Explanation"])
                 elif count == 0:
                     self.assertEqual(row["analytics_state"], "unavailable")
                     self.assertFalse(row["privacy_suppressed"])
@@ -407,7 +416,7 @@ class GradeDistributionMonitorTests(TestCase):
                     self.assertEqual(row["analytics_state"], "disclosed")
                     self.assertEqual(row["average"], Decimal("83.27"))
                     self.assertEqual(Decimal(modal["average"]), Decimal("83.27"))
-                    self.assertEqual(csv_row["Class Ave."], "83.27")
+                    self.assertEqual(csv_row["Average Grade"], "83.27")
         StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=None)
         StudentPeriodGrade.objects.filter(pk__in=[g.pk for g in grades[:5]]).update(period_grade=0)
         self.assertEqual(self.search().context["rows"][0]["average"], 0)
@@ -423,8 +432,8 @@ class GradeDistributionMonitorTests(TestCase):
             self._privacy_assert_payload(row)
             self._privacy_assert_payload(self.detail(response).json())
             self.assertEqual(row["missing_count"], 0)
-            for output in (response.content, self.client.get(self.url + "?" + response.context["export_query"]).content):
-                self.assertNotIn(b"87.43", output)
+            for output in (response.content.decode(), self._export_text(self.client.get(self.url + "?" + response.context["export_query"]))):
+                self.assertNotIn("87.43", output)
         StudentPeriodGrade.objects.filter(pk__in=ids[5:]).update(is_finalized=False)
         for status, count in (("all", 10), ("finalized", 5), ("unfinalized", 5)):
             row = self.search(status=status).context["rows"][0]
@@ -485,7 +494,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(sum(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("exam_grade", flat=True)), 788)
         response = self.search()
         data = self.detail(response).json()
-        common = next(m for m in data["measures"] if m["label"] == "Examination - Common")
+        common = next(m for m in data["measures"] if m["label"] == "Common")
         total = data["measures"][0]
         # Attacker uses only the actual public JSON, including chart/table frequencies.
         attacks = []
@@ -503,7 +512,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(Decimal(common["average"]) * common["graded_count"], 745)
         self._privacy_assert_payload(data)
 
-    def test_formula_privacy_html_json_csv_chart_consistency_and_statuses(self):
+    def test_formula_privacy_html_json_xlsx_chart_consistency_and_statuses(self):
         ids, _ = self._formula_fixture()
         StudentPeriodGrade.objects.filter(offering=self.offering, student_id__in=ids[:5]).update(is_finalized=True)
         for status in ("all", "finalized", "unfinalized"):
@@ -511,11 +520,11 @@ class GradeDistributionMonitorTests(TestCase):
             row = response.context["rows"][0]
             modal = self.detail(response).json()
             export = self.client.get(self.url + "?" + response.context["export_query"])
-            csv_row = self._privacy_csv_row(export)
+            csv_row = self._privacy_xlsx_row(export)
             self._privacy_assert_payload(row)
             self._privacy_assert_payload(modal)
             self.assertEqual(csv_row["Analytics Availability"], row["analytics_state"])
-            for column in ("Class Ave.", "Minimum", "Maximum", "Exactly 100 Count", "Exactly 100 %"):
+            for column in ("Average Grade", "Minimum", "Maximum", "Exactly 100 Count", "Exactly 100 %"):
                 self.assertEqual(csv_row[column], "")
             for category in row["high_grade_breakdown"]:
                 self.assertEqual(csv_row[f'{category["grade"]} Count'], "")
@@ -568,11 +577,12 @@ class GradeDistributionMonitorTests(TestCase):
         StudentActivityScore.objects.create(activity=activity, student_id=ids[0], raw_score=43, computed_score=43)
         self._persist_formula_totals(ids)
         data = self.detail(self.search()).json()
-        # The component has TEN students, but one activity has ONE. Standing
-        # activities are internal sources, not displayed measures in the modal.
-        common = next(m for m in data["measures"] if m["label"] == "Class standing - Common")
+        # One quiz has ONE student. Withhold its dependent standing/period
+        # totals while retaining the independently safe common activity.
+        common = next(m for m in data["measures"] if m["label"] == "Common")
         self.assertEqual(common["graded_count"], 10)
-        self._privacy_assert_payload(common)
+        self.assertEqual(common["analytics_state"], "disclosed")
+        self._privacy_assert_payload(next(m for m in data["measures"] if m["label"] == "Small quiz"))
         self._privacy_assert_payload(data["measures"][1])
         self._privacy_assert_payload(data)
 
@@ -585,7 +595,7 @@ class GradeDistributionMonitorTests(TestCase):
         self._persist_formula_totals(list(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("student_id", flat=True)))
         data = self.detail(self.search()).json()
         self.assertFalse(any("Actual examination percentage" in m["label"] for m in data["measures"]))
-        self._privacy_assert_payload(next(m for m in data["measures"] if m["label"] == "Supplemental - Saved configured activity grade"))
+        self._privacy_assert_payload(next(m for m in data["measures"] if m["label"] == "Supplemental"))
         self._privacy_assert_payload(data["measures"][0])
         self._privacy_assert_payload(data)
 
@@ -608,7 +618,7 @@ class GradeDistributionMonitorTests(TestCase):
         data = self.detail(response).json()
         self._privacy_assert_payload(data)
         self._privacy_assert_payload(data["measures"][1])
-        self.assertEqual(next(m for m in data["measures"] if m["label"] == "Class standing - Common")["graded_count"], 10)
+        self.assertEqual(next(m for m in data["measures"] if m["label"] == "Common")["graded_count"], 10)
 
     def test_formula_privacy_sparse_attendance_session_protects_dense_standing(self):
         from apps.attendance.models import AttendanceRecord, AttendanceSession
@@ -623,7 +633,8 @@ class GradeDistributionMonitorTests(TestCase):
         self._persist_formula_totals(ids)
         data = self.detail(self.search()).json()
         self._privacy_assert_payload(data)
-        self._privacy_assert_payload(next(m for m in data["measures"] if m["label"] == "Class standing - Common"))
+        self.assertEqual(next(m for m in data["measures"] if m["label"] == "Common")["analytics_state"], "disclosed")
+        self._privacy_assert_payload(data["measures"][1])
 
     def test_formula_privacy_five_boundary_retains_safe_detailed_analytics(self):
         ids, _ = self._formula_fixture(supplemental_count=5)
@@ -631,7 +642,7 @@ class GradeDistributionMonitorTests(TestCase):
             data = self.detail(self.search(status=status)).json()
             self.assertEqual(data["analytics_state"], "disclosed")
             self.assertTrue(all(m["analytics_state"] == "disclosed" for m in data["measures"]))
-            supplemental = next(m for m in data["measures"] if m["label"] == "Examination - Supplemental")
+            supplemental = next(m for m in data["measures"] if m["label"] == "Supplemental")
             self.assertEqual((supplemental["graded_count"], Decimal(supplemental["average"])), (5, Decimal("43")))
         score = StudentActivityScore.objects.get(student_id=ids[4], activity__title="Supplemental")
         score.delete()
@@ -649,7 +660,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(Decimal(data["average"]), row["average"])
         self._privacy_assert_payload(data["measures"][0])
         self.assertEqual(Decimal(data["measures"][1]["average"]), Decimal("80"))
-        self.assertEqual(self._privacy_csv_row(self.client.get(self.url + "?" + response.context["export_query"]))["Class Ave."], "80.00")
+        self.assertEqual(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]))["Average Grade"], "80.00")
 
     def test_privacy_overlap_guard_does_not_change_summary_when_opening_modal(self):
         ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id").values_list("student_id", flat=True))
@@ -685,7 +696,7 @@ class GradeDistributionMonitorTests(TestCase):
             self._privacy_assert_payload(row)
             self._privacy_assert_payload(self.detail(response, row=row).json())
         self.assertEqual(response.context["rows"][0]["eligible_count"], 10)
-        self.assertNotIn(b"88.13", self.client.get(self.url + "?" + response.context["export_query"]).content)
+        self.assertNotIn("88.13", self._export_text(self.client.get(self.url + "?" + response.context["export_query"])))
         UserPermission.objects.create(user=self.admin_user, permission=Permission.objects.get(code="grade_distribution_monitor.read"), tenant=self.tenant, campus=campus, grant_type="DENY")
         self.assertEqual(self.client.get(self.url + "?" + response.context["export_query"]).status_code, 400)
         self.assertEqual(len(self.search(campus_id="all").context["rows"]), 1)
@@ -738,7 +749,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertIsNone(payload["incomplete_source_count"])
         self.assertIn("Original roster", " ".join(payload["notes"]))
 
-    def test_historical_transfer_preserves_summary_modal_csv_and_original_authority(self):
+    def test_historical_transfer_preserves_summary_modal_xlsx_and_original_authority(self):
         self.offering.status = "ARCHIVED"
         self.offering.save()
         campus, dept, target = self._second_campus()
@@ -759,7 +770,7 @@ class GradeDistributionMonitorTests(TestCase):
                     modal = self.detail(before).json()
                     modal.pop("detail_query")  # Signing timestamp is not an analytics value.
                     captures.append((status, {k: row[k] for k in keys}, modal,
-                                     self.client.get(self.url + "?" + before.context["export_query"]).content))
+                                     self._export_text(self.client.get(self.url + "?" + before.context["export_query"]))))
                 Student.objects.filter(pk=student.pk).update(campus=campus, department=dept, program=target.program)
                 for status, summary, modal, csv in captures:
                     after = self.search(status=status)
@@ -767,7 +778,7 @@ class GradeDistributionMonitorTests(TestCase):
                     after_modal = self.detail(after).json()
                     after_modal.pop("detail_query")
                     self.assertEqual(after_modal, modal)
-                    self.assertEqual(self.client.get(self.url + "?" + after.context["export_query"]).content, csv)
+                    self.assertEqual(self._export_text(self.client.get(self.url + "?" + after.context["export_query"])), csv)
                 row = self.search().context["rows"][0]
                 self.assertEqual((row["eligible_count"], row["graded_count"], row["average"], row["coverage_rate"]),
                                  (10, 10, Decimal("90.40"), Decimal("100.00")))
@@ -782,7 +793,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual([r["offering_id"] for r in own.context["rows"]], [target.id])
         previous_url = reverse("admin_portal:grade_distribution_monitor_detail", args=[self.offering.id, self.period.id])
         self.assertEqual(self.client.get(previous_url + "?" + own.context["page_query"]).status_code, 404)
-        self.assertNotIn(b"ACC101", self.client.get(self.url + "?" + own.context["export_query"]).content)
+        self.assertNotIn("ACC101", self._export_text(self.client.get(self.url + "?" + own.context["export_query"])))
         self.assertEqual(self.detail(authorized).status_code, 400)
         self.assertEqual(self.client.get(self.url + "?" + authorized.context["export_query"]).status_code, 400)
         self.assertTrue(self.search(campus_id=self.campus.id).context["errors"])
@@ -923,9 +934,8 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(self.client.get(self.url + "?" + exact.context["page_query"] + "&page=20").status_code, 200)
         csv = self.client.get(self.url + "?" + exact.context["export_query"])
         self.assertEqual(csv.status_code, 200)
-        import csv as csv_module
-        import io
-        self.assertEqual(len(list(csv_module.reader(io.StringIO(csv.content.decode("utf-8-sig"))))), 501)
+        workbook = self._workbook(csv)
+        self.assertEqual(workbook["Grade summaries"].max_row, 1501)
 
         def assert_rejected(message):
             for params in ({"apply": "1", "academic_year_id": self.academic_year.id, "term_id": self.term.id, "period": "PRELIM"},
@@ -979,35 +989,14 @@ class GradeDistributionMonitorTests(TestCase):
                     self.assertEqual(self.detail(response).status_code, 400)
                     self.assertEqual(self.client.get(self.url + "?" + response.context["export_query"]).status_code, 400)
 
-    def test_numeric_ranges_are_visible_dynamic_with_counts(self):
-        from html.parser import HTMLParser
-        class VisibleBands(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.active = False
-                self.text = []
-            def handle_starttag(self, tag, attrs):
-                if tag == "dl" and "gdm-band-ranges" in dict(attrs).get("class", ""):
-                    self.active = True
-            def handle_endtag(self, tag):
-                if tag == "dl":
-                    self.active = False
-            def handle_data(self, data):
-                if self.active:
-                    self.text.append(data)
+    def test_summary_uses_simple_gradebook_labels_and_excel_link(self):
         self.client.force_login(self.admin_user)
-        for threshold in (75, 80):
-            with self.subTest(threshold=threshold):
-                self.template.passing_grade_threshold = threshold
-                self.template.save()
-                response = self.search()
-                parser = VisibleBands()
-                parser.feed(response.content.decode())
-                visible = " ".join(parser.text)
-                for band in response.context["rows"][0]["distribution"]:
-                    self.assertIn(band["label"], visible)
-                    self.assertIn(band["range"], visible)
-                    self.assertIn(str(band["count"]), visible)
+        response = self.search()
+        for text in ("Period Grades", "Examination Grades", "Class Standing Grades", "Average Grade", "Export Excel", "Base 50"):
+            self.assertContains(response, text)
+        self.assertIn("export=xlsx", response.context["export_query"])
+        for text in ("Threshold-Aware Distribution", "Class Ave.", "Export CSV"):
+            self.assertNotContains(response, text)
 
     def test_historical_assignment_without_acceptance_evidence_unavailable(self):
         self.offering.status = "CLOSED"; self.offering.save()
@@ -1075,9 +1064,9 @@ class GradeDistributionMonitorTests(TestCase):
         measures = {m["label"]: m for m in data["measures"]}
         self.assertNotIn("Exam - Actual examination percentage", measures)
         self.assertEqual(set(StudentActivityScore.objects.filter(activity=activity).values_list("raw_score", flat=True)), {Decimal("25")})
-        self.assertEqual(Decimal(measures["Exam - Saved configured activity grade"]["average"]), 75)
-        self.assertEqual(Decimal(measures["Examination - Exam"]["average"]), 75)
-        self.assertEqual(Decimal(measures["Class standing - Class Standing"]["average"]), 100)
+        self.assertEqual(Decimal(measures["Exam"]["average"]), 75)
+        self.assertEqual(Decimal(measures["Quiz"]["average"]), 100)
+        self.assertNotIn("Examination - Exam", measures)
         self.assertEqual(data["incomplete_source_count"], 5)
 
     def test_direct_percentage_multiple_components_and_no_combined_normalization(self):
@@ -1093,7 +1082,7 @@ class GradeDistributionMonitorTests(TestCase):
         total = data["measures"][0]
         self.assertEqual(Decimal(total["average"]), 200)
         self.assertEqual(total["exact_100_count"], 0)
-        components = [m for m in data["measures"] if m["label"].startswith("Examination - Exam")]
+        components = [m for m in data["measures"] if m["label"].startswith("Exam ")]
         self.assertEqual(len(components), 2)
         self.assertTrue(all(m["all_100"] for m in components))
 
@@ -1149,8 +1138,8 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["course_code"], "MISMATCH101")
         export = self.client.get(self.url + "?" + response.context["export_query"])
-        self.assertContains(export, "MISMATCH101")
-        self.assertNotContains(export, "ACC101")
+        self.assertIn("MISMATCH101", self._export_text(export))
+        self.assertNotIn("ACC101", self._export_text(export))
 
     def _second_campus(self, grant_admin=False):
         campus = Campus.objects.create(tenant=self.tenant, code="CUB", name="Cubao")
@@ -1167,14 +1156,14 @@ class GradeDistributionMonitorTests(TestCase):
             UserRole.objects.create(user=self.admin_user, role=role, tenant=self.tenant, campus=campus, department=dept)
         return campus, dept, offering
 
-    def test_same_faculty_in_other_campus_cannot_leak_filters_results_modal_csv(self):
+    def test_same_faculty_in_other_campus_cannot_leak_filters_results_modal_xlsx(self):
         campus, dept, offering = self._second_campus()
         self.client.force_login(self.admin_user)
         response = self.search(campus_id="all")
         self.assertEqual(len(response.context["rows"]), 1)
         self.assertNotContains(response, "Cubao Accounting")
         self.assertNotIn(dept.id, [d["id"] for d in response.context["filter_options"]["departments"]])
-        self.assertNotContains(self.client.get(self.url + "?" + response.context["export_query"]), "CUB101")
+        self.assertNotIn("CUB101", self._export_text(self.client.get(self.url + "?" + response.context["export_query"])))
         url = reverse("admin_portal:grade_distribution_monitor_detail", args=[offering.id, self.period.id])
         self.assertEqual(self.client.get(url + "?" + response.context["page_query"]).status_code, 404)
         self.assertTrue(self.search(campus_id=campus.id).context["errors"])
@@ -1222,24 +1211,18 @@ class GradeDistributionMonitorTests(TestCase):
         self.client.force_login(other)
         self.assertEqual(self.detail(response).status_code, 400)
 
-    def test_subcomponent_detail_weighting_and_transmutation_preserve_saved_period(self):
-        component = GradingTemplateComponent.objects.create(template_period=self.period, code="EX", name="Weighted Exam", weight_percentage=100, is_exam_component=True)
-        sub = GradingTemplateSubcomponent.objects.create(template_component=component, code="PART", name="Part", weight_percentage=100)
-        students = list(Student.objects.filter(enrollments__course_offering=self.offering).order_by("id")[:5])
-        for i, weight, grade in ((1, 25, 40), (2, 75, 100)):
-            d = GradingTemplateDetail.objects.create(template_subcomponent=sub, code=f"D{i}", name=f"Detail {i}", weight_percentage=weight)
-            a = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering, template_period=self.period, template_component=component, template_subcomponent=sub, template_detail=d, title=f"Part {i}", total_score=100, created_by_user=self.faculty_user)
-            for student in students:
-                StudentActivityScore.objects.create(activity=a, student=student, raw_score=grade, computed_score=grade)
-        self.client.force_login(self.admin_user)
-        data = self.detail(self.search()).json()
-        measure = next(m for m in data["measures"] if m["label"] == "Examination - Weighted Exam")
-        self.assertEqual(Decimal(measure["average"]), 85)
+    def test_weighted_and_transmuted_gradebook_parity_uses_saved_values(self):
+        self._formula_fixture(supplemental_count=5)
         TenantGradingProfile.objects.create(tenant=self.tenant, profile_code="DEPED", profile_name="DepEd", grading_template=self.template, period_grade_formula_mode="DEPED_TRANSMUTATION")
+        ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("student_id", flat=True))
+        self._persist_formula_totals(ids)
+        before = list(StudentPeriodGrade.objects.filter(offering=self.offering).values())
         data = self.detail(self.search()).json()
-        measure = next(m for m in data["measures"] if m["label"] == "Examination - Weighted Exam")
-        self.assertEqual(Decimal(measure["average"]), 70)
-        self.assertEqual(Decimal(data["average"]), Decimal("90.40"))
+        for field, measure in (("period_grade", data), ("exam_grade", data["measures"][0]), ("class_standing_grade", data["measures"][1])):
+            values = [r[field] for r in before if r[field] is not None]
+            self.assertEqual(Decimal(measure["average"]), (sum(values) / len(values)).quantize(Decimal("0.01")))
+        self.assertEqual(list(StudentPeriodGrade.objects.filter(offering=self.offering).values()), before)
+        self.assertFalse(any("component grade" in m["unit"] for m in data["measures"]))
 
     def test_engine_attendance_interpretation_is_batched_and_read_only(self):
         from apps.attendance.models import AttendanceSession, AttendanceRecord
@@ -1253,9 +1236,8 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.search()
         with CaptureQueriesContext(connection) as queries:
             data = self.detail(response).json()
-        measure = next(m for m in data["measures"] if m["label"] == "Class standing - Attendance Standing")
-        self.assertEqual(Decimal(measure["average"]), 100)
-        self.assertEqual(measure["graded_count"], 5)
+        self.assertEqual([m["label"] for m in data["measures"]], ["Examination Grades", "Class Standing Grades"])
+        self.assertEqual(data["measures"][1]["analytics_state"], "unavailable")
         self.assertEqual(data["incomplete_source_count"], 5)
         self.assertLessEqual(sum('attendance_records' in q["sql"] for q in queries), 2)
 
@@ -1273,7 +1255,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(data["missing_count"], 0)
         self.assertEqual(data["incomplete_source_count"], 10)
         self.assertFalse(any("Actual examination percentage" in m["label"] for m in data["measures"]))
-        configured = next(m for m in data["measures"] if m["label"] == "Zero exam - Saved configured activity grade")
+        configured = next(m for m in data["measures"] if m["label"] == "Zero exam")
         self.assertEqual(configured["graded_count"], 5)
         self.assertEqual(Decimal(configured["minimum"]), 50)
         self.assertEqual(set(StudentActivityScore.objects.filter(activity=activity).values_list("raw_score", flat=True)), {Decimal("0")})
@@ -1463,6 +1445,412 @@ class GradeDistributionMonitorTests(TestCase):
             is_primary=True,
         )
         return offering
+
+    def _gradebook_activity_fixture(self, *, values=None, total=50, mode="RAW_BASE50", exam=False, title="Written assessment", students=None):
+        component = GradingTemplateComponent.objects.create(template_period=self.period,
+            code=f"ACT{GradeActivity.objects.count()}", name="Assessment", weight_percentage=100,
+            is_exam_component=exam, score_input_mode=mode)
+        activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
+            template_period=self.period, template_component=component, title=title, total_score=total)
+        ids = students if students is not None else list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("student_id").values_list("student_id", flat=True))
+        for sid, raw in zip(ids, values or [25] * len(ids)):
+            computed = FacultyGradingService.compute_activity_score(raw_score=Decimal(str(raw)),
+                total_score=Decimal(total), base_value=Decimal("50"), score_input_mode=mode)
+            StudentActivityScore.objects.create(activity=activity, student_id=sid, raw_score=raw, computed_score=computed)
+        self.client.force_login(self.admin_user)
+        return activity, ids
+
+    def test_base50_gradebook_activity_columns_match_analytics_frequencies(self):
+        from collections import Counter
+        from apps.grading.tabulation import PeriodSummaryLayoutService
+        activity, ids = self._gradebook_activity_fixture(values=[0, 10, 20, 25, 30, 35, 40, 45, 49, 50])
+        self._persist_formula_totals(ids)
+        layout = PeriodSummaryLayoutService.build_layout(self.period, [activity])
+        score_map = {(r.student_id, r.activity_id): r.computed_score for r in StudentActivityScore.objects.filter(activity=activity)}
+        gradebook_values = []
+        for student in Student.objects.filter(id__in=ids):
+            row = PeriodSummaryLayoutService.build_row_values({"student": student}, layout, score_map)
+            gradebook_values.extend(row["class_standing_blocks"][0]["sections"][0]["activity_values"])
+        response = self.search()
+        data = self.detail(response).json()
+        measure = next(m for m in data["measures"] if m["label"] == activity.title)
+        actual = {Decimal(f["grade"]): f["count"] for f in measure["frequency"]}
+        self.assertEqual(actual, Counter(gradebook_values))
+        self.assertIn(Decimal("75"), actual)  # Gradebook 25/50 -> Base 50 grade 75.
+        self.assertNotIn(Decimal("25"), actual)
+        self.assertEqual(Decimal(measure["average"]), sum(gradebook_values) / 10)
+        for field, metric in (("period_grade", data), ("exam_grade", data["measures"][0]), ("class_standing_grade", data["measures"][1])):
+            values = list(StudentPeriodGrade.objects.filter(offering=self.offering).exclude(**{field: None}).values_list(field, flat=True))
+            self.assertEqual({Decimal(f["grade"]): f["count"] for f in metric["frequency"]}, Counter(values))
+        workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
+        summaries = list(workbook["Grade summaries"].values)
+        exported = dict(zip(summaries[0], next(r for r in summaries[1:] if r[6] == activity.title)))
+        self.assertEqual(exported["Average Grade"], float(measure["average"]))
+        self.assertEqual(exported["Exactly 100 Count"], 1)
+        self.assertEqual(exported["Exactly 100 %"], 0.1)
+
+    def test_direct100_gradebook_ratings_use_exact_unrounded_breakdown(self):
+        activity, ids = self._gradebook_activity_fixture(total=100, mode="DIRECT_PERCENTAGE", exam=True,
+            values=[100, 99, 98, 97, 96, 95, Decimal("99.75"), 90, 89, 0])
+        self._persist_formula_totals(ids)
+        data = self.detail(self.search()).json()
+        measure = next(m for m in data["measures"] if m["label"] == activity.title)
+        self.assertEqual([r["count"] for r in measure["high_grade_breakdown"]], [1, 1, 1, 1, 1, 1, 6, 8])
+        self.assertEqual(measure["exact_100_count"], 1)
+        self.assertIn({"grade": "99.75", "count": 1, "percentage": "10.00"}, measure["frequency"])
+
+    def test_monitor_reads_saved_configured_edits_without_recomputing(self):
+        activity, ids = self._gradebook_activity_fixture()
+        StudentActivityScore.objects.filter(activity=activity).update(computed_score=83)
+        self._persist_formula_totals(ids)
+        before_scores = list(StudentActivityScore.objects.values())
+        before_grades = list(StudentPeriodGrade.objects.values())
+        with patch.object(FacultyGradingService, "recompute_period_summary_for_students", side_effect=AssertionError("write forbidden")):
+            data = self.detail(self.search()).json()
+        measure = next(m for m in data["measures"] if m["label"] == activity.title)
+        self.assertEqual(Decimal(measure["average"]), 83)
+        self.assertEqual(list(StudentActivityScore.objects.values()), before_scores)
+        self.assertEqual(list(StudentPeriodGrade.objects.values()), before_grades)
+        StudentActivityScore.objects.filter(activity=activity).update(is_active=False)
+        measure = self.detail(self.search()).json()["measures"][-1]
+        self.assertEqual(measure["analytics_state"], "unavailable")
+
+    def test_historical_activity_grades_preserve_original_campus_eligibility(self):
+        activity, ids = self._gradebook_activity_fixture()
+        self._persist_formula_totals(ids)
+        self.offering.status = "ARCHIVED"
+        self.offering.save()
+        response = self.search()
+        before = self.detail(response).json()
+        target_campus, department, target = self._second_campus()
+        Student.objects.filter(pk__in=ids).update(campus=target_campus, department=department, program=target.program, is_active=False)
+        after = self.detail(self.search()).json()
+        self.assertEqual(before["measures"], after["measures"])
+        self.assertEqual(Decimal(after["measures"][-1]["average"]), 75)
+        self.assertIn("score revisions are not snapshotted", " ".join(after["notes"]))
+        self.assertIsNone(after["incomplete_source_count"])
+        StudentActivityScore.objects.filter(activity=activity).update(computed_score=84)
+        after = self.detail(self.search()).json()
+        self.assertEqual(Decimal(after["measures"][-1]["average"]), 84)
+
+    def test_historical_sparse_activity_blocks_saved_formula_ancestors(self):
+        activity, ids = self._gradebook_activity_fixture(students=list(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("student_id", flat=True))[:1])
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(exam_grade=75, class_standing_grade=80)
+        self.offering.status = "ARCHIVED"
+        self.offering.save()
+        response = self.search()
+        data = self.detail(response).json()
+        for metric in [data, *data["measures"]]:
+            self._privacy_assert_payload(metric)
+        export = self._export_text(self.client.get(self.url + "?" + response.context["export_query"]))
+        self.assertNotIn("75.0", export)
+        self.assertNotIn("80.0", export)
+
+    def test_overlapping_activity_populations_cannot_isolate_one_student(self):
+        ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("student_id").values_list("student_id", flat=True))
+        first, _ = self._gradebook_activity_fixture(students=ids[:5], title="First assessment")
+        second, _ = self._gradebook_activity_fixture(students=ids[4:9], title="Second assessment")
+        data = self.detail(self.search()).json()
+        measures = {m["label"]: m for m in data["measures"]}
+        self.assertEqual(measures[first.title]["analytics_state"], "disclosed")
+        self._privacy_assert_payload(measures[second.title])
+        self.assertEqual(measures[second.title]["privacy_reason"], "complementary_population")
+        response = self.search()
+        workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
+        self.assertFalse(any(r[6] == second.title for r in list(workbook["Grade frequencies"].values)[1:]))
+
+    def test_activity_status_complements_and_five_student_boundary(self):
+        activity, ids = self._gradebook_activity_fixture()
+        for count in (1, 4, 5, 6, 9, 10):
+            with self.subTest(finalized=count):
+                StudentPeriodGrade.objects.filter(offering=self.offering).update(is_finalized=False)
+                StudentPeriodGrade.objects.filter(student_id__in=ids[:count], offering=self.offering).update(is_finalized=True)
+                for status in ("all", "finalized", "unfinalized"):
+                    response = self.search(status=status)
+                    metric = self.detail(response).json()["measures"][-1]
+                    chosen = 10 if status == "all" else count if status == "finalized" else 10-count
+                    state = "unavailable" if chosen == 0 else "disclosed" if count in (5, 10) else "privacy_suppressed"
+                    self.assertEqual(metric["analytics_state"], state)
+                    if state == "privacy_suppressed":
+                        self._privacy_assert_payload(metric)
+
+    def test_xlsx_styles_types_filters_suppression_and_literal_user_text(self):
+        activity, ids = self._gradebook_activity_fixture(title='=HYPERLINK("https://invalid.example","x")')
+        self._persist_formula_totals(ids)
+        response = self.search()
+        exported = self.client.get(self.url + "?" + response.context["export_query"])
+        workbook = self._workbook(exported)
+        self.assertEqual(workbook.sheetnames, ["Grade summaries", "Grade frequencies"])
+        self.assertIn('.xlsx"', exported["Content-Disposition"])
+        for sheet in workbook:
+            self.assertEqual(sheet.freeze_panes, "H2")
+            self.assertEqual(sheet.auto_filter.ref, sheet.dimensions)
+            self.assertTrue(sheet['A1'].font.bold)
+            self.assertEqual(sheet['A1'].fill.fgColor.rgb, '0020613C')
+            self.assertGreaterEqual(sheet.column_dimensions['A'].width, 30)
+            self.assertFalse(any(c.data_type == 'f' for cells in sheet for c in cells))
+        summary = workbook['Grade summaries']
+        activity_row = next(cells for cells in summary.iter_rows(min_row=2) if cells[6].value == activity.title)
+        self.assertEqual(activity_row[6].data_type, 's')
+        headers = [c.value for c in summary[1]]
+        self.assertEqual(activity_row[headers.index('Average Grade')].number_format, '0.00')
+        self.assertEqual(activity_row[headers.index('Exactly 100 %')].number_format, '0.00%')
+        StudentActivityScore.objects.filter(activity=activity).exclude(student_id__in=ids[:4]).update(is_active=False)
+        response = self.search()
+        summary = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))['Grade summaries']
+        row = next(r for r in list(summary.values)[1:] if r[6] == activity.title)
+        self.assertIsNone(row[headers.index('Average Grade')])
+        self.assertIsNone(row[headers.index('Exactly 100 %')])
+        self.assertEqual(row[headers.index('Analytics Availability')], 'privacy_suppressed')
+
+    def test_xlsx_aggregate_row_limit_is_exact_and_does_not_truncate(self):
+        self.client.force_login(self.admin_user)
+        response = self.search()
+        url = self.url + '?' + response.context['export_query']
+        with patch('apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS', 10):
+            self.assertEqual(self.client.get(url).status_code, 200)
+        with patch('apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS', 9):
+            rejected = self.client.get(url)
+            self.assertEqual(rejected.status_code, 400)
+            self.assertIn('no records were truncated', ' '.join(rejected.json()['errors']))
+        # The old download URL remains usable but returns the new workbook.
+        self._workbook(self.client.get(url.replace('export=xlsx', 'export=csv')))
+
+    def test_xlsx_row_limit_stops_later_class_source_queries(self):
+        from apps.admin_portal.grade_distribution_metrics import component_measures
+        other = self._create_extra_offering("NEXT", "Later class", "NEXT-A")
+        self._seed_grades(other, [90] * 10)
+        self.client.force_login(self.admin_user)
+        response = self.search()
+        with patch("apps.admin_portal.grade_distribution.component_measures", wraps=component_measures) as source:
+            with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 2):
+                rejected = self.client.get(self.url + "?" + response.context["export_query"])
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(source.call_count, 1)
+        self.assertIn("no records were truncated", " ".join(rejected.json()["errors"]))
+
+    def test_inactive_activity_route_fails_closed_without_invented_classification(self):
+        activity, ids = self._gradebook_activity_fixture()
+        activity.template_component.is_active = False
+        activity.template_component.save()
+        data = self.detail(self.search()).json()
+        self._privacy_assert_payload(data)
+        self._privacy_assert_payload(data['measures'][-1])
+        self.assertNotIn('subjective', data['measures'][-1])
+        self.assertIn('inactive grading route', ' '.join(data['notes']))
+
+    def test_real_formula_payload_for_frontend_dom(self):
+        import os
+        from pathlib import Path
+        self._formula_fixture()
+        data = self.detail(self.search()).json()
+        self._privacy_assert_payload(data)
+        self.assertTrue(any(m["analytics_state"] == "disclosed" for m in data["measures"]))
+        if os.environ.get("TMP_MONITOR_DOM_PAYLOAD"):
+            Path(os.environ["TMP_MONITOR_DOM_PAYLOAD"]).write_text(json.dumps(data), encoding="utf-8")
+
+    def _worksheet_records(self, workbook, sheet_name):
+        rows = list(workbook[sheet_name].values)
+        return [dict(zip(rows[0], values)) for values in rows[1:]]
+
+    def _assert_dataset_reconciliation(self, response, metrics):
+        workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
+        summaries = self._worksheet_records(workbook, "Grade summaries")
+        frequencies = self._worksheet_records(workbook, "Grade frequencies")
+        by_id = {r["Dataset Reference"]: r for r in summaries}
+        self.assertEqual(len(by_id), len(summaries), "A distinct source must have exactly one summary identity")
+        self.assertTrue({r["Dataset Reference"] for r in frequencies}.issubset(by_id))
+        identity_columns = ("Dataset Reference", "Class Record", "Period Record", "Activity Record", "Gradebook Context", "Status Selection")
+        for metric in metrics:
+            summary = by_id[metric["dataset_id"]]
+            self.assertEqual(summary["Class Record"], metric["offering_id"])
+            self.assertEqual(summary["Period Record"], metric["physical_period_id"])
+            self.assertEqual(summary["Activity Record"], metric["activity_id"])
+            self.assertEqual(summary["Gradebook Context"], metric["gradebook_context"])
+            entries = [r for r in frequencies if r["Dataset Reference"] == metric["dataset_id"]]
+            if metric["analytics_state"] != "disclosed":
+                self.assertEqual(entries, [])
+                self.assertIsNone(summary["Average Grade"])
+                self.assertIsNone(summary["Exactly 100 Count"])
+                self.assertIsNone(summary["Same Grades As Dataset"])
+                continue
+            self.assertEqual(sum(r["Student Count"] for r in entries), metric["graded_count"])
+            # These fixtures have 5/10-student denominators and exact percentages.
+            self.assertEqual(sum(Decimal(str(r["% of Graded Students"])) for r in entries), Decimal("1"))
+            for entry in entries:
+                self.assertEqual({k: entry[k] for k in identity_columns}, {k: summary[k] for k in identity_columns})
+            self.assertEqual({Decimal(str(r["Exact Grade"])): r["Student Count"] for r in entries},
+                             {Decimal(str(r["grade"])): r["count"] for r in metric["frequency"]})
+            target = metric.get("equivalent_dataset_id")
+            self.assertEqual(summary["Same Grades As Dataset"], target or None)
+            if target:
+                self.assertIn(target, by_id)
+        return summaries, frequencies
+
+    def _duplicate_quiz_fixture(self):
+        component = GradingTemplateComponent.objects.create(template_period=self.period,
+            code="QUIZZES", name="Class Standing", weight_percentage=100)
+        activities = []
+        ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("student_id").values_list("student_id", flat=True))
+        for code, name, raw in (("WRITTEN", "Written Quizzes", 25), ("ORAL", "Oral Quizzes", 40)):
+            sub = GradingTemplateSubcomponent.objects.create(template_component=component, code=code, name=name, weight_percentage=50)
+            activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
+                template_period=self.period, template_component=component, template_subcomponent=sub, title="Quiz", total_score=50)
+            grade = FacultyGradingService.compute_activity_score(raw_score=Decimal(raw), total_score=Decimal(50), base_value=Decimal(50))
+            for sid in ids:
+                StudentActivityScore.objects.create(activity=activity, student_id=sid, raw_score=raw, computed_score=grade)
+            activities.append(activity)
+        self._persist_formula_totals(ids)
+        self.client.force_login(self.admin_user)
+        return activities, ids
+
+    def test_dataset_identity_preserves_two_physical_prelim_periods_in_xlsx(self):
+        template = GradingTemplate.objects.create(tenant=self.tenant, code="HISTORICAL", name="Historical Template")
+        second = GradingTemplatePeriod.objects.create(template=template, code="PRELIM", name="Prelim", sequence_no=1)
+        self.offering.status = "ARCHIVED"
+        self.offering.save()
+        existing = list(StudentPeriodGrade.objects.filter(offering=self.offering))
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=75)
+        StudentPeriodGrade.objects.bulk_create([StudentPeriodGrade(tenant=self.tenant, campus=self.campus,
+            offering=self.offering, template_period=second, student_id=r.student_id, period_grade=90) for r in existing])
+        self.client.force_login(self.admin_user)
+        response = self.search()
+        rows = response.context["rows"]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({r["period"] for r in rows}, {"Prelim"})
+        self.assertEqual({r["physical_period_id"] for r in rows}, {self.period.id, second.id})
+        self.assertEqual(len({r["dataset_id"] for r in rows}), 2)
+        for row in rows:
+            self.assertEqual(self.detail(response, row).json()["dataset_id"], row["dataset_id"])
+            self.assertContains(response, f'Period #{row["physical_period_id"]}')
+        import os
+        from pathlib import Path
+        if os.environ.get("TMP_PERIOD_DATASET_DOM_PAYLOAD"):
+            Path(os.environ["TMP_PERIOD_DATASET_DOM_PAYLOAD"]).write_text(
+                json.dumps([self.detail(response, row).json() for row in rows]), encoding="utf-8")
+        _, frequencies = self._assert_dataset_reconciliation(response, rows)
+        # The old display-label key still collides; the new record key does not.
+        legacy = [r for r in frequencies if r["Measure"] == "Period Grades"]
+        self.assertEqual(len({tuple(r[k] for k in ("Faculty", "Campus", "Course", "Section", "Academic Year / Term", "Period", "Measure")) for r in legacy}), 1)
+        self.assertEqual(sum(r["Student Count"] for r in legacy), 20)
+        self.assertEqual(sum(Decimal(str(r["% of Graded Students"])) for r in legacy), 2)
+        self.assertEqual(len({r["Dataset Reference"] for r in legacy}), 2)
+
+    def test_duplicate_quiz_routes_reconcile_and_match_gradebook_for_all_statuses(self):
+        from apps.grading.tabulation import PeriodSummaryLayoutService
+        import os
+        from pathlib import Path
+        activities, ids = self._duplicate_quiz_fixture()
+        StudentPeriodGrade.objects.filter(offering=self.offering, student_id__in=ids[:5]).update(is_finalized=True)
+        layout = PeriodSummaryLayoutService.build_layout(self.period, activities)
+        score_map = {(r.student_id, r.activity_id): r.computed_score for r in StudentActivityScore.objects.filter(activity__in=activities)}
+        source_ids = None
+        selection_ids = set()
+        for status, count in (("all", 10), ("finalized", 5), ("unfinalized", 5)):
+            with self.subTest(status=status):
+                response = self.search(status=status)
+                data = self.detail(response).json()
+                quizzes = [m for m in data["measures"] if m["label"] == "Quiz"]
+                self.assertEqual(len(quizzes), 2)
+                self.assertEqual({m["activity_id"] for m in quizzes}, {a.id for a in activities})
+                self.assertEqual(len({m["dataset_id"] for m in quizzes}), 2)
+                current_sources = {m["dataset_id"].split("/status:")[0] for m in quizzes}
+                self.assertEqual(current_sources, source_ids or current_sources)
+                source_ids = current_sources
+                self.assertTrue(selection_ids.isdisjoint(m["dataset_id"] for m in quizzes))
+                selection_ids.update(m["dataset_id"] for m in quizzes)
+                for metric in quizzes:
+                    self.assertEqual(metric["graded_count"], count)
+                    self.assertEqual(metric["selection_status"], status)
+                    self.assertIn(f'Activity #{metric["activity_id"]}', metric["gradebook_context"])
+                    self.assertIn("Quizzes", metric["gradebook_context"])
+                sample = Student.objects.get(pk=ids[0])
+                gradebook = PeriodSummaryLayoutService.build_row_values({"student": sample}, layout, score_map)
+                gradebook_by_activity = {
+                    aid: value
+                    for section, values in zip(layout["class_standing_blocks"][0]["sections"], gradebook["class_standing_blocks"][0]["sections"])
+                    for aid, value in zip(section["activity_ids"], values["activity_values"])
+                }
+                self.assertEqual(gradebook_by_activity,
+                                 {m["activity_id"]: Decimal(m["frequency"][0]["grade"]) for m in quizzes})
+                _, frequencies = self._assert_dataset_reconciliation(response, [data, *data["measures"]])
+                quiz_frequencies = [r for r in frequencies if r["Measure"] == "Quiz"]
+                self.assertEqual(sum(r["Student Count"] for r in quiz_frequencies), 2 * count)
+                self.assertEqual(sum(Decimal(str(r["% of Graded Students"])) for r in quiz_frequencies), 2)
+                if status == "all" and os.environ.get("TMP_DATASET_DOM_PAYLOAD"):
+                    Path(os.environ["TMP_DATASET_DOM_PAYLOAD"]).write_text(json.dumps(data), encoding="utf-8")
+
+    def test_dataset_identity_survives_title_edits_and_historical_retention(self):
+        activities, ids = self._duplicate_quiz_fixture()
+        response = self.search()
+        before = self.detail(response).json()
+        before_ids = {m["activity_id"]: m["dataset_id"] for m in before["measures"] if m["activity_id"]}
+        GradeActivity.objects.filter(pk=activities[0].pk).update(title="Quiz revised")
+        self.offering.status = "ARCHIVED"
+        self.offering.save()
+        after = self.detail(self.search()).json()
+        after_ids = {m["activity_id"]: m["dataset_id"] for m in after["measures"] if m["activity_id"]}
+        self.assertEqual(before_ids, after_ids)
+        self.assertIn("Quiz revised", {m["label"] for m in after["measures"]})
+        self._assert_dataset_reconciliation(self.search(), [after, *after["measures"]])
+
+    def test_equal_quiz_maps_reuse_exact_dataset_reference_but_keep_export_records(self):
+        activities, ids = self._duplicate_quiz_fixture()
+        # Keep saved buckets at 82.50 so the two equal Quiz maps refer to each
+        # other, rather than to a same-valued saved period/standing dataset.
+        StudentActivityScore.objects.filter(activity=activities[1]).update(computed_score=75)
+        response = self.search()
+        data = self.detail(response).json()
+        quizzes = [m for m in data["measures"] if m["label"] == "Quiz"]
+        self.assertNotEqual(quizzes[0]["dataset_id"], quizzes[1]["dataset_id"])
+        self.assertEqual(quizzes[1]["equivalent_to"], "Quiz")
+        self.assertEqual(quizzes[1]["equivalent_dataset_id"], quizzes[0]["dataset_id"])
+        self.assertEqual(quizzes[1]["equivalent_context"], quizzes[0]["gradebook_context"])
+        self.assertIn("Written Quizzes", quizzes[1]["equivalent_context"])
+        _, frequencies = self._assert_dataset_reconciliation(response, [data, *data["measures"]])
+        for metric in quizzes:
+            self.assertEqual(sum(r["Student Count"] for r in frequencies if r["Dataset Reference"] == metric["dataset_id"]), 10)
+
+    def test_export_limit_counts_frequencies_for_equal_but_distinct_records(self):
+        activities, ids = self._duplicate_quiz_fixture()
+        StudentActivityScore.objects.filter(activity=activities[1]).update(computed_score=75)
+        for sid, value in zip(ids, range(70, 80)):
+            StudentPeriodGrade.objects.filter(offering=self.offering, student_id=sid).update(period_grade=value)
+        response = self.search()
+        url = self.url + "?" + response.context["export_query"]
+        # 10 saved period buckets + 1 standing + 1 for EACH separate Quiz.
+        with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 13):
+            self.assertEqual(self.client.get(url).status_code, 200)
+        with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 12):
+            self.assertEqual(self.client.get(url).status_code, 400)
+
+    def test_duplicate_quiz_identity_does_not_expose_formula_protected_xlsx_difference(self):
+        ids, components = self._formula_fixture()
+        GradeActivity.objects.filter(template_component__in=components[:2]).update(title="Quiz")
+        response = self.search()
+        data = self.detail(response).json()
+        quizzes = [m for m in data["measures"] if m["label"] == "Quiz"]
+        common = next(m for m in quizzes if m["graded_count"] == 10)
+        sparse = next(m for m in quizzes if m["graded_count"] == 1)
+        self.assertNotEqual(common["dataset_id"], sparse["dataset_id"])
+        self._privacy_assert_payload(sparse)
+        self._privacy_assert_payload(data)
+        self._privacy_assert_payload(data["measures"][0])
+        self.assertEqual(sum(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("exam_grade", flat=True)), 788)
+        summaries, frequencies = self._assert_dataset_reconciliation(response, [data, *data["measures"]])
+        by_id = {r["Dataset Reference"]: r for r in summaries}
+        common_sum = sum(Decimal(str(r["Exact Grade"])) * r["Student Count"] for r in frequencies if r["Dataset Reference"] == common["dataset_id"])
+        self.assertEqual(common_sum, 745)
+        self.assertIsNone(by_id[data["measures"][0]["dataset_id"]]["Average Grade"])
+        self.assertFalse(any(r["Dataset Reference"] in (sparse["dataset_id"], data["measures"][0]["dataset_id"]) for r in frequencies))
+        self.assertFalse(any(Decimal(str(r["Exact Grade"])) == 43 for r in frequencies))
+        # Neither the public mean/count nor exact-frequency sums can supply
+        # the protected 788 total needed to subtract the safe common 745.
+        attacks = []
+        total = by_id[data["measures"][0]["dataset_id"]]
+        if total["Average Grade"] is not None:
+            attacks.append(Decimal(str(total["Average Grade"])) * total["Graded Students"] - common_sum)
+        self.assertNotIn(Decimal(43), attacks)
 
 
 class GradeDistributionPrivacyMetricTests(SimpleTestCase):

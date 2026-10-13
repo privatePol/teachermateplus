@@ -149,7 +149,7 @@ class GradeDistributionMonitorService:
             context["rows"] = cls.rows(selection, assignments, offerings, saved, candidates, periods)
             query = selection.query(selection.token())
             context["page_query"] = query.urlencode()
-            query["export"] = "csv"
+            query["export"] = "xlsx"
             context["export_query"] = query.urlencode()
             context["mapping_note"] = (f"{unresolved} saved physical period mapping(s) are unresolved and unavailable; sequence alone is not used." if unresolved else "")
             context["result_count"] = count
@@ -169,6 +169,7 @@ class GradeDistributionMonitorService:
         for a in assignments.filter(offering_id__in=offering_ids).select_related("faculty_user").order_by("faculty_user__last_name", "faculty_user__first_name", "faculty_user_id"):
             faculty_map[a.offering_id].append(faculty_name(a.faculty_user))
         rows = []
+        export_summaries = export_frequencies = 0
         for candidate in candidates:
             offering = offering_map[candidate["offering_id"]]
             period = periods[candidate["template_period_id"]]
@@ -206,6 +207,9 @@ class GradeDistributionMonitorService:
                 **period_metrics,
             }
             row["detail_query"] = selection.query(selection.token()).urlencode()
+            row["measures"] = measures
+            row["incomplete_source_count"] = incomplete
+            row["notes"].extend(notes)
             if candidate["saved_count"] > len(records):
                 row["notes"].append(
                     f'{candidate["saved_count"] - len(records)} saved record(s) are outside the dependable eligible roster and are omitted.'
@@ -213,9 +217,12 @@ class GradeDistributionMonitorService:
             if historical and not student_ids:
                 row["notes"].append("No dependable eligible enrollment associations remain; saved grades cannot establish an original roster on their own.")
             if detail:
-                row["measures"], row["incomplete_source_count"] = measures, incomplete
-                row["notes"].extend(notes)
-                row["notes"].append("Saved unfinalized grades may change. Monitor ranges are reference categories, not official grade equivalents. Percentages round independently to two decimal places.")
+                row["notes"].append("Analytics use the saved grades displayed in the Gradebook, including the configured base for activities. Raw scores are not the displayed distribution. Saved unfinalized grades may change. Percentages round independently to two decimal places. Activities have no authoritative subjective/objective classification.")
+            if selection.request.GET.get("export"):
+                from apps.admin_portal.grade_distribution_export import validate_workbook_size
+                export_summaries += 1 + len(measures)
+                export_frequencies += sum(len(m["frequency"]) for m in [row, *measures])
+                validate_workbook_size(export_summaries, export_frequencies)
             rows.append(row)
         return rows
 

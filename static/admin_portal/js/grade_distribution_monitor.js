@@ -30,9 +30,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (detail) card.append(node("div", detail, "small"));
     return card;
   };
-  const table = (headings, rows, caption) => {
+  const datasetDomId = id => `gdm-dataset-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const table = (headings, rows, caption, datasetId) => {
     const wrap = node("div", undefined, "table-responsive");
     const t = node("table", undefined, "table table-sm");
+    t.dataset.datasetId = datasetId;
     t.append(node("caption", caption));
     const head = node("thead"), tr = node("tr");
     headings.forEach(label => { const th = node("th", label); th.scope = "col"; tr.append(th); });
@@ -41,12 +43,13 @@ document.addEventListener("DOMContentLoaded", () => {
     rows.forEach(row => { const r = node("tr"); row.forEach(value => r.append(node("td", display(value)))); tb.append(r); });
     t.append(tb); wrap.append(t); return wrap;
   };
-  const chart = (items, title, xLabel) => {
+  const chart = (items, title, xLabel, datasetId, context) => {
     const wrap = node("div", undefined, "gdm-chart-wrap");
     const ns = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(ns, "svg");
+    svg.dataset.datasetId = datasetId;
     svg.classList.add("gdm-chart"); svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", `${title}. Vertical bars; horizontal axis ${xLabel}; vertical axis student count. Values are in the following table.`);
+    svg.setAttribute("aria-label", `${title}. ${context}. Vertical bars; horizontal axis ${xLabel}; vertical axis student count. Values are in the following table.`);
     const width = Math.max(600, items.length * 55 + 80);
     svg.setAttribute("viewBox", `0 0 ${width} 280`);
     svg.style.minWidth = `${Math.min(width, 1200)}px`;
@@ -69,23 +72,31 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   const renderMeasure = (measure, title, includeFrequency) => {
     const section = node("section", undefined, "gdm-measure");
+    section.id = datasetDomId(measure.dataset_id);
+    section.dataset.datasetId = measure.dataset_id;
     section.append(node("h4", title, "h6"));
+    section.append(node("p", measure.gradebook_context, "small text-muted"));
     if (measure.unit) section.append(node("p", measure.unit, "small text-muted"));
     if (measure.analytics_state && measure.analytics_state !== "disclosed") {
       section.append(node("p", measure.privacy_message, "small text-muted"));
-      section.append(table(["Reference category", "Numerical range", "Count", "% of graded"], measure.distribution.map(b => [b.label, b.range, "Withheld", "Withheld"]), `${title}: reference definitions only`));
       return section;
     }
-    if (measure.equivalent_to) {
-      section.append(node("p", `Same students and grades as ${measure.equivalent_to}. Use that measure's statistics below its heading.`, "small text-muted"));
+    if (measure.equivalent_dataset_id) {
+      section.dataset.equivalentDatasetId = measure.equivalent_dataset_id;
+      const reference = node("p", undefined, "small text-muted");
+      const link = node("a", measure.equivalent_to);
+      link.href = `#${datasetDomId(measure.equivalent_dataset_id)}`;
+      reference.append(node("span", "Same Gradebook values for the same students as "), link,
+        node("span", `. ${measure.equivalent_context}. See that distribution.`));
+      section.append(reference);
       return section;
     }
     const high = measure.high_grade_breakdown || [];
     const combined = high.find(item => item.grade === "Combined 95–99");
     const above = high.find(item => item.grade === "90 and above");
     const tiles = node("div", undefined, "gdm-summary mb-3");
-    tiles.append(tile("Class Ave.", display(measure.average), title),
-      tile("Graded Students", display(measure.graded_count), "Eligible saved/configured values"),
+    tiles.append(tile("Average Grade", display(measure.average), title),
+      tile("Graded Students", display(measure.graded_count), "Saved Gradebook grades"),
       tile("Lowest / Highest", `${display(measure.minimum)} / ${display(measure.maximum)}`, title),
       tile("Exactly 100", `${display(measure.exact_100_count)} / ${measure.graded_count}`, `${percent(measure.exact_100_percentage)} · ${title}`, true),
       tile("95–99", `${display(combined?.count)} / ${measure.graded_count}`, `${percent(combined?.percentage)} · 95 to below 100`),
@@ -95,17 +106,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (measure.finalized_count || measure.unfinalized_count) section.append(node("p", `Saved status: ${measure.status}; ${measure.finalized_count} finalized, ${measure.unfinalized_count} unfinalized.`, "small"));
     if (!measure.graded_count) section.append(node("p", "No eligible values are available for this measure.", "text-muted"));
     section.append(table(["Grade", "Count", "Total graded students", "Percentage"],
-      high.map(item => [item.grade, item.count, item.total_graded_students, percent(item.percentage)]), `${title}: high-grade breakdown`));
-    section.append(node("p", "Combined categories overlap; do not add their counts. Grades are compared without rounding. Exactly 100 refers to this measure, not necessarily a perfect raw examination score.", "small text-muted"));
-    const bands = measure.distribution.map((b, i) => ({...b, label: b.range, shortLabel: ["Strongly above", "Above", "Near", "Below", "Well below"][i]}));
-    section.append(chart(bands, `${title}: distribution`, "Threshold reference range"));
-    section.append(table(["Reference category", "Numerical range", "Count", "% of graded"], measure.distribution.map(b => [b.label, b.range, b.count, b.percentage]), `${title} — accessible distribution data`));
+      high.map(item => [item.grade, item.count, item.total_graded_students, percent(item.percentage)]), `${title}: high-grade breakdown (${measure.gradebook_context})`, measure.dataset_id));
+    section.append(node("p", "Combined categories overlap; do not add their counts. Grades are compared without rounding. Exactly 100 refers to this measure, not necessarily a perfect raw assessment score.", "small text-muted"));
     if (includeFrequency && measure.frequency.length) {
-      // A frequency chart adds exact-value concentration to the range chart.
-      const details = node("details", undefined, "gdm-collapsible"); details.append(node("summary", "Exact-grade frequency"));
+      // One numerical chart per distinct Gradebook measure; table retains all bins.
+      const details = node("div", undefined, "gdm-frequency");
       const frequencyChart = node("div");
       let offset = 0;
-      const drawFrequency = () => frequencyChart.replaceChildren(chart(measure.frequency.slice(offset, offset + 25).map(f => ({...f, label: String(f.grade)})), `${title}: exact frequency (${offset + 1}–${Math.min(offset + 25, measure.frequency.length)})`, "Exact grade"));
+      const drawFrequency = () => frequencyChart.replaceChildren(chart(measure.frequency.slice(offset, offset + 25).map(f => ({...f, label: String(f.grade)})), `${title}: exact frequency (${offset + 1}–${Math.min(offset + 25, measure.frequency.length)})`, "Gradebook grade", measure.dataset_id, measure.gradebook_context));
       drawFrequency(); details.append(frequencyChart);
       if (measure.frequency.length > 25) {
         const controls = node("div", undefined, "d-flex gap-2");
@@ -117,7 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
         next.addEventListener("click", () => { offset += 25; update(); });
         update(); controls.append(previous, next); details.append(controls);
       }
-      details.append(table(["Exact grade", "Count", "% of graded"], measure.frequency.map(f => [f.grade, f.count, f.percentage]), "Aggregate grade frequencies"));
+      details.append(table(["Gradebook grade", "Count", "% of graded"], measure.frequency.map(f => [f.grade, f.count, f.percentage]), `${title}: Gradebook grade frequencies (${measure.gradebook_context})`, measure.dataset_id));
       section.append(details);
     }
     return section;
@@ -170,7 +178,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const labels = node("dl", undefined, "row mb-0");
       for (const [label, value] of [["Faculty", data.faculty_name], ["Course", `${data.course_code} — ${data.course_title}`],
         ["Class/section", data.section], ["Campus", data.campus], ["Academic year and term", `${data.school_year} / ${data.term}`],
-        ["Grading period", data.period], ["Grade status", data.status]]) {
+        ["Grading period", data.gradebook_context], ["Grade status", data.status]]) {
         labels.append(node("dt", label, "col-sm-4"));
         const dd = node("dd", undefined, "col-sm-8");
         dd.append(node(label === "Faculty" ? "h5" : "span", value, label === "Faculty" ? "mb-0" : "")); labels.append(dd);
@@ -180,24 +188,16 @@ document.addEventListener("DOMContentLoaded", () => {
       for (const [label, value] of [["Selected saved grades / eligible students", `${data.graded_count} / ${data.eligible_count}`],
         ["Missing period grades", data.missing_count], ["Excluded by status", data.status_excluded_count],
         ["Incomplete assessment sources", display(data.incomplete_source_count)],
-        ["Threshold reference", `${data.passing_threshold} (${data.threshold_source})`]]) {
+        ["Activity grades", "Saved Gradebook values, including the configured base"]]) {
         const row = node("div"); row.append(node("dt", label), node("dd", value)); coverage.append(row);
       }
       body.append(coverage);
-      body.append(renderMeasure(data, "Period grade", true));
-      data.measures.forEach((measure, index) => {
-        const section = renderMeasure(measure, measure.label, false);
-        if (index < 2) body.append(section); // Saved examination and class-standing comparisons.
-        else {
-          const details = node("details", undefined, "gdm-collapsible mb-3");
-          details.append(node("summary", measure.analytics_state && measure.analytics_state !== "disclosed" ? `${measure.label}: ${measure.privacy_suppressed ? "Privacy suppressed" : "Unavailable"}` : `${measure.label}: Class Ave. ${display(measure.average)}; exactly 100: ${measure.exact_100_count}`), section);
-          body.append(details);
-        }
-      });
+      body.append(renderMeasure(data, "Period Grades", true));
+      data.measures.forEach(measure => body.append(renderMeasure(measure, measure.label, true)));
       const notes = node("details", undefined, "gdm-collapsible gdm-data-notes mt-3");
       notes.append(node("summary", "Data Notes"));
       const notesBody = node("div", undefined, "p-3");
-      notesBody.append(node("p", `Technical period: ${data.physical_period_label}. Finalized: ${data.finalized_count}; unfinalized: ${data.unfinalized_count}.`, "small"));
+      notesBody.append(node("p", `Finalized: ${data.finalized_count}; unfinalized: ${data.unfinalized_count}.`, "small"));
       data.notes.forEach(note => notesBody.append(node("p", note, "small text-muted")));
       notes.append(notesBody); body.append(notes);
     } catch (error) {
