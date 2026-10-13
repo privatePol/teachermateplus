@@ -811,12 +811,10 @@ ADMIN_HELP_SECTIONS = [
                     ),
                     (
                         "Detailed grade analytics require at least five distinct students with eligible non-null saved "
-                        "values for each measure; zero counts as a saved value. Classes stay visible, and privacy suppression "
-                        "is separate from missing grades or unavailable assessment sources. Summary, modal, charts and CSV "
-                        "withhold averages, min/max, exact frequencies, band counts/percentages and exact-100 analytics "
-                        "when suppressed. General threshold definitions and coverage remain visible."
+                        "values for each measure; zero counts as a saved value. Privacy suppression is separate from missing "
+                        "grades. Summary, modal, charts and Excel withhold averages, min/max, exact frequencies and high-grade "
+                        "counts/percentages when suppressed. No individual student records or masked identifiers are exported."
                     ),
-
                     (
                         "Grade Distribution Monitor starts empty. Select Academic Year, Term and one of Prelim, "
                         "Midterm, Pre-Final or Final, then click Apply Filters. Final Exam belongs within Final. "
@@ -824,34 +822,43 @@ ADMIN_HELP_SECTIONS = [
                         "filters supervised faculty relationships, not the department owning the course offering."
                     ),
                     (
-                        "All Statuses includes current saved finalized and unfinalized period grades. Saved unfinalized "
-                        "grades may change. Missing grades, genuine zeroes and values excluded by a status filter are "
-                        "separate. Class Ave. is the arithmetic mean of eligible saved non-null period grades."
+                        "All Statuses includes saved finalized and unfinalized grades. The monitor uses the same saved values "
+                        "as the official TMP Gradebook: Period Grades, Examination Grades, Class Standing Grades and every valid "
+                        "individual activity. Activity distributions use configured grades including Base 50 where configured, "
+                        "not raw scores or freshly recalculated grades. Average Grade is the arithmetic mean of the selected "
+                        "eligible saved values. No subjective/objective classification exists for these activities."
                     ),
                     (
-                        "Use View Analytics for labeled class details, compact metric tiles and a subtle gold Exactly 100 tile. "
-                        "The high-grade table shows exact 100, 99, 98, 97, 96 and 95 counts, Combined 95–99 (95 to below 100, "
-                        "including decimal grades) and 90 and above. Each row uses the same measure's eligible non-null graded students "
-                        "in the selected status as its denominator, with two-decimal percentages. Values are not rounded into exact grades. "
-                        "Combined categories overlap; do not add their counts. Data Notes retains coverage, historical and privacy explanations. "
-                        "Additional component charts are collapsed; proven equivalent measures share a visualization. "
-                        "Apply Filters, pagination and class analytics show an indeterminate green progress indicator. "
-                        "No individual student records or masked identifiers are shown or exported. Numerical "
-                        "threshold ranges and counts are visible in the main table. They are monitor reference categories, not official grade equivalents or misconduct judgments."
+                        "View Analytics shows one exact numerical frequency chart and accessible table per distinct measure. "
+                        "Intermediate calculated components are kept internally for privacy, and proven equivalent measures "
+                        "share a visualization only when their full student/value maps match. Each assessment shows its actual "
+                        "Gradebook group and activity record reference; distinct physical periods show their period record reference. "
+                        "Chart reuse links to the specific dataset, even when assessment names match. The gold Exactly 100 tile and "
+                        "high-grade table show exact 100, 99, 98, 97, 96 and 95, Combined 95–99 (95 to below 100, including "
+                        "decimals), and 90 and above. Each uses that measure's selected graded-student denominator and "
+                        "two-decimal percentages. Values are not rounded into exact grades. Combined categories overlap. "
+                        "Data Notes explains saved status and source limits. Apply Filters, pagination and class analytics "
+                        "show an indeterminate green progress indicator. Analytics are not official grade equivalents or misconduct judgments."
                     ),
                     (
-                        "Examination and class-standing saved totals can exceed 100 when major components are added. "
-                        "Only saved/configured examination grades and useful current component grades are displayed; raw examination "
-                        "percentages remain internal to formula-aware privacy protection. "
-                        "Configured grades of 100 do not necessarily mean a perfect raw examination. Historical ended terms and closed or "
-                        "archived classes use retained accepted assignments and enrollment associations despite same-tenant student campus, department or program transfers; unavailable original "
-                        "rosters, formulas, thresholds and physical-period mappings are explained without inventing calculations."
+                        "Examination and class-standing saved totals can exceed 100 and are never normalized or clamped. "
+                        "A configured grade of 100 need not mean a perfect raw score. Historical ended terms and closed or "
+                        "archived classes use retained accepted assignments, enrollment associations, saved totals and saved "
+                        "activity grades despite same-tenant student transfers. Original roster/formula/maximum/score-revision "
+                        "snapshots are unavailable. Historical activities reflect retained current saved entries, not immutable "
+                        "original ratings. Missing history and unresolved physical-period mappings are explained without invented calculations."
                     ),
                     (
-                        "Monitor pages show 25 class/physical-period rows. Search and CSV exports are limited to 500 "
-                        "class/period rows, 50,000 saved grades and roster associations, and 2,000 students per class. "
-                        "Narrow criteria when a limit is exceeded. Exports and detail requests require a valid authorized "
-                        "search context, valid for one hour; Apply Filters again after expiration or scope changes."
+                        "Export Excel downloads Grade summaries and Grade frequencies with filters, frozen headers and "
+                        "numeric formats. Distinct records retain separate dataset references and frequency rows, including "
+                        "otherwise identical names or equal grades. Use Dataset Reference to group or join the sheets, with "
+                        "Class Record, Period Record, Activity Record and Status Selection identifying the source and selection. "
+                        "Suppressed statistics are blank "
+                        "with a privacy explanation. Monitor pages show 25 class/physical-period rows. Search and Excel exports "
+                        "are limited to 500 class/period rows, 50,000 saved grades and roster associations, 2,000 students per class, "
+                        "200 activities and 20,000 scores per class/period, and 50,000 aggregate rows per Excel sheet. "
+                        "Narrow criteria when a limit is exceeded; results are never truncated. Exports and detail require "
+                        "an authorized search context valid for one hour; Apply Filters again after expiration or scope changes."
                     ),
                     (
                         "For Midterm Exam Performance, select the Midterm examination cycle, then use Load more "
