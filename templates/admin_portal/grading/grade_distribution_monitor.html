@@ -6,7 +6,22 @@
 .gdm-distribution {display:flex;min-width:9rem;height:1rem;border-radius:.25rem;overflow:hidden;background:#eee}
 .gdm-distribution span:nth-child(1) {background:#14532d}.gdm-distribution span:nth-child(2) {background:#29814a}.gdm-distribution span:nth-child(3) {background:#a67800}.gdm-distribution span:nth-child(4) {background:#b45309}.gdm-distribution span:nth-child(5) {background:#9f1239}
 .gdm-chart {width:100%;height:auto;max-height:280px}.gdm-chart text {font-size:12px;fill:#28352e}.gdm-chart rect {fill:#20613c}
-.gdm-measure {border-top:1px solid #ddd;padding-top:1rem;margin-top:1rem}.gdm-chart-wrap {overflow-x:auto}.gdm-summary {display:flex;flex-wrap:wrap;gap:1rem}
+.gdm-measure {border-top:1px solid #ddd;padding-top:1rem;margin-top:1rem}.gdm-chart-wrap {overflow-x:auto}
+.gdm-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.75rem}
+.gdm-metric{padding:.8rem;border:1px solid #D0E5D6;border-radius:.5rem;background:#FAFDFB;overflow-wrap:anywhere}
+.gdm-exact-100{background:#fff8e5;border-color:#d9ba64;color:#604b15}
+.gdm-class-header{padding:1rem;background:#FAFDFB;border:1px solid #D0E5D6;border-radius:.5rem}
+.gdm-coverage{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.75rem;margin-top:1rem}
+.gdm-coverage dt{font-size:.8rem}.gdm-coverage dd{margin-bottom:0}
+.gdm-collapsible{background:#FAFDFB;border:1px solid #D0E5D6;border-radius:.5rem;overflow:hidden}
+.gdm-collapsible>summary{padding:.75rem;background:#E6F3E9;color:#20452c;cursor:pointer;font-weight:600}
+.gdm-collapsible[open]>summary{border-bottom:1px solid #D0E5D6;background:#D0E5D6}
+.gdm-collapsible>summary:focus-visible{outline:3px solid #20613c;outline-offset:-3px}
+.gdm-collapsible>.gdm-measure,.gdm-collapsible>.table-responsive,.gdm-collapsible>.gdm-chart-wrap{padding:1rem;margin:0;border-top:0}
+.gdm-loading .progress{height:.65rem;background:#E6F3E9;overflow:hidden}
+.gdm-indeterminate{width:40%;animation:gdm-progress 1.25s ease-in-out infinite}
+@keyframes gdm-progress{from{transform:translateX(-100%)}to{transform:translateX(350%)}}
+@media(prefers-reduced-motion:reduce){.gdm-indeterminate{animation:none;width:100%;opacity:.65}}
 </style>
 <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
   <div><h2 class="h4 mb-1">Faculty Grade Distribution Monitor</h2><p class="text-muted small mb-0">Read-only class aggregates for faculty under your supervision. Saved unfinalized grades may change.</p></div>
@@ -48,17 +63,18 @@
   {% if mapping_note %}<p class="alert alert-info">{{ mapping_note }}</p>{% endif %}
   <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><p class="mb-0">{{ result_count }} class/period rows. Separate physical periods remain separate rows.</p><a class="btn btn-sm btn-outline-success" href="?{{ export_query }}">Export CSV</a></div>
   <div class="table-responsive"><table class="table table-sm align-middle"><caption>Threshold-Aware Distribution of eligible saved period grades. Reference categories are not official grade equivalents.</caption>
-  <thead><tr><th scope="col">Faculty</th><th scope="col">Class / Course</th><th scope="col">Grading Period</th><th scope="col">Coverage</th><th scope="col">Threshold</th><th scope="col">Class Ave.</th><th scope="col">Threshold-Aware Distribution</th><th scope="col">View Analytics</th></tr></thead>
+  <thead><tr><th scope="col">Faculty</th><th scope="col">Class / Course</th><th scope="col">Grading Period</th><th scope="col">Coverage</th><th scope="col">Threshold</th><th scope="col">Class Ave.</th><th scope="col">Exactly 100</th><th scope="col">Threshold-Aware Distribution</th><th scope="col">View Analytics</th></tr></thead>
   <tbody>{% for row in rows %}<tr>
     <td>{{ row.faculty_name }}</td><td><strong>{{ row.course_code }}</strong><div class="small">{{ row.course_title }} &middot; {{ row.section }} &middot; {{ row.campus }}</div>{% if row.historical %}<span class="badge text-bg-secondary">Historical</span>{% endif %}</td>
     <td>{{ row.period }}<div class="small text-muted">{{ row.physical_period_label }}</div><span class="small">{{ row.status }}</span></td>
     <td>{{ row.graded_count }} / {{ row.eligible_count }}<div class="small">{{ row.missing_count }} missing{% if row.status_excluded_count %}; {{ row.status_excluded_count }} excluded by status{% endif %}</div></td>
     <td>{{ row.passing_threshold }}{% if row.historical %}<div class="small">Current reference</div>{% endif %}<div class="small text-muted">{{ row.threshold_source }}</div></td><td>{% if row.privacy_suppressed %}<span class="text-muted">Privacy suppressed</span>{% else %}{{ row.average|default_if_none:"Unavailable" }}{% endif %}</td>
+    <td>{% if row.analytics_state == "disclosed" %}<div class="gdm-metric gdm-exact-100"><strong>{{ row.exact_100_count }} / {{ row.graded_count }}</strong><div>{{ row.exact_100_percentage|floatformat:2 }}%</div><div class="small">Period Grade</div></div>{% else %}<span class="text-muted">{{ row.analytics_state|title }}</span>{% endif %}</td>
     <td>{% if row.analytics_state == "disclosed" %}<div class="gdm-distribution" aria-hidden="true">{% for b in row.distribution %}<span style="width:{{ b.percentage }}%"></span>{% endfor %}</div>{% else %}<p class="small text-muted mb-1">{{ row.privacy_message }}</p>{% endif %}
       <dl class="gdm-band-ranges small mt-1 mb-0">{% for b in row.distribution %}<div><dt class="fw-normal">{{ b.label }} <span class="text-muted">({{ b.range }})</span></dt><dd class="mb-0 fw-semibold">{{ b.count|default_if_none:"Withheld" }}</dd></div>{% endfor %}</dl>
       {% if row.analytics_state == "disclosed" %}<span class="visually-hidden">{% for b in row.distribution %}{{ b.label }} ({{ b.range }}): {{ b.count }}, {{ b.percentage }}%. {% endfor %}</span>{% endif %}
     </td><td><button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#gradeDistributionAnalyticsModal" data-analytics-url="{% url 'admin_portal:grade_distribution_monitor_detail' row.offering_id row.physical_period_id %}?{{ row.detail_query }}">View Analytics<span class="visually-hidden"> for {{ row.course_code }} {{ row.section }}</span></button></td>
-  </tr>{% empty %}<tr><td colspan="8">No saved grading records match these criteria. Unresolved physical period identities are unavailable.</td></tr>{% endfor %}</tbody></table></div>
+  </tr>{% empty %}<tr><td colspan="9">No saved grading records match these criteria. Unresolved physical period identities are unavailable.</td></tr>{% endfor %}</tbody></table></div>
   <p class="small text-muted">Band order: Strongly Above / Above / Near / Below / Well Below. Counts use the selected saved grade status; missing values are separate. Coverage uses all saved non-null period grades.</p>
   {% if page_obj.has_other_pages %}<nav aria-label="Grade distribution pages"><ul class="pagination">
     {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?{{ page_query }}&amp;page={{ page_obj.previous_page_number }}">Previous</a></li>{% endif %}<li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>{% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?{{ page_query }}&amp;page={{ page_obj.next_page_number }}">Next</a></li>{% endif %}
@@ -69,5 +85,5 @@
   <div class="modal-header"><h3 class="modal-title h5" id="gdm-modal-title">Class Analytics</h3><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close analytics"></button></div>
   <div class="modal-body" id="gdm-modal-body" aria-live="polite"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
 </div></div></div>
-<script src="{% static 'admin_portal/js/grade_distribution_monitor.js' %}?v=20261012-privacy5" defer></script>
+<script src="{% static 'admin_portal/js/grade_distribution_monitor.js' %}?v=20261013-high-grades" defer></script>
 {% endblock %}

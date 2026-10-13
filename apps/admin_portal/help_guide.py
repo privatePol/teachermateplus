@@ -934,14 +934,21 @@ ADMIN_HELP_SECTIONS = [
                         "separate. Class Ave. is the arithmetic mean of eligible saved non-null period grades."
                     ),
                     (
-                        "Use View Analytics for aggregate distributions, coverage, minimum/maximum and exactly-100 "
-                        "counts. Additional component charts are collapsed. No individual student records or masked identifiers are shown or exported. Numerical "
+                        "Use View Analytics for labeled class details, compact metric tiles and a subtle gold Exactly 100 tile. "
+                        "The high-grade table shows exact 100, 99, 98, 97, 96 and 95 counts, Combined 95–99 (95 to below 100, "
+                        "including decimal grades) and 90 and above. Each row uses the same measure's eligible non-null graded students "
+                        "in the selected status as its denominator, with two-decimal percentages. Values are not rounded into exact grades. "
+                        "Combined categories overlap; do not add their counts. Data Notes retains coverage, historical and privacy explanations. "
+                        "Additional component charts are collapsed; proven equivalent measures share a visualization. "
+                        "Apply Filters, pagination and class analytics show an indeterminate green progress indicator. "
+                        "No individual student records or masked identifiers are shown or exported. Numerical "
                         "threshold ranges and counts are visible in the main table. They are monitor reference categories, not official grade equivalents or misconduct judgments."
                     ),
                     (
                         "Examination and class-standing saved totals can exceed 100 when major components are added. "
-                        "Current component grades and actual raw examination percentages are shown separately when reliable; "
-                        "configured grades of 100 do not necessarily mean a perfect raw examination. Historical ended terms and closed or "
+                        "Only saved/configured examination grades and useful current component grades are displayed; raw examination "
+                        "percentages remain internal to formula-aware privacy protection. "
+                        "Configured grades of 100 do not necessarily mean a perfect raw examination. Historical ended terms and closed or "
                         "archived classes use retained accepted assignments and enrollment associations despite same-tenant student campus, department or program transfers; unavailable original "
                         "rosters, formulas, thresholds and physical-period mappings are explained without inventing calculations."
                     ),

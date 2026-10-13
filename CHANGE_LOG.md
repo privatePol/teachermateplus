@@ -1,3 +1,9 @@
+## 2026-10-13 - Grade Distribution Monitor UI refinement (Gate 21)
+
+- Removed Actual Examination Percentage from monitor response measures and visualizations while retaining raw inputs, conversions and every formula-privacy dependency internally. Saved period, examination and class-standing grades remain the primary measures; proven identical full student/value maps share a visualization. No grading-engine or saved-data changes.
+- Added exact 100/99/98/97/96/95, Combined 95–99 (95 to below 100, including decimal grades) and 90+ counts with each measure's selected eligible graded-student denominator and two-decimal percentages. Values are never rounded into exact buckets. Overlapping combined categories must not be summed; withheld measures expose no high-grade counts or percentages in HTML, JSON or CSV.
+- Added subtle gold Exactly 100 tiles, labeled modal identity rows with an actual faculty H5, compact summary tiles, expandable Data Notes, accessible green collapsibles and animated indeterminate loading for Apply Filters, pagination and analytics. Initial grade retrieval remains explicit. Local validation and independent-review next steps are recorded in HANDOFF.md; no release action performed.
+
 ## 2026-10-12 - Grade Distribution Monitor formula privacy remediation
 
 - Fixed cross-measure reconstruction (745 common + suppressed 43 supplemental = 788 saved exam). The server plans complete formula dependencies before releasing any statistic, including summary/CSV requests. Stored bucket sums, weighted/rounded/transmuted period grades, components, detail/activity averages, raw/configured sources and attendance sessions participate; student membership comparison alone is insufficient.

@@ -648,3 +648,7 @@ class GradeDistributionGuideContentTests(TestCase):
             self.assertIn(phrase, text)
         for phrase in ("Formula privacy", "weighted period", "affected analytic family", "Safely independent measures", "Unresolved formula dependencies"):
             self.assertIn(phrase, text)
+        for phrase in ("Combined 95–99", "95 to below 100", "not rounded", "two-decimal percentages", "Data Notes",
+                       "indeterminate green progress", "gold Exactly 100", "proven equivalent measures"):
+            self.assertIn(phrase, text)
+        self.assertNotIn("actual raw examination percentages are shown", text)

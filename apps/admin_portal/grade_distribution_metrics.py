@@ -19,6 +19,23 @@ def percentage(count, total):
     return rounded(Decimal(count) * 100 / total) if total else Decimal("0.00")
 
 
+def high_grade_breakdown(values, total, *, disclosed=True):
+    """Unrounded saved/configured values; reuse the admitted measure population.
+
+    These are projections of its already releasable exact frequencies, not new
+    cohorts. Combined categories overlap and must never be added together.
+    """
+    categories = [(f"Exactly {grade}", sum(v == grade for v in values)) for grade in range(100, 94, -1)]
+    categories.extend([
+        ("Combined 95–99", sum(Decimal("95") <= v < Decimal("100") for v in values)),
+        ("90 and above", sum(v >= Decimal("90") for v in values)),
+    ])
+    return [{"grade": label, "count": count if disclosed else None,
+             "total_graded_students": total,
+             "percentage": percentage(count, total) if disclosed else None}
+            for label, count in categories]
+
+
 def distribution(values, threshold):
     t = Decimal(threshold)
     limits = (t + 15, t, t - 5, t - 15)
@@ -47,6 +64,7 @@ def metrics(values, *, threshold, eligible_count, finalized_count=0, unfinalized
         "minimum": min(values) if count else None, "maximum": max(values) if count else None,
         "exact_100_count": frequencies[Decimal("100")], "exact_100_percentage": percentage(frequencies[Decimal("100")], count),
         "all_100": bool(count and frequencies[Decimal("100")] == count),
+        "high_grade_breakdown": high_grade_breakdown(values, count),
         "finalized_count": finalized_count, "unfinalized_count": unfinalized_count, "status": status,
         "distribution": distribution(values, threshold),
         "frequency": [{"grade": grade, "count": n, "percentage": percentage(n, count)} for grade, n in sorted(frequencies.items()) if n],
@@ -116,6 +134,7 @@ class PrivacyFamily:
             result = {"graded_count": len(chosen), "eligible_count": eligible_count,
                       "average": None, "minimum": None, "maximum": None,
                       "exact_100_count": None, "exact_100_percentage": None, "all_100": None,
+                      "high_grade_breakdown": high_grade_breakdown([], len(chosen), disclosed=False),
                       "frequency": [], "distribution": bands, "finalized_count": finalized,
                       "unfinalized_count": unfinalized,
                       "status": "Mixed" if finalized and unfinalized else
@@ -217,8 +236,18 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
             plan.link("period_grade", "class_standing_grade")
         plan.finalize(unresolved=unresolved)
         period_metrics = plan.measure("period_grade", eligible_count=len(student_ids))
-        released = [{"label": label, "unit": unit, **plan.measure(key, eligible_count=len(selected_ids))}
-                    for key, label, unit in measures]
+        released = []
+        disclosed_sources = [("period_grade", "Period grade")] if period_metrics["analytics_state"] == "disclosed" else []
+        for key, label, unit in measures:
+            measure = {"label": label, "unit": unit, **plan.measure(key, eligible_count=len(selected_ids))}
+            # Compare full student/value maps, never rounded aggregate averages.
+            # Suppressed sources cannot disclose an equivalence relationship.
+            if measure["analytics_state"] == "disclosed":
+                measure["equivalent_to"] = next((prior_label for prior_key, prior_label in disclosed_sources
+                    if plan.samples[key] == plan.samples[prior_key]), "")
+                if not measure["equivalent_to"]:
+                    disclosed_sources.append((key, label))
+            released.append(measure)
         return period_metrics, released, notes, incomplete
 
     for field, label in (("exam_grade", "Examination - saved component total"), ("class_standing_grade", "Class standing - saved component total")):
@@ -364,8 +393,10 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         plan.link(raw_key, configured_key)
         plan.link(raw_key, input_key)
         if FacultyGradingService.is_exam_component(activity.template_component):
-            for key, unit in ((raw_key, "Actual examination percentage"), (configured_key, "Saved configured activity grade")):
-                measures.append((key, f"{activity.title} - {unit}", "Each activity is separate. Actual raw percentage and configured grade may differ; no combined percentage is assumed."))
+            # Raw scores/percentages still participate in every privacy edge,
+            # but are no longer browser-facing measures.
+            measures.append((configured_key, f"{activity.title} - Saved configured activity grade",
+                             "Saved configured assessment grade; a grade of 100 need not mean a perfect raw examination score."))
     lineage_matches = all(all(r[field] == engine_totals[r["student_id"]][field]
                               for field in ("period_grade", "exam_grade", "class_standing_grade")) for r in saved_rows)
     notes.append("Current component/activity measures use saved assessment sources and the read-only grading engine. They do not overwrite saved period grades. Exactly 100 refers to the stated measure, not necessarily a perfect raw examination.")

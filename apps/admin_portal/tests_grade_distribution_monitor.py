@@ -10,7 +10,7 @@ from unittest.mock import patch
 from urllib.parse import parse_qs
 
 from apps.admin_portal.grade_distribution import GradeDistributionMonitorService
-from apps.admin_portal.grade_distribution_metrics import FormulaPrivacyPlan, PrivacyFamily, distribution
+from apps.admin_portal.grade_distribution_metrics import FormulaPrivacyPlan, PrivacyFamily, distribution, metrics
 from apps.admin_portal.grade_distribution_selection import logical_period
 from apps.grading.services import FacultyGradingService
 from django.urls import reverse
@@ -183,6 +183,74 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertNotContains(response, "Masked Student")
         self.assertNotIn("grade_details", row)
 
+    def test_high_grade_html_json_csv_parity_and_unrounded_denominators(self):
+        grades = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id"))
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(exam_grade=None, class_standing_grade=None)
+        for grade, value in zip(grades, (100, 99, 98, 97, 96, 95, Decimal("99.75"), 90, 89, None)):
+            StudentPeriodGrade.objects.filter(pk=grade.pk).update(period_grade=value)
+        self.client.force_login(self.admin_user)
+        response = self.search()
+        row = response.context["rows"][0]
+        data = self.detail(response).json()
+        export = self._privacy_csv_row(self.client.get(self.url + "?" + response.context["export_query"]))
+        self.assertEqual([item["count"] for item in row["high_grade_breakdown"]], [1, 1, 1, 1, 1, 1, 6, 8])
+        self.assertContains(response, "gdm-metric gdm-exact-100")
+        self.assertContains(response, "11.11%")
+        for local, public in zip(row["high_grade_breakdown"], data["high_grade_breakdown"]):
+            label = local["grade"]
+            self.assertEqual(public["count"], local["count"])
+            self.assertEqual(public["total_graded_students"], 9)
+            self.assertEqual(Decimal(public["percentage"]), local["percentage"])
+            self.assertEqual(export[f"{label} Count"], str(local["count"]))
+            self.assertEqual(export[f"{label} Total Graded Students"], "9")
+            self.assertEqual(export[f"{label} %"], str(local["percentage"]))
+        self.assertNotIn("Actual examination percentage", json.dumps(data))
+        self.assertEqual(data["missing_count"], 1)
+
+    def test_configured_exact_100_is_not_a_perfect_raw_exam_and_equivalence_is_proven(self):
+        exam = GradingTemplateComponent.objects.create(template_period=self.period, code="EXAM", name="Exam", weight_percentage=100, is_exam_component=True)
+        activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
+            template_period=self.period, template_component=exam, title="Midterm Exam", total_score=100, created_by_user=self.faculty_user)
+        for student in Student.objects.filter(enrollments__course_offering=self.offering):
+            StudentActivityScore.objects.create(activity=activity, student=student, raw_score=50, computed_score=100)
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(exam_grade=100, class_standing_grade=None)
+        before = list(StudentActivityScore.objects.filter(activity=activity).values())
+        self.client.force_login(self.admin_user)
+        data = self.detail(self.search()).json()
+        for measure in data["measures"]:
+            if measure["analytics_state"] == "disclosed":
+                self.assertEqual(measure["high_grade_breakdown"][0]["count"], 10)
+                self.assertEqual(measure["high_grade_breakdown"][0]["total_graded_students"], 10)
+                self.assertEqual(Decimal(measure["high_grade_breakdown"][0]["percentage"]), 100)
+        component = next(m for m in data["measures"] if m["label"] == "Examination - Exam")
+        configured = next(m for m in data["measures"] if m["label"] == "Midterm Exam - Saved configured activity grade")
+        self.assertEqual(component["equivalent_to"], data["measures"][0]["label"])
+        self.assertEqual(configured["equivalent_to"], data["measures"][0]["label"])
+        self.assertNotIn("Actual examination percentage", json.dumps(data))
+        self.assertEqual(list(StudentActivityScore.objects.filter(activity=activity).values()), before)
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=100)
+        data = self.detail(self.search()).json()
+        disclosed = [m for m in data["measures"] if m["analytics_state"] == "disclosed"]
+        self.assertTrue(all(m["equivalent_to"] == "Period grade" for m in disclosed))
+        # A matching average is insufficient: keep a different student/value map.
+        scores = list(StudentActivityScore.objects.filter(activity=activity).order_by("id"))
+        for index, score in enumerate(scores):
+            StudentActivityScore.objects.filter(pk=score.pk).update(computed_score=99 if index < 5 else 101)
+        data = self.detail(self.search()).json()
+        component = next(m for m in data["measures"] if m["label"] == "Examination - Exam")
+        self.assertEqual(Decimal(component["average"]), 100)
+        self.assertEqual(component["equivalent_to"], "")
+        self.assertEqual(component["high_grade_breakdown"][0]["count"], 0)
+
+    def test_modal_template_has_accessible_responsive_collapsible_and_loading_styles(self):
+        self.client.force_login(self.admin_user)
+        response = self.client.get(self.url)
+        for phrase in ("prefers-reduced-motion", ":focus-visible", "#E6F3E9", "#FAFDFB", "#D0E5D6",
+                       "@keyframes gdm-progress", "modal-fullscreen-sm-down", 'aria-labelledby="gdm-modal-title"',
+                       'id="gdm-filter-status" role="status" aria-live="polite"'):
+            self.assertContains(response, phrase)
+        self.assertNotContains(response, 'role="progressbar"')  # Initial page remains idle.
+
     def test_all_four_logical_periods_and_exact_options(self):
         students = list(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("student_id", flat=True))
         for key, name, seq in (("MIDTERM", "Midterm", 2), ("PRE-FINAL", "Pre-Final", 3), ("FINAL_EXAM", "Final Exam", 4)):
@@ -290,6 +358,10 @@ class GradeDistributionMonitorTests(TestCase):
         for key in ("average", "minimum", "maximum", "exact_100_count", "exact_100_percentage", "all_100"):
             self.assertIsNone(payload[key], key)
         self.assertEqual(payload["frequency"], [])
+        self.assertEqual(len(payload["high_grade_breakdown"]), 8)
+        self.assertTrue(all(item["count"] is None and item["percentage"] is None
+                            for item in payload["high_grade_breakdown"]))
+        self.assertNotIn("equivalent_to", payload)
         self.assertTrue(all(b["count"] is None and b["percentage"] is None for b in payload["distribution"]))
         self.assertNotIn("student_id", payload)
 
@@ -323,6 +395,9 @@ class GradeDistributionMonitorTests(TestCase):
                     self.assertNotContains(response, 'class="gdm-distribution"')
                     for column in ("Class Ave.", "Minimum", "Maximum", "Exactly 100 Count", "Exactly 100 %", "All Graded Values Exactly 100"):
                         self.assertEqual(csv_row[column], "")
+                    for category in row["high_grade_breakdown"]:
+                        self.assertEqual(csv_row[f'{category["grade"]} Count'], "")
+                        self.assertEqual(csv_row[f'{category["grade"]} %'], "")
                     self.assertIn("Withheld", csv_row["Threshold-Aware Distribution"])
                 elif count == 0:
                     self.assertEqual(row["analytics_state"], "unavailable")
@@ -442,6 +517,9 @@ class GradeDistributionMonitorTests(TestCase):
             self.assertEqual(csv_row["Analytics Availability"], row["analytics_state"])
             for column in ("Class Ave.", "Minimum", "Maximum", "Exactly 100 Count", "Exactly 100 %"):
                 self.assertEqual(csv_row[column], "")
+            for category in row["high_grade_breakdown"]:
+                self.assertEqual(csv_row[f'{category["grade"]} Count'], "")
+                self.assertEqual(csv_row[f'{category["grade"]} %'], "")
             self.assertNotContains(response, 'class="gdm-distribution"')
             for measure in modal["measures"]:
                 if measure["analytics_state"] != "disclosed":
@@ -506,8 +584,8 @@ class GradeDistributionMonitorTests(TestCase):
         StudentActivityScore.objects.filter(activity=activity).update(raw_score=Decimal("21.5"), computed_score=Decimal("71.5"))
         self._persist_formula_totals(list(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("student_id", flat=True)))
         data = self.detail(self.search()).json()
-        for label in ("Supplemental - Actual examination percentage", "Supplemental - Saved configured activity grade"):
-            self._privacy_assert_payload(next(m for m in data["measures"] if m["label"] == label))
+        self.assertFalse(any("Actual examination percentage" in m["label"] for m in data["measures"]))
+        self._privacy_assert_payload(next(m for m in data["measures"] if m["label"] == "Supplemental - Saved configured activity grade"))
         self._privacy_assert_payload(data["measures"][0])
         self._privacy_assert_payload(data)
 
@@ -995,7 +1073,8 @@ class GradeDistributionMonitorTests(TestCase):
         self.client.force_login(self.admin_user)
         data = self.detail(self.search()).json()
         measures = {m["label"]: m for m in data["measures"]}
-        self.assertEqual(Decimal(measures["Exam - Actual examination percentage"]["average"]), 50)
+        self.assertNotIn("Exam - Actual examination percentage", measures)
+        self.assertEqual(set(StudentActivityScore.objects.filter(activity=activity).values_list("raw_score", flat=True)), {Decimal("25")})
         self.assertEqual(Decimal(measures["Exam - Saved configured activity grade"]["average"]), 75)
         self.assertEqual(Decimal(measures["Examination - Exam"]["average"]), 75)
         self.assertEqual(Decimal(measures["Class standing - Class Standing"]["average"]), 100)
@@ -1193,9 +1272,11 @@ class GradeDistributionMonitorTests(TestCase):
         data = self.detail(self.search()).json()
         self.assertEqual(data["missing_count"], 0)
         self.assertEqual(data["incomplete_source_count"], 10)
-        raw = next(m for m in data["measures"] if m["label"] == "Zero exam - Actual examination percentage")
-        self.assertEqual(raw["graded_count"], 5)
-        self.assertEqual(Decimal(raw["minimum"]), 0)
+        self.assertFalse(any("Actual examination percentage" in m["label"] for m in data["measures"]))
+        configured = next(m for m in data["measures"] if m["label"] == "Zero exam - Saved configured activity grade")
+        self.assertEqual(configured["graded_count"], 5)
+        self.assertEqual(Decimal(configured["minimum"]), 50)
+        self.assertEqual(set(StudentActivityScore.objects.filter(activity=activity).values_list("raw_score", flat=True)), {Decimal("0")})
         self.assertEqual(Decimal(data["average"]), Decimal("90.40"))
 
     def test_component_activity_limit_is_explicit_and_saved_totals_remain_available(self):
@@ -1389,7 +1470,32 @@ class GradeDistributionPrivacyMetricTests(SimpleTestCase):
         for key in ("average", "minimum", "maximum", "exact_100_count", "exact_100_percentage", "all_100"):
             self.assertIsNone(result[key], key)
         self.assertEqual(result["frequency"], [])
+        self.assertTrue(all(item["count"] is None and item["percentage"] is None
+                            for item in result["high_grade_breakdown"]))
         self.assertTrue(all(b["count"] is None and b["percentage"] is None for b in result["distribution"]))
+
+    def test_exact_and_combined_high_grades_do_not_round_or_cap_values(self):
+        values = list(map(Decimal, ["100", "100.01", "99.99", "99", "98", "97", "96", "95", "95.50", "90", "89.99", "0"]))
+        result = metrics(values + [None], threshold=75, eligible_count=20)
+        high = result["high_grade_breakdown"]
+        self.assertEqual([item["count"] for item in high], [1, 1, 1, 1, 1, 1, 7, 10])
+        self.assertTrue(all(item["total_graded_students"] == 12 for item in high))
+        self.assertEqual(high[0]["percentage"], Decimal("8.33"))
+        self.assertEqual(high[6]["percentage"], Decimal("58.33"))
+        self.assertEqual(high[7]["percentage"], Decimal("83.33"))
+        # No new information beyond the existing safely admitted frequency map.
+        self.assertEqual(high[7]["count"], sum(item["count"] for item in result["frequency"] if item["grade"] >= 90))
+
+    def test_high_grade_denominators_follow_each_measure_and_selected_status(self):
+        statuses = {i: i < 5 for i in range(10)}
+        samples = {i: Decimal("100") if i < 5 else Decimal("99.75") for i in statuses}
+        for status, count, exact, combined in (("all", 10, 5, 5), ("finalized", 5, 5, 0), ("unfinalized", 5, 0, 5)):
+            result = PrivacyFamily(statuses, status, 75).measure(samples, eligible_count=20)
+            self.assertEqual(result["analytics_state"], "disclosed")
+            high = result["high_grade_breakdown"]
+            self.assertEqual((high[0]["count"], high[6]["count"], high[7]["count"]), (exact, combined, count))
+            self.assertTrue(all(item["total_graded_students"] == count for item in high))
+            self.assertEqual(high[7]["percentage"], Decimal("100.00"))
 
     def test_zero_to_six_distinct_saved_values_and_real_zero(self):
         for n in range(7):
