@@ -1,3 +1,18 @@
+## Meaningful MCQ inline whitespace - 2026-10-15 (Gate 2C)
+
+- Fixed the questionnaire-only projection dropping spaces between top-level inline words when the same canonical HTML contains a paragraph. Mixed `<strong>First</strong> <em>Second</em><p>Third</p>` now retains its exact HTML and semantic text. Inline separators are preserved verbatim; block indentation and approved redundant blank-line/paragraph compaction remain unchanged.
+- Added exact-content, nested-inline/entity, all-five-field, mixed-block, idempotence and historical-safety regressions, plus both-set screen/print coverage. Links/spans remain subject to the existing sanitizer and historical escaping; no new HTML support, stored-content change, model or migration is introduced. See HANDOFF.md for executed validation and pending review.
+
+## Smart questionnaire spacer projection - 2026-10-14 (Gate 2B)
+
+- Admin generated preview and shared Admin/Faculty Set A/B print now compact redundant MCQ spacers only while rendering. Leading/trailing blank paragraphs and prose line breaks are removed; internal blank runs retain at most one blank line. This includes automatically marked `tmp-preserve` spacer paragraphs in stems and all four choices.
+- The questionnaire-specific adapter retains the existing canonical HTML verification and escaped historical fallback. Meaningful text/formatting, tables, balanced mathematical spans, caselets and protected structure remain intact; ambiguous math or meaningful preformatted whitespace is preserved conservatively. The editor, saved content, identity/digests, generated revisions and releases are unchanged.
+- Shared screen/print CSS gives the retained empty paragraph one line of height and aligns the first visible stem with its question number. Existing revisions need no regeneration or new release. Focused source, disposable-record and synthetic browser/PDF evidence is recorded in HANDOFF.md; deployed-version and official questionnaire acceptance remain separate gates.
+
+## Questionnaire MCQ paragraph spacing - 2026-10-14
+
+- Admin generated preview and the shared Admin/Faculty questionnaire print page now use scoped MCQ paragraph spacing: no outer paragraph margins and a modest gap between consecutive paragraphs. Plain-text output, intentional preserved whitespace, table cells, caselets, scientific notation and existing choice columns remain unchanged. Existing snapshots and releases receive the presentation correction without regeneration or data changes; no migration is added.
+
 ## 2026-10-14 - Grade Distribution dataset identity correction (Gate 33)
 
 - Fixed ambiguous dataset identity across same-named physical grading periods and assessments. Analytics now carry offering and physical-period records, the saved measure kind or actual activity record, and the selected saved status in a stable Dataset Reference. Logical period labels and activity titles remain display text.

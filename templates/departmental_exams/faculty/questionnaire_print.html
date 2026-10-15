@@ -7,6 +7,7 @@
   <title>{{ course_code }} — Set {{ set_code }} Questionnaire</title>
   {% include "departmental_exams/_scientific_notation_assets.html" %}
   <link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">
+  <link rel="stylesheet" href="{% static 'css/departmental_exam_questionnaire_presentation.css' %}">
   <style>
     @page { size: {{ paper_css_size }} portrait; margin: 0.55in 0.6in 0.85in; }
     * { box-sizing: border-box; }
@@ -103,8 +104,8 @@
         {% if item.case_start %}<aside class="questionnaire-case"><h3>{{ item.case_title|default:"Case / Scenario" }}</h3><div class="tmp-case-content" data-scientific-content>{{ item.case_content|scenario_content:item.case_format }}</div></aside>{% endif %}
         {% if forloop.last %}<div class="questionnaire-ending">{% endif %}
         <article class="question" data-scientific-group>
-          <div class="question-line"><span>{{ item.position }}.</span>{% if item.question_format == 'RICH_HTML_V1' %}<div class="tmp-case-content" data-scientific-content>{{ item.question_text|question_content:item.question_format }}</div>{% else %}<span data-scientific-content>{{ item.question_text|question_content:item.question_format }}</span>{% endif %}</div>
-          <ol class="choices{% if item.question_format == 'RICH_HTML_V1' %} choices-rich{% endif %}" type="A">{% for choice in item.choices %}<li>{% if item.question_format == 'RICH_HTML_V1' %}<div class="tmp-case-content" data-scientific-content>{{ choice|question_choice_content:item.question_format }}</div>{% else %}<span data-scientific-content>{{ choice|question_choice_content:item.question_format }}</span>{% endif %}</li>{% endfor %}</ol>
+          <div class="question-line"><span>{{ item.position }}.</span>{% if item.question_format == 'RICH_HTML_V1' %}<div class="tmp-case-content tmp-mcq-output" data-scientific-content>{{ item.question_text|questionnaire_question_content:item.question_format }}</div>{% else %}<span data-scientific-content>{{ item.question_text|questionnaire_question_content:item.question_format }}</span>{% endif %}</div>
+          <ol class="choices{% if item.question_format == 'RICH_HTML_V1' %} choices-rich{% endif %}" type="A">{% for choice in item.choices %}<li>{% if item.question_format == 'RICH_HTML_V1' %}<div class="tmp-case-content tmp-mcq-output" data-scientific-content>{{ choice|questionnaire_choice_content:item.question_format }}</div>{% else %}<span data-scientific-content>{{ choice|questionnaire_choice_content:item.question_format }}</span>{% endif %}</li>{% endfor %}</ol>
         </article>
         {% if forloop.last %}
           <footer class="confidential-footer">CONFIDENTIAL &bull; {{ course_code }} &bull; SET {{ set_code }} &bull; Revision R{{ revision_number }} &bull; Printed {{ printed_at|date:"M j, Y g:i A" }}</footer>

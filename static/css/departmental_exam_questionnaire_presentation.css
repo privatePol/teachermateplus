@@ -1,0 +1,24 @@
+/* Preview/print-only MCQ spacing. Keep meaningful whitespace, table geometry,
+   caselets and editor styles independent of these output containers. */
+.tmp-mcq-output > p {
+  margin-block: 0;
+}
+
+.tmp-mcq-output > p + p {
+  margin-block-start: 0.25em;
+}
+
+/* The display adapter retains at most one internal spacer paragraph. */
+.tmp-mcq-output > p:empty {
+  min-height: 0;
+  height: 1.35em;
+  height: 1lh;
+  margin-block: 0;
+}
+
+.tmp-mcq-output > p:empty + p,
+.tmp-mcq-output > p:first-child,
+.tmp-mcq-output > h3:first-child,
+.tmp-mcq-output > h4:first-child {
+  margin-block-start: 0;
+}
