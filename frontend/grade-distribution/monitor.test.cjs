@@ -10,7 +10,7 @@ function setup() {
     <select name="campus_id"><option value="1">A</option><option value="2">B</option></select>
     <select name="academic_year_id"><option value="1">AY</option></select><select name="term_id"><option value="1">Term</option></select>
     <select name="faculty_id"><option value="">All</option></select><select name="department_id"><option value="">All</option></select>
-    <select name="status"><option value="all">All</option><option value="finalized">Finalized</option></select><button type="submit">Apply</button></form>
+    <select name="sort"><option value="exact_100_desc">Exactly 100 Count</option><option value="faculty_asc">Faculty</option></select><select name="status"><option value="all">All</option><option value="finalized">Finalized</option></select><button type="submit">Apply</button></form>
     <div id="gdm-results"><button id="open" data-analytics-url="/detail?context=signed">View</button><nav class="pagination"><a class="page-link" href="?page=2">Next</a></nav></div><div id="gdm-filter-status"></div>
     <div id="gradeDistributionAnalyticsModal"><div id="gdm-modal-body"></div></div>`, {url:'https://example.test/monitor', runScripts:'outside-only'});
   const w = dom.window, d = w.document;
@@ -118,4 +118,16 @@ test('actual distinct physical Prelim contexts remain separate when opening anot
     assert.equal(s.d.querySelectorAll('section[data-dataset-id="'+data.dataset_id+'"]').length,1);
   }
   assert.equal(s.d.querySelector('section[data-dataset-id="'+datasets[0].dataset_id+'"]'),null);s.dom.window.close();
+});
+
+
+test('sort change clears stale results and modal without fetching until Apply', async()=>{
+  const s=setup();let calls=0;s.w.fetch=()=>{calls++;throw Error('unexpected fetch');};
+  s.d.getElementById('gdm-modal-body').textContent='old analytics';
+  s.d.querySelector('[name="sort"]').value='faculty_asc';s.change('sort');await tick();
+  assert.equal(calls,0);assert.equal(s.d.getElementById('gdm-results').hidden,true);
+  assert.equal(s.d.getElementById('gdm-modal-body').textContent,'');
+  assert.match(s.d.getElementById('gdm-filter-status').textContent,/Apply Filters/);
+  assert.equal(new s.w.FormData(s.d.querySelector('form')).get('sort'),'faculty_asc');
+  assert.equal(s.d.querySelector('[name="page"]'),null);s.dom.window.close();
 });

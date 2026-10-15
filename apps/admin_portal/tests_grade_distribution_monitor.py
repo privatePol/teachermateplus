@@ -201,9 +201,7 @@ class GradeDistributionMonitorTests(TestCase):
             self.assertEqual(public["count"], local["count"])
             self.assertEqual(public["total_graded_students"], 9)
             self.assertEqual(Decimal(public["percentage"]), local["percentage"])
-            self.assertEqual(export[f"{label} Count"], str(local["count"]))
-            self.assertEqual(export["Graded Students"], "9")
-            self.assertEqual(export[f"{label} %"], str(local["percentage"]))
+        self.assertTrue(all(export[f"Exactly {grade}"] == "" for grade in range(100, 94, -1)))
         self.assertNotIn("Actual examination percentage", json.dumps(data))
         self.assertEqual(data["missing_count"], 1)
 
@@ -337,7 +335,7 @@ class GradeDistributionMonitorTests(TestCase):
                 self.assertNotIn(forbidden, content)
         payload = detail.json()
         self.assertEqual(sum(f["count"] for f in payload["frequency"]), payload["graded_count"])
-        self.assertIn("Average Grade", self._export_text(export))
+        self.assertIn("Computed Grade Component", self._export_text(export))
 
     def _privacy_assert_payload(self, payload):
         self.assertTrue(payload["privacy_suppressed"])
@@ -363,29 +361,18 @@ class GradeDistributionMonitorTests(TestCase):
     def _export_text(self, response):
         return str({sheet.title: list(sheet.values) for sheet in self._workbook(response)})
 
-    def _privacy_xlsx_row(self, response):
-        sheet = self._workbook(response)["Grade summaries"]
-        result = {}
-        for heading, cell in zip(sheet[1], sheet[2]):
-            value = cell.value
-            if value is None:
-                text = ""
-            elif "%" in str(heading.value):
-                text = format(Decimal(str(value)) * 100, ".2f")
-            elif heading.value in ("Average Grade", "Minimum", "Maximum"):
-                text = format(Decimal(str(value)), ".2f")
-            else:
-                text = str(value)
-            result[heading.value] = text
-        return result
+    def _privacy_xlsx_row(self, response, component="Periodic Examination"):
+        records = self._worksheet_records(self._workbook(response), "Grade Distribution")
+        record = next(r for r in records if r["Computed Grade Component"] == component)
+        return {key: "" if value is None else str(value) for key, value in record.items()}
 
     def test_privacy_zero_one_to_four_five_and_six_html_json_xlsx_parity(self):
         self.client.force_login(self.admin_user)
         grades = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id"))
         for count in range(7):
             with self.subTest(count=count):
-                StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=None)
-                StudentPeriodGrade.objects.filter(pk__in=[g.pk for g in grades[:count]]).update(period_grade=Decimal("83.27"))
+                StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=None, exam_grade=None)
+                StudentPeriodGrade.objects.filter(pk__in=[g.pk for g in grades[:count]]).update(period_grade=Decimal("83.27"), exam_grade=Decimal("83.27"))
                 response = self.search()
                 row = response.context["rows"][0]
                 modal = self.detail(response).json()
@@ -393,7 +380,6 @@ class GradeDistributionMonitorTests(TestCase):
                 csv_row = self._privacy_xlsx_row(csv_response)
                 self.assertEqual((row["graded_count"], row["missing_count"]), (count, 10 - count))
                 self.assertEqual(row["analytics_state"], modal["analytics_state"])
-                self.assertEqual(row["analytics_state"], csv_row["Analytics Availability"])
                 if 0 < count < 5:
                     self._privacy_assert_payload(row)
                     self._privacy_assert_payload(modal)
@@ -402,12 +388,8 @@ class GradeDistributionMonitorTests(TestCase):
                     self.assertNotIn("83.27", self._export_text(csv_response))
                     self.assertNotIn("83.27", str(modal))
                     self.assertNotContains(response, 'class="gdm-distribution"')
-                    for column in ("Average Grade", "Minimum", "Maximum", "Exactly 100 Count", "Exactly 100 %"):
-                        self.assertEqual(csv_row[column], "")
-                    for category in row["high_grade_breakdown"]:
-                        self.assertEqual(csv_row[f'{category["grade"]} Count'], "")
-                        self.assertEqual(csv_row[f'{category["grade"]} %'], "")
-                    self.assertIn("five", csv_row["Privacy Explanation"])
+                    for grade in range(100, 94, -1):
+                        self.assertEqual(csv_row[f"Exactly {grade}"], "")
                 elif count == 0:
                     self.assertEqual(row["analytics_state"], "unavailable")
                     self.assertFalse(row["privacy_suppressed"])
@@ -416,9 +398,9 @@ class GradeDistributionMonitorTests(TestCase):
                     self.assertEqual(row["analytics_state"], "disclosed")
                     self.assertEqual(row["average"], Decimal("83.27"))
                     self.assertEqual(Decimal(modal["average"]), Decimal("83.27"))
-                    self.assertEqual(csv_row["Average Grade"], "83.27")
-        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=None)
-        StudentPeriodGrade.objects.filter(pk__in=[g.pk for g in grades[:5]]).update(period_grade=0)
+                    self.assertTrue(all(csv_row[f"Exactly {grade}"] == "0" for grade in range(100, 94, -1)))
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=None, exam_grade=None)
+        StudentPeriodGrade.objects.filter(pk__in=[g.pk for g in grades[:5]]).update(period_grade=0, exam_grade=0)
         self.assertEqual(self.search().context["rows"][0]["average"], 0)
 
     def test_privacy_complementary_status_suppression_is_identical_across_endpoints(self):
@@ -523,12 +505,8 @@ class GradeDistributionMonitorTests(TestCase):
             csv_row = self._privacy_xlsx_row(export)
             self._privacy_assert_payload(row)
             self._privacy_assert_payload(modal)
-            self.assertEqual(csv_row["Analytics Availability"], row["analytics_state"])
-            for column in ("Average Grade", "Minimum", "Maximum", "Exactly 100 Count", "Exactly 100 %"):
-                self.assertEqual(csv_row[column], "")
-            for category in row["high_grade_breakdown"]:
-                self.assertEqual(csv_row[f'{category["grade"]} Count'], "")
-                self.assertEqual(csv_row[f'{category["grade"]} %'], "")
+            for grade in range(100, 94, -1):
+                self.assertEqual(csv_row[f"Exactly {grade}"], "")
             self.assertNotContains(response, 'class="gdm-distribution"')
             for measure in modal["measures"]:
                 if measure["analytics_state"] != "disclosed":
@@ -660,7 +638,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(Decimal(data["average"]), row["average"])
         self._privacy_assert_payload(data["measures"][0])
         self.assertEqual(Decimal(data["measures"][1]["average"]), Decimal("80"))
-        self.assertEqual(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]))["Average Grade"], "80.00")
+        self.assertEqual(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]))["Exactly 100"], "")
 
     def test_privacy_overlap_guard_does_not_change_summary_when_opening_modal(self):
         ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id").values_list("student_id", flat=True))
@@ -695,7 +673,8 @@ class GradeDistributionMonitorTests(TestCase):
         for row in response.context["rows"]:
             self._privacy_assert_payload(row)
             self._privacy_assert_payload(self.detail(response, row=row).json())
-        self.assertEqual(response.context["rows"][0]["eligible_count"], 10)
+        retained = next(r for r in response.context["rows"] if r["offering_id"] == self.offering.id)
+        self.assertEqual(retained["eligible_count"], 10)
         self.assertNotIn("88.13", self._export_text(self.client.get(self.url + "?" + response.context["export_query"])))
         UserPermission.objects.create(user=self.admin_user, permission=Permission.objects.get(code="grade_distribution_monitor.read"), tenant=self.tenant, campus=campus, grant_type="DENY")
         self.assertEqual(self.client.get(self.url + "?" + response.context["export_query"]).status_code, 400)
@@ -927,15 +906,23 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(Enrollment.objects.count(), 50000)
         self.assertEqual(StudentPeriodGrade.objects.count(), 50000)
         self.client.force_login(self.admin_user)
+        import time
+        started = time.perf_counter()
         exact = self.search()
+        page_one_seconds = time.perf_counter() - started
         self.assertFalse(exact.context["errors"])
         self.assertEqual((exact.context["result_count"], len(exact.context["rows"])), (500, 25))
         self.assertEqual(self.detail(exact).status_code, 200)
+        started = time.perf_counter()
         self.assertEqual(self.client.get(self.url + "?" + exact.context["page_query"] + "&page=20").status_code, 200)
+        page_twenty_seconds = time.perf_counter() - started
+        started = time.perf_counter()
         csv = self.client.get(self.url + "?" + exact.context["export_query"])
+        export_seconds = time.perf_counter() - started
+        print(f"GRADE100_BOUNDARY: 500 classes / 50,000 saved+roster rows: page1={page_one_seconds:.3f}s page20={page_twenty_seconds:.3f}s export={export_seconds:.3f}s")
         self.assertEqual(csv.status_code, 200)
         workbook = self._workbook(csv)
-        self.assertEqual(workbook["Grade summaries"].max_row, 1501)
+        self.assertEqual(workbook["Grade Distribution"].max_row, 1501)
 
         def assert_rejected(message):
             for params in ({"apply": "1", "academic_year_id": self.academic_year.id, "term_id": self.term.id, "period": "PRELIM"},
@@ -1023,7 +1010,7 @@ class GradeDistributionMonitorTests(TestCase):
             response = self.search()
         self.assertEqual(len(response.context["rows"]), 25)
         self.assertEqual(response.context["result_count"], 27)
-        self.assertTrue(any('GROUP BY' in q["sql"] and 'LIMIT 25' in q["sql"] for q in queries))
+        self.assertFalse(any('GROUP BY' in q["sql"] and 'LIMIT 25' in q["sql"] for q in queries))
         page_two = self.client.get(self.url + "?" + response.context["page_query"] + "&page=2")
         self.assertEqual(len(page_two.context["rows"]), 2)
         self.assertEqual(self.client.get(self.url + "?" + response.context["export_query"]).status_code, 200)
@@ -1483,11 +1470,10 @@ class GradeDistributionMonitorTests(TestCase):
             values = list(StudentPeriodGrade.objects.filter(offering=self.offering).exclude(**{field: None}).values_list(field, flat=True))
             self.assertEqual({Decimal(f["grade"]): f["count"] for f in metric["frequency"]}, Counter(values))
         workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
-        summaries = list(workbook["Grade summaries"].values)
-        exported = dict(zip(summaries[0], next(r for r in summaries[1:] if r[6] == activity.title)))
-        self.assertEqual(exported["Average Grade"], float(measure["average"]))
-        self.assertEqual(exported["Exactly 100 Count"], 1)
-        self.assertEqual(exported["Exactly 100 %"], 0.1)
+        records = self._worksheet_records(workbook, "Grade Distribution")
+        self.assertEqual(len(records), 3)
+        self.assertNotIn(activity.title, {r["Computed Grade Component"] for r in records})
+        self._assert_count_export_reconciliation(response)
 
     def test_direct100_gradebook_ratings_use_exact_unrounded_breakdown(self):
         activity, ids = self._gradebook_activity_fixture(total=100, mode="DIRECT_PERCENTAGE", exam=True,
@@ -1557,7 +1543,8 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(measures[second.title]["privacy_reason"], "complementary_population")
         response = self.search()
         workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
-        self.assertFalse(any(r[6] == second.title for r in list(workbook["Grade frequencies"].values)[1:]))
+        self.assertEqual(workbook.sheetnames, ["Grade Distribution"])
+        self._assert_count_export_reconciliation(response)
 
     def test_activity_status_complements_and_five_student_boundary(self):
         activity, ids = self._gradebook_activity_fixture()
@@ -1575,41 +1562,39 @@ class GradeDistributionMonitorTests(TestCase):
                         self._privacy_assert_payload(metric)
 
     def test_xlsx_styles_types_filters_suppression_and_literal_user_text(self):
-        activity, ids = self._gradebook_activity_fixture(title='=HYPERLINK("https://invalid.example","x")')
+        activity, ids = self._gradebook_activity_fixture()
         self._persist_formula_totals(ids)
+        self.course.title = '=HYPERLINK("https://invalid.example","x")'
+        self.course.save()
+        self.faculty_user.last_name = '+Literal'
+        self.faculty_user.save()
         response = self.search()
         exported = self.client.get(self.url + "?" + response.context["export_query"])
         workbook = self._workbook(exported)
-        self.assertEqual(workbook.sheetnames, ["Grade summaries", "Grade frequencies"])
+        self.assertEqual(workbook.sheetnames, ["Grade Distribution"])
         self.assertIn('.xlsx"', exported["Content-Disposition"])
-        for sheet in workbook:
-            self.assertEqual(sheet.freeze_panes, "H2")
-            self.assertEqual(sheet.auto_filter.ref, sheet.dimensions)
-            self.assertTrue(sheet['A1'].font.bold)
-            self.assertEqual(sheet['A1'].fill.fgColor.rgb, '0020613C')
-            self.assertGreaterEqual(sheet.column_dimensions['A'].width, 30)
-            self.assertFalse(any(c.data_type == 'f' for cells in sheet for c in cells))
-        summary = workbook['Grade summaries']
-        activity_row = next(cells for cells in summary.iter_rows(min_row=2) if cells[6].value == activity.title)
-        self.assertEqual(activity_row[6].data_type, 's')
-        headers = [c.value for c in summary[1]]
-        self.assertEqual(activity_row[headers.index('Average Grade')].number_format, '0.00')
-        self.assertEqual(activity_row[headers.index('Exactly 100 %')].number_format, '0.00%')
+        sheet = workbook.active
+        self.assertEqual(sheet.freeze_panes, "F2")
+        self.assertEqual(sheet.auto_filter.ref, sheet.dimensions)
+        self.assertTrue(sheet['A1'].font.bold)
+        self.assertEqual(sheet['A1'].fill.fgColor.rgb, '0020613C')
+        self.assertGreaterEqual(sheet.column_dimensions['A'].width, 30)
+        self.assertFalse(any(c.data_type == 'f' for cells in sheet for c in cells))
+        self.assertEqual(sheet['A2'].data_type, 's')
+        self.assertTrue(sheet['A2'].value.startswith('+Literal'))
+        self.assertEqual(sheet['C2'].data_type, 's')
+        self.assertIn('=HYPERLINK', sheet['C2'].value)
+        self.assertEqual(sheet['F3'].number_format, '0')
         StudentActivityScore.objects.filter(activity=activity).exclude(student_id__in=ids[:4]).update(is_active=False)
-        response = self.search()
-        summary = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))['Grade summaries']
-        row = next(r for r in list(summary.values)[1:] if r[6] == activity.title)
-        self.assertIsNone(row[headers.index('Average Grade')])
-        self.assertIsNone(row[headers.index('Exactly 100 %')])
-        self.assertEqual(row[headers.index('Analytics Availability')], 'privacy_suppressed')
+        self._assert_count_export_reconciliation(self.search())
 
     def test_xlsx_aggregate_row_limit_is_exact_and_does_not_truncate(self):
         self.client.force_login(self.admin_user)
         response = self.search()
         url = self.url + '?' + response.context['export_query']
-        with patch('apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS', 10):
+        with patch('apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS', 3):
             self.assertEqual(self.client.get(url).status_code, 200)
-        with patch('apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS', 9):
+        with patch('apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS', 2):
             rejected = self.client.get(url)
             self.assertEqual(rejected.status_code, 400)
             self.assertIn('no records were truncated', ' '.join(rejected.json()['errors']))
@@ -1626,7 +1611,7 @@ class GradeDistributionMonitorTests(TestCase):
             with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 2):
                 rejected = self.client.get(self.url + "?" + response.context["export_query"])
         self.assertEqual(rejected.status_code, 400)
-        self.assertEqual(source.call_count, 1)
+        self.assertEqual(source.call_count, 0)
         self.assertIn("no records were truncated", " ".join(rejected.json()["errors"]))
 
     def test_inactive_activity_route_fails_closed_without_invented_classification(self):
@@ -1653,39 +1638,21 @@ class GradeDistributionMonitorTests(TestCase):
         rows = list(workbook[sheet_name].values)
         return [dict(zip(rows[0], values)) for values in rows[1:]]
 
-    def _assert_dataset_reconciliation(self, response, metrics):
+    def _assert_count_export_reconciliation(self, response):
+        from apps.admin_portal.grade_distribution_export import HEADERS, export_components
+        rows = response.context["rows"]
         workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
-        summaries = self._worksheet_records(workbook, "Grade summaries")
-        frequencies = self._worksheet_records(workbook, "Grade frequencies")
-        by_id = {r["Dataset Reference"]: r for r in summaries}
-        self.assertEqual(len(by_id), len(summaries), "A distinct source must have exactly one summary identity")
-        self.assertTrue({r["Dataset Reference"] for r in frequencies}.issubset(by_id))
-        identity_columns = ("Dataset Reference", "Class Record", "Period Record", "Activity Record", "Gradebook Context", "Status Selection")
-        for metric in metrics:
-            summary = by_id[metric["dataset_id"]]
-            self.assertEqual(summary["Class Record"], metric["offering_id"])
-            self.assertEqual(summary["Period Record"], metric["physical_period_id"])
-            self.assertEqual(summary["Activity Record"], metric["activity_id"])
-            self.assertEqual(summary["Gradebook Context"], metric["gradebook_context"])
-            entries = [r for r in frequencies if r["Dataset Reference"] == metric["dataset_id"]]
-            if metric["analytics_state"] != "disclosed":
-                self.assertEqual(entries, [])
-                self.assertIsNone(summary["Average Grade"])
-                self.assertIsNone(summary["Exactly 100 Count"])
-                self.assertIsNone(summary["Same Grades As Dataset"])
-                continue
-            self.assertEqual(sum(r["Student Count"] for r in entries), metric["graded_count"])
-            # These fixtures have 5/10-student denominators and exact percentages.
-            self.assertEqual(sum(Decimal(str(r["% of Graded Students"])) for r in entries), Decimal("1"))
-            for entry in entries:
-                self.assertEqual({k: entry[k] for k in identity_columns}, {k: summary[k] for k in identity_columns})
-            self.assertEqual({Decimal(str(r["Exact Grade"])): r["Student Count"] for r in entries},
-                             {Decimal(str(r["grade"])): r["count"] for r in metric["frequency"]})
-            target = metric.get("equivalent_dataset_id")
-            self.assertEqual(summary["Same Grades As Dataset"], target or None)
-            if target:
-                self.assertIn(target, by_id)
-        return summaries, frequencies
+        self.assertEqual(workbook.sheetnames, ["Grade Distribution"])
+        self.assertEqual([c.value for c in workbook.active[1]], HEADERS)
+        records = self._worksheet_records(workbook, "Grade Distribution")
+        self.assertEqual(len(records), 3 * len(rows))
+        for row_index, row in enumerate(rows):
+            for offset, (label, metric) in enumerate(export_components(row)):
+                record = records[3 * row_index + offset]
+                self.assertEqual(record["Computed Grade Component"], label)
+                expected = [m["count"] for m in metric["high_grade_breakdown"][:6]] if metric["analytics_state"] == "disclosed" else [None] * 6
+                self.assertEqual([record[f"Exactly {g}"] for g in range(100, 94, -1)], expected)
+        return records
 
     def _duplicate_quiz_fixture(self):
         component = GradingTemplateComponent.objects.create(template_period=self.period,
@@ -1728,13 +1695,9 @@ class GradeDistributionMonitorTests(TestCase):
         if os.environ.get("TMP_PERIOD_DATASET_DOM_PAYLOAD"):
             Path(os.environ["TMP_PERIOD_DATASET_DOM_PAYLOAD"]).write_text(
                 json.dumps([self.detail(response, row).json() for row in rows]), encoding="utf-8")
-        _, frequencies = self._assert_dataset_reconciliation(response, rows)
-        # The old display-label key still collides; the new record key does not.
-        legacy = [r for r in frequencies if r["Measure"] == "Period Grades"]
-        self.assertEqual(len({tuple(r[k] for k in ("Faculty", "Campus", "Course", "Section", "Academic Year / Term", "Period", "Measure")) for r in legacy}), 1)
-        self.assertEqual(sum(r["Student Count"] for r in legacy), 20)
-        self.assertEqual(sum(Decimal(str(r["% of Graded Students"])) for r in legacy), 2)
-        self.assertEqual(len({r["Dataset Reference"] for r in legacy}), 2)
+        records = self._assert_count_export_reconciliation(response)
+        self.assertEqual(len({r["Grading Period"] for r in records}), 2)
+        self.assertTrue(all("Prelim" in r["Grading Period"] for r in records))
 
     def test_duplicate_quiz_routes_reconcile_and_match_gradebook_for_all_statuses(self):
         from apps.grading.tabulation import PeriodSummaryLayoutService
@@ -1773,10 +1736,9 @@ class GradeDistributionMonitorTests(TestCase):
                 }
                 self.assertEqual(gradebook_by_activity,
                                  {m["activity_id"]: Decimal(m["frequency"][0]["grade"]) for m in quizzes})
-                _, frequencies = self._assert_dataset_reconciliation(response, [data, *data["measures"]])
-                quiz_frequencies = [r for r in frequencies if r["Measure"] == "Quiz"]
-                self.assertEqual(sum(r["Student Count"] for r in quiz_frequencies), 2 * count)
-                self.assertEqual(sum(Decimal(str(r["% of Graded Students"])) for r in quiz_frequencies), 2)
+                records = self._assert_count_export_reconciliation(response)
+                self.assertEqual(data["quiz"]["graded_count"], count)
+                self.assertEqual(len([r for r in records if r["Computed Grade Component"] == "Quizzes"]), 1)
                 if status == "all" and os.environ.get("TMP_DATASET_DOM_PAYLOAD"):
                     Path(os.environ["TMP_DATASET_DOM_PAYLOAD"]).write_text(json.dumps(data), encoding="utf-8")
 
@@ -1792,7 +1754,7 @@ class GradeDistributionMonitorTests(TestCase):
         after_ids = {m["activity_id"]: m["dataset_id"] for m in after["measures"] if m["activity_id"]}
         self.assertEqual(before_ids, after_ids)
         self.assertIn("Quiz revised", {m["label"] for m in after["measures"]})
-        self._assert_dataset_reconciliation(self.search(), [after, *after["measures"]])
+        self._assert_count_export_reconciliation(self.search())
 
     def test_equal_quiz_maps_reuse_exact_dataset_reference_but_keep_export_records(self):
         activities, ids = self._duplicate_quiz_fixture()
@@ -1807,21 +1769,17 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(quizzes[1]["equivalent_dataset_id"], quizzes[0]["dataset_id"])
         self.assertEqual(quizzes[1]["equivalent_context"], quizzes[0]["gradebook_context"])
         self.assertIn("Written Quizzes", quizzes[1]["equivalent_context"])
-        _, frequencies = self._assert_dataset_reconciliation(response, [data, *data["measures"]])
-        for metric in quizzes:
-            self.assertEqual(sum(r["Student Count"] for r in frequencies if r["Dataset Reference"] == metric["dataset_id"]), 10)
+        records = self._assert_count_export_reconciliation(response)
+        self.assertEqual(len(records), 3)
+        self.assertEqual(data["quiz"]["analytics_state"], "unavailable")
 
-    def test_export_limit_counts_frequencies_for_equal_but_distinct_records(self):
-        activities, ids = self._duplicate_quiz_fixture()
-        StudentActivityScore.objects.filter(activity=activities[1]).update(computed_score=75)
-        for sid, value in zip(ids, range(70, 80)):
-            StudentPeriodGrade.objects.filter(offering=self.offering, student_id=sid).update(period_grade=value)
+    def test_export_limit_counts_only_three_components_per_physical_record(self):
+        self._duplicate_quiz_fixture()
         response = self.search()
         url = self.url + "?" + response.context["export_query"]
-        # 10 saved period buckets + 1 standing + 1 for EACH separate Quiz.
-        with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 13):
+        with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 3):
             self.assertEqual(self.client.get(url).status_code, 200)
-        with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 12):
+        with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 2):
             self.assertEqual(self.client.get(url).status_code, 400)
 
     def test_duplicate_quiz_identity_does_not_expose_formula_protected_xlsx_difference(self):
@@ -1837,20 +1795,448 @@ class GradeDistributionMonitorTests(TestCase):
         self._privacy_assert_payload(data)
         self._privacy_assert_payload(data["measures"][0])
         self.assertEqual(sum(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("exam_grade", flat=True)), 788)
-        summaries, frequencies = self._assert_dataset_reconciliation(response, [data, *data["measures"]])
-        by_id = {r["Dataset Reference"]: r for r in summaries}
-        common_sum = sum(Decimal(str(r["Exact Grade"])) * r["Student Count"] for r in frequencies if r["Dataset Reference"] == common["dataset_id"])
-        self.assertEqual(common_sum, 745)
-        self.assertIsNone(by_id[data["measures"][0]["dataset_id"]]["Average Grade"])
-        self.assertFalse(any(r["Dataset Reference"] in (sparse["dataset_id"], data["measures"][0]["dataset_id"]) for r in frequencies))
-        self.assertFalse(any(Decimal(str(r["Exact Grade"])) == 43 for r in frequencies))
-        # Neither the public mean/count nor exact-frequency sums can supply
-        # the protected 788 total needed to subtract the safe common 745.
-        attacks = []
-        total = by_id[data["measures"][0]["dataset_id"]]
-        if total["Average Grade"] is not None:
-            attacks.append(Decimal(str(total["Average Grade"])) * total["Graded Students"] - common_sum)
-        self.assertNotIn(Decimal(43), attacks)
+        records = self._assert_count_export_reconciliation(response)
+        examination = next(r for r in records if r["Computed Grade Component"] == "Periodic Examination")
+        self.assertTrue(all(examination[f"Exactly {g}"] is None for g in range(100, 94, -1)))
+        self.assertNotIn("Average Grade", examination)
+        self.assertNotIn("Grade frequencies", self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).sheetnames)
+
+
+    def _same_label_offering(self, *, department=None, program=None, separate_section=False, grade=99):
+        department = department or self.department
+        program = program or self.program
+        section = self.section
+        if separate_section:
+            section = Section.objects.create(tenant=self.tenant, campus=self.campus, department=department,
+                program=program, code=self.section.code, name=self.section.name)
+        offering = CourseOffering.objects.create(tenant=self.tenant, campus=self.campus, department=department,
+            program=program, academic_year=self.academic_year, term=self.term, course=self.course, section=section)
+        FacultyAssignment.objects.create(tenant=self.tenant, campus=self.campus, offering=offering,
+            faculty_user=self.faculty_user, response_status="ACCEPTED", accepted_at=timezone.now())
+        for row in StudentPeriodGrade.objects.filter(offering=self.offering):
+            Enrollment.objects.create(tenant=self.tenant, campus=self.campus, academic_year=self.academic_year,
+                term=self.term, course_offering=offering, student_id=row.student_id)
+            StudentPeriodGrade.objects.create(tenant=self.tenant, campus=self.campus, offering=offering,
+                template_period=self.period, student_id=row.student_id, period_grade=grade,
+                exam_grade=grade, class_standing_grade=grade)
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=100, exam_grade=100, class_standing_grade=100)
+        self.client.force_login(self.admin_user)
+        return offering
+
+    def _class_label_export(self, response, count):
+        workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
+        self.assertEqual(workbook.sheetnames, ["Grade Distribution"])
+        self.assertEqual(workbook.active.max_column, 11)
+        records = list(workbook.active.values)[1:]
+        self.assertEqual(len(records), 3 * count)
+        self.assertEqual(len({tuple(row[:5]) for row in records}), 3 * count)
+        return records
+
+    def test_excel_class_labels_distinguish_exact_cross_department_collision(self):
+        department = Department.objects.create(tenant=self.tenant, campus=self.campus, code="BBA", name="Business")
+        program = Program.objects.create(tenant=self.tenant, campus=self.campus, department=department,
+            code="BBA", name="Business Administration")
+        other = self._same_label_offering(department=department, program=program)
+        response = self.search()
+        self.assertEqual({r["offering_id"] for r in response.context["rows"]}, {self.offering.id, other.id})
+        self.assertEqual(len({(r["faculty_name"], r["campus"], r["course_code"], r["section"], r["period"])
+                              for r in response.context["rows"]}), 1)
+        records = self._class_label_export(response, 2)
+        base = f"{self.course.code} - {self.course.title} / {self.section.code}"
+        self.assertEqual({r[2] for r in records}, {base + " [Department: BSA]", base + " [Department: BBA]"})
+        self.assertEqual({r[3] for r in records}, {"Prelim"})
+        examination = {r[2]: r[5:] for r in records if r[4] == "Periodic Examination"}
+        self.assertEqual(examination[base + " [Department: BSA]"], (10, 0, 0, 0, 0, 0))
+        self.assertEqual(examination[base + " [Department: BBA]"], (0, 10, 0, 0, 0, 0))
+
+    def test_excel_class_labels_use_program_only_when_department_cannot_distinguish(self):
+        program = Program.objects.create(tenant=self.tenant, campus=self.campus, department=self.department,
+            code="BBA", name="Business Administration")
+        self._same_label_offering(program=program, separate_section=True)
+        records = self._class_label_export(self.search(), 2)
+        self.assertTrue(all("[Department:" not in r[2] for r in records))
+        self.assertEqual({r[2].split(" [Program: ")[1] for r in records}, {"BSA]", "BBA]"})
+
+    def test_excel_class_labels_qualify_only_remaining_program_collision(self):
+        program = Program.objects.create(tenant=self.tenant, campus=self.campus, department=self.department,
+            code="BBA", name="Business Administration")
+        self._same_label_offering(program=program, separate_section=True)
+        department = Department.objects.create(tenant=self.tenant, campus=self.campus, code="EDUC", name="Education")
+        education = Program.objects.create(tenant=self.tenant, campus=self.campus, department=department,
+            code="EDUC", name="Education")
+        self._same_label_offering(department=department, program=education, grade=98)
+        records = self._class_label_export(self.search(), 3)
+        labels = {r[2] for r in records}
+        self.assertEqual(len(labels), 3)
+        self.assertTrue(any(label.endswith("[Department: EDUC]") for label in labels))
+        self.assertTrue(any(label.endswith("[Department: BSA] [Program: BSA]") for label in labels))
+        self.assertTrue(any(label.endswith("[Department: BSA] [Program: BBA]") for label in labels))
+
+    def test_excel_class_labels_handle_missing_offering_program(self):
+        program = Program.objects.create(tenant=self.tenant, campus=self.campus, department=self.department,
+            code="BBA", name="Business Administration")
+        other = self._same_label_offering(program=program, separate_section=True)
+        CourseOffering.objects.filter(pk=other.pk).update(program=None)
+        records = self._class_label_export(self.search(), 2)
+        self.assertTrue(any(r[2].endswith("[Program: Not specified]") for r in records))
+        self.assertTrue(any(r[2].endswith("[Program: BSA]") for r in records))
+
+    def test_excel_class_labels_reject_remaining_ambiguous_physical_classes(self):
+        program = Program.objects.create(tenant=self.tenant, campus=self.campus, department=self.department,
+            code="BBA", name="Business Administration")
+        other = self._same_label_offering(program=program, separate_section=True)
+        # Different physical sections, but even the offering qualifiers agree.
+        # Do not invent an identifier from row order or silently combine grades.
+        CourseOffering.objects.filter(pk=other.pk).update(program=self.program)
+        response = self.search()
+        self.assertEqual(len(response.context["rows"]), 2)
+        exported = self.client.get(self.url + "?" + response.context["export_query"])
+        self.assertEqual(exported.status_code, 400)
+        self.assertIn("class labels remain ambiguous", " ".join(exported.json()["errors"]))
+        self.assertFalse(exported.has_header("Content-Disposition"))
+        self.assertEqual(StudentPeriodGrade.objects.filter(offering_id__in=[self.offering.id, other.id]).count(), 20)
+
+    def test_excel_class_labels_reject_missing_program_marker_collision(self):
+        program = Program.objects.create(tenant=self.tenant, campus=self.campus, department=self.department,
+            code="BBA", name="Business Administration")
+        other = self._same_label_offering(program=program, separate_section=True)
+        Program.objects.filter(pk=self.program.pk).update(code="Not specified")
+        CourseOffering.objects.filter(pk=other.pk).update(program=None)
+        response = self.search()
+        exported = self.client.get(self.url + "?" + response.context["export_query"])
+        self.assertEqual(exported.status_code, 400)
+        self.assertIn("class labels remain ambiguous", " ".join(exported.json()["errors"]))
+        self.assertFalse(exported.has_header("Content-Disposition"))
+
+    def test_excel_class_labels_preserve_suppression_for_cross_department_collision(self):
+        department = Department.objects.create(tenant=self.tenant, campus=self.campus, code="BBA", name="Business")
+        other = self._same_label_offering(department=department)
+        saved = StudentPeriodGrade.objects.filter(offering=other)
+        keep = list(saved.order_by("id").values_list("id", flat=True)[:4])
+        saved.exclude(pk__in=keep).update(period_grade=None, exam_grade=None, class_standing_grade=None)
+        response = self.search()
+        records = self._class_label_export(response, 2)
+        private_rows = [r for r in records if "[Department: BBA]" in r[2]]
+        self.assertEqual(len(private_rows), 3)
+        self.assertTrue(all(value is None for row in private_rows for value in row[5:]))
+        public = next(r for r in records if "[Department: BSA]" in r[2] and r[4] == "Periodic Examination")
+        self.assertEqual(public[5], 10)
+
+    def test_excel_class_labels_preserve_classes_and_physical_periods_together(self):
+        department = Department.objects.create(tenant=self.tenant, campus=self.campus, code="BBA", name="Business")
+        other = self._same_label_offering(department=department)
+        template = GradingTemplate.objects.create(tenant=self.tenant, code="LEGACY-LABEL", name="Legacy Template")
+        period = GradingTemplatePeriod.objects.create(template=template, code="PRELIM", name="Prelim", sequence_no=1)
+        CourseOffering.objects.filter(pk__in=[self.offering.pk, other.pk]).update(status="ARCHIVED")
+        for row in list(StudentPeriodGrade.objects.filter(offering_id__in=[self.offering.pk, other.pk])):
+            row.pk = None
+            row.template_period = period
+            row.save(force_insert=True)
+        response = self.search()
+        records = self._class_label_export(response, 4)
+        self.assertEqual(len({r[2] for r in records}), 2)
+        self.assertEqual(len({r[3] for r in records}), 2)
+        self.assertTrue(all("[Program:" not in r[2] for r in records))
+        self.assertTrue(all("Legacy Template" in r[3] or "General Education" in r[3] for r in records))
+
+    def test_excel_class_labels_reject_case_and_whitespace_equivalent_identifiers(self):
+        from django.core.exceptions import ValidationError
+        from apps.admin_portal.grade_distribution_export import class_labels
+        row = dict(faculty_name="Faculty", campus="FV", course_code="C", course_title="Course", section="S",
+            period="Prelim", physical_period_id=1, department="BSA", program="BSA")
+        with self.assertRaisesMessage(ValidationError, "class labels remain ambiguous"):
+            class_labels([dict(row, offering_id=1), dict(row, offering_id=2, department=" bsa ", program="bsa")])
+
+    def test_excel_class_labels_leave_unambiguous_class_unqualified(self):
+        self.client.force_login(self.admin_user)
+        records = self._class_label_export(self.search(), 1)
+        self.assertEqual({r[2] for r in records}, {f"{self.course.code} - {self.course.title} / {self.section.code}"})
+        self.assertEqual({r[3] for r in records}, {"Prelim"})
+
+    def _calculated_quiz_fixture(self, values=None):
+        values = values or [Decimal("100"), Decimal("99.75"), Decimal("99"), Decimal("98"),
+                            Decimal("97"), Decimal("96"), Decimal("95"), Decimal("94.5"), Decimal("50"), Decimal("90")]
+        ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("student_id").values_list("student_id", flat=True))
+        standing = GradingTemplateComponent.objects.create(template_period=self.period, code="CS", name="Class Standing", weight_percentage=60)
+        sub = GradingTemplateSubcomponent.objects.create(template_component=standing, code="QUIZZES", name="Quizzes", weight_percentage=100)
+        activities = []
+        for title in ("Q1", "Q2"):
+            activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
+                template_period=self.period, template_component=standing, template_subcomponent=sub, title=title, total_score=50)
+            for sid, value in zip(ids, values):
+                StudentActivityScore.objects.create(activity=activity, student_id=sid, raw_score=value - 50, computed_score=value)
+            activities.append(activity)
+        exam = GradingTemplateComponent.objects.create(template_period=self.period, code="EXAM", name="Periodic Examination", weight_percentage=40, is_exam_component=True, score_input_mode="DIRECT_PERCENTAGE")
+        exam_activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
+            template_period=self.period, template_component=exam, title="Exam", total_score=100)
+        for sid in ids:
+            StudentActivityScore.objects.create(activity=exam_activity, student_id=sid, raw_score=96, computed_score=96)
+        self._persist_formula_totals(ids)
+        self.client.force_login(self.admin_user)
+        return ids, activities
+
+    def test_default_sort_is_numeric_global_stable_and_export_preserves_filters(self):
+        import time
+        extra = []
+        for index in range(26):
+            offering = self._create_extra_offering(f"SORT{index:02}", "Sort course", f"S{index:02}")
+            self._seed_grades(offering, [100] * (10 if index == 25 else 2) + [90] * (0 if index == 25 else 8))
+            extra.append(offering)
+        self.client.force_login(self.admin_user)
+        start = time.perf_counter()
+        with CaptureQueriesContext(connection) as queries:
+            response = self.search(faculty_id=self.faculty_user.id)
+        elapsed = time.perf_counter() - start
+        query_count = len(queries)
+        first = response.context["rows"]
+        self.assertEqual(first[0]["offering_id"], extra[-1].id)
+        self.assertEqual(first[0]["exact_100_count"], 10)
+        self.assertEqual(first[1]["exact_100_count"], 2)
+        self.assertEqual(response.context["selected"]["sort"], "exact_100_desc")
+        second = self.client.get(self.url + "?" + response.context["page_query"] + "&page=2")
+        ids = [r["offering_id"] for r in first + second.context["rows"]]
+        self.assertEqual(len(ids), 27)
+        self.assertEqual(len(set(ids)), 27)
+        self.assertEqual(len(first), 25)
+        repeated = self.search(faculty_id=self.faculty_user.id)
+        self.assertEqual([r["offering_id"] for r in repeated.context["rows"]], ids[:25])
+        params = parse_qs(response.context["export_query"])
+        self.assertEqual(params["faculty_id"], [str(self.faculty_user.id)])
+        self.assertEqual(params["sort"], ["exact_100_desc"])
+        sheet = self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active
+        self.assertTrue(sheet["C2"].value.startswith("SORT25"))
+        self.assertEqual(sheet.max_row, 82)
+        self.assertGreater(query_count, 0)
+        self.assertLess(query_count, 1500)
+        print(f"GRADE100_PERFORMANCE: 27 classes / 270 students / page 1: {elapsed:.3f}s, {query_count} SQL queries")
+
+    def test_sort_validation_context_binding_and_page_reset(self):
+        self.client.force_login(self.admin_user)
+        self.assertTrue(self.search(sort="raw_count").context["errors"])
+        response = self.search(sort="faculty_asc")
+        self.assertContains(response, 'name="sort"')
+        self.assertNotContains(response, 'name="page"')
+        url = self.url + "?" + response.context["export_query"]
+        self.assertEqual(self.client.get(url.replace("sort=faculty_asc", "sort=exact_100_desc")).status_code, 400)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_suppressed_ranking_never_uses_hidden_counts(self):
+        base = dict(faculty_name="Same", campus="FV", course_code="C", section="S", physical_period_id=1)
+        rows = [dict(base, offering_id=2, analytics_state="privacy_suppressed", exact_100_count=999),
+                dict(base, offering_id=1, analytics_state="privacy_suppressed", exact_100_count=1),
+                dict(base, offering_id=3, analytics_state="disclosed", exact_100_count=0)]
+        rank = lambda: [r["offering_id"] for r in sorted(rows, key=GradeDistributionMonitorService.sort_key)]
+        self.assertEqual(rank(), [3, 1, 2])
+        rows[0]["exact_100_count"], rows[1]["exact_100_count"] = 0, 2000
+        self.assertEqual(rank(), [3, 1, 2])
+
+    def test_calculated_quiz_exact_counts_match_gradebook_and_not_raw_values(self):
+        from collections import Counter
+        from apps.grading.tabulation import PeriodSummaryLayoutService
+        ids, activities = self._calculated_quiz_fixture()
+        response = self.search()
+        quiz = self.detail(response).json()["quiz"]
+        layout = PeriodSummaryLayoutService.build_layout(self.period, activities)
+        score_map = {(r.student_id, r.activity_id): r.computed_score for r in StudentActivityScore.objects.filter(activity__in=activities)}
+        expected = Counter(PeriodSummaryLayoutService.print_group_average(layout,
+            PeriodSummaryLayoutService.build_row_values({"student": student}, layout, score_map), quizzes=True)
+            for student in Student.objects.filter(id__in=ids))
+        self.assertEqual({Decimal(f["grade"]): f["count"] for f in quiz["frequency"]}, expected)
+        self.assertEqual(quiz["graded_count"], 10)
+        self.assertEqual([b["count"] for b in quiz["high_grade_breakdown"][:6]], [1, 1, 1, 1, 1, 1])
+        self.assertEqual(expected[Decimal("99.75")], 1)
+        exported = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
+        self.assertEqual([exported[f"Exactly {g}"] for g in range(100, 94, -1)], ["1"] * 6)
+        self.assertContains(response, "not make Quiz averages immutable finalized snapshots")
+        self.assertEqual(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]))["Exactly 96"], "10")
+
+    def test_quiz_counts_one_average_per_student_not_individual_quiz_frequencies(self):
+        ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        StudentActivityScore.objects.filter(activity=activities[1]).update(raw_score=48, computed_score=98)
+        self._persist_formula_totals(ids)
+        response = self.search()
+        quiz = self.detail(response).json()["quiz"]
+        self.assertEqual(quiz["frequency"], [{"grade": "99.00", "count": 10, "percentage": "100.00"}])
+        exported = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
+        self.assertEqual((exported["Exactly 100"], exported["Exactly 99"]), ("0", "10"))
+
+    def test_quiz_weighted_details_and_average_activities_use_shared_gradebook_rules(self):
+        ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        sub = activities[0].template_subcomponent
+        first = GradingTemplateDetail.objects.create(template_subcomponent=sub, code="A", name="A", weight_percentage=50)
+        second = GradingTemplateDetail.objects.create(template_subcomponent=sub, code="B", name="B", weight_percentage=50)
+        GradeActivity.objects.filter(pk=activities[0].pk).update(template_detail=first)
+        GradeActivity.objects.filter(pk=activities[1].pk).update(template_detail=second)
+        StudentActivityScore.objects.filter(activity=activities[1]).update(raw_score=48, computed_score=98)
+        third = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
+            template_period=self.period, template_component=sub.template_component, template_subcomponent=sub,
+            template_detail=second, title="Q3", total_score=50)
+        for sid in ids:
+            StudentActivityScore.objects.create(activity=third, student_id=sid, raw_score=46, computed_score=96)
+        for mode, expected in (("WEIGHTED_DETAILS", "98.50"), ("AVERAGE_ACTIVITIES", "98.00")):
+            with self.subTest(mode=mode):
+                sub.detail_computation_mode = mode
+                sub.save()
+                self._persist_formula_totals(ids)
+                response = self.search()
+                quiz = self.detail(response).json()["quiz"]
+                self.assertEqual(quiz["frequency"], [{"grade": expected, "count": 10, "percentage": "100.00"}])
+                record = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
+                self.assertEqual(record["Exactly 98"], "10" if mode == "AVERAGE_ACTIVITIES" else "0")
+
+    def test_quiz_average_across_major_components_keeps_decimal_precision(self):
+        ids, _ = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        GradingTemplateComponent.objects.filter(template_period=self.period, is_exam_component=True).update(weight_percentage=20)
+        other = GradingTemplateComponent.objects.create(template_period=self.period, code="EXTRA_QUIZZES", name="Quizzes", weight_percentage=20, score_input_mode="DIRECT_PERCENTAGE")
+        activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
+            template_period=self.period, template_component=other, title="Other Quiz", total_score=100)
+        for sid in ids:
+            StudentActivityScore.objects.create(activity=activity, student_id=sid, raw_score=90, computed_score=90)
+        self._persist_formula_totals(ids)
+        response = self.search()
+        quiz = self.detail(response).json()["quiz"]
+        self.assertEqual(quiz["frequency"], [{"grade": "97.50", "count": 10, "percentage": "100.00"}])
+        self.assertEqual(quiz["exact_100_count"], 0)
+        record = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
+        self.assertTrue(all(record[f"Exactly {g}"] == "0" for g in range(100, 94, -1)))
+
+    def test_quiz_missing_or_conflicting_classification_is_explicit_and_blank(self):
+        ids, activities = self._calculated_quiz_fixture()
+        sub = activities[0].template_subcomponent
+        for code, name, reason in (("QUIZZES", "Written work", "disagree"), ("OTHER", "Quizzes", "disagree"), ("OTHER", "Written work", "no configured")):
+            with self.subTest(code=code, name=name):
+                sub.code, sub.name = code, name
+                sub.save()
+                response = self.search()
+                quiz = self.detail(response).json()["quiz"]
+                self.assertEqual(quiz["analytics_state"], "unavailable")
+                self.assertIn(reason, quiz["calculation_note"])
+                self.assertEqual(quiz["frequency"], [])
+                self.assertTrue(all(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")[f"Exactly {g}"] == "" for g in range(100, 94, -1)))
+
+    def test_quiz_historical_and_stale_lineage_are_not_finalized_snapshots(self):
+        ids, activities = self._calculated_quiz_fixture()
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(is_finalized=True)
+        current = self.detail(self.search(status="finalized")).json()["quiz"]
+        self.assertEqual(current["analytics_state"], "disclosed")
+        self.assertIn("not an immutable finalized snapshot", current["calculation_note"])
+        StudentActivityScore.objects.filter(activity=activities[0]).update(computed_score=70)
+        stale = self.detail(self.search(status="finalized")).json()["quiz"]
+        self.assertEqual(stale["analytics_state"], "unavailable")
+        self.assertIn("saved totals differ", stale["calculation_note"])
+        self.offering.status = "ARCHIVED"
+        self.offering.save()
+        response = self.search(status="finalized")
+        historical = self.detail(response).json()["quiz"]
+        self.assertEqual(historical["analytics_state"], "unavailable")
+        self.assertIn("historical", historical["calculation_note"])
+        self.assertTrue(all(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")[f"Exactly {g}"] == "" for g in range(100, 94, -1)))
+
+    def test_quiz_sparse_contributor_protects_aggregate_and_saved_ancestors(self):
+        ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        StudentActivityScore.objects.filter(activity=activities[1]).exclude(student_id=ids[0]).update(is_active=False)
+        self._persist_formula_totals(ids)
+        response = self.search()
+        data = self.detail(response).json()
+        for metric in (data, data["quiz"], data["measures"][1]):
+            self._privacy_assert_payload(metric)
+        self.assertEqual(data["measures"][0]["analytics_state"], "disclosed")
+        records = self._assert_count_export_reconciliation(response)
+        for record in records[1:]:
+            self.assertTrue(all(record[f"Exactly {g}"] is None for g in range(100, 94, -1)))
+
+    def test_quiz_complementary_statuses_nine_one_withhold_five_five_disclose(self):
+        ids, _ = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(is_finalized=True)
+        StudentPeriodGrade.objects.filter(offering=self.offering, student_id=ids[-1]).update(is_finalized=False)
+        for status in ("all", "finalized", "unfinalized"):
+            response = self.search(status=status)
+            self._privacy_assert_payload(self.detail(response).json()["quiz"])
+            self._assert_count_export_reconciliation(response)
+        StudentPeriodGrade.objects.filter(offering=self.offering, student_id__in=ids[5:]).update(is_finalized=False)
+        for status, count in (("all", 10), ("finalized", 5), ("unfinalized", 5)):
+            response = self.search(status=status)
+            quiz = self.detail(response).json()["quiz"]
+            self.assertEqual((quiz["analytics_state"], quiz["exact_100_count"]), ("disclosed", count))
+            self._assert_count_export_reconciliation(response)
+
+    def test_quiz_zero_through_six_distinct_student_boundary(self):
+        from django.db import transaction
+        ids, _ = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        for count in range(7):
+            with self.subTest(count=count), transaction.atomic():
+                Enrollment.objects.filter(course_offering=self.offering).exclude(student_id__in=ids[:count]).update(is_active=False)
+                response = self.search()
+                quiz = self.detail(response).json()["quiz"]
+                state = "unavailable" if count == 0 else "privacy_suppressed" if count < 5 else "disclosed"
+                self.assertEqual(quiz["analytics_state"], state)
+                self.assertEqual(quiz["graded_count"], count)
+                record = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
+                self.assertEqual(record["Exactly 100"], str(count) if count >= 5 else "")
+                transaction.set_rollback(True)
+
+    def test_quiz_overlap_cannot_release_small_population_difference(self):
+        ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        StudentActivityScore.objects.filter(activity=activities[0]).exclude(student_id__in=ids[:5]).update(is_active=False)
+        StudentActivityScore.objects.filter(activity=activities[1]).exclude(student_id__in=ids[4:9]).update(is_active=False)
+        self._persist_formula_totals(ids)
+        response = self.search()
+        quiz = self.detail(response).json()["quiz"]
+        self._privacy_assert_payload(quiz)
+        self._assert_count_export_reconciliation(response)
+
+    def test_quiz_zero_weight_does_not_suppress_independent_saved_period(self):
+        ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        GradingTemplateComponent.objects.filter(pk=activities[0].template_component_id).update(weight_percentage=0)
+        GradingTemplateComponent.objects.filter(template_period=self.period, is_exam_component=True).update(weight_percentage=100)
+        StudentActivityScore.objects.filter(activity=activities[1]).exclude(student_id=ids[0]).update(is_active=False)
+        self._persist_formula_totals(ids)
+        response = self.search()
+        data = self.detail(response).json()
+        self._privacy_assert_payload(data["quiz"])
+        self.assertEqual((data["analytics_state"], Decimal(data["average"])), ("disclosed", Decimal(96)))
+        self.assertEqual(data["measures"][0]["analytics_state"], "disclosed")
+        self._assert_count_export_reconciliation(response)
+
+    def test_quiz_adapter_query_count_does_not_grow_per_student(self):
+        from apps.admin_portal.grade_distribution_metrics import quiz_samples
+        ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
+        scores = list(StudentActivityScore.objects.filter(activity__in=activities).values("student_id", "activity_id", "computed_score"))
+        counts = []
+        for cohort in (set(ids[:3]), set(ids)):
+            with CaptureQueriesContext(connection) as queries:
+                values, sources, note = quiz_samples(self.period, activities, scores, cohort)
+            self.assertEqual(len(values), len(cohort))
+            self.assertEqual(set(values.values()), {Decimal(100)})
+            self.assertEqual(sources, {a.id for a in activities})
+            self.assertEqual(note, "")
+            counts.append(len(queries))
+        self.assertEqual(counts[0], counts[1])
+        self.assertLessEqual(counts[1], 3)
+
+    def test_export_has_exact_count_only_schema_and_integer_cells(self):
+        self._calculated_quiz_fixture()
+        response = self.search()
+        sheet = self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active
+        self.assertEqual([c.value for c in sheet[1]], ["Faculty", "Campus", "Course / Section", "Grading Period", "Computed Grade Component", "Exactly 100", "Exactly 99", "Exactly 98", "Exactly 97", "Exactly 96", "Exactly 95"])
+        self.assertEqual(sheet.max_row, 4)
+        self.assertEqual([sheet.cell(i, 5).value for i in (2, 3, 4)], ["Periodic Examination", "Class Standing", "Quizzes"])
+        for cells in sheet.iter_rows(min_row=2, min_col=6):
+            for cell in cells:
+                self.assertIs(type(cell.value), int)
+                self.assertEqual(cell.number_format, "0")
+                self.assertIsNone(cell.comment)
+        self.assertEqual(sheet.sheet_state, "visible")
+
+    def test_export_uses_saved_buckets_without_normalizing_or_substituting_period_grade(self):
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=100, exam_grade=150, class_standing_grade=99)
+        self.client.force_login(self.admin_user)
+        response = self.search()
+        records = self._assert_count_export_reconciliation(response)
+        self.assertTrue(all(records[0][f"Exactly {g}"] == 0 for g in range(100, 94, -1)))
+        self.assertEqual(records[1]["Exactly 99"], 10)
+        self.assertEqual(records[1]["Exactly 100"], 0)
+        self.assertTrue(all(records[2][f"Exactly {g}"] is None for g in range(100, 94, -1)))
 
 
 class GradeDistributionPrivacyMetricTests(SimpleTestCase):

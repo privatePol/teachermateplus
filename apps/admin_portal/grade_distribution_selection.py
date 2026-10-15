@@ -41,7 +41,7 @@ def logical_period(period):
 
 
 class MonitorSelection:
-    FILTER_KEYS = ("campus_id", "academic_year_id", "term_id", "period", "faculty_id", "department_id", "status")
+    FILTER_KEYS = ("campus_id", "academic_year_id", "term_id", "period", "faculty_id", "department_id", "status", "sort")
 
     def __init__(self, request):
         self.request = request
@@ -52,6 +52,7 @@ class MonitorSelection:
             self.selected[key] = (request.GET.get(key) or "").strip()
         self.selected["campus_id"] = self.selected["campus_id"] or str(getattr(request, "scope", {}).get("campus_id") or "")
         self.selected["status"] = self.selected["status"] or "all"
+        self.selected["sort"] = self.selected["sort"] or "exact_100_desc"
         self.campuses = list(AdminScopeService.active_scoped_campuses(request).filter(tenant_id=self.tenant_id).order_by("code"))
         self.campuses = [c for c in self.campuses if PermissionService.has_permission(
             request.user, "grade_distribution_monitor.read", tenant_id=self.tenant_id, campus_id=c.id
@@ -138,6 +139,8 @@ class MonitorSelection:
             self.errors.append("Select a valid Grading Period.")
         if s["status"] not in {"all", "finalized", "unfinalized"}:
             self.errors.append("Select a valid grade status.")
+        if s["sort"] not in {"exact_100_desc", "faculty_asc"}:
+            self.errors.append("Select a valid sort order.")
         for key, choices, label in (("faculty_id", self.options["faculty"], "faculty"), ("department_id", self.options["departments"], "department")):
             if s[key] and s[key] not in {str(item["id"]) for item in choices}:
                 self.errors.append(f"The selected {label} is unavailable in the authorized scope.")
