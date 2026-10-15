@@ -82,7 +82,7 @@ class MonitorSelection:
             "periods": [{"id": key, "label": label} for key, label in PERIODS],
             "faculty": [{"id": u.id, "label": faculty_name(u) + (f" (#{u.id})" if labels[faculty_name(u).casefold()] > 1 else "")} for u in self.faculty],
             "departments": [{"id": d.id, "label": f"{d.name} ({d.campus.code} / {d.code}, #{d.id})"} for d in self.departments],
-            "courses": [{"id": str(c.id), "label": f"{c.code} — {c.title} ({c.campus.code}, #{c.id})"} for c in
+            "courses": [{"id": str(c.id), "label": f"{c.code} — {c.title} ({c.campus.code if c.campus_id else 'Campus not specified'}, #{c.id})"} for c in
                 Course.objects.filter(id__in=self.assignments.values("offering__course_id"), tenant_id=self.tenant_id)
                     .select_related("campus").order_by("code", "id")],
             "sorts": [{"id": key, "label": label} for key, label in self.SORTS] + [{"id": "faculty_asc", "label": "Faculty (A to Z)"}],

@@ -1,3 +1,8 @@
+## 2026-10-15 - Grade Distribution NULL-campus option hotfix
+
+- Fixed the Course Code option label crash for an already authorized course whose nullable campus is unset. The label retains its ID, code and title and displays Campus not specified; assignment, tenant, campus, supervision and direct-DENY scope are unchanged.
+- Added focused HTTP/authorization/query regressions and clarified Admin help. No model changes, migrations or persistent record corrections. See HANDOFF.md for local validation and the next gate.
+
 ## 2026-10-15 - Grade Distribution filters and request performance
 
 - Added authorized searchable multi-course selection, privacy-safe Classes with 100s only, and descending Exactly 100/99/98/97/96/95 sorting across the complete filtered selection. Signed selections preserve criteria through details, pagination and the unchanged 11-column Excel export.

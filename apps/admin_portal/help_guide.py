@@ -958,6 +958,7 @@ ADMIN_HELP_SECTIONS = [
                         "are calculated across the complete filtered selection before pagination, with stable faculty/class "
                         "tie-breakers. Exactly 99, 98, 97, 96 and 95 descending sorts and Faculty (A to Z) are also available. "
                         "Course Code supports multiple authorized courses and case-insensitive partial option search. "
+                        "Authorized courses without a course campus display Campus not specified; offering and faculty scope still govern visibility. "
                         "Classes with 100s only includes classes whose disclosed Period Grade Exactly 100 count exceeds zero, "
                         "after complete privacy planning. Withheld counts never affect ranking. Withheld values never affect membership. "
                         "Courses, sort and the toggle remain consistent across pagination, analytics and Excel export. "

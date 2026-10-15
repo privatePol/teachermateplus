@@ -1,3 +1,7 @@
+## 2026-10-15 - Grade Distribution NULL-campus option hotfix
+
+Course.campus is nullable. Course Code options still come only from the existing tenant-filtered authorized faculty-assignment queryset, whose campus scope is on the offering. Option labels now display Campus not specified when course.campus_id is NULL, retaining course ID/code/title. The existing select_related("campus") query is unchanged; there is no additional per-course read or visibility expansion. Local disposable SQLite/DOM checks are recorded in HANDOFF.md; staging verification remains pending.
+
 ## 2026-10-15 - TMP-GRADE-FILTERS-PERFORMANCE-01
 
 Grade Distribution now accepts repeated `course_id` parameters, validates/deduplicates authorized IDs, supports case-insensitive partial course-option search, and binds these choices plus `only_100=1` and all six exact-grade descending sorts to the signed selection. Default remains Exactly 100 descending; Faculty ascending remains available. Classes with 100s only uses disclosed saved Period Grade Exactly 100 counts after full source/formula privacy planning. Detail endpoints recheck membership and authorization; pagination and the 11-column Excel report use the same complete ranked selection.
