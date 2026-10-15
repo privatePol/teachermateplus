@@ -1,3 +1,11 @@
+## 2026-10-15 - TMP-GRADE-FILTERS-PERFORMANCE-01
+
+Grade Distribution now accepts repeated `course_id` parameters, validates/deduplicates authorized IDs, supports case-insensitive partial course-option search, and binds these choices plus `only_100=1` and all six exact-grade descending sorts to the signed selection. Default remains Exactly 100 descending; Faculty ascending remains available. Classes with 100s only uses disclosed saved Period Grade Exactly 100 counts after full source/formula privacy planning. Detail endpoints recheck membership and authorization; pagination and the 11-column Excel report use the same complete ranked selection.
+
+MonitorReadBundle batches bounded sources with per-class overflow sentinels (201 activities/sessions, 20,001 score/attendance records). Complete eligible source populations remain the basis of privacy planning. Dense-source SQL parameters are chunked without splitting a physical class/period. A request-local grading-service subclass batches profiles, departments, assignments, overrides and templates while retaining authoritative formula strategies/arithmetic. Its precedence is tested against FacultyGradingService. PeriodSummaryLayoutService.build_layout has an optional preloaded components argument; existing callers retain their query path and calculations. There is no cross-request cache. Previously signed searches require Apply Filters again because filter identity expanded.
+
+Changes remain isolated, uncommitted and unstaged on feat/grade-distribution-filters-performance at base 533c730c20822ba24bc3e1cec2da2b37191f8635. Prior unresolved release/runtime/privacy acceptance items remain as documented below. See HANDOFF.md for local measurements and validation; this session does not provide MariaDB/browser/production acceptance.
+
 ## 2026-10-15 - Excel class-identification remediation
 
 - The count-only exporter previously added identical period/template context to distinct offerings that shared faculty, campus, course, section and logical grading period across departments. The exact regression produced six component rows but only three unique identifying keys.

@@ -66,8 +66,8 @@ class PeriodSummaryLayoutService:
         return (prefix, int(number) if number else 999999, remainder.strip())
 
     @classmethod
-    def build_layout(cls, period, activities):
-        components = list(
+    def build_layout(cls, period, activities, *, components=None):
+        components = components if components is not None else list(
             period.components.filter(is_active=True)
             .prefetch_related("subcomponents__details")
             .order_by("sort_order", "id")

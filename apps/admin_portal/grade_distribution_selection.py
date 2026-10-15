@@ -12,7 +12,7 @@ from django.db.models import F, Q
 from django.http import QueryDict
 from django.utils import timezone
 
-from apps.academics.models import AcademicYear, FacultyAssignment, Term
+from apps.academics.models import AcademicYear, Course, FacultyAssignment, Term
 from apps.admin_portal.services import AdminScopeService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
@@ -41,7 +41,8 @@ def logical_period(period):
 
 
 class MonitorSelection:
-    FILTER_KEYS = ("campus_id", "academic_year_id", "term_id", "period", "faculty_id", "department_id", "status", "sort")
+    SORTS = tuple((f"exact_{grade}_desc", f"Exactly {grade} Count (highest first)") for grade in range(100, 94, -1))
+    FILTER_KEYS = ("campus_id", "academic_year_id", "term_id", "period", "faculty_id", "department_id", "status", "sort", "course_id", "only_100")
 
     def __init__(self, request):
         self.request = request
@@ -50,6 +51,7 @@ class MonitorSelection:
         self.selected = {}
         for key in self.FILTER_KEYS:
             self.selected[key] = (request.GET.get(key) or "").strip()
+        self.selected["course_id"] = sorted(set(v.strip() for v in request.GET.getlist("course_id") if v.strip()))
         self.selected["campus_id"] = self.selected["campus_id"] or str(getattr(request, "scope", {}).get("campus_id") or "")
         self.selected["status"] = self.selected["status"] or "all"
         self.selected["sort"] = self.selected["sort"] or "exact_100_desc"
@@ -69,7 +71,7 @@ class MonitorSelection:
         self.terms = Term.objects.filter(tenant_id=self.tenant_id, academic_year__tenant_id=self.tenant_id)
         if self.selected["academic_year_id"].isdigit():
             self.terms = self.terms.filter(academic_year_id=self.selected["academic_year_id"])
-        self.terms = self.terms.order_by("-academic_year__start_date", "sequence_no", "id")
+        self.terms = self.terms.select_related("academic_year").order_by("-academic_year__start_date", "sequence_no", "id")
         self.assignments = self._assignments()
         self.departments = self._departments()
         faculty_ids = self.assignments.values("faculty_user_id")
@@ -80,6 +82,10 @@ class MonitorSelection:
             "periods": [{"id": key, "label": label} for key, label in PERIODS],
             "faculty": [{"id": u.id, "label": faculty_name(u) + (f" (#{u.id})" if labels[faculty_name(u).casefold()] > 1 else "")} for u in self.faculty],
             "departments": [{"id": d.id, "label": f"{d.name} ({d.campus.code} / {d.code}, #{d.id})"} for d in self.departments],
+            "courses": [{"id": str(c.id), "label": f"{c.code} — {c.title} ({c.campus.code}, #{c.id})"} for c in
+                Course.objects.filter(id__in=self.assignments.values("offering__course_id"), tenant_id=self.tenant_id)
+                    .select_related("campus").order_by("code", "id")],
+            "sorts": [{"id": key, "label": label} for key, label in self.SORTS] + [{"id": "faculty_asc", "label": "Faculty (A to Z)"}],
         }
 
     def _assignments(self):
@@ -110,8 +116,12 @@ class MonitorSelection:
         role_departments = self._faculty_roles().filter(user_id__in=faculty_ids).values("department_id")
         defaults = get_user_model().objects.filter(id__in=faculty_ids, default_campus_id__in=self.campus_ids).values("default_department_id")
         accessible = set()
+        scope = getattr(self.request, "scope", {})
         for campus_id in self.campus_ids:
-            accessible.update(ScopeService.get_accessible_department_ids(self.request.user, tenant_id=self.tenant_id, campus_id=campus_id))
+            if scope.get("tenant_id") == self.tenant_id and scope.get("campus_id") == campus_id and "department_ids" in scope:
+                accessible.update(scope["department_ids"])
+            else:
+                accessible.update(ScopeService.get_accessible_department_ids(self.request.user, tenant_id=self.tenant_id, campus_id=campus_id))
         return list(Department.objects.filter(id__in=accessible).filter(
             Q(id__in=role_departments) | Q(id__in=defaults), tenant_id=self.tenant_id,
             campus_id__in=self.campus_ids, is_active=True,
@@ -139,8 +149,12 @@ class MonitorSelection:
             self.errors.append("Select a valid Grading Period.")
         if s["status"] not in {"all", "finalized", "unfinalized"}:
             self.errors.append("Select a valid grade status.")
-        if s["sort"] not in {"exact_100_desc", "faculty_asc"}:
+        if s["sort"] not in {key for key, _ in self.SORTS} | {"faculty_asc"}:
             self.errors.append("Select a valid sort order.")
+        if s["only_100"] not in {"", "1"}:
+            self.errors.append("Select a valid Classes with 100s option.")
+        if not set(s["course_id"]).issubset({c["id"] for c in self.options["courses"]}):
+            self.errors.append("A selected course is unavailable in the authorized scope.")
         for key, choices, label in (("faculty_id", self.options["faculty"], "faculty"), ("department_id", self.options["departments"], "department")):
             if s[key] and s[key] not in {str(item["id"]) for item in choices}:
                 self.errors.append(f"The selected {label} is unavailable in the authorized scope.")
@@ -152,6 +166,8 @@ class MonitorSelection:
         qs = self.assignments.filter(offering__academic_year_id=s["academic_year_id"], offering__term_id=s["term_id"])
         if s["faculty_id"]:
             qs = qs.filter(faculty_user_id=s["faculty_id"])
+        if s["course_id"]:
+            qs = qs.filter(offering__course_id__in=s["course_id"])
         if s["department_id"]:
             dept = next(d for d in self.departments if str(d.id) == s["department_id"])
             dept_ids = AdminScopeService.expand_department_filter_ids(dept.id, tenant_id=self.tenant_id, campus_id=dept.campus_id)
@@ -184,7 +200,10 @@ class MonitorSelection:
         q = QueryDict(mutable=True)
         for key, value in self.selected.items():
             if value:
-                q[key] = value
+                if isinstance(value, list):
+                    q.setlist(key, value)
+                else:
+                    q[key] = value
         q["apply"] = "1"
         q["context"] = token
         return q

@@ -141,6 +141,8 @@ class GradeDistributionMonitorService:
             # Privacy requires the full source family, not a SQL count of 100s.
             # prepare() bounds this complete selection before any source loading.
             rows = cls.rows(selection, assignments, offerings, saved, list(groups), periods)
+            if selection.selected["only_100"]:
+                rows = [row for row in rows if row["analytics_state"] == "disclosed" and row["exact_100_count"] > 0]
             rows.sort(key=lambda row: cls.sort_key(row, selection.selected["sort"]))
             if request.GET.get("export"):
                 context["rows"] = rows
@@ -148,12 +150,17 @@ class GradeDistributionMonitorService:
                 page = Paginator(rows, cls.PAGE_SIZE).get_page(request.GET.get("page"))
                 context["page_obj"] = page
                 context["rows"] = list(page.object_list)
+            for row in context["rows"]:
+                display = row.pop("_display", None)
+                if display:
+                    _, row["measures"], notes, row["incomplete_source_count"], row["quiz"] = display()
+                    row["notes"].extend(notes)
             query = selection.query(selection.token())
             context["page_query"] = query.urlencode()
             query["export"] = "xlsx"
             context["export_query"] = query.urlencode()
             context["mapping_note"] = (f"{unresolved} saved physical period mapping(s) are unresolved and unavailable; sequence alone is not used." if unresolved else "")
-            context["result_count"] = count
+            context["result_count"] = len(rows)
         except ValidationError as exc:
             context["errors"] = exc.messages
             context["searched"] = False
@@ -170,7 +177,12 @@ class GradeDistributionMonitorService:
             return identity
         disclosed = row["analytics_state"] == "disclosed"
         # Never rank by a protected count, including through a hidden tie-breaker.
-        return (not disclosed, -row["exact_100_count"] if disclosed else 0, *identity)
+        if sort == "exact_100_desc":
+            count = row["exact_100_count"] if disclosed else 0
+        else:
+            grade = sort.split("_")[1]
+            count = next((item["count"] for item in row["high_grade_breakdown"] if item["grade"] == f"Exactly {grade}"), 0) if disclosed else 0
+        return (not disclosed, -count, *identity)
 
     @classmethod
     def rows(cls, selection, assignments, offerings, saved, candidates, periods, detail=False):
@@ -199,6 +211,15 @@ class GradeDistributionMonitorService:
                     "offering_id", "template_period_id", "student_id", "period_grade",
                     "exam_grade", "class_standing_grade", "is_finalized"):
             saved_map[(record.pop("offering_id"), record.pop("template_period_id"))].append(record)
+        from apps.admin_portal.grade_distribution_data import MonitorReadBundle, configuration_service
+        cohorts = {(c["offering_id"], c["template_period_id"]):
+            (retained if offering_map[c["offering_id"]].monitor_historical or not periods[c["template_period_id"]].is_active else live)[c["offering_id"]]
+            for c in candidates}
+        bundle = MonitorReadBundle(offering_map, periods, cohorts)
+        service = configuration_service(offering_map)
+        # Identity contains the complete filter/authority selection, not a row ID.
+        # Physical row identity remains in each detail URL and is reauthorized.
+        detail_query = selection.query(selection.token()).urlencode()
         rows = []
         for candidate in candidates:
             offering = offering_map[candidate["offering_id"]]
@@ -211,11 +232,11 @@ class GradeDistributionMonitorService:
             status = selection.selected["status"]
             chosen = [r for r in records if status == "all" or r["is_finalized"] == (status == "finalized")]
             valued = [r for r in chosen if r["period_grade"] is not None]
-            t, source = threshold_for(offering)
+            t, source = threshold_for(offering, service)
             privacy = PrivacyFamily({r["student_id"]: r["is_finalized"] for r in records}, status, t)
             # Plan all sources before even the summary/CSV statistic is released.
             period_metrics, measures, notes, incomplete, quiz = component_measures(
-                offering, period, records, student_ids, t, historical, privacy)
+                offering, period, records, student_ids, t, historical, privacy, bundle=bundle, service=service, defer_display=not detail)
             saved_ids = {r["student_id"] for r in records if r["period_grade"] is not None}
             excluded = sum(r["period_grade"] is not None for r in records) - len(valued)
             row = {
@@ -234,8 +255,12 @@ class GradeDistributionMonitorService:
                 "notes": (["Historical roster uses retained enrollment associations, including inactive records except non-grading statuses. Current student campus, department and program do not alter this retained cohort. Original roster and threshold snapshots are unavailable. Threshold shown is currently resolved."] if historical else []),
                 **period_metrics,
             }
-            row["detail_query"] = selection.query(selection.token()).urlencode()
-            row["measures"] = measures
+            row["detail_query"] = detail_query
+            if callable(measures):
+                row["_display"] = measures
+                row["measures"] = []
+            else:
+                row["measures"] = measures
             row["quiz"] = quiz
             row["incomplete_source_count"] = incomplete
             row["notes"].extend(notes)
@@ -256,7 +281,10 @@ class GradeDistributionMonitorService:
         candidates = list(groups.filter(offering_id=offering_id, template_period_id=period_id)[:1])
         if not candidates:
             return None
-        return cls.rows(selection, assignments, offerings, saved, candidates, periods, detail=True)[0]
+        row = cls.rows(selection, assignments, offerings, saved, candidates, periods, detail=True)[0]
+        if selection.selected["only_100"] and (row["analytics_state"] != "disclosed" or not row["exact_100_count"]):
+            return None
+        return row
 
     @classmethod
     def sanitized_query(cls, request):

@@ -652,5 +652,7 @@ class GradeDistributionGuideContentTests(TestCase):
                        "indeterminate green progress", "gold Exactly 100", "proven equivalent measures", "Base 50", "official TMP Gradebook", "one Grade Distribution worksheet", "Export Excel", "No subjective/objective classification", "50,000 aggregate rows"):
             self.assertIn(phrase, text)
         self.assertNotIn("actual raw examination percentages are shown", text)
+        for phrase in ("Course Code supports multiple authorized courses", "partial option search", "Classes with 100s only", "Exactly 99, 98, 97, 96 and 95", "Withheld values never affect membership"):
+            self.assertIn(phrase, text)
         for phrase in ("Exactly 100 Count (highest first)", "before pagination", "Withheld counts never affect ranking", "one calculated Gradebook Quiz average per student", "not an immutable finalized snapshot", "Blank counts", "Matching class labels add department", "export is rejected", "Chart reuse links to the specific dataset"):
             self.assertIn(phrase, text)

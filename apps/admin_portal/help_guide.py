@@ -956,7 +956,11 @@ ADMIN_HELP_SECTIONS = [
                     (
                         "Exactly 100 Count (highest first) is the default sort for saved Period Grades. Privacy-safe counts "
                         "are calculated across the complete filtered selection before pagination, with stable faculty/class "
-                        "tie-breakers. Withheld counts never affect ranking. Faculty (A to Z) is also available. "
+                        "tie-breakers. Exactly 99, 98, 97, 96 and 95 descending sorts and Faculty (A to Z) are also available. "
+                        "Course Code supports multiple authorized courses and case-insensitive partial option search. "
+                        "Classes with 100s only includes classes whose disclosed Period Grade Exactly 100 count exceeds zero, "
+                        "after complete privacy planning. Withheld counts never affect ranking. Withheld values never affect membership. "
+                        "Courses, sort and the toggle remain consistent across pagination, analytics and Excel export. "
                         "Export Excel downloads one Grade Distribution worksheet with Faculty, Campus, Course / Section, "
                         "Grading Period, Computed Grade Component and Exactly 100, 99, 98, 97, 96, 95 integer counts. "
                         "Only Periodic Examination, Class Standing and Quizzes are included. Examination and standing use "

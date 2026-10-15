@@ -50,7 +50,15 @@
       <option value="all" {% if selected.status == "all" %}selected{% endif %}>All Statuses</option><option value="finalized" {% if selected.status == "finalized" %}selected{% endif %}>Finalized</option><option value="unfinalized" {% if selected.status == "unfinalized" %}selected{% endif %}>Unfinalized</option>
     </select></div>
   </div>
-  <div class="mt-3"><label class="form-label" for="gdm-sort">Sort by</label><select id="gdm-sort" class="form-select w-auto" name="sort"><option value="exact_100_desc" {% if selected.sort == "exact_100_desc" %}selected{% endif %}>Exactly 100 Count (highest first)</option><option value="faculty_asc" {% if selected.sort == "faculty_asc" %}selected{% endif %}>Faculty (A to Z)</option></select><div class="form-text">Uses disclosed saved Period Grade counts across all matching classes before pagination. Withheld counts do not affect ranking.</div></div>
+  <div class="mt-3"><label class="form-label" for="gdm-course-search">Search course codes or titles</label>
+    <input id="gdm-course-search" type="search" class="form-control" placeholder="Type part of a course code or title" aria-controls="gdm-courses">
+    <label class="form-label mt-2" for="gdm-courses">Course Code (multiple selection)</label>
+    <select id="gdm-courses" name="course_id" class="form-select" multiple size="6">
+      {% for c in filter_options.courses %}<option value="{{ c.id }}" {% if c.id in selected.course_id %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
+    </select><div class="form-text">Leave unselected for all eligible courses. Use Ctrl or Command to select multiple courses. Searching options preserves selections.</div>
+  </div>
+  <div class="form-check mt-3"><input class="form-check-input" type="checkbox" id="gdm-only-100" name="only_100" value="1" {% if selected.only_100 %}checked{% endif %}><label class="form-check-label" for="gdm-only-100">Classes with 100s only</label><div class="form-text">Includes only classes with a disclosed Period Grade Exactly 100 count above zero.</div></div>
+  <div class="mt-3"><label class="form-label" for="gdm-sort">Sort by</label><select id="gdm-sort" class="form-select w-auto" name="sort">{% for choice in filter_options.sorts %}<option value="{{ choice.id }}" {% if selected.sort == choice.id %}selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select><div class="form-text">Uses disclosed saved Period Grade counts across all matching classes before pagination. Withheld counts do not affect ranking.</div></div>
   <div class="d-flex gap-2 mt-3"><button type="submit" class="btn btn-success">Apply Filters</button><a class="btn btn-outline-secondary" href="{% url 'admin_portal:grade_distribution_monitor' %}">Clear</a></div>
   <p class="small text-muted mt-2 mb-0">25 rows per page. Search/export limits: 500 class/period rows, 50,000 saved grades and roster associations, 2,000 students per class. Narrow criteria if a limit is exceeded.</p>
 </form>

@@ -1,3 +1,9 @@
+## 2026-10-15 - Grade Distribution filters and request performance
+
+- Added authorized searchable multi-course selection, privacy-safe Classes with 100s only, and descending Exactly 100/99/98/97/96/95 sorting across the complete filtered selection. Signed selections preserve criteria through details, pagination and the unchanged 11-column Excel export.
+- Batched monitor configuration, component hierarchy, activity/score and attendance reads within each request; kept full formula/privacy planning before filtering and ranking. Deferred activity/Quiz display metrics until page/export rendering. No cross-request cache, model change or migration.
+- Updated Admin help and focused Django/DOM regression coverage. See the TMP-GRADE-FILTERS-PERFORMANCE-01 entry in HANDOFF.md for measurements, validation boundaries and next gate.
+
 ## 2026-10-15 - Grade Distribution Excel class-label remediation
 
 - Resolve matching authorized class labels with department and, only for remaining collisions, program qualifiers inside Course / Section. Unambiguous classes retain their original labels. Offering department/program supply the qualifiers; no student or supervision metadata is substituted.

@@ -3375,7 +3375,7 @@ def grade_distribution_monitor_view(request):
     if request.GET.get("options") == "1":
         from apps.admin_portal.grade_distribution_selection import MonitorSelection
         options = MonitorSelection(request).options
-        return JsonResponse({key: options[key] for key in ("faculty", "departments")} | {
+        return JsonResponse({key: options[key] for key in ("faculty", "departments", "courses")} | {
             "terms": [{"id": t.id, "label": f"{t.academic_year.code} / {t.name}"} for t in options["terms"]]
         })
     context = GradeDistributionMonitorService.build_context(request)

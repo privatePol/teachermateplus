@@ -6,6 +6,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const modal = document.getElementById("gradeDistributionAnalyticsModal");
   const body = document.getElementById("gdm-modal-body");
   if (!form || !modal) return;
+  const courseSearch = document.getElementById("gdm-course-search");
+  const courseSelect = form.elements.course_id;
+  const searchCourses = () => {
+    const text = (courseSearch?.value || "").trim().toLocaleLowerCase();
+    if (courseSelect) for (const option of courseSelect.options) {
+      option.hidden = !option.textContent.toLocaleLowerCase().includes(text);
+    }
+  };
+  courseSearch?.addEventListener("input", searchCourses);
   let optionsAbort, detailAbort, opener;
   const node = (tag, text, className) => {
     const el = document.createElement(tag);
@@ -131,6 +140,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return section;
   };
   form.addEventListener("change", async event => {
+    if (event.target === courseSearch) return;
     results.hidden = true;
     form.removeAttribute("aria-busy");
     detailAbort?.abort();
@@ -149,6 +159,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!response.ok) throw new Error("Filter choices are unavailable. Reload this page.");
       const data = await response.json();
       if (thisAbort.signal.aborted || optionsAbort !== thisAbort) return;
+      if (courseSelect) {
+        const selected = new Set([...courseSelect.selectedOptions].map(o => o.value));
+        courseSelect.replaceChildren();
+        (data.courses || []).forEach(choice => courseSelect.add(new Option(choice.label, choice.id, false, selected.has(String(choice.id)))));
+        searchCourses();
+      }
       for (const [key, choices, placeholder] of [["faculty_id", data.faculty, "All Eligible Faculty"], ["department_id", data.departments, "All Eligible Departments"], ["term_id", data.terms, "Select Term"]]) {
         const select = form.elements[key], old = select.value;
         select.replaceChildren(new Option(placeholder, ""));

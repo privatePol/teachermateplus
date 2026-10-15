@@ -10,7 +10,8 @@ function setup() {
     <select name="campus_id"><option value="1">A</option><option value="2">B</option></select>
     <select name="academic_year_id"><option value="1">AY</option></select><select name="term_id"><option value="1">Term</option></select>
     <select name="faculty_id"><option value="">All</option></select><select name="department_id"><option value="">All</option></select>
-    <select name="sort"><option value="exact_100_desc">Exactly 100 Count</option><option value="faculty_asc">Faculty</option></select><select name="status"><option value="all">All</option><option value="finalized">Finalized</option></select><button type="submit">Apply</button></form>
+    <input type="search" id="gdm-course-search"><select name="course_id" multiple id="gdm-courses"><option value="10" selected>ACC101 Accounting</option><option value="20">MATH101 Mathematics</option><option value="30">ACC201 Advanced accounting</option></select><input name="only_100" type="checkbox" value="1">
+    <select name="sort">${[100,99,98,97,96,95].map(n=>`<option value="exact_${n}_desc">Exactly ${n} Count</option>`).join('')}<option value="faculty_asc">Faculty</option></select><select name="status"><option value="all">All</option><option value="finalized">Finalized</option></select><button type="submit">Apply</button></form>
     <div id="gdm-results"><button id="open" data-analytics-url="/detail?context=signed">View</button><nav class="pagination"><a class="page-link" href="?page=2">Next</a></nav></div><div id="gdm-filter-status"></div>
     <div id="gradeDistributionAnalyticsModal"><div id="gdm-modal-body"></div></div>`, {url:'https://example.test/monitor', runScripts:'outside-only'});
   const w = dom.window, d = w.document;
@@ -130,4 +131,36 @@ test('sort change clears stale results and modal without fetching until Apply', 
   assert.match(s.d.getElementById('gdm-filter-status').textContent,/Apply Filters/);
   assert.equal(new s.w.FormData(s.d.querySelector('form')).get('sort'),'faculty_asc');
   assert.equal(s.d.querySelector('[name="page"]'),null);s.dom.window.close();
+});
+
+test('partial course option search is case insensitive and preserves multi-selection',()=>{
+  const s=setup(), input=s.d.getElementById('gdm-course-search'), select=s.d.getElementById('gdm-courses');
+  select.options[1].selected=true;
+  input.value='aCc';input.dispatchEvent(new s.w.Event('input'));
+  assert.deepEqual([...select.options].map(o=>o.hidden),[false,true,false]);
+  assert.deepEqual(new s.w.FormData(s.d.querySelector('form')).getAll('course_id'),['10','20']);
+  input.value='101';input.dispatchEvent(new s.w.Event('input'));
+  assert.deepEqual([...select.options].map(o=>o.hidden),[false,false,true]);
+  input.value='';input.dispatchEvent(new s.w.Event('input'));
+  assert.ok([...select.options].every(o=>!o.hidden));s.dom.window.close();
+});
+
+test('course and toggle changes clear stale results and all six sorts submit',()=>{
+  const s=setup(), form=s.d.querySelector('form');
+  for(const grade of [100,99,98,97,96,95]){
+    form.elements.sort.value=`exact_${grade}_desc`;s.change('sort');
+    assert.equal(new s.w.FormData(form).get('sort'),`exact_${grade}_desc`);
+    assert.equal(s.d.getElementById('gdm-results').hidden,true);
+  }
+  form.elements.only_100.checked=true;s.change('only_100');
+  assert.equal(new s.w.FormData(form).get('only_100'),'1');
+  s.change('course_id');assert.match(s.d.getElementById('gdm-filter-status').textContent,/Apply Filters/);s.dom.window.close();
+});
+
+test('scope refresh replaces courses with authorized choices and preserves valid selections',async()=>{
+  const s=setup();s.w.fetch=async()=>({ok:true,json:async()=>({faculty:[],departments:[],terms:[],courses:[{id:'10',label:'ACC101'},{id:'40',label:'NEW101'}]})});
+  s.change('campus_id');await tick();
+  const select=s.d.getElementById('gdm-courses');
+  assert.deepEqual([...select.options].map(o=>o.value),['10','40']);
+  assert.deepEqual([...select.selectedOptions].map(o=>o.value),['10']);s.dom.window.close();
 });

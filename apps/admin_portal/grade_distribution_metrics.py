@@ -205,9 +205,9 @@ class FormulaPrivacyPlan:
                 if key in self.blocked else "")
 
 
-def threshold_for(offering):
+def threshold_for(offering, service=FacultyGradingService):
     try:
-        trace = FacultyGradingService.resolve_passing_threshold_trace(offering)
+        trace = service.resolve_passing_threshold_trace(offering)
         return trace["value"], trace["source_label"]
     except ValidationError:
         raw = SystemSettingService.get("PASSING_GRADE_THRESHOLD", tenant_id=offering.tenant_id, default=None)
@@ -239,14 +239,14 @@ def dataset_metadata(offering, period, key, status, *, activity=None):
     }
 
 
-def quiz_samples(period, activities, scores, student_ids):
+def quiz_samples(period, activities, scores, student_ids, *, components=None):
     """Reuse Gradebook's numeric Quiz average; never sum activity frequencies.
 
     Label-based display routing and structured-code classification must agree.
     Inputs are already scoped and bounded by the monitor; no student query or
     student-level result is serialized by this adapter.
     """
-    layout = PeriodSummaryLayoutService.build_layout(period, activities)
+    layout = PeriodSummaryLayoutService.build_layout(period, activities, components=components)
     quiz_ids = set()
     for block in layout["class_standing_blocks"]:
         for section in block["sections"]:
@@ -271,7 +271,7 @@ def quiz_samples(period, activities, scores, student_ids):
     return values, quiz_ids, ""
 
 
-def component_measures(offering, period, saved_rows, student_ids, threshold, historical, privacy):
+def component_measures(offering, period, saved_rows, student_ids, threshold, historical, privacy, *, bundle=None, service=FacultyGradingService, defer_display=False):
     """Keep saved totals distinct from current engine interpretations and raw scores."""
     measures, notes = [], []
     activity_map = {}
@@ -285,7 +285,7 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         plan.add(key, values)
         measures.append((key, label, unit))
 
-    def finish(*, unresolved=False, unknown_links=False, incomplete=None):
+    def finish(*, unresolved=False, unknown_links=False, incomplete=None, render=False):
         if unknown_links:
             # Original/current lineage cannot prove independence of the buckets.
             plan.link("period_grade", "exam_grade")
@@ -301,6 +301,12 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         plan.finalize(unresolved=unresolved)
         period_metadata = dataset_metadata(offering, period, "period_grade", privacy.status)
         period_metrics = {**plan.measure("period_grade", eligible_count=len(student_ids)), **period_metadata}
+        if defer_display and not render:
+            # Full lineage and population planning is complete. Ranking needs
+            # only the admitted period measure; activity charts/Quiz metrics are
+            # constructed only for the visible page (or the complete export).
+            return period_metrics, lambda: finish(unresolved=unresolved, unknown_links=unknown_links,
+                incomplete=incomplete, render=True), [], incomplete, None
         released = []
         disclosed_sources = [("period_grade", "Period Grades", period_metadata)] if period_metrics["analytics_state"] == "disclosed" else []
         for key, label, unit in measures:
@@ -339,7 +345,8 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         add_measure(field, values, label, "Stored grade total; may exceed 100 when major components are summed.")
     # Gradebook activity columns read computed_score, including configured Base
     # 50. Raw inputs remain internal sources in the formula privacy plan.
-    activities = list(GradeActivity.objects.filter(offering=offering, template_period=period, is_active=True,
+    pair = offering.id, period.id
+    activities = bundle.activities[pair] if bundle else list(GradeActivity.objects.filter(offering=offering, template_period=period, is_active=True,
                     template_component__template_period=period,
                     tenant_id=offering.tenant_id, campus_id=offering.campus_id).filter(
                         Q(template_subcomponent__isnull=True) | Q(
@@ -351,11 +358,12 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         notes.append("Activity analysis limit: 200 activities per class/period. Formula safety cannot be established; related analytics are withheld.")
         return finish(unresolved=True, unknown_links=True)
     activity_map = {a.id: a for a in activities}
-    scores_qs = StudentActivityScore.objects.filter(activity_id__in=[a.id for a in activities], student_id__in=student_ids, is_active=True).order_by()
-    if scores_qs.count() > 20000:
+    scores = bundle.scores[pair] if bundle else list(StudentActivityScore.objects.filter(
+        activity_id__in=[a.id for a in activities], student_id__in=student_ids, is_active=True).order_by().values(
+            "student_id", "activity_id", "raw_score", "computed_score")[:20001])
+    if len(scores) > 20000:
         notes.append("Activity analysis limit: 20,000 saved assessment scores per class/period. Formula safety cannot be established; related analytics are withheld.")
         return finish(unresolved=True, unknown_links=True)
-    scores = list(scores_qs.values("student_id", "activity_id", "raw_score", "computed_score"))
     inactive_routes = any(not a.template_component.is_active or
         (a.template_subcomponent and not a.template_subcomponent.is_active) or
         (a.template_detail and not a.template_detail.is_active) for a in activities)
@@ -376,15 +384,15 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         notes.append("Historical analytics use retained saved Gradebook totals and activity grades. Original formulas, activity maxima and score revisions are not snapshotted; current saved activity entries may reflect later edits. No historical calculation is invented.")
         return finish(unresolved=inactive_routes, unknown_links=True)
     try:
-        template = FacultyGradingService.resolve_template_for_offering(offering)
+        template = service.resolve_template_for_offering(offering)
         if template.id != period.template_id:
             raise ValidationError("The saved physical period differs from the current template.")
-        base = FacultyGradingService.resolve_base_value(offering, template)
-        strategy = FacultyGradingService.resolve_period_grade_strategy(offering, template=template)
+        base = service.resolve_base_value(offering, template)
+        strategy = service.resolve_period_grade_strategy(offering, template=template)
     except ValidationError:
         notes.append("Current component configuration cannot reliably interpret this saved period. Formula independence cannot be established; related analytics are withheld and underlying source completeness is unknown.")
         return finish(unresolved=True, unknown_links=True)
-    components = list(period.components.filter(is_active=True).prefetch_related("subcomponents", "subcomponents__details").order_by("sort_order", "id"))
+    components = bundle.components[period.id] if bundle else list(period.components.filter(is_active=True).prefetch_related("subcomponents", "subcomponents__details").order_by("sort_order", "id"))
     lookup, raw_lookup, present = defaultdict(list), defaultdict(list), defaultdict(set)
     component_present = defaultdict(set)
     activity_values, actual_values, raw_input_values = defaultdict(dict), defaultdict(dict), defaultdict(dict)
@@ -409,13 +417,14 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
     attendance_scores, attendance_present, session_ids = defaultdict(list), defaultdict(set), set()
     attendance_values = defaultdict(dict)
     if has_attendance:
-        session_ids = set(AttendanceSession.objects.filter(offering=offering, template_period=period, is_active=True,
+        session_ids = bundle.sessions[pair] if bundle else set(AttendanceSession.objects.filter(offering=offering, template_period=period, is_active=True,
                           tenant_id=offering.tenant_id, campus_id=offering.campus_id).values_list("id", flat=True)[:201])
-        records = AttendanceRecord.objects.filter(session_id__in=session_ids, student_id__in=student_ids, is_active=True).order_by()
-        if len(session_ids) > 200 or records.count() > 20000:
+        records = bundle.attendance[pair] if bundle else list(AttendanceRecord.objects.filter(
+            session_id__in=session_ids, student_id__in=student_ids, is_active=True).order_by().values("student_id", "session_id", "status_code")[:20001])
+        if len(session_ids) > 200 or len(records) > 20000:
             notes.append("Component analysis limit: 200 attendance sessions / 20,000 records. Formula safety cannot be established; related analytics are withheld.")
             return finish(unresolved=True, unknown_links=True)
-        for record in records.values("student_id", "session_id", "status_code"):
+        for record in records:
             attendance_scores[record["student_id"]].append(FacultyGradingService.compute_activity_score(
                 raw_score=FacultyGradingService.ATTENDANCE_SCORE_MAP.get(record["status_code"], Decimal("0")),
                 total_score=Decimal("100"), base_value=base, score_input_mode="DIRECT_PERCENTAGE"))
@@ -502,5 +511,5 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         notes.append("Saved totals differ from current assessment interpretations. Their formula independence cannot be verified; related saved buckets are treated as potentially dependent.")
         quiz_note = "Quiz calculations unavailable: saved totals differ from the current Gradebook calculation."
     elif not inactive_routes:
-        quiz_values, quiz_source_ids, quiz_note = quiz_samples(period, activities, scores, student_ids)
+        quiz_values, quiz_source_ids, quiz_note = quiz_samples(period, activities, scores, student_ids, components=components)
     return finish(unresolved=inactive_routes, unknown_links=not lineage_matches, incomplete=incomplete)
