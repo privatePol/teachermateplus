@@ -354,7 +354,7 @@ ADMIN_HELP_SECTIONS = [
                         "does": "Opens sanitized Print Set A or Print Set B output for an exact revision without a Faculty release, with Letter (default), A4, and Legal paper choices.",
                         "when": "Use it for authorized Admin-only printing cases.",
                         "avoid": "Do not treat direct printing as permission for Faculty access.",
-                        "result": "A private, no-store questionnaire is rendered without answers or internal audit metadata; supported scientific notation finishes rendering before the print dialog opens.",
+                        "result": "A private, no-store questionnaire is rendered without answers or internal audit metadata; supported scientific notation finishes rendering before the print dialog opens. Generated preview and print remove leading and trailing blank MCQ spacers and retain at most one internal blank line, while keeping meaningful formatting, spaces between formatted words, tables, mathematical notation and Case narratives. Existing revisions receive this display correction without regeneration.",
                         "editable": "Printing is read-only and does not change Faculty release state.",
                     },
                     {

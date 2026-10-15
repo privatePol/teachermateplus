@@ -52,6 +52,67 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
     PRINT_SCHOOL_NAME = "National College of Business and Arts"
     PRINT_CAMPUS_LINE = "Cubao-Fairview-Taytay"
 
+    def test_spacing_output_preserves_generated_and_released_records_on_repeated_access(self):
+        from .question_content import RICH_HTML_V1
+
+        # Change only disposable fixture snapshots, then prove GETs preserve them.
+        blank = '<p class="tmp-preserve"></p>'
+        stem = (blank * 2 + '<p class="tmp-preserve"><br><br>First paragraph</p>' + blank * 3
+                + '<p class="tmp-preserve">Second paragraph<br><br></p>' + blank * 2)
+        choices = [blank * 2 + f'<p class="tmp-preserve"><br><br>Choice {letter}<br><br><br>Detail {letter}<br><br></p>'
+                   + blank * 2 for letter in "ABCD"]
+        GeneratedExamItem.objects.filter(
+            generated_set__generation_revision=self.r2, position=1,
+        ).update(
+            question_content_format_snapshot=RICH_HTML_V1,
+            question_text_snapshot=stem,
+            choices_snapshot=choices,
+        )
+        release = self._release()
+
+        def academic_state():
+            return {
+                "items": list(GeneratedExamItem.objects.order_by("pk").values()),
+                "sets": list(GeneratedExamSet.objects.order_by("pk").values()),
+                "revisions": list(ExamGenerationRevision.objects.order_by("pk").values()),
+                "releases": list(QuestionnairePrintRelease.objects.order_by("pk").values()),
+                "questions": list(Question.objects.order_by("pk").values()),
+                "contributions": list(FacultyContribution.objects.order_by("pk").values()),
+            }
+
+        before = academic_state()
+        actions = ("DE_ADMIN_QUESTIONNAIRE_PRINT_SET_ACCESSED", "DE_QUESTIONNAIRE_PRINT_SET_ACCESSED")
+        audit_counts = {action: AuditLog.objects.filter(action=action).count() for action in actions}
+        admin = Client()
+        admin.force_login(self.manager_user)
+        faculty = self._faculty_client()
+        for _ in range(2):
+            for set_code in ("A", "B"):
+                for client, url in (
+                    (admin, self._admin_print_url(revision=self.r2, set_code=set_code)),
+                    (faculty, self._print_url(release, set_code)),
+                ):
+                    response = client.get(url)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertContains(response, "css/departmental_exam_questionnaire_presentation.css")
+                    self.assertContains(response, 'class="tmp-case-content tmp-mcq-output"', count=5)
+                    self.assertContains(response, '<p class="tmp-preserve">First paragraph</p><p class="tmp-preserve"></p><p class="tmp-preserve">Second paragraph</p>')
+                    for letter in "ABCD":
+                        self.assertContains(response, f'<p class="tmp-preserve">Choice {letter}<br><br>Detail {letter}</p>')
+                    self.assertEqual(response.context["revision_number"], self.r2.revision_number)
+                    self.assertEqual(response.context["set_code"], set_code)
+                    self.assertEqual([item["position"] for item in response.context["items"]], [1, 2])
+                    self.assertEqual(response.context["items"][0]["question_text"], stem)
+                    self.assertEqual(response.context["items"][0]["choices"], tuple(choices))
+                    self.assertNotContains(response, "Correct answer:")
+            response = admin.get(reverse("departmental_exams:generated_revision_detail", args=[self.r2.id]))
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, "css/departmental_exam_questionnaire_presentation.css")
+            self.assertContains(response, "tmp-case-content tmp-mcq-output fw-semibold mb-2")
+            self.assertEqual(before, academic_state())
+        for action in actions:
+            self.assertEqual(AuditLog.objects.filter(action=action).count(), audit_counts[action] + 4)
+
     def setUp(self):
         super().setUp()
         SystemSettingService.set(
