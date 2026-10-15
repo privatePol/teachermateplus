@@ -1,3 +1,16 @@
+## 2026-10-15 - Grade Distribution Excel class-label remediation
+
+- Resolve matching authorized class labels with department and, only for remaining collisions, program qualifiers inside Course / Section. Unambiguous classes retain their original labels. Offering department/program supply the qualifiers; no student or supervision metadata is substituted.
+- Preserve separate physical class/period counts and the existing 11-column, one-sheet workbook. Multiple physical periods within a class retain readable period/template context. If visible identities still collide, reject export without records rather than invent class identifiers or merge counts. Normalized label checks also catch case/whitespace and missing-program marker collisions.
+- Sorting, grade calculations, historical Quiz availability, privacy and authorization rules are unchanged. Existing upper-limit latency remains a separate acceptance risk; no performance refactoring is included. Remediation validation is recorded in HANDOFF.md.
+
+## 2026-10-15 - Grade Distribution count sorting and simplified Excel
+
+- Default to numeric Exactly 100 Count descending across the complete authorized, privacy-filtered selection before 25-row pagination, with stable faculty/class/physical-period tie-breakers. Withheld counts never influence rank; Faculty A to Z remains an option. Roster and saved totals are loaded in batches.
+- Excel now has one Grade Distribution worksheet with five identifying columns and six integer counts (exactly 100 through 95), and only Periodic Examination, Class Standing and Quizzes rows. Saved examination/standing totals are preserved, including values above 100. Internal identities remain in processing; visible period/template context distinguishes matching physical-period labels. Legacy export=csv links still return XLSX.
+- Quizzes reuse the shared Gradebook calculated average from saved configured activity grades, including Base 50, weighting and existing decimal rounding. Each student contributes at most one result. Missing/conflicting classification, stale saved-total lineage and unreliable historical calculations remain unavailable; current calculations are not finalized snapshots. Quiz sources join the same formula/complementary privacy plan before any route releases metrics. Blanks represent unavailable/withheld counts; disclosed zero remains zero.
+- No grading formulas, RBAC rules, models, migrations or questionnaire behavior changed. Validation and remaining acceptance limits are recorded in HANDOFF.md. This entry supersedes the earlier verbose two-sheet export presentation.
+
 ## Meaningful MCQ inline whitespace - 2026-10-15 (Gate 2C)
 
 - Fixed the questionnaire-only projection dropping spaces between top-level inline words when the same canonical HTML contains a paragraph. Mixed `<strong>First</strong> <em>Second</em><p>Third</p>` now retains its exact HTML and semantic text. Inline separators are preserved verbatim; block indentation and approved redundant blank-line/paragraph compaction remain unchanged.

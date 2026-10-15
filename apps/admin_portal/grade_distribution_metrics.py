@@ -1,6 +1,7 @@
 """Aggregate facts from current saved grades; no gradebook writes or recomputation."""
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
+from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError
 from django.db.models import F, Q
@@ -9,6 +10,7 @@ from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.core.services.settings import SystemSettingService
 from apps.grading.models import GradeActivity, StudentActivityScore
 from apps.grading.services import FacultyGradingService
+from apps.grading.tabulation import PeriodSummaryLayoutService
 
 
 def rounded(value):
@@ -237,11 +239,45 @@ def dataset_metadata(offering, period, key, status, *, activity=None):
     }
 
 
+def quiz_samples(period, activities, scores, student_ids):
+    """Reuse Gradebook's numeric Quiz average; never sum activity frequencies.
+
+    Label-based display routing and structured-code classification must agree.
+    Inputs are already scoped and bounded by the monitor; no student query or
+    student-level result is serialized by this adapter.
+    """
+    layout = PeriodSummaryLayoutService.build_layout(period, activities)
+    quiz_ids = set()
+    for block in layout["class_standing_blocks"]:
+        for section in block["sections"]:
+            if section["color_class"] != "summary-group-quizzes":
+                continue
+            groups = section["groups"] if section["uses_nested"] else [section]
+            quiz_ids.update(aid for group in groups for aid in group["activity_ids"])
+    classified_ids = {a.id for a in activities if FacultyGradingService.is_quiz_activity(a)}
+    if quiz_ids != classified_ids:
+        return {}, set(), "Quiz calculations unavailable: Gradebook display labels and template Quiz codes disagree."
+    if not quiz_ids:
+        return {}, set(), "Quiz calculations unavailable: no configured Gradebook Quiz activities."
+    score_map = {(r["student_id"], r["activity_id"]): r["computed_score"] for r in scores}
+    values = {}
+    for sid in sorted(student_ids):
+        row = PeriodSummaryLayoutService.build_row_values({"student": SimpleNamespace(id=sid)}, layout, score_map)
+        value = PeriodSummaryLayoutService.print_group_average(layout, row, quizzes=True)
+        if value is not None:
+            values[sid] = value
+    if not values:
+        return {}, quiz_ids, "Quiz calculations unavailable: no saved computed Quiz grades for eligible students."
+    return values, quiz_ids, ""
+
+
 def component_measures(offering, period, saved_rows, student_ids, threshold, historical, privacy):
     """Keep saved totals distinct from current engine interpretations and raw scores."""
     measures, notes = [], []
     activity_map = {}
     plan = FormulaPrivacyPlan(privacy)
+    quiz_values, quiz_source_ids = {}, set()
+    quiz_note = "Quiz calculations unavailable: current formula lineage could not be verified."
     plan.add("period_grade", {r["student_id"]: r["period_grade"] for r in saved_rows})
     selected_ids = student_ids if privacy.status == "all" else {r["student_id"] for r in saved_rows if r["is_finalized"] == (privacy.status == "finalized")}
 
@@ -254,6 +290,14 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
             # Original/current lineage cannot prove independence of the buckets.
             plan.link("period_grade", "exam_grade")
             plan.link("period_grade", "class_standing_grade")
+        plan.add("quiz_grade", quiz_values)
+        for aid in quiz_source_ids:
+            for source in ("raw", "configured", "raw_input"):
+                plan.depends_on("quiz_grade", (source, aid))
+        if quiz_source_ids:
+            plan.depends_on("class_standing_grade", "quiz_grade")
+            if any(a.template_component.weight_percentage for a in activities if a.id in quiz_source_ids):
+                plan.depends_on("period_grade", "quiz_grade")
         plan.finalize(unresolved=unresolved)
         period_metadata = dataset_metadata(offering, period, "period_grade", privacy.status)
         period_metrics = {**plan.measure("period_grade", eligible_count=len(student_ids)), **period_metadata}
@@ -278,7 +322,17 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
                 if not equivalent:
                     disclosed_sources.append((key, label, metadata))
             released.append(measure)
-        return period_metrics, released, notes, incomplete
+        # Release after existing measures in the same fixed family on every
+        # route. Export must not get a different privacy decision from HTML/JSON.
+        quiz = {"label": "Quizzes", **plan.measure("quiz_grade", eligible_count=len(selected_ids)),
+                **dataset_metadata(offering, period, "quiz_grade", privacy.status)}
+        quiz["calculation_note"] = quiz_note or (
+            "Current calculated Gradebook Quiz average, including the configured base; "
+            "not an immutable finalized snapshot. Status selects students by their saved period status.")
+        notes.append(quiz["calculation_note"])
+        if quiz["privacy_message"]:
+            notes.append(f'Quizzes: {quiz["privacy_message"]}')
+        return period_metrics, released, notes, incomplete, quiz
 
     for field, label in (("exam_grade", "Examination Grades"), ("class_standing_grade", "Class Standing Grades")):
         values = {r["student_id"]: r[field] for r in saved_rows if r[field] is not None}
@@ -308,6 +362,7 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
     if inactive_routes:
         notes.append("An active activity has an inactive grading route. Its formula lineage cannot be verified; related analytics are withheld.")
     if historical:
+        quiz_note = "Quiz calculations unavailable: no immutable historical Quiz calculation or original formula snapshot is saved."
         for activity in activities:
             configured_key, input_key = ("configured", activity.id), ("raw_input", activity.id)
             add_measure(configured_key, {r["student_id"]: r["computed_score"] for r in scores if r["activity_id"] == activity.id},
@@ -445,4 +500,7 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
     notes.append("Activity analytics use saved Gradebook grades, including the configured base. The read-only grading engine checks formula dependencies internally; analytics do not recompute or overwrite saved grades. Exactly 100 need not mean a perfect raw score.")
     if not lineage_matches:
         notes.append("Saved totals differ from current assessment interpretations. Their formula independence cannot be verified; related saved buckets are treated as potentially dependent.")
+        quiz_note = "Quiz calculations unavailable: saved totals differ from the current Gradebook calculation."
+    elif not inactive_routes:
+        quiz_values, quiz_source_ids, quiz_note = quiz_samples(period, activities, scores, student_ids)
     return finish(unresolved=inactive_routes, unknown_links=not lineage_matches, incomplete=incomplete)

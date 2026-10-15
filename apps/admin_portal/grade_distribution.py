@@ -111,7 +111,7 @@ class GradeDistributionMonitorService:
                  | Q(template_period__is_active=False)).order_by()
         # Period identities are resolved only after Apply; physical records remain
         # distinct even if multiple templates share a logical period.
-        periods = list(GradingTemplatePeriod.objects.filter(id__in=saved.values("template_period_id"))[:2001])
+        periods = list(GradingTemplatePeriod.objects.filter(id__in=saved.values("template_period_id")).select_related("template")[:2001])
         if len(periods) > 2000:
             raise ValidationError("Period mapping limit exceeded. Narrow the campus, faculty or department criteria.")
         unresolved = sum(logical_period(p) is None for p in periods)
@@ -138,15 +138,16 @@ class GradeDistributionMonitorService:
         try:
             selection, assignments, offerings, saved, groups, periods, unresolved, count = cls.prepare(request, selection)
             context["searched"] = True
+            # Privacy requires the full source family, not a SQL count of 100s.
+            # prepare() bounds this complete selection before any source loading.
+            rows = cls.rows(selection, assignments, offerings, saved, list(groups), periods)
+            rows.sort(key=lambda row: cls.sort_key(row, selection.selected["sort"]))
             if request.GET.get("export"):
-                candidates = list(groups)
+                context["rows"] = rows
             else:
-                paginator = Paginator(groups, cls.PAGE_SIZE)
-                paginator.count = count  # Reuse the scope-wide grouped count; keep SQL LIMIT/OFFSET.
-                page = paginator.get_page(request.GET.get("page"))
-                candidates = list(page.object_list)
+                page = Paginator(rows, cls.PAGE_SIZE).get_page(request.GET.get("page"))
                 context["page_obj"] = page
-            context["rows"] = cls.rows(selection, assignments, offerings, saved, candidates, periods)
+                context["rows"] = list(page.object_list)
             query = selection.query(selection.token())
             context["page_query"] = query.urlencode()
             query["export"] = "xlsx"
@@ -160,35 +161,60 @@ class GradeDistributionMonitorService:
             context["page_obj"] = None
         return context
 
+    @staticmethod
+    def sort_key(row, sort="exact_100_desc"):
+        identity = tuple(row[key].casefold() for key in
+                         ("faculty_name", "campus", "course_code", "section"))
+        identity += (row["offering_id"], row["physical_period_id"])
+        if sort == "faculty_asc":
+            return identity
+        disclosed = row["analytics_state"] == "disclosed"
+        # Never rank by a protected count, including through a hidden tie-breaker.
+        return (not disclosed, -row["exact_100_count"] if disclosed else 0, *identity)
+
     @classmethod
     def rows(cls, selection, assignments, offerings, saved, candidates, periods, detail=False):
+        if selection.request.GET.get("export"):
+            from apps.admin_portal.grade_distribution_export import validate_workbook_size
+            validate_workbook_size(3 * len(candidates))
         offering_ids = {c["offering_id"] for c in candidates}
         offering_map = {o.id: o for o in offerings.filter(id__in=offering_ids).select_related(
             "campus", "tenant", "department", "program", "course", "section", "academic_year", "term")}
         faculty_map = defaultdict(list)
         for a in assignments.filter(offering_id__in=offering_ids).select_related("faculty_user").order_by("faculty_user__last_name", "faculty_user__first_name", "faculty_user_id"):
             faculty_map[a.offering_id].append(faculty_name(a.faculty_user))
+        # Sorting visits every bounded class. Load rosters/saved totals once,
+        # rather than adding two queries per class or one query per student.
+        retained, live = defaultdict(set), defaultdict(set)
+        roster = cls.retained_roster(offerings.filter(id__in=offering_ids), selection.tenant_id).annotate(
+            monitor_live=Case(When(cls.live_roster_q(), then=Value(True)),
+                              default=Value(False), output_field=BooleanField()))
+        for entry in roster.values("course_offering_id", "student_id", "monitor_live"):
+            retained[entry["course_offering_id"]].add(entry["student_id"])
+            if entry["monitor_live"]:
+                live[entry["course_offering_id"]].add(entry["student_id"])
+        saved_map = defaultdict(list)
+        for record in saved.filter(offering_id__in=offering_ids,
+                template_period_id__in={c["template_period_id"] for c in candidates}).values(
+                    "offering_id", "template_period_id", "student_id", "period_grade",
+                    "exam_grade", "class_standing_grade", "is_finalized"):
+            saved_map[(record.pop("offering_id"), record.pop("template_period_id"))].append(record)
         rows = []
-        export_summaries = export_frequencies = 0
         for candidate in candidates:
             offering = offering_map[candidate["offering_id"]]
             period = periods[candidate["template_period_id"]]
             historical = offering.monitor_historical or not period.is_active
-            enrollment_qs = cls.retained_roster(offerings.filter(id=offering.id), offering.tenant_id)
-            if not historical:
-                enrollment_qs = enrollment_qs.filter(cls.live_roster_q())
-            student_ids = set(enrollment_qs.values_list("student_id", flat=True).distinct()[:cls.MAX_CLASS_STUDENTS + 1])
+            student_ids = (retained if historical else live)[offering.id]
             if len(student_ids) > cls.MAX_CLASS_STUDENTS:
                 raise ValidationError(f"A class exceeds the {cls.MAX_CLASS_STUDENTS:,} student analysis limit. Narrow your criteria; no records were truncated.")
-            records = list(saved.filter(offering=offering, template_period=period, student_id__in=student_ids).values(
-                "student_id", "period_grade", "exam_grade", "class_standing_grade", "is_finalized"))
+            records = [r for r in saved_map[(offering.id, period.id)] if r["student_id"] in student_ids]
             status = selection.selected["status"]
             chosen = [r for r in records if status == "all" or r["is_finalized"] == (status == "finalized")]
             valued = [r for r in chosen if r["period_grade"] is not None]
             t, source = threshold_for(offering)
             privacy = PrivacyFamily({r["student_id"]: r["is_finalized"] for r in records}, status, t)
             # Plan all sources before even the summary/CSV statistic is released.
-            period_metrics, measures, notes, incomplete = component_measures(
+            period_metrics, measures, notes, incomplete, quiz = component_measures(
                 offering, period, records, student_ids, t, historical, privacy)
             saved_ids = {r["student_id"] for r in records if r["period_grade"] is not None}
             excluded = sum(r["period_grade"] is not None for r in records) - len(valued)
@@ -196,9 +222,11 @@ class GradeDistributionMonitorService:
                 "offering_id": offering.id, "physical_period_id": period.id,
                 "faculty_name": "; ".join(faculty_map[offering.id]), "campus": offering.campus.code,
                 "department": offering.department.code, "course_code": offering.course.code, "course_title": offering.course.title,
+                "program": offering.program.code if offering.program_id else "",
                 "section": offering.section.code, "school_year": offering.academic_year.code, "term": offering.term.code,
                 "period": next(p["label"] for p in selection.options["periods"] if p["id"] == logical_period(period)),
                 "physical_period_label": f"Physical period #{period.id}",
+                "period_context": f"{period.name} ({period.code}) / {period.template.name} ({period.template.code})",
                 "passing_threshold": t, "threshold_source": source,
                 "missing_count": max(len(student_ids) - len(saved_ids), 0), "status_excluded_count": excluded,
                 "coverage_rate": percentage(len(saved_ids), len(student_ids)),
@@ -208,6 +236,7 @@ class GradeDistributionMonitorService:
             }
             row["detail_query"] = selection.query(selection.token()).urlencode()
             row["measures"] = measures
+            row["quiz"] = quiz
             row["incomplete_source_count"] = incomplete
             row["notes"].extend(notes)
             if candidate["saved_count"] > len(records):
@@ -218,11 +247,6 @@ class GradeDistributionMonitorService:
                 row["notes"].append("No dependable eligible enrollment associations remain; saved grades cannot establish an original roster on their own.")
             if detail:
                 row["notes"].append("Analytics use the saved grades displayed in the Gradebook, including the configured base for activities. Raw scores are not the displayed distribution. Saved unfinalized grades may change. Percentages round independently to two decimal places. Activities have no authoritative subjective/objective classification.")
-            if selection.request.GET.get("export"):
-                from apps.admin_portal.grade_distribution_export import validate_workbook_size
-                export_summaries += 1 + len(measures)
-                export_frequencies += sum(len(m["frequency"]) for m in [row, *measures])
-                validate_workbook_size(export_summaries, export_frequencies)
             rows.append(row)
         return rows
 
