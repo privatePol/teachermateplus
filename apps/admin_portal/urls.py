@@ -1,4 +1,8 @@
 from django.urls import path
+from .insights_views import (
+    academic_performance_insights_view,
+    academic_performance_section_detail_view,
+)
 
 from .api_views import sis_periodic_grades_api_view
 from .academic_data_reconciliation import (
@@ -17,8 +21,6 @@ from .import_views import (
 )
 from .views import (
     academic_activity_consistency_view,
-    academic_performance_insights_view,
-    academic_performance_section_detail_view,
     midterm_exam_performance_view,
     academic_intervention_monitor_view,
     academic_intervention_monitor_detail_view,

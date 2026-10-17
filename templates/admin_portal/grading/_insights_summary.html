@@ -1,0 +1,12 @@
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="card card-body h-100"><div>Average Grade</div><strong class="h4">{{ summary.average }}</strong><small>{{ summary.average_note }}</small></div></div>
+  <div class="col-md-3"><div class="card card-body h-100"><div>Students Below Passing</div><strong class="h4">{{ summary.below }}</strong><small>Distinct students in disclosed classes.</small></div></div>
+  <div class="col-md-3"><div class="card card-body h-100"><div>Classes Needing Attention</div><strong class="h4">{{ summary.attention }}</strong><small>Review class averages and individual concerns separately.</small></div></div>
+  <div class="col-md-3"><div class="card card-body h-100"><div>Performance Trend</div><strong>{{ summary.trend }}</strong><small>Class counts; {{ summary.trend_unavailable }} without a comparable complete baseline.</small></div></div>
+</div>
+<p class="small text-muted">Complete selection: {{ summary.classes }} classes; {{ summary.disclosed }} disclosed; {{ summary.suppressed }} withheld. Indicators include disclosed classes only. Small or overlapping cohorts and their contributions to totals are withheld. Grades may be provisional; submitted or locked grades are identified in details.</p>
+<div class="card card-body mb-3"><h2 class="h6">Classes to Review</h2>
+{% for row in priority %}<div class="border-bottom py-2"><strong>{{ row.course }} / {{ row.section }}</strong> — {{ row.concern }} <button type="button" class="btn btn-sm btn-outline-success" data-detail="{{ row.id }}">View Details</button></div>
+{% empty %}<p class="mb-0">No disclosed class concerns are available for this selection.</p>{% endfor %}
+</div>
+<button type="button" class="btn btn-outline-success mb-3" data-page="1">View Classes and Recorded Activities</button>

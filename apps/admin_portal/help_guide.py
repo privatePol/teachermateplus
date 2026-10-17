@@ -793,6 +793,21 @@ ADMIN_HELP_SECTIONS = [
                     ),
                     "Set the campus, academic year, term, period, course, or status filters before reviewing results.",
                     (
+                        "Academic Performance Insights opens with filters only. Select your filters and click View Performance. "
+                        "Changing a filter clears the snapshot; classes and details load when opened. If selections fail to load, use Retry Selections; "
+                        "View Performance and downloads remain blocked until the choices are verified. If academic records change, "
+                        "click View Performance to refresh the report. Campus and department "
+                        "choices narrow supervised faculty and courses. Exact analytics for small or overlapping cohorts are "
+                        "withheld; totals include disclosed classes only. CSV downloads remain explicit actions, with privacy suppression."
+                    ),
+                    (
+                        "Recorded activity counts require saved non-excused scores, and do not prove conduct or sufficient practice. "
+                        "Quiz averages are comparable activity percentages, while periodic grades use the Faculty Gradebook. "
+                        "Quizzes may already contribute to periodic grades; do not infer causation or rank departments/faculty. "
+                        "Not Available means reliable evidence or a comparable complete cohort is missing. Open View Details "
+                        "for grade states, period trends, threshold-relative categories and the existing Activity Consistency context."
+                    ),
+                    (
                         "For Midterm Exam Performance, select the Midterm examination cycle, then use Load more "
                         "to show additional course tables and sections. Each heading shows COURSE CODE | COURSE TITLE; "
                         "ranked sections appear in numeric rank order, followed by unranked sections. An exact Course "

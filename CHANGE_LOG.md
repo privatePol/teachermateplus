@@ -1,3 +1,17 @@
+## Academic Performance Insights targeted remediation - 2026-10-17
+
+- Reject changed record generations before and after report/detail/activity/history/CSV reads, including bulk score edits, enrollment changes and historical/configuration updates. Return: "Academic records have changed. Please click View Performance to refresh the report." The client removes the entire outdated report and enables explicit regeneration.
+- Use expiring signed, user/scope-bound generation tokens with existing Django cache as an optimization. A different Gunicorn worker can reconstruct unchanged results without a shared cache; no grades or student records travel in the token. Reuse verified calculated period results and rendered details.
+- Failed selection requests expose Retry Selections. Reports/downloads stay blocked until current selections are verified; late successes/errors cannot restore outdated controls. Preserve supported Activity Consistency campus/tenant scope parameters without changing that feature.
+
+## Academic Performance Insights - 2026-10-17
+
+- Require explicit View Performance; load summary, paged classes and class details with CSRF-protected AJAX. Filter changes discard results and outdated requests. All five existing navigation/export buttons remain in their original order.
+- Resolve dependent campus/department/course/faculty options through authorized supervised assignments, including per-campus direct-DENY checks. Complete-selection summaries replace the first-100 limit; class/activity details load separately.
+- Apply minimum-five and stable overlapping-cohort suppression before HTML/JSON/CSV disclosure. Totals include disclosed classes only. Small outcome groups and complements are withheld; student-review exports retain identity permission/masking and withhold individual exact grades/counts.
+- Add distinct recorded quiz/other activity counts and comparable percentage averages from saved non-excused scores. Missing evidence is Not Available; counts are not proof of conduct, sufficient practice, faculty effectiveness or causation. Periodic grades use the official Faculty Gradebook calculations; matching complete cohorts/configurations are required for trends.
+- Activity Consistency opens its existing supported course/faculty/period context. Its implementation and Midterm Exam Performance remain unchanged. No model/migration change.
+
 ## Midterm course tables and progressive loading - 2026-09-27
 
 - Decimal-rank remediation: aggregate official two-decimal grades as integer hundredths, then calculate displayed averages with explicit Decimal HALF_EVEN rounding. Full-unit competition ranks use those displayed values and exact integer aggregate keys, never floating-point sum equality. Regression coverage includes three `80.10` grades and tied averages across progressive page boundaries.
