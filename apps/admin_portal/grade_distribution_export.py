@@ -7,8 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 MAX_WORKBOOK_ROWS = 50000
-HEADERS = ["Faculty", "Campus", "Course / Section", "Grading Period", "Computed Grade Component",
-           *[f"Exactly {grade}" for grade in range(100, 94, -1)]]
+HEADERS = ["Faculty", "Campus", "Course / Section", "Grading Period", "Computed Grade Component"]
 
 
 def validate_workbook_size(count):
@@ -19,8 +18,9 @@ def validate_workbook_size(count):
 def export_components(row):
     # Saved totals are stable machine sources, never matched by user labels.
     by_source = {m["dataset_id"].split("/")[-2]: m for m in row["measures"] if m["activity_id"] is None}
-    return [("Periodic Examination", by_source["exam_grade"]),
-            ("Class Standing", by_source["class_standing_grade"]),
+    return [("Period Grades", row),
+            ("Examination Grades", by_source["exam_grade"]),
+            ("Class Standing Grades", by_source["class_standing_grade"]),
             ("Quizzes", row["quiz"])]
 
 
@@ -71,18 +71,21 @@ def class_labels(rows):
     return labels
 
 
-def grade_distribution_workbook(rows):
-    validate_workbook_size(3 * len(rows))
+def grade_distribution_workbook(rows, *, range_heading=None):
+    validate_workbook_size(4 * len(rows))
     labels = class_labels(rows)
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Grade Distribution"
-    sheet.append(HEADERS)
+    label = range_heading or (rows[0]["range_label"] if rows else "Grade Range")
+    sheet.append(HEADERS + [label, "Total Graded Students", "Percentage", "Analytics Status", "Notice"])
     for row, (course, period) in zip(rows, labels):
         common = [row["faculty_name"], row["campus"], course, period]
         for label, measure in export_components(row):
-            counts = [item["count"] for item in measure["high_grade_breakdown"][:6]] if measure["analytics_state"] == "disclosed" else [None] * 6
-            sheet.append(common + [label] + counts)
+            disclosed = measure.get("range_state") == "disclosed"
+            values = [measure["range_count"], measure["range_denominator"], measure["range_percentage"]] if disclosed else [None] * 3
+            notice = " ".join(filter(None, (measure.get("privacy_message"), measure.get("source_notice"), measure.get("history_notice"), measure.get("calculation_note"), measure.get("unit"))))
+            sheet.append(common + [label] + values + ["Disclosed" if disclosed else "Withheld", notice])
     sheet.freeze_panes = "F2"
     sheet.auto_filter.ref = sheet.dimensions
     sheet.sheet_view.showGridLines = False
@@ -105,7 +108,7 @@ def grade_distribution_workbook(rows):
                 # User-authored labels, including = + - @, are literal text.
                 cell.data_type = "s"
             elif cell.value is not None:
-                cell.number_format = "0"
+                cell.number_format = "0.00" if cell.column == 8 else "0"
             if cell.row % 2 == 0:
                 cell.fill = PatternFill("solid", fgColor="F0F7F2")
     output = BytesIO()

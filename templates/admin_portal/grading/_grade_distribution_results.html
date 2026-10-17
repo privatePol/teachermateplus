@@ -1,0 +1,20 @@
+{% for error in errors %}<div class="alert alert-warning" role="alert">{{ error }}</div>{% endfor %}
+{% if searched %}
+  {% if mapping_note %}<p class="alert alert-info">{{ mapping_note }}</p>{% endif %}
+  <p class="alert alert-info">{{ disclosure_notice }}</p>
+  <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><p class="mb-0">{{ result_count }} class/period rows.</p><a class="btn btn-sm btn-outline-success" href="?{{ export_query }}">Export Excel</a></div>
+  <div class="table-responsive"><table class="table table-sm align-middle">
+  <caption>Saved Period Grades. Withheld values do not affect class membership or ranking.</caption>
+  <thead><tr><th scope="col">Faculty</th><th scope="col">Class / Course</th><th scope="col">Grading Period</th><th scope="col">Saved Grades</th><th scope="col">Average Grade</th><th scope="col">{{ range_label }}</th><th scope="col">View Analytics</th></tr></thead>
+  <tbody>{% for row in rows %}<tr data-dataset-id="{{ row.dataset_id }}">
+    <td>{{ row.faculty_name }}</td><td><strong>{{ row.course_code }}</strong><div class="small">{{ row.course_title }} &middot; {{ row.section }} &middot; {{ row.campus }}</div>{% if row.historical %}<span class="badge text-bg-secondary">Historical</span>{% endif %}</td>
+    <td>{{ row.period }}<div class="small text-muted">{{ row.gradebook_context }}</div><div class="small text-muted">{{ row.status }}</div></td>
+    <td>{{ row.graded_count }} / {{ row.eligible_count }}<div class="small">{{ row.missing_count }} missing{% if row.status_excluded_count %}; {{ row.status_excluded_count }} excluded by status{% endif %}</div></td>
+    <td>{% if row.privacy_suppressed %}Withheld{% else %}{{ row.average|default_if_none:"Unavailable" }}{% endif %}</td>
+    <td>{% if row.range_state == "disclosed" %}<strong>{{ row.range_count }} / {{ row.range_denominator }}</strong><div>{{ row.range_percentage|floatformat:2 }}%</div>{% else %}<span class="text-muted">Withheld</span>{% if row.source_notice %}<p class="small text-muted mb-0">{{ row.source_notice }}</p>{% endif %}{% endif %}</td>
+    <td><button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#gradeDistributionAnalyticsModal" data-analytics-url="{% url 'admin_portal:grade_distribution_monitor_detail' row.offering_id row.physical_period_id %}?{{ row.detail_query }}">View Analytics<span class="visually-hidden"> for {{ row.course_code }} {{ row.section }}</span></button></td>
+  </tr>{% empty %}<tr><td colspan="7">No saved grading records match these criteria. Unresolved physical period identities are unavailable.</td></tr>{% endfor %}</tbody></table></div>
+  {% if page_obj.has_other_pages %}<nav aria-label="Grade distribution pages"><ul class="pagination">
+    {% if page_obj.has_previous %}<li class="page-item"><form method="post" action="?{{ page_query }}&amp;page={{ page_obj.previous_page_number }}" class="gdm-page-form">{% csrf_token %}<input type="hidden" name="manual_intent" value="{{ manual_intent }}">{{ continuation_inputs }}<input type="hidden" name="page" value="{{ page_obj.previous_page_number }}"><button class="page-link" type="submit">Previous</button></form></li>{% endif %}<li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>{% if page_obj.has_next %}<li class="page-item"><form method="post" action="?{{ page_query }}&amp;page={{ page_obj.next_page_number }}" class="gdm-page-form">{% csrf_token %}<input type="hidden" name="manual_intent" value="{{ manual_intent }}">{{ continuation_inputs }}<input type="hidden" name="page" value="{{ page_obj.next_page_number }}"><button class="page-link" type="submit">Next</button></form></li>{% endif %}
+  </ul></nav>{% endif %}
+{% elif not errors %}<div class="card card-body text-muted">Select criteria and click Apply Filters to view grade distributions.</div>{% endif %}

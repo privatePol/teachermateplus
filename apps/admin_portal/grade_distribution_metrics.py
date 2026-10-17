@@ -316,7 +316,10 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
                 continue
             metadata = dataset_metadata(offering, period, key, privacy.status,
                 activity=activity_map[key[1]] if isinstance(key, tuple) else None)
-            measure = {"label": label, "unit": unit, **plan.measure(key, eligible_count=len(selected_ids)), **metadata}
+            group = ("examination" if key == "exam_grade" else "standing")
+            if isinstance(key, tuple):
+                group = "examination" if FacultyGradingService.is_exam_component(activity_map[key[1]].template_component) else "standing"
+            measure = {"label": label, "unit": unit, "group": group, **plan.measure(key, eligible_count=len(selected_ids)), **metadata}
             # Compare full student/value maps, never rounded aggregate averages.
             # Suppressed sources cannot disclose an equivalence relationship.
             if measure["analytics_state"] == "disclosed":
@@ -330,7 +333,7 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
             released.append(measure)
         # Release after existing measures in the same fixed family on every
         # route. Export must not get a different privacy decision from HTML/JSON.
-        quiz = {"label": "Quizzes", **plan.measure("quiz_grade", eligible_count=len(selected_ids)),
+        quiz = {"label": "Quizzes", "group": "standing", **plan.measure("quiz_grade", eligible_count=len(selected_ids)),
                 **dataset_metadata(offering, period, "quiz_grade", privacy.status)}
         quiz["calculation_note"] = quiz_note or (
             "Current calculated Gradebook Quiz average, including the configured base; "

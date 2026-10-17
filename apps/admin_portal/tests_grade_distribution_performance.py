@@ -24,85 +24,7 @@ def load_tests(loader, tests, pattern):
 
 
 class GradeDistributionPerformanceTests(fixtures.GradeDistributionMonitorTests):
-    def test_course_option_labels_allow_null_campus_without_changing_selection(self):
-        other = self._create_extra_offering("NULL101", "Campus unspecified", "NULL-A")
-        Course.objects.filter(pk=other.course_id).update(campus=None)
-        self._seed_grades(other, [100, 99] + [90] * 8)
-        self.client.force_login(self.admin_user)
-        expected = {
-            str(self.course.id): f"{self.course.code} — {self.course.title} ({self.campus.code}, #{self.course.id})",
-            str(other.course_id): f"NULL101 — Campus unspecified (Campus not specified, #{other.course_id})",
-        }
-        initial = self.client.get(self.url)
-        self.assertEqual(initial.status_code, 200)
-        self.assertEqual({c["id"]: c["label"] for c in initial.context["filter_options"]["courses"]}, expected)
-        options = self.client.get(self.url, {"options": "1"})
-        self.assertEqual(options.status_code, 200)
-        self.assertEqual({c["id"]: c["label"] for c in options.json()["courses"]}, expected)
-        response = self.search(course_id=[str(self.course.id), str(other.course_id), str(other.course_id)], sort="exact_99_desc")
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context["errors"])
-        self.assertEqual(response.context["result_count"], 2)
-        self.assertEqual(response.context["selected"]["course_id"], sorted(expected))
-        self.assertEqual(self.detail(response).status_code, 200)
-        self.assertEqual(self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active.max_column, 11)
-        only = self.search(course_id=[str(other.course_id)], only_100="1", sort="exact_100_desc")
-        self.assertEqual([r["offering_id"] for r in only.context["rows"]], [other.id])
-        other.course.refresh_from_db()
-        self.assertEqual((other.course.campus_id, other.course.code, other.course.title), (None, "NULL101", "Campus unspecified"))
 
-    def test_null_campus_courses_do_not_expand_authorized_options(self):
-        foreign = Course.objects.create(tenant=Tenant.objects.create(code="FOREIGN", name="Foreign"),
-            campus=None, code="FOREIGNNULL", title="Foreign campus unspecified")
-        unassigned = Course.objects.create(tenant=self.tenant, campus=None, code="UNASSIGNEDNULL", title="Unassigned")
-        _, _, other_campus = self._second_campus()
-        Course.objects.filter(pk=other_campus.course_id).update(campus=None)
-        other_department = Department.objects.create(tenant=self.tenant, campus=self.campus, code="OUT", name="Outside supervision")
-        other_faculty = self._user("outside", "Outside", "Faculty", self.tenant, self.campus, other_department)
-        self._assign_faculty_role(other_faculty)
-        unsupervised = self._create_extra_offering("UNSUPNULL", "Outside supervision", "UNSUP-A")
-        Course.objects.filter(pk=unsupervised.course_id).update(campus=None)
-        fixtures.FacultyAssignment.objects.filter(offering=unsupervised).update(faculty_user=other_faculty)
-        hidden_ids = {str(foreign.id), str(unassigned.id), str(other_campus.course_id), str(unsupervised.course_id)}
-        self.client.force_login(self.admin_user)
-        for campus in (str(self.campus.id), "all"):
-            response = self.client.get(self.url, {"options": "1", "campus_id": campus})
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual({c["id"] for c in response.json()["courses"]}, {str(self.course.id)})
-            for course_id in hidden_ids:
-                self.assertTrue(self.search(campus_id=campus, course_id=[course_id]).context["errors"])
-
-    def test_null_campus_course_options_keep_direct_deny(self):
-        Course.objects.filter(pk=self.course.pk).update(campus=None)
-        self.client.force_login(self.admin_user)
-        self.assertEqual(self.client.get(self.url, {"options": "1"}).status_code, 200)
-        fixtures.UserPermission.objects.create(user=self.admin_user,
-            permission=fixtures.Permission.objects.get(code="grade_distribution_monitor.read"),
-            tenant=self.tenant, campus=self.campus, grant_type="DENY")
-        for params in ({}, {"options": "1"}, {"apply": "1", "course_id": str(self.course.id)}):
-            self.assertEqual(self.client.get(self.url, params).status_code, 403)
-
-    def test_null_campus_course_options_keep_constant_query_counts(self):
-        self.client.force_login(self.admin_user)
-        counts = []
-        for size, null_base in ((1, False), (1, True), (27, True), (54, True)):
-            if null_base:
-                Course.objects.filter(pk=self.course.pk).update(campus=None)
-            for i in range(0 if size == 27 else 26, size - 1):
-                offering = self._create_extra_offering(f"NULLQ{i}", "Option query count", f"NQ{i}")
-                if i % 2 == 0:
-                    Course.objects.filter(pk=offering.course_id).update(campus=None)
-            endpoint_counts = []
-            for params in ({}, {"options": "1"}):
-                with CaptureQueriesContext(connection) as queries:
-                    response = self.client.get(self.url, params)
-                self.assertEqual(response.status_code, 200)
-                options = response.json()["courses"] if params else response.context["filter_options"]["courses"]
-                self.assertEqual(len(options), size)
-                endpoint_counts.append(len(queries))
-            counts.append(endpoint_counts)
-        self.assertEqual(counts, [counts[0]] * 4)
-        print("NULL_CAMPUS_OPTION_QUERIES=" + json.dumps(counts))
 
     def _profile_type_parity(self, offering):
         offering = CourseOffering.objects.select_related("course", "term", "section").get(pk=offering.pk)
@@ -174,62 +96,6 @@ class GradeDistributionPerformanceTests(fixtures.GradeDistributionMonitorTests):
         self.assertEqual(counts, [5, 5])
         print(f"PROFILE_TYPE_BATCH_QUERIES: 27={counts[0]}, 54={counts[1]}")
 
-    def test_courses_are_deduplicated_authorized_signed_and_exported(self):
-        other = self._create_extra_offering("SEC101", "Second course", "SEC")
-        self._seed_grades(other, [99] * 10)
-        self.client.force_login(self.admin_user)
-        response = self.search(course_id=[str(other.course_id), str(self.course.id), str(other.course_id)])
-        self.assertEqual(response.context["selected"]["course_id"], sorted([str(self.course.id), str(other.course_id)]))
-        self.assertEqual(response.context["result_count"], 2)
-        selected = self.search(course_id=[str(other.course_id)])
-        self.assertEqual([r["offering_id"] for r in selected.context["rows"]], [other.id])
-        exported = self._workbook(self.client.get(self.url + "?" + selected.context["export_query"]))
-        self.assertEqual(exported.active.max_column, 11)
-        self.assertEqual(exported.active.max_row, 4)
-        self.assertTrue(self.search(course_id=["nonsense"]).context["errors"])
-        foreign_tenant = Tenant.objects.create(code="OUT", name="Outside")
-        foreign_campus = Campus.objects.create(tenant=foreign_tenant, code="OUT", name="Outside")
-        foreign_dept = Department.objects.create(tenant=foreign_tenant, campus=foreign_campus, code="OUT", name="Outside")
-        foreign = Course.objects.create(tenant=foreign_tenant, campus=foreign_campus, department=foreign_dept, code="SECRET", title="Outside")
-        options = self.client.get(self.url, {"options": "1"}).json()["courses"]
-        self.assertNotIn(str(foreign.id), [c["id"] for c in options])
-        self.assertTrue(self.search(course_id=[str(foreign.id)]).context["errors"])
-        self.assertEqual(self.client.get(self.url + "?" + selected.context["export_query"] + f"&course_id={self.course.id}").status_code, 400)
-
-    def test_six_sorts_use_disclosed_numeric_counts_and_stable_ties(self):
-        base = dict(faculty_name="Faculty", campus="FV", course_code="C", section="S", physical_period_id=1)
-        for grade in range(100, 94, -1):
-            rows = [dict(base, offering_id=i, analytics_state=state, exact_100_count=count,
-                high_grade_breakdown=[dict(grade=f"Exactly {grade}", count=count)])
-                for i, state, count in [(3, "privacy_suppressed", 900), (2, "disclosed", 2), (1, "disclosed", 10)]]
-            self.assertEqual([r["offering_id"] for r in sorted(rows, key=lambda r: GradeDistributionMonitorService.sort_key(r, f"exact_{grade}_desc"))], [1, 2, 3])
-            rows[0]["high_grade_breakdown"][0]["count"] = -999
-            self.assertEqual(GradeDistributionMonitorService.sort_key(rows[0], f"exact_{grade}_desc")[1], 0)
-        self.client.force_login(self.admin_user)
-        for grade in range(100, 94, -1):
-            response = self.search(sort=f"exact_{grade}_desc")
-            self.assertFalse(response.context["errors"])
-            self.assertEqual(self.client.get(self.url + "?" + response.context["export_query"]).status_code, 200)
-
-    def test_only_100_membership_detail_and_export_respect_formula_suppression(self):
-        self.client.force_login(self.admin_user)
-        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=100)
-        other = self._create_extra_offering("SMALL", "Small class", "SM")
-        self._seed_grades(other, [100] * 4)
-        none = self._create_extra_offering("NONE", "No perfect grades", "NO")
-        self._seed_grades(none, [99] * 10)
-        response = self.search(only_100="1")
-        self.assertEqual(response.context["result_count"], 1)
-        self.assertEqual([r["offering_id"] for r in response.context["rows"]], [self.offering.id])
-        self.assertEqual(self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active.max_row, 4)
-        self.assertEqual(self.detail(response).status_code, 200)
-        from django.urls import reverse
-        hidden_url = reverse("admin_portal:grade_distribution_monitor_detail", args=[other.id, self.period.id])
-        self.assertEqual(self.client.get(hidden_url + "?" + response.context["page_query"]).status_code, 404)
-        self._formula_fixture()
-        suppressed = self.search(only_100="1")
-        self.assertEqual(suppressed.context["result_count"], 0)
-        self.assertEqual(self._workbook(self.client.get(self.url + "?" + suppressed.context["export_query"])).active.max_row, 1)
 
     def test_configuration_precedence_matches_authoritative_service(self):
         def compare():
@@ -270,33 +136,6 @@ class GradeDistributionPerformanceTests(fixtures.GradeDistributionMonitorTests):
         default.passing_grade_threshold = None
         default.save(update_fields=["passing_grade_threshold"])
         compare()
-
-    def test_new_filters_keep_direct_deny_precedence(self):
-        self.client.force_login(self.admin_user)
-        response = self.search(course_id=[str(self.course.id)], sort="exact_99_desc", only_100="1")
-        permission = fixtures.Permission.objects.get(code="grade_distribution_monitor.read")
-        fixtures.UserPermission.objects.create(user=self.admin_user, permission=permission, tenant=self.tenant,
-            campus=self.campus, grant_type="DENY")
-        self.assertEqual(self.search(course_id=[str(self.course.id)], sort="exact_99_desc", only_100="1").status_code, 403)
-        self.assertEqual(self.client.get(self.url + "?" + response.context["export_query"]).status_code, 403)
-
-    def test_filtered_pagination_and_export_share_the_complete_ranked_membership(self):
-        selected = []
-        for i in range(27):
-            offering = self._create_extra_offering(f"FILTER{i:02}", "Filtered", f"F{i:02}")
-            self._seed_grades(offering, [100, 99, 99] + [90] * 7)
-            selected.append(str(offering.course_id))
-        self.client.force_login(self.admin_user)
-        response = self.search(course_id=selected, only_100="1", sort="exact_99_desc")
-        second = self.client.get(self.url + "?" + response.context["page_query"] + "&page=2")
-        self.assertEqual(response.context["result_count"], 27)
-        rows = response.context["rows"] + second.context["rows"]
-        self.assertEqual(len(rows), 27)
-        self.assertEqual(len({r["offering_id"] for r in rows}), 27)
-        self.assertEqual(self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active.max_row, 82)
-        for row in rows:
-            self.assertNotIn("_display", row)
-            self.assertIn("only_100=1", row["detail_query"])
 
 
     def test_dense_activity_reads_are_capped_and_fail_closed(self):
@@ -340,7 +179,8 @@ class GradeDistributionPerformanceTests(fixtures.GradeDistributionMonitorTests):
             measure("initial", lambda: self.client.get(self.url))
             response = measure("apply_all_faculty", self.search)
             self.assertEqual(response.context["result_count"], size)
-            measure("page_2", lambda: self.client.get(self.url + "?" + response.context["page_query"] + "&page=2"))
+            measure("ajax", lambda: self.client.get(self.url + "?" + response.context["page_query"] + "&results=1"))
+            measure("page_2", lambda: self.client.get(self.url + "?" + response.context["page_query"] + "&page=2&results=1"))
             measure("xlsx", lambda: self.client.get(self.url + "?" + response.context["export_query"]))
         print("GRADE_FILTER_BENCHMARK=" + json.dumps(results))
 
@@ -370,3 +210,47 @@ class GradeDistributionPerformanceTests(fixtures.GradeDistributionMonitorTests):
                 seconds=round(time.perf_counter()-start, 4), queries=len(queries)))
         self.assertLessEqual(measurements[1]["queries"], measurements[0]["queries"] + 2)
         print("GRADE_FILTER_DENSE_BENCHMARK=" + json.dumps(measurements))
+
+    def test_null_campus_courses_do_not_break_any_monitor_mode(self):
+        other = self._create_extra_offering("NULL101", "Campus unspecified", "NULL-A")
+        Course.objects.filter(pk=other.course_id).update(campus=None)
+        self._seed_grades(other, [100, 99] + [90] * 8)
+        self.client.force_login(self.admin_user)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+        self.assertNotIn("courses", self.client.get(self.url, {"options": "1"}).json())
+        response = self.search()
+        self.assertEqual(response.context["result_count"], 2)
+        self.assertEqual(self.detail(response).status_code, 200)
+        self.assertEqual(self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active.max_row, 9)
+
+    def test_obsolete_filters_reject_instead_of_widening_results(self):
+        self.client.force_login(self.admin_user)
+        for extra in ({"course_id": str(self.course.id)}, {"only_100": "1"}, {"sort": "exact_99_desc"}):
+            response = self.search(**extra)
+            self.assertTrue(response.context["errors"])
+            self.assertEqual(response.context["rows"], [])
+
+    def test_range_filters_keep_direct_deny_precedence(self):
+        self.client.force_login(self.admin_user)
+        response = self.search(grade_min="97.5")
+        permission = fixtures.Permission.objects.get(code="grade_distribution_monitor.read")
+        fixtures.UserPermission.objects.create(user=self.admin_user, permission=permission, tenant=self.tenant,
+            campus=self.campus, grant_type="DENY")
+        self.assertEqual(self.search(grade_min="97.5").status_code, 403)
+        self.assertEqual(self.client.get(self.url + "?" + response.context["export_query"]).status_code, 403)
+
+    def test_all_saved_classes_share_pagination_and_export_membership(self):
+        for i in range(26):
+            offering = self._create_extra_offering(f"RANGE{i:02}", "Range", f"R{i:02}")
+            self._seed_grades(offering, [90] * 5)
+        self.client.force_login(self.admin_user)
+        response = self.search()
+        second = self.continue_search(response.context["page_query"], 2)
+        rows = response.context["rows"] + second.context["rows"]
+        self.assertEqual(response.context["result_count"], 27)
+        self.assertEqual(len({r["offering_id"] for r in rows}), 27)
+        self.assertEqual(self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active.max_row, 109)
+        for row in rows:
+            self.assertNotIn("_display", row)
+            self.assertIn("grade_min=97", row["detail_query"])
+            self.assertIsNone(row["range_count"])

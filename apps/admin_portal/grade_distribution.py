@@ -11,6 +11,8 @@ from django.utils import timezone
 from apps.academics.models import CourseOffering
 from apps.admin_portal.grade_distribution_selection import MonitorSelection, faculty_name, logical_period
 from apps.admin_portal.grade_distribution_metrics import PrivacyFamily, component_measures, percentage, threshold_for
+from apps.admin_portal.grade_distribution_disclosure import HOLD_MESSAGE, public_measure
+from apps.admin_portal.grade_distribution_releases import published_map, released_values, source_candidate
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import GradingTemplatePeriod, StudentPeriodGrade
@@ -91,14 +93,16 @@ class GradeDistributionMonitorService:
                 raise ValidationError(f"A class exceeds the {cls.MAX_CLASS_STUDENTS:,} student analysis limit. Narrow your criteria; no records were truncated.")
 
     @classmethod
-    def prepare(cls, request, selection=None, require_context=False):
+    def prepare(cls, request, selection=None, require_context=False, *, target_offering_id=None):
         selection = selection or MonitorSelection(request)
         selection.validate()
         if require_context or request.GET.get("context") or request.GET.get("page") or request.GET.get("export") or request.GET.get("detail"):
             selection.validate_token()
-        elif request.GET.get("apply") != "1":
+        elif request.method != "POST" or request.GET.get("apply") != "1":
             raise ValidationError("Select criteria and click Apply Filters.")
         assignments = selection.filtered_assignments()
+        if target_offering_id is not None:
+            assignments = assignments.filter(offering_id=target_offering_id)
         offerings = CourseOffering.objects.filter(id__in=assignments.values("offering_id")).annotate(
             monitor_historical=Case(When(cls.historical_offering_q(), then=Value(True)),
                                     default=Value(False), output_field=BooleanField())
@@ -129,11 +133,14 @@ class GradeDistributionMonitorService:
         return selection, assignments, offerings, saved, groups, period_map, unresolved, count
 
     @classmethod
-    def build_context(cls, request):
+    def build_context(cls, request, *, shell=False):
         selection = MonitorSelection(request)
         context = {"selected": selection.selected, "filter_options": selection.options, "rows": [],
-                   "searched": False, "errors": [], "page_obj": None, "page_query": "", "export_query": ""}
-        if request.GET.get("apply") != "1" and not any(request.GET.get(k) for k in ("export", "page", "context")):
+                   "searched": False, "errors": list(selection.errors), "page_obj": None, "page_query": "", "export_query": "",
+                   "range_label": selection.range_label, "disclosure_notice": HOLD_MESSAGE}
+        if shell:
+            return context
+        if request.method != "POST" and not any(request.GET.get(k) for k in ("apply", "export", "page", "context")):
             return context
         try:
             selection, assignments, offerings, saved, groups, periods, unresolved, count = cls.prepare(request, selection)
@@ -141,8 +148,6 @@ class GradeDistributionMonitorService:
             # Privacy requires the full source family, not a SQL count of 100s.
             # prepare() bounds this complete selection before any source loading.
             rows = cls.rows(selection, assignments, offerings, saved, list(groups), periods)
-            if selection.selected["only_100"]:
-                rows = [row for row in rows if row["analytics_state"] == "disclosed" and row["exact_100_count"] > 0]
             rows.sort(key=lambda row: cls.sort_key(row, selection.selected["sort"]))
             if request.GET.get("export"):
                 context["rows"] = rows
@@ -153,8 +158,9 @@ class GradeDistributionMonitorService:
             for row in context["rows"]:
                 display = row.pop("_display", None)
                 if display:
-                    _, row["measures"], notes, row["incomplete_source_count"], row["quiz"] = display()
-                    row["notes"].extend(notes)
+                    _, row["measures"], notes, _, row["quiz"] = display()
+                    row["measures"] = [public_measure(m, selection.bounds, historical=row["historical"]) for m in row["measures"]]
+                    row["quiz"] = public_measure(row["quiz"], selection.bounds, historical=row["historical"])
             query = selection.query(selection.token())
             context["page_query"] = query.urlencode()
             query["export"] = "xlsx"
@@ -169,26 +175,22 @@ class GradeDistributionMonitorService:
         return context
 
     @staticmethod
-    def sort_key(row, sort="exact_100_desc"):
+    def sort_key(row, sort="range_count_desc"):
         identity = tuple(row[key].casefold() for key in
                          ("faculty_name", "campus", "course_code", "section"))
         identity += (row["offering_id"], row["physical_period_id"])
         if sort == "faculty_asc":
             return identity
-        disclosed = row["analytics_state"] == "disclosed"
+        disclosed = row.get("range_state") == "disclosed" and row.get("range_count") is not None
         # Never rank by a protected count, including through a hidden tie-breaker.
-        if sort == "exact_100_desc":
-            count = row["exact_100_count"] if disclosed else 0
-        else:
-            grade = sort.split("_")[1]
-            count = next((item["count"] for item in row["high_grade_breakdown"] if item["grade"] == f"Exactly {grade}"), 0) if disclosed else 0
+        count = row["range_count"] if disclosed else 0
         return (not disclosed, -count, *identity)
 
     @classmethod
-    def rows(cls, selection, assignments, offerings, saved, candidates, periods, detail=False):
+    def rows(cls, selection, assignments, offerings, saved, candidates, periods, detail=False, release_sink=None):
         if selection.request.GET.get("export"):
             from apps.admin_portal.grade_distribution_export import validate_workbook_size
-            validate_workbook_size(3 * len(candidates))
+            validate_workbook_size(4 * len(candidates))
         offering_ids = {c["offering_id"] for c in candidates}
         offering_map = {o.id: o for o in offerings.filter(id__in=offering_ids).select_related(
             "campus", "tenant", "department", "program", "course", "section", "academic_year", "term")}
@@ -209,7 +211,7 @@ class GradeDistributionMonitorService:
         for record in saved.filter(offering_id__in=offering_ids,
                 template_period_id__in={c["template_period_id"] for c in candidates}).values(
                     "offering_id", "template_period_id", "student_id", "period_grade",
-                    "exam_grade", "class_standing_grade", "is_finalized"):
+                    "exam_grade", "class_standing_grade", "is_finalized", "updated_at"):
             saved_map[(record.pop("offering_id"), record.pop("template_period_id"))].append(record)
         from apps.admin_portal.grade_distribution_data import MonitorReadBundle, configuration_service
         cohorts = {(c["offering_id"], c["template_period_id"]):
@@ -220,6 +222,9 @@ class GradeDistributionMonitorService:
         # Identity contains the complete filter/authority selection, not a row ID.
         # Physical row identity remains in each detail URL and is reauthorized.
         detail_query = selection.query(selection.token()).urlencode()
+        # token() captured the publication boundary above. A later approval must
+        # not silently change the release set inside this applied selection.
+        releases = published_map(selection.tenant_id, offering_ids, periods, publication_limit=selection.publication_limit)
         rows = []
         for candidate in candidates:
             offering = offering_map[candidate["offering_id"]]
@@ -237,6 +242,11 @@ class GradeDistributionMonitorService:
             # Plan all sources before even the summary/CSV statistic is released.
             period_metrics, measures, notes, incomplete, quiz = component_measures(
                 offering, period, records, student_ids, t, historical, privacy, bundle=bundle, service=service, defer_display=not detail)
+            frozen_source = source_candidate(offering, period, records, student_ids, historical,
+                period_metrics.get("analytics_state") == "disclosed")
+            if release_sink is not None:
+                release_sink[(offering.id, period.id)] = frozen_source
+            frozen = released_values(releases.get((offering.id, period.id)), frozen_source, selection.bounds, status)
             saved_ids = {r["student_id"] for r in records if r["period_grade"] is not None}
             excluded = sum(r["period_grade"] is not None for r in records) - len(valued)
             row = {
@@ -253,16 +263,16 @@ class GradeDistributionMonitorService:
                 "coverage_rate": percentage(len(saved_ids), len(student_ids)),
                 "historical": historical,
                 "notes": (["Historical roster uses retained enrollment associations, including inactive records except non-grading statuses. Current student campus, department and program do not alter this retained cohort. Original roster and threshold snapshots are unavailable. Threshold shown is currently resolved."] if historical else []),
-                **period_metrics,
+                **public_measure(period_metrics, selection.bounds, historical=historical, frozen=frozen),
             }
             row["detail_query"] = detail_query
             if callable(measures):
                 row["_display"] = measures
                 row["measures"] = []
             else:
-                row["measures"] = measures
-            row["quiz"] = quiz
-            row["incomplete_source_count"] = incomplete
+                row["measures"] = [public_measure(m, selection.bounds, historical=historical) for m in measures]
+            row["quiz"] = public_measure(quiz, selection.bounds, historical=historical) if quiz else None
+            row["incomplete_source_count"] = None
             row["notes"].extend(notes)
             if candidate["saved_count"] > len(records):
                 row["notes"].append(
@@ -272,6 +282,9 @@ class GradeDistributionMonitorService:
                 row["notes"].append("No dependable eligible enrollment associations remain; saved grades cannot establish an original roster on their own.")
             if detail:
                 row["notes"].append("Analytics use the saved grades displayed in the Gradebook, including the configured base for activities. Raw scores are not the displayed distribution. Saved unfinalized grades may change. Percentages round independently to two decimal places. Activities have no authoritative subjective/objective classification.")
+            # Internal diagnostic notes never cross the public boundary. Essential
+            # source notices live on the affected measure instead.
+            row.pop("notes", None)
             rows.append(row)
         return rows
 
@@ -282,8 +295,6 @@ class GradeDistributionMonitorService:
         if not candidates:
             return None
         row = cls.rows(selection, assignments, offerings, saved, candidates, periods, detail=True)[0]
-        if selection.selected["only_100"] and (row["analytics_state"] != "disclosed" or not row["exact_100_count"]):
-            return None
         return row
 
     @classmethod

@@ -12,7 +12,8 @@ from django.db.models import F, Q
 from django.http import QueryDict
 from django.utils import timezone
 
-from apps.academics.models import AcademicYear, Course, FacultyAssignment, Term
+from apps.academics.models import AcademicYear, FacultyAssignment, Term
+from apps.admin_portal.grade_distribution_disclosure import decimal_label, parse_bounds, range_label
 from apps.admin_portal.services import AdminScopeService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
@@ -21,7 +22,7 @@ from apps.rbac.models import UserRole
 from apps.tenants.models import Department
 
 PERIODS = (("PRELIM", "Prelim"), ("MIDTERM", "Midterm"), ("PREFINAL", "Pre-Final"), ("FINAL", "Final"))
-SALT = "grade-distribution-search-v1"
+SALT = "grade-distribution-search-v3-manual-frozen"
 
 
 def faculty_name(user):
@@ -41,8 +42,8 @@ def logical_period(period):
 
 
 class MonitorSelection:
-    SORTS = tuple((f"exact_{grade}_desc", f"Exactly {grade} Count (highest first)") for grade in range(100, 94, -1))
-    FILTER_KEYS = ("campus_id", "academic_year_id", "term_id", "period", "faculty_id", "department_id", "status", "sort", "course_id", "only_100")
+    SORTS = (("range_count_desc", "Grade Range Count (highest first)"),)
+    FILTER_KEYS = ("campus_id", "academic_year_id", "term_id", "period", "faculty_id", "department_id", "status", "sort", "grade_min", "grade_max")
 
     def __init__(self, request):
         self.request = request
@@ -51,10 +52,20 @@ class MonitorSelection:
         self.selected = {}
         for key in self.FILTER_KEYS:
             self.selected[key] = (request.GET.get(key) or "").strip()
-        self.selected["course_id"] = sorted(set(v.strip() for v in request.GET.getlist("course_id") if v.strip()))
+        self.bounds = None
+        try:
+            self.bounds = parse_bounds(request.GET)
+            self.selected.update(zip(("grade_min", "grade_max"), map(decimal_label, self.bounds)))
+        except ValidationError as exc:
+            self.errors.extend(exc.messages)
+        self.range_label = range_label(self.bounds) if self.bounds else "Grade Range"
+        if any(key in request.GET for key in ("course_id", "course_search", "only_100")):
+            self.errors.append("This bookmarked course/100s filter is obsolete. Clear Filters and apply the new Grade Range.")
+        if any(len(request.GET.getlist(key)) > 1 for key in self.FILTER_KEYS):
+            self.errors.append("Supply each filter only once.")
         self.selected["campus_id"] = self.selected["campus_id"] or str(getattr(request, "scope", {}).get("campus_id") or "")
         self.selected["status"] = self.selected["status"] or "all"
-        self.selected["sort"] = self.selected["sort"] or "exact_100_desc"
+        self.selected["sort"] = self.selected["sort"] or "range_count_desc"
         self.campuses = list(AdminScopeService.active_scoped_campuses(request).filter(tenant_id=self.tenant_id).order_by("code"))
         self.campuses = [c for c in self.campuses if PermissionService.has_permission(
             request.user, "grade_distribution_monitor.read", tenant_id=self.tenant_id, campus_id=c.id
@@ -82,9 +93,6 @@ class MonitorSelection:
             "periods": [{"id": key, "label": label} for key, label in PERIODS],
             "faculty": [{"id": u.id, "label": faculty_name(u) + (f" (#{u.id})" if labels[faculty_name(u).casefold()] > 1 else "")} for u in self.faculty],
             "departments": [{"id": d.id, "label": f"{d.name} ({d.campus.code} / {d.code}, #{d.id})"} for d in self.departments],
-            "courses": [{"id": str(c.id), "label": f"{c.code} — {c.title} ({c.campus.code if c.campus_id else 'Campus not specified'}, #{c.id})"} for c in
-                Course.objects.filter(id__in=self.assignments.values("offering__course_id"), tenant_id=self.tenant_id)
-                    .select_related("campus").order_by("code", "id")],
             "sorts": [{"id": key, "label": label} for key, label in self.SORTS] + [{"id": "faculty_asc", "label": "Faculty (A to Z)"}],
         }
 
@@ -151,10 +159,6 @@ class MonitorSelection:
             self.errors.append("Select a valid grade status.")
         if s["sort"] not in {key for key, _ in self.SORTS} | {"faculty_asc"}:
             self.errors.append("Select a valid sort order.")
-        if s["only_100"] not in {"", "1"}:
-            self.errors.append("Select a valid Classes with 100s option.")
-        if not set(s["course_id"]).issubset({c["id"] for c in self.options["courses"]}):
-            self.errors.append("A selected course is unavailable in the authorized scope.")
         for key, choices, label in (("faculty_id", self.options["faculty"], "faculty"), ("department_id", self.options["departments"], "department")):
             if s[key] and s[key] not in {str(item["id"]) for item in choices}:
                 self.errors.append(f"The selected {label} is unavailable in the authorized scope.")
@@ -166,8 +170,6 @@ class MonitorSelection:
         qs = self.assignments.filter(offering__academic_year_id=s["academic_year_id"], offering__term_id=s["term_id"])
         if s["faculty_id"]:
             qs = qs.filter(faculty_user_id=s["faculty_id"])
-        if s["course_id"]:
-            qs = qs.filter(offering__course_id__in=s["course_id"])
         if s["department_id"]:
             dept = next(d for d in self.departments if str(d.id) == s["department_id"])
             dept_ids = AdminScopeService.expand_department_filter_ids(dept.id, tenant_id=self.tenant_id, campus_id=dept.campus_id)
@@ -180,9 +182,16 @@ class MonitorSelection:
         return qs
 
     def identity(self):
+        if not hasattr(self, "_release_epoch"):
+            from django.db.models import Max
+            from django.utils.crypto import salted_hmac
+            from apps.admin_portal.models import GradeDistributionPublication
+            latest = GradeDistributionPublication.objects.filter(release__tenant_id=self.tenant_id).aggregate(value=Max("pk"))["value"]
+            self.publication_limit = latest or 0
+            self._release_epoch = salted_hmac("gdm-release-epoch", f"{self.tenant_id}:{latest}").hexdigest()
         scope = getattr(self.request, "scope", {})
         authority = {"faculty": {k: sorted(v) for k, v in self.faculty_map.items()}, "tenant": self.tenant_id, "campus": scope.get("campus_id")}
-        return {"user": self.request.user.pk, "filters": self.selected,
+        return {"user": self.request.user.pk, "filters": self.selected, "release_epoch": self._release_epoch,
                 "authority": hashlib.sha256(json.dumps(authority, sort_keys=True).encode()).hexdigest()}
 
     def token(self):

@@ -1,3 +1,11 @@
+## 2026-10-17 - Grade Distribution manual Apply and immutable numeric releases
+
+- Only explicit Apply starts a search. Initial GET, refresh, bookmarks and history/BFCache restoration render/restore controls without analytics. Changes to filters/sort require Apply again. Clear restores 97–100 and clears results without a results request. CSRF-protected POST retains non-JS Apply and pagination; AJAX retains loading, cancellation, deduplication, race/error/retry and signed-context protections.
+- Added a controlled, versioned saved-Period-Grade release snapshot and independent publication record. Approved 97–100 / All Statuses totals can disclose count, denominator and percentage, including safe zero. Other ranges/status subsets and exam/standing/Quiz/averages/extrema/frequencies remain withheld. All eligible saved physical classes remain visible.
+- Enforced minimum-five, safe complements and existing source/formula admission. One publication per physical source; numeric cohorts cannot overlap earlier numeric cohorts. Current-source fingerprints invalidate changed releases. Signing-key changes block incomparable histories. Publication changes expire applied selections across HTML/AJAX/modal/Excel.
+- Preparation/publication are explicit operator commands, require active scoped superusers, distinct approval, review notes and prior-disclosure clearance. Ordinary HTTP requests never publish. Unknown legacy disclosure history must not be cleared. See apps/admin_portal/GRADE_DISTRIBUTION_RELEASES.md for commands, trust boundaries and operational limits.
+- Added only admin_portal/0001_initial.py (two aggregate release tables, scoped index, PROTECT/unique/check constraints). No normal database migration, live release publication, deployment, service restart, staging, commit or push was performed. Existing responsive accordions and workbook identity/literal-text safeguards remain. See HANDOFF.md for executed validation and open gates.
+
 ## 2026-10-15 - Grade Distribution NULL-campus option hotfix
 
 - Fixed the Course Code option label crash for an already authorized course whose nullable campus is unset. The label retains its ID, code and title and displays Campus not specified; assignment, tenant, campus, supervision and direct-DENY scope are unchanged.

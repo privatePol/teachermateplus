@@ -31,7 +31,7 @@ from django.utils.dateparse import parse_date, parse_datetime
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_http_methods, require_GET
 
 from apps.accounts.models import FacultyInvitation, PortalLoginLockoutState, UserDeactivationSchedule
 from apps.accounts.faculty_provisioning import FacultyInvitationService, ScopedUserRoleAssignmentService
@@ -3368,23 +3368,48 @@ def academic_intervention_monitor_detail_view(request, case_id):
     return render(request, "admin_portal/interventions/detail.html", context)
 
 
+@never_cache
 @portal_required("ADMIN")
 @permission_required("grade_distribution_monitor.read")
-@require_GET
+@require_http_methods(["GET", "POST"])
 def grade_distribution_monitor_view(request):
+    # POST is explicit Apply. GET page/bookmark/refresh always renders the shell;
+    # signed continuation endpoints may read an already applied selection.
+    if request.method == "POST":
+        request.GET = request.POST.copy()
     if request.GET.get("options") == "1":
         from apps.admin_portal.grade_distribution_selection import MonitorSelection
-        options = MonitorSelection(request).options
-        return JsonResponse({key: options[key] for key in ("faculty", "departments", "courses")} | {
+        selection = MonitorSelection(request)
+        if selection.errors:
+            return JsonResponse({"errors": selection.errors}, status=400)
+        options = selection.options
+        return JsonResponse({key: options[key] for key in ("faculty", "departments")} | {
             "terms": [{"id": t.id, "label": f"{t.academic_year.code} / {t.name}"} for t in options["terms"]]
         })
-    context = GradeDistributionMonitorService.build_context(request)
+    exporting = request.GET.get("export") in ("xlsx", "csv")
+    asynchronous = request.GET.get("results") == "1"
+    from apps.admin_portal.grade_distribution_intent import consume_manual_intent, issue_manual_intent
+    replayed = request.method == "POST" and not asynchronous and not consume_manual_intent(request)
+    shell = replayed or not (request.method == "POST" or exporting or asynchronous)
+    context = GradeDistributionMonitorService.build_context(request, shell=shell)
+    if replayed:
+        context["errors"].append("This form was already submitted or expired. Click Apply Filters again.")
+    context["manual_intent"] = issue_manual_intent(request)
+    campus_choices = {str(c.pk) for c in context["filter_options"]["campuses"]}
+    if not campus_choices:
+        raise PermissionDenied("An authorized monitor campus is required.")
+    from django.utils.html import format_html_join
+    from django.http import QueryDict
+    from django.middleware.csrf import get_token
+    context["csrf_token"] = get_token(request)
+    context["continuation_inputs"] = format_html_join("", '<input type="hidden" name="{}" value="{}">',
+        QueryDict(context["page_query"]).items())
     if request.GET.get("export") in ("xlsx", "csv"):
         if context["errors"] or not context["searched"]:
             return JsonResponse({"errors": context["errors"] or ["Apply Filters before exporting."]}, status=400)
         from apps.admin_portal.grade_distribution_export import grade_distribution_workbook
         try:
-            workbook = grade_distribution_workbook(context["rows"])
+            workbook = grade_distribution_workbook(context["rows"], range_heading=context["range_label"])
         except ValidationError as exc:
             return JsonResponse({"errors": exc.messages}, status=400)
         response = HttpResponse(workbook,
@@ -3392,10 +3417,21 @@ def grade_distribution_monitor_view(request):
         response["Content-Disposition"] = 'attachment; filename="grade_distribution_monitor.xlsx"'
         response["Cache-Control"] = "private, no-store"
         return response
+    if asynchronous:
+        query = context["page_query"]
+        if query and context["page_obj"] and context["page_obj"].number > 1:
+            query += "&page=" + str(context["page_obj"].number)
+        return JsonResponse({
+            "html": render_to_string("admin_portal/grading/_grade_distribution_results.html", context),
+            "errors": context["errors"], "selected": context["selected"], "manual_intent": context["manual_intent"],
+            "url": request.path + ("?" + query if query else ""),
+        }, status=400 if context["errors"] else 200)
+    context["default_campus_id"] = str(getattr(request, "scope", {}).get("campus_id") or "all")
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/grade_distribution_monitor.html", context)
 
 
+@never_cache
 @portal_required("ADMIN")
 @permission_required("grade_distribution_monitor.read")
 @require_GET

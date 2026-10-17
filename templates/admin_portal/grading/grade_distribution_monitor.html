@@ -2,30 +2,32 @@
 {% load static %}
 {% block admin_content %}
 <style>
-.gdm-chart {width:100%;height:auto;max-height:280px}.gdm-chart text {font-size:12px;fill:#28352e}.gdm-chart rect {fill:#20613c}
-.gdm-measure {border-top:1px solid #ddd;padding-top:1rem;margin-top:1rem}.gdm-chart-wrap {overflow-x:auto}
-.gdm-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.75rem}
-.gdm-metric{padding:.8rem;border:1px solid #D0E5D6;border-radius:.5rem;background:#FAFDFB;overflow-wrap:anywhere}
-.gdm-exact-100{background:#fff8e5;border-color:#d9ba64;color:#604b15}
-.gdm-class-header{padding:1rem;background:#FAFDFB;border:1px solid #D0E5D6;border-radius:.5rem}
-.gdm-coverage{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.75rem;margin-top:1rem}
-.gdm-coverage dt{font-size:.8rem}.gdm-coverage dd{margin-bottom:0}
-.gdm-collapsible{background:#FAFDFB;border:1px solid #D0E5D6;border-radius:.5rem;overflow:hidden}
-.gdm-collapsible>summary{padding:.75rem;background:#E6F3E9;color:#20452c;cursor:pointer;font-weight:600}
-.gdm-collapsible[open]>summary{border-bottom:1px solid #D0E5D6;background:#D0E5D6}
-.gdm-collapsible>summary:focus-visible{outline:3px solid #20613c;outline-offset:-3px}
-.gdm-collapsible>.gdm-measure,.gdm-collapsible>.table-responsive,.gdm-collapsible>.gdm-chart-wrap{padding:1rem;margin:0;border-top:0}
-.gdm-loading .progress{height:.65rem;background:#E6F3E9;overflow:hidden}
+.gdm-range{border:2px solid #20613c;border-radius:.5rem;background:#f0f7f2;padding:1rem}
+.gdm-range legend{float:none;width:auto;padding:0 .5rem;color:#16432a;font-weight:700}
+.gdm-measure{padding:1rem;border-bottom:1px solid #ddd;overflow-wrap:anywhere}
+.gdm-class-header{padding:1rem;background:#f0f7f2;border-radius:.5rem;margin-bottom:1rem}
+.gdm-loading .progress{height:.65rem;background:#e6f3e9;overflow:hidden}
 .gdm-indeterminate{width:40%;animation:gdm-progress 1.25s ease-in-out infinite}
 @keyframes gdm-progress{from{transform:translateX(-100%)}to{transform:translateX(350%)}}
-@media(prefers-reduced-motion:reduce){.gdm-indeterminate{animation:none;width:100%;opacity:.65}}
+#gdm-modal-body{overflow-y:auto;min-height:0}
+#gradeDistributionAnalyticsModal .modal-content{max-height:100%;height:100%}
+#gradeDistributionAnalyticsModal .modal-header,#gradeDistributionAnalyticsModal .modal-footer{flex-shrink:0}
+.gdm-accordion{border:1px solid #b8cabe;border-radius:.5rem;margin-bottom:1rem;overflow:hidden}
+.gdm-accordion h4{margin:0}
+.gdm-accordion-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;border:0;padding:1rem;text-align:left;font-weight:700}
+.gdm-period{background:#d5eadc;color:#123b25}.gdm-examination{background:#e0e9f7;color:#17375e}.gdm-standing{background:#fff0c7;color:#523e09}
+.gdm-accordion-toggle:focus-visible{outline:3px solid #20613c;outline-offset:-3px}
+.gdm-chevron{transition:transform .15s}.gdm-accordion-toggle[aria-expanded="true"] .gdm-chevron{transform:rotate(90deg)}
+@media(min-width:576px){#gradeDistributionAnalyticsModal .modal-dialog{width:96vw;max-width:96vw;height:92vh;margin:4vh auto}}
+@media(prefers-reduced-motion:reduce){.gdm-indeterminate{animation:none;width:100%;opacity:.65}.gdm-chevron{transition:none}}
 </style>
 <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
   <div><h2 class="h4 mb-1">Faculty Grade Distribution Monitor</h2><p class="text-muted small mb-0">Gradebook grade distributions for faculty under your supervision. Includes configured activity grades and saved period, examination and class-standing grades.</p></div>
   <a class="btn btn-sm btn-outline-secondary align-self-start" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
 </div>
-<form method="get" class="card card-body mb-3" id="gradeDistributionFilterForm">
-  <input type="hidden" name="apply" value="1">
+<form method="post" action="{% url 'admin_portal:grade_distribution_monitor' %}" class="card card-body mb-3" id="gradeDistributionFilterForm" data-default-campus="{{ default_campus_id }}">
+  {% csrf_token %}<input type="hidden" name="manual_intent" value="{{ manual_intent }}">
+  <input type="hidden" name="apply" value="1"><input type="hidden" name="render" value="full">
   <div class="row g-3">
     <div class="col-sm-6 col-lg-3"><label class="form-label" for="gdm-campus">Campus</label><select id="gdm-campus" class="form-select" name="campus_id" required>
       <option value="all" {% if selected.campus_id == "all" %}selected{% endif %}>All Authorized Campuses</option>
@@ -50,44 +52,24 @@
       <option value="all" {% if selected.status == "all" %}selected{% endif %}>All Statuses</option><option value="finalized" {% if selected.status == "finalized" %}selected{% endif %}>Finalized</option><option value="unfinalized" {% if selected.status == "unfinalized" %}selected{% endif %}>Unfinalized</option>
     </select></div>
   </div>
-  <div class="mt-3"><label class="form-label" for="gdm-course-search">Search course codes or titles</label>
-    <input id="gdm-course-search" type="search" class="form-control" placeholder="Type part of a course code or title" aria-controls="gdm-courses">
-    <label class="form-label mt-2" for="gdm-courses">Course Code (multiple selection)</label>
-    <select id="gdm-courses" name="course_id" class="form-select" multiple size="6">
-      {% for c in filter_options.courses %}<option value="{{ c.id }}" {% if c.id in selected.course_id %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
-    </select><div class="form-text">Leave unselected for all eligible courses. Use Ctrl or Command to select multiple courses. Searching options preserves selections.</div>
-  </div>
-  <div class="form-check mt-3"><input class="form-check-input" type="checkbox" id="gdm-only-100" name="only_100" value="1" {% if selected.only_100 %}checked{% endif %}><label class="form-check-label" for="gdm-only-100">Classes with 100s only</label><div class="form-text">Includes only classes with a disclosed Period Grade Exactly 100 count above zero.</div></div>
+  <fieldset class="gdm-range mt-3"><legend class="h5">Grade Range</legend>
+    <div class="row g-3">
+      <div class="col-sm-6"><label class="form-label fw-semibold" for="gdm-min">Minimum Grade</label><input id="gdm-min" class="form-control" type="number" name="grade_min" min="0" max="100" step="any" value="{{ selected.grade_min }}" required></div>
+      <div class="col-sm-6"><label class="form-label fw-semibold" for="gdm-max">Maximum Grade</label><input id="gdm-max" class="form-control" type="number" name="grade_max" min="0" max="100" step="any" value="{{ selected.grade_max }}" required></div>
+    </div><p class="small mb-0 mt-2">Both bounds are inclusive. All eligible saved-period classes remain visible.</p>
+  </fieldset>
   <div class="mt-3"><label class="form-label" for="gdm-sort">Sort by</label><select id="gdm-sort" class="form-select w-auto" name="sort">{% for choice in filter_options.sorts %}<option value="{{ choice.id }}" {% if selected.sort == choice.id %}selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select><div class="form-text">Uses disclosed saved Period Grade counts across all matching classes before pagination. Withheld counts do not affect ranking.</div></div>
-  <div class="d-flex gap-2 mt-3"><button type="submit" class="btn btn-success">Apply Filters</button><a class="btn btn-outline-secondary" href="{% url 'admin_portal:grade_distribution_monitor' %}">Clear</a></div>
+  <div class="d-flex gap-2 mt-3"><button type="submit" class="btn btn-success">Apply Filters</button><a class="btn btn-outline-secondary" href="{% url 'admin_portal:grade_distribution_monitor' %}" id="gdm-clear">Clear Filters</a></div>
   <p class="small text-muted mt-2 mb-0">25 rows per page. Search/export limits: 500 class/period rows, 50,000 saved grades and roster associations, 2,000 students per class. Narrow criteria if a limit is exceeded.</p>
 </form>
 <div id="gdm-filter-status" role="status" aria-live="polite" class="mb-3"></div>
-{% for error in errors %}<div class="alert alert-warning" role="alert">{{ error }}</div>{% endfor %}
 <div id="gdm-results">
-{% if searched %}
-  {% if mapping_note %}<p class="alert alert-info">{{ mapping_note }}</p>{% endif %}
-  <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><p class="mb-0">{{ result_count }} class/period rows. Separate physical periods remain separate rows.</p><a class="btn btn-sm btn-outline-success" href="?{{ export_query }}">Export Excel</a></div>
-  <p class="small text-muted">Excel contains Periodic Examination, Class Standing and Quizzes counts only. Blank counts mean unavailable or privacy withheld. Quiz averages use current saved Gradebook activity grades and configuration, including Base 50; selecting finalized students does not make Quiz averages immutable finalized snapshots. Missing, conflicting or historically unreliable Quiz calculations remain blank; View Analytics Data Notes explains availability.</p>
-  <div class="table-responsive"><table class="table table-sm align-middle"><caption>Saved Period Grades. View Analytics includes Examination Grades, Class Standing Grades and individual activities using the same saved values as the Gradebook.</caption>
-  <thead><tr><th scope="col">Faculty</th><th scope="col">Class / Course</th><th scope="col">Grading Period</th><th scope="col">Saved Grades</th><th scope="col">Average Grade</th><th scope="col">Exactly 100</th><th scope="col">View Analytics</th></tr></thead>
-  <tbody>{% for row in rows %}<tr data-dataset-id="{{ row.dataset_id }}">
-    <td>{{ row.faculty_name }}</td><td><strong>{{ row.course_code }}</strong><div class="small">{{ row.course_title }} &middot; {{ row.section }} &middot; {{ row.campus }}</div>{% if row.historical %}<span class="badge text-bg-secondary">Historical</span>{% endif %}</td>
-    <td>{{ row.period }}<div class="small text-muted">{{ row.gradebook_context }}</div><div class="small text-muted">{{ row.status }}</div></td>
-    <td>{{ row.graded_count }} / {{ row.eligible_count }}<div class="small">{{ row.missing_count }} missing{% if row.status_excluded_count %}; {{ row.status_excluded_count }} excluded by status{% endif %}</div></td>
-    <td>{% if row.privacy_suppressed %}<span class="text-muted">Privacy suppressed</span>{% else %}{{ row.average|default_if_none:"Unavailable" }}{% endif %}</td>
-    <td>{% if row.analytics_state == "disclosed" %}<div class="gdm-metric gdm-exact-100"><strong>{{ row.exact_100_count }} / {{ row.graded_count }}</strong><div>{{ row.exact_100_percentage|floatformat:2 }}%</div></div>{% else %}<span class="text-muted">{{ row.analytics_state|title }}</span><p class="small text-muted mb-0">{{ row.privacy_message }}</p>{% endif %}</td>
-    <td><button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#gradeDistributionAnalyticsModal" data-analytics-url="{% url 'admin_portal:grade_distribution_monitor_detail' row.offering_id row.physical_period_id %}?{{ row.detail_query }}">View Analytics<span class="visually-hidden"> for {{ row.course_code }} {{ row.section }}</span></button></td>
-  </tr>{% empty %}<tr><td colspan="7">No saved grading records match these criteria. Unresolved physical period identities are unavailable.</td></tr>{% endfor %}</tbody></table></div>
-  <p class="small text-muted">Activities use saved configured Gradebook grades, including Base 50 where configured. Raw scores are not the primary distribution. Saved unfinalized grades may change. Analytics and Excel exports contain aggregates only.</p>
-  {% if page_obj.has_other_pages %}<nav aria-label="Grade distribution pages"><ul class="pagination">
-    {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?{{ page_query }}&amp;page={{ page_obj.previous_page_number }}">Previous</a></li>{% endif %}<li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>{% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?{{ page_query }}&amp;page={{ page_obj.next_page_number }}">Next</a></li>{% endif %}
-  </ul></nav>{% endif %}
-{% else %}<div class="card card-body text-muted">Select criteria and click Apply Filters to view grade distributions.</div>{% endif %}
+{% include "admin_portal/grading/_grade_distribution_results.html" %}
 </div>
+<noscript><p>Apply Filters submits this form without JavaScript. A page reload opens the filter shell; use Apply Filters again.</p></noscript>
 <div class="modal fade" id="gradeDistributionAnalyticsModal" tabindex="-1" aria-labelledby="gdm-modal-title" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-sm-down"><div class="modal-content">
   <div class="modal-header"><h3 class="modal-title h5" id="gdm-modal-title">Class Analytics</h3><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close analytics"></button></div>
   <div class="modal-body" id="gdm-modal-body" aria-live="polite"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
 </div></div></div>
-<script src="{% static 'admin_portal/js/grade_distribution_monitor.js' %}?v=20261014-dataset-identity" defer></script>
+<script src="{% static 'admin_portal/js/grade_distribution_monitor.js' %}?v=20261017-manual-frozen-release" defer></script>
 {% endblock %}

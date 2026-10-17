@@ -641,19 +641,17 @@ class AdminHelpGuideTests(TestCase):
 
 
 class GradeDistributionGuideContentTests(TestCase):
-    def test_monitor_guide_explains_saved_status_scope_privacy_and_limits(self):
+    def test_monitor_guide_explains_range_async_hold_sources_and_limits(self):
         from apps.admin_portal.help_guide import ADMIN_HELP_SECTIONS
         text = str(ADMIN_HELP_SECTIONS)
-        for phrase in ("Grade Distribution Monitor starts empty", "Apply Filters", "saved finalized and unfinalized", "not the department owning", "No individual student records", "500", "2,000", "not official grade equivalents", "Prelim", "Midterm, Pre-Final or Final", "five distinct students", "Complementary suppression", "nine", "suppressed analytics are never added to the missing-grade count"):
+        for phrase in ("Grade Range defaults to 97–100", "both bounds are inclusive", "Clear Filters",
+                       "Obsolete bookmarked course filters are rejected", "zero-qualifying classes",
+                       "before analytics", "Browser Back/Forward", "Without JavaScript", "before pagination",
+                       "Withheld counts never affect ranking", "Only explicit Apply Filters",
+                       "comparisons across overlapping classes", "approved immutable", "Minimum-five",
+                       "formula privacy", "No individual student records", "PERIOD GRADES", "EXAMINATION GRADES",
+                       "CLASS STANDING GRADES", "Base 50", "not an immutable finalized", "one Grade Distribution worksheet",
+                       "Matching class labels add department", "ambiguous export is rejected", "2,000", "50,000"):
             self.assertIn(phrase, text)
-        for phrase in ("Formula privacy", "weighted period", "affected analytic family", "Safely independent measures", "Unresolved formula dependencies"):
-            self.assertIn(phrase, text)
-        for phrase in ("Combined 95–99", "95 to below 100", "not rounded", "two-decimal percentages", "Data Notes",
-                       "indeterminate green progress", "gold Exactly 100", "proven equivalent measures", "Base 50", "official TMP Gradebook", "one Grade Distribution worksheet", "Export Excel", "No subjective/objective classification", "50,000 aggregate rows"):
-            self.assertIn(phrase, text)
-        self.assertNotIn("actual raw examination percentages are shown", text)
-        for phrase in ("Course Code supports multiple authorized courses", "partial option search", "Classes with 100s only", "Exactly 99, 98, 97, 96 and 95", "Withheld values never affect membership"):
-            self.assertIn(phrase, text)
-        self.assertIn("Campus not specified", text)
-        for phrase in ("Exactly 100 Count (highest first)", "before pagination", "Withheld counts never affect ranking", "one calculated Gradebook Quiz average per student", "not an immutable finalized snapshot", "Blank counts", "Matching class labels add department", "export is rejected", "Chart reuse links to the specific dataset"):
-            self.assertIn(phrase, text)
+        for obsolete in ("Course Code supports multiple", "Classes with 100s only", "gold Exactly 100", "Data Notes"):
+            self.assertNotIn(obsolete, text)
