@@ -1,3 +1,10 @@
+## Academic Performance Insights staging acceptance corrections - 2026-10-17
+
+- Resolve faculty and course selections from actual authorized teaching assignments for campus/year/term/department. Reuse assignment-level filtering for co-teachers; narrow courses by selected faculty. Show stored department names without campus prefixes and sort/display faculty as Lastname, Firstname Middlename. Retain identifiers and supervised-faculty authorization.
+- Include active CLOSED/ARCHIVED classes only with scoped saved activity scores or periodic grades and an active accepted supervised assignment. OPEN classes remain available. Inactive/revoked supervision is not restored.
+- Supersede the earlier blanket minimum-five policy for class aggregates only: effective `faculty_gradebook_monitor.read` plus existing portal/analytics and supervised-class scope permits authorized academic administrators to view small-class/overlap aggregates, outcomes, quiz averages and complete comparable trends. Direct DENY wins even for superusers. Other users keep suppression. Student-review CSV identity permission/masking, small advisory cohorts and individual-grade withholding are unchanged.
+- Show separate compatible course groups when grading configurations differ. Distinct below-passing students and attention classes use the authorized disclosed records; missing grades do not invent an average or trend. Preserve all five buttons, explicit View Performance, AJAX/retry, pagination/lazy details and signed generation checks; tokens now also bind aggregate authority.
+
 ## Academic Performance Insights targeted remediation - 2026-10-17
 
 - Reject changed record generations before and after report/detail/activity/history/CSV reads, including bulk score edits, enrollment changes and historical/configuration updates. Return: "Academic records have changed. Please click View Performance to refresh the report." The client removes the entire outdated report and enables explicit regeneration.

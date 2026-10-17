@@ -17,6 +17,7 @@ from apps.admin_portal import insights_views
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService as Official
 from apps.admin_portal.insights import SUPPRESSED, UNAVAILABLE, Selection, activity_metrics, disclosure_mask
 from apps.admin_portal.insights_generation import CHANGED_MESSAGE
+from apps.academics.models import Course, FacultyAssignment
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.enrollment.models import Enrollment
 from apps.grading.models import GradeActivity, GradingTemplateComponent, GradingTemplatePeriod, StudentActivityScore, StudentPeriodGrade
@@ -299,15 +300,15 @@ class InsightsImprovementTests(TestCase):
         self.assertEqual(response.json()["pages"], 5)
 
     def test_csv_retains_schema_zero_and_formula_safety(self):
-        self.faculty.first_name = "=Faculty"
-        self.faculty.save(update_fields=["first_name"])
+        self.faculty.last_name = "=Faculty"
+        self.faculty.save(update_fields=["last_name"])
         self.component.score_input_mode = "DIRECT_PERCENTAGE"
         self.component.save(update_fields=["score_input_mode"])
         StudentActivityScore.objects.update(raw_score=0, computed_score=0)
         response = self.client.get(self.url, {**self.filters, "export": "sections"})
         rows = list(csv.DictReader(io.StringIO(response.content.decode())))
         self.assertEqual(rows[0]["Average"], "0.00")
-        self.assertEqual(rows[0]["Faculty"], "'=Faculty User")
+        self.assertEqual(rows[0]["Faculty"], "'=Faculty, faculty-one")
         self.assertIn("No Usable Grade", rows[0])
         self.assertEqual(rows[0]["Highest"], SUPPRESSED)
 
@@ -554,3 +555,268 @@ class InsightsImprovementTests(TestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["request"].scope["campus_id"], campus.id)
+
+    def grant_gradebook_monitor(self, user=None, campus=None):
+        permission, _ = Permission.objects.get_or_create(code="faculty_gradebook_monitor.read",
+            defaults={"module": "faculty_gradebook_monitor", "action": "read"})
+        return UserPermission.objects.create(user=user or self.area_chair, permission=permission,
+            tenant=self.tenant, campus=campus or self.campus, grant_type="ALLOW")
+
+    def small_classes(self):
+        Enrollment.objects.filter(student__student_no__startswith="EXTRA").update(is_active=False)
+
+    def test_cao_dean_area_chair_and_superadmin_see_authorized_small_aggregates(self):
+        self.small_classes()
+        for code in ("CAO", "DEAN", "AREA_CHAIR", "SUPER_ADMIN", "CUSTOM_ACADEMIC_ADMIN"):
+            with self.subTest(role=code):
+                leader = self._user("leader-" + code.lower(), self.campus, self.department)
+                role = self._role_with_access(code, code)
+                UserRole.objects.create(user=leader, role=role, tenant=self.tenant,
+                    campus=self.campus, department=self.department)
+                self.grant_gradebook_monitor(leader)
+                self.client.force_login(leader)
+                snapshot = self.snapshot(campus_id=self.campus.id)
+                self.assertEqual(snapshot["summary"]["suppressed"], 0)
+                self.assertEqual(snapshot["summary"]["average"], "82.00")
+                self.assertEqual(snapshot["summary"]["below"], 1)
+                self.assertEqual(snapshot["summary"]["attention"], 1)
+                self.assertNotIn("withheld", snapshot["html"])
+                html = self.post("detail", token=snapshot["token"], offering_id=self.offering_a.id).json()["html"]
+                for value in ("Average Grade:</strong> 70.00", "Students Below Passing:</strong> 1 (50.0%)", "Quiz Average: 40.00"):
+                    self.assertIn(value, html)
+                self.assertNotIn(SUPPRESSED, html)
+                self.assertNotIn(self.student_a1.student_no, html)
+                rows = list(csv.DictReader(io.StringIO(self.client.get(self.url,
+                    {**self.filters, "campus_id": self.campus.id, "export": "sections"}).content.decode())))
+                self.assertEqual(next(row for row in rows if row["Section"] == self.offering_a.section.code)["Average"], "70.00")
+                review = self.client.get(self.url, {**self.filters, "campus_id": self.campus.id, "export": "students"})
+                self.assertEqual(list(csv.DictReader(io.StringIO(review.content.decode()))), [])
+
+    def test_superuser_exception_respects_explicit_deny(self):
+        self.small_classes()
+        self.area_chair.is_superuser = True
+        self.area_chair.save(update_fields=["is_superuser"])
+        self.client.force_login(self.area_chair)
+        self.assertEqual(self.snapshot()["summary"]["below"], 1)
+        grant = self.grant_gradebook_monitor()
+        grant.grant_type = "DENY"
+        grant.save(update_fields=["grant_type"])
+        self.assertEqual(self.snapshot()["summary"]["suppressed"], 2)
+        permission = Permission.objects.get(code="grading_analytics.read")
+        UserPermission.objects.create(user=self.area_chair, permission=permission, tenant=self.tenant,
+            campus=self.campus, grant_type="DENY")
+        response = self.post("report")
+        self.assertIn(response.status_code, (400, 403))
+
+    def test_role_name_without_gradebook_authority_keeps_small_class_protection(self):
+        self.small_classes()
+        self.assertEqual(self.snapshot()["summary"]["suppressed"], 2)
+        grant = self.grant_gradebook_monitor()
+        snapshot = self.snapshot()
+        grant.grant_type = "DENY"
+        grant.save(update_fields=["grant_type"])
+        self.assertEqual(self.post("classes", token=snapshot["token"]).status_code, 409)
+        self.assertEqual(self.snapshot()["summary"]["suppressed"], 2)
+
+    def test_leadership_permission_does_not_expand_supervision_or_record_scope(self):
+        self.grant_gradebook_monitor()
+        self.small_classes()
+        campus, department, faculty, offering = self.add_campus()
+        self.assertEqual(self.post("report", campus_id=campus.id).status_code, 400)
+        self.assertEqual(self.post("options").json()["options"]["faculty_id"],
+            [{"value": self.faculty.id, "label": "User, faculty-one"}])
+        self.assertEqual(self.client.get(reverse("admin_portal:academic_performance_section_detail",
+            args=[offering.id, "PRELIM"])).status_code, 404)
+        other = Tenant.objects.create(code="INVALID", name="Invalid")
+        self.student_a1.tenant = other
+        self.student_a1.save(update_fields=["tenant"])
+        self.assertEqual(self.snapshot()["summary"]["suppressed"], 1)
+
+    def test_faculty_last_name_sort_and_stored_department_names(self):
+        self.faculty.first_name, self.faculty.middle_name, self.faculty.last_name = "Zoe", "M.", "Abad"
+        self.faculty.save(update_fields=["first_name", "middle_name", "last_name"])
+        colleague = self._user("colleague-z", self.campus, self.department)
+        colleague.first_name, colleague.last_name = "Ana", "Zamora"
+        colleague.save(update_fields=["first_name", "last_name"])
+        UserRole.objects.create(user=colleague, role=self.faculty_role, tenant=self.tenant,
+            campus=self.campus, department=self.department)
+        self._assign(self.offering_a, colleague)
+        result = self.post("options", campus_id=self.campus.id).json()
+        self.assertEqual(result["options"]["faculty_id"], [
+            {"value": self.faculty.id, "label": "Abad, Zoe M."},
+            {"value": colleague.id, "label": "Zamora, Ana"}])
+        self.assertEqual(result["options"]["department_id"],
+            [{"value": self.department.id, "label": "Information Systems"}])
+
+    def test_department_faculty_filter_does_not_include_coteachers_from_other_departments(self):
+        UserRole.objects.filter(user=self.area_chair).update(department=None)
+        department = Department.objects.create(tenant=self.tenant, campus=self.campus,
+            code="OTHER", name="Other Academic Department")
+        colleague = self._user("other-department-faculty", self.campus, department)
+        UserRole.objects.create(user=colleague, role=self.faculty_role, tenant=self.tenant,
+            campus=self.campus, department=department)
+        self._assign(self.offering_a, colleague)
+        result = self.post("options", department_id=self.department.id).json()
+        self.assertEqual([r["value"] for r in result["options"]["faculty_id"]], [self.faculty.id])
+        self.assertIsNone(self.post("options", department_id=self.department.id,
+            faculty_id=colleague.id).json()["filters"]["faculty_id"])
+
+    def test_courses_and_faculty_follow_actual_campus_year_term_and_assignments(self):
+        campus, department, faculty, offering = self.add_campus()
+        course = Course.objects.create(tenant=self.tenant, code="CUB-ONLY", title="Cubao Course")
+        offering.course = course
+        offering.save(update_fields=["course"])
+        cao = self._user("selection-cao", self.campus, self.department)
+        role = self._role_with_access("CAO", "CAO")
+        for c in (self.campus, campus):
+            UserRole.objects.create(user=cao, role=role, tenant=self.tenant, campus=c)
+        # Supervision on both campuses does not mean this faculty teaches on both.
+        UserRole.objects.create(user=faculty, role=self.faculty_role, tenant=self.tenant,
+            campus=self.campus, department=self.department)
+        self.client.force_login(cao)
+        fairview = self.post("options", campus_id=self.campus.id).json()["options"]
+        self.assertEqual([r["value"] for r in fairview["faculty_id"]], [self.faculty.id])
+        self.assertEqual([r["value"] for r in fairview["course_code"]], [self.course.code])
+        cubao = self.post("options", campus_id=campus.id).json()["options"]
+        self.assertEqual([r["value"] for r in cubao["faculty_id"]], [faculty.id])
+        self.assertEqual([r["value"] for r in cubao["course_code"]], [course.code])
+        from apps.academics.models import Term
+        term = Term.objects.create(tenant=self.tenant, academic_year=self.academic_year,
+            code="2ND", name="Second Semester", sequence_no=2,
+            start_date=self.term.start_date, end_date=self.term.end_date)
+        offering.term = term
+        offering.save(update_fields=["term"])
+        self.assertEqual(self.post("options", campus_id=campus.id).json()["options"]["faculty_id"], [])
+
+    def test_closed_and_archived_classes_require_saved_gradebook_evidence(self):
+        self.offering_a.status, self.offering_b.status = "CLOSED", "ARCHIVED"
+        self.offering_a.save(update_fields=["status"])
+        self.offering_b.save(update_fields=["status"])
+        self.assertEqual(self.snapshot()["summary"]["classes"], 2)
+        StudentActivityScore.objects.filter(activity=self.activity_a).delete()
+        self.assertEqual(self.snapshot()["summary"]["classes"], 1)
+        StudentPeriodGrade.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+            student=self.student_a1, template_period=self.period, period_grade=80)
+        self.assertEqual(self.snapshot()["summary"]["classes"], 2)
+        FacultyAssignment.objects.filter(offering=self.offering_a).update(is_active=False)
+        self.assertEqual(self.snapshot()["summary"]["classes"], 1)
+
+    def test_small_class_trends_use_authoritative_grades_and_complete_matching_cohorts(self):
+        self.grant_gradebook_monitor()
+        self.small_classes()
+        period = GradingTemplatePeriod.objects.create(template=self.template, code="MIDTERM", name="Midterm", sequence_no=2)
+        component = GradingTemplateComponent.objects.create(template_period=period,
+            code="QUIZZES", name="Quizzes", weight_percentage=100)
+        activity = self._activity(self.offering_a, "Midterm Quiz", 100)
+        activity.template_period, activity.template_component = period, component
+        activity.save(update_fields=["template_period", "template_component"])
+        for student in (self.student_a1, self.student_a2):
+            self._score(activity, student, 100, 100)
+        snapshot = self.snapshot(period_code="MIDTERM")
+        self.assertIn("1 improving", snapshot["summary"]["trend"])
+        detail = self.post("detail", token=snapshot["token"], offering_id=self.offering_a.id).json()["html"]
+        self.assertIn("<td>Prelim</td><td>70.00</td>", detail)
+        self.assertIn("<td>Midterm</td><td>100.00</td>", detail)
+        StudentActivityScore.objects.filter(activity=self.activity_a, student=self.student_a1).delete()
+        self.assertEqual(self.snapshot(period_code="MIDTERM")["summary"]["trend"], UNAVAILABLE)
+
+    def test_incompatible_configurations_display_separate_compatible_averages(self):
+        original = Official.get_section_performance_summary
+        def incompatible(offering, period):
+            section = original(offering, period)
+            if offering.id == self.offering_b.id:
+                section["grading_context"]["signature"] = ("different legitimate configuration",)
+            return section
+        with patch.object(Official, "get_section_performance_summary", side_effect=incompatible):
+            snapshot = self.snapshot()
+        self.assertEqual(snapshot["summary"]["average"], UNAVAILABLE)
+        self.assertEqual([r["average"] for r in snapshot["summary"]["averages"]], ["85.00", "94.60"])
+        self.assertIn("Averages by Compatible Course Group", snapshot["html"])
+
+    def test_leadership_overlap_counts_distinct_students_and_does_not_suppress_outcomes(self):
+        self.small_classes()
+        self.grant_gradebook_monitor()
+        Enrollment.objects.create(tenant=self.tenant, campus=self.campus, academic_year=self.academic_year,
+            term=self.term, course_offering=self.offering_b, student=self.student_a2)
+        self._score(self.activity_b, self.student_a2, 0, 50)
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot["summary"]["below"], 1)
+        self.assertEqual(snapshot["summary"]["attention"], 2)
+        self.assertEqual(snapshot["summary"]["disclosed"], 2)
+        self.assertEqual(self.snapshot(faculty_id=self.faculty.id)["summary"]["below"], 1)
+
+    def test_leadership_empty_grades_do_not_invent_averages_or_trends(self):
+        self.grant_gradebook_monitor()
+        StudentActivityScore.objects.all().delete()
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot["summary"]["average"], UNAVAILABLE)
+        self.assertEqual(snapshot["summary"]["trend"], UNAVAILABLE)
+        detail = self.post("detail", token=snapshot["token"], offering_id=self.offering_a.id).json()["html"]
+        self.assertIn("Average Grade:</strong> Not Available", detail)
+        self.assertNotIn("Average Grade:</strong> None", detail)
+
+    def test_leadership_aggregate_permission_preserves_separate_student_export_masking(self):
+        self.grant_gradebook_monitor()
+        StudentActivityScore.objects.update(raw_score=0, computed_score=50)
+        export = self.client.get(self.url, {**self.filters, "export": "students"})
+        rows = list(csv.DictReader(io.StringIO(export.content.decode())))
+        self.assertEqual(len(rows), 10)
+        self.assertTrue(all(r["Current Grade"] == SUPPRESSED for r in rows))
+        self.assertNotIn(self.student_a1.student_no, export.content.decode())
+        permission, _ = Permission.objects.get_or_create(code="gradebook.view_student_identity",
+            defaults={"module": "gradebook", "action": "view_student_identity"})
+        UserPermission.objects.create(user=self.area_chair, permission=permission,
+            tenant=self.tenant, campus=self.campus, grant_type="ALLOW")
+        export = self.client.get(self.url, {**self.filters, "export": "students"})
+        self.assertIn(self.student_a1.student_no, export.content.decode())
+        self.assertTrue(all(r["Current Grade"] == SUPPRESSED for r in csv.DictReader(io.StringIO(export.content.decode()))))
+
+    def test_aggregate_exception_is_specific_to_the_effectively_authorized_campus(self):
+        self.small_classes()
+        campus, department, faculty, offering = self.add_campus()
+        student = self._student(offering, "CUB-SMALL", "Campus Student")
+        activity = self._activity(offering, "CUB Quiz", 100)
+        self._score(activity, student, 80, 90)
+        cao = self._user("campus-authority-cao", self.campus, self.department)
+        role = self._role_with_access("CAO", "CAO")
+        for c in (self.campus, campus):
+            UserRole.objects.create(user=cao, role=role, tenant=self.tenant, campus=c)
+        self.grant_gradebook_monitor(cao, self.campus)
+        self.client.force_login(cao)
+        self.assertEqual(self.snapshot(campus_id=self.campus.id)["summary"]["disclosed"], 2)
+        snapshot = self.snapshot(campus_id=campus.id)
+        self.assertEqual(snapshot["summary"]["suppressed"], 1)
+        self.assertEqual(snapshot["summary"]["average"], UNAVAILABLE)
+        permission = Permission.objects.get(code="faculty_gradebook_monitor.read")
+        RolePermission.objects.get_or_create(role=role, permission=permission)
+        self.assertEqual(self.snapshot(campus_id=campus.id)["summary"]["average"], "90.00")
+
+    def test_course_catalogue_also_narrows_to_selected_faculty_without_duplicates(self):
+        second_course = Course.objects.create(tenant=self.tenant, code="OTHER-COURSE", title="Other Course")
+        self.offering_b.course = second_course
+        self.offering_b.save(update_fields=["course"])
+        colleague = self._user("separate-class-faculty", self.campus, self.department)
+        UserRole.objects.create(user=colleague, role=self.faculty_role, tenant=self.tenant,
+            campus=self.campus, department=self.department)
+        FacultyAssignment.objects.filter(offering=self.offering_b).update(faculty_user=colleague)
+        options = self.post("options", faculty_id=colleague.id).json()["options"]
+        self.assertEqual(options["course_code"], [{"value": second_course.code,
+            "label": "OTHER-COURSE - Other Course"}])
+
+    def test_gradebook_authority_without_analytics_permission_does_not_grant_insights(self):
+        self.grant_gradebook_monitor()
+        permission = Permission.objects.get(code="grading_analytics.read")
+        UserPermission.objects.create(user=self.area_chair, permission=permission,
+            tenant=self.tenant, campus=self.campus, grant_type="DENY")
+        for action in ("options", "report"):
+            self.assertEqual(self.post(action).status_code, 403)
+        self.assertEqual(self.client.get(self.url, {**self.filters, "export": "sections"}).status_code, 403)
+
+    def test_global_direct_deny_overrides_leadership_grant(self):
+        self.grant_gradebook_monitor()
+        self.small_classes()
+        self.assertEqual(self.snapshot()["summary"]["suppressed"], 0)
+        permission = Permission.objects.get(code="faculty_gradebook_monitor.read")
+        UserPermission.objects.create(user=self.area_chair, permission=permission,
+            tenant=None, campus=None, grant_type="DENY")
+        self.assertEqual(self.snapshot()["summary"]["suppressed"], 2)

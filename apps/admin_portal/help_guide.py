@@ -797,8 +797,12 @@ ADMIN_HELP_SECTIONS = [
                         "Changing a filter clears the snapshot; classes and details load when opened. If selections fail to load, use Retry Selections; "
                         "View Performance and downloads remain blocked until the choices are verified. If academic records change, "
                         "click View Performance to refresh the report. Campus and department "
-                        "choices narrow supervised faculty and courses. Exact analytics for small or overlapping cohorts are "
-                        "withheld; totals include disclosed classes only. CSV downloads remain explicit actions, with privacy suppression."
+                        "choices narrow supervised faculty and courses for the selected campus, year and term; faculty names use "
+                        "last name first. Closed or archived active classes with saved grades remain available within supervision. "
+                        "Academic administrators with effective Faculty Gradebook Monitor read access in that campus can view "
+                        "authorized class aggregates even below five students. Other users retain small-cohort suppression. "
+                        "Student-review CSV keeps its separate identity permission, masking and cohort protections. "
+                        "Incompatible grading configurations show separate compatible course averages. Downloads remain explicit actions."
                     ),
                     (
                         "Recorded activity counts require saved non-excused scores, and do not prove conduct or sufficient practice. "

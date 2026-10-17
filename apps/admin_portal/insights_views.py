@@ -79,19 +79,20 @@ def consistency_url(selection, section):
     })
 
 
-def metrics_for(raw):
+def metrics_for(raw, selection):
     return activity_metrics(
         {s["offering"].id: s["offering"] for s in raw},
         {s["offering"].id: s["period"].id for s in raw},
         {s["offering"].id: {r["student_id"] for r in s["coverage"]["rows"] if r["usable_grade"]} for s in raw},
         {s["offering"].id: {r["student_id"] for r in s["coverage"]["rows"]} for s in raw},
+        {s["offering"].id for s in raw if selection.allows_aggregates(s["offering"])},
     )
 
 
 def detail_context(selection, public, raw):
     if public["suppressed"]:
         return {"row": public, "activity_consistency_url": consistency_url(selection, raw)}
-    return {"row": public, "metrics": metrics_for([raw])[public["id"]],
+    return {"row": public, "metrics": metrics_for([raw], selection)[public["id"]],
             "trends": period_trends(selection, raw["offering"], raw),
             "activity_consistency_url": consistency_url(selection, raw)}
 
@@ -115,7 +116,7 @@ def export_csv(request, selection, result, raw, kind):
                 row["template"] + " / " + row["profile"], row["formula"], row["threshold"], row["enrolled"], row["graded"],
                 row["no_grade"], row["coverage_rate"], row["passing"], row["passing_rate"], row["below"], row["below_rate"],
                 row["average"], row["median"], SUPPRESSED, SUPPRESSED, row["state"], "Review compatible class details",
-                "Complete authorized selection; privacy suppression applies",
+                "Complete authorized selection; student export protections remain separate",
             )])
     else:
         writer.writerow(["Campus", "Academic Year", "Term", "Course", "Section", "Grading Period", "Student", "Student No.",
@@ -218,7 +219,7 @@ def academic_performance_insights_view(request):
         if data["action"] == "classes":
             page = Paginator(result["rows"], 25).get_page(data.get("page"))
             ids = {r["id"] for r in page.object_list if not r["suppressed"]}
-            metrics = metrics_for([s for s in raw if s["offering"].id in ids])
+            metrics = metrics_for([s for s in raw if s["offering"].id in ids], selection)
             rows = [{**r, "metrics": metrics.get(r["id"])} for r in page.object_list]
             response = JsonResponse({"html": render_to_string("admin_portal/grading/_insights_classes.html", {
                 "rows": rows, "page": page,

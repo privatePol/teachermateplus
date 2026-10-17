@@ -2,7 +2,7 @@
 <p>{{ row.campus }}; {{ row.year }} / {{ row.term }}; {{ row.period }}; {{ row.faculty }}</p>
 <a class="btn btn-sm btn-outline-success mb-3" href="{{ activity_consistency_url }}">View Activity Consistency</a>
 <p class="small text-muted">Activity Consistency opens the supported course, faculty and period context. It has no section filter. Activity setup is context, not proof of the cause of a grade result.</p>
-{% if row.suppressed %}<div class="alert alert-info">Suppressed (privacy). Exact analytics require at least five usable graded students and safe overlapping cohorts.</div>{% else %}
+{% if row.suppressed %}<div class="alert alert-info">Suppressed (privacy). {{ row.withholding_reason }}</div>{% else %}
 <p><strong>Average Grade:</strong> {{ row.average }}; <strong>Passing Grade:</strong> {{ row.threshold }}; <strong>Students Below Passing:</strong> {{ row.below }} ({{ row.below_rate }}%).</p>
 <p><strong>Grade state:</strong> {{ row.state }}. <strong>Template:</strong> {{ row.template }}; <strong>Formula:</strong> {{ row.formula }}.</p>
 <p><strong>What to Review:</strong> {{ row.concern }}. A student below passing does not mean the whole class is failing.</p>

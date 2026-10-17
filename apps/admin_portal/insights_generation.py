@@ -54,6 +54,7 @@ def encoded(value):
 def authority(selection):
     value = (selection.request.user.pk, selection.request.scope.get("tenant_id"),
              selection.request.scope.get("campus_id"),
+             sorted(selection.leadership_campuses),
              sorted((a.pk, a.offering_id, a.faculty_user_id) for a in selection.assignments),
              sorted((key, sorted(v for v in values if v is not None))
                     for key, values in selection.faculty_departments.items()))
@@ -118,7 +119,7 @@ def fingerprint(selection, filters):
     feed(Role.objects.filter(pk__in=role_ids))
     feed(RolePermission.objects.filter(role_id__in=role_ids))
     feed(UserPermission.objects.filter(user_id=selection.request.user.pk))
-    feed(Permission.objects.filter(code__in=("admin_portal.access", "grading_analytics.read", "gradebook.view_student_identity")))
+    feed(Permission.objects.filter(code__in=("admin_portal.access", "grading_analytics.read", "gradebook.view_student_identity", "faculty_gradebook_monitor.read")))
     # Never inspect unrelated settings/secrets.
     feed(SystemSetting.objects.filter(setting_key="PASSING_GRADE_THRESHOLD").filter(Q(tenant_id=tenant_id) | Q(tenant__isnull=True)))
     return salted_hmac("academic-insights-generation-v1", digest.hexdigest(), algorithm="sha256").hexdigest()

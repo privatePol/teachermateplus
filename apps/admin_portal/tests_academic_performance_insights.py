@@ -484,8 +484,8 @@ class AcademicPerformanceInsightsTests(TestCase):
         self.client.force_login(self.area_chair)
 
         for unsafe_prefix in ("=", "+", "-", "@"):
-            self.faculty.first_name = f"{unsafe_prefix}Faculty"
-            self.faculty.save(update_fields=["first_name", "updated_at"])
+            self.faculty.last_name = f"{unsafe_prefix}Faculty"
+            self.faculty.save(update_fields=["last_name", "updated_at"])
             response = self.client.get(self.url, {**self.filters, "export": "sections"})
 
             self.assertEqual(response.status_code, 200)
@@ -497,7 +497,7 @@ class AcademicPerformanceInsightsTests(TestCase):
             self.assertEqual(row["Average"], "Suppressed (privacy)")
             self.assertEqual(row["Highest"], "Suppressed (privacy)")
             self.assertEqual(row["Lowest"], "Suppressed (privacy)")
-            self.assertEqual(row["Faculty"], f"'{unsafe_prefix}Faculty User")
+            self.assertEqual(row["Faculty"], f"'{unsafe_prefix}Faculty, faculty-one")
 
     def test_student_review_csv_withholds_small_groups_even_with_identity_permission(self):
         self.client.force_login(self.area_chair)

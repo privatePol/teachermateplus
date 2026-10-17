@@ -3,14 +3,14 @@ from collections import Counter, defaultdict
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db.models import F, Q
+from django.db.models import Exists, F, OuterRef, Q
 
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService as Official
 from apps.admin_portal.services import AdminScopeService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
 from apps.enrollment.models import Enrollment
-from apps.grading.models import GradeActivity, StudentActivityScore
+from apps.grading.models import GradeActivity, StudentActivityScore, StudentPeriodGrade
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.rbac.models import UserPermission, UserRole
 from apps.tenants.models import Department
@@ -19,6 +19,31 @@ from apps.tenants.models import Department
 MIN_STUDENTS = 5
 UNAVAILABLE = "Not Available"
 SUPPRESSED = "Suppressed (privacy)"
+LEADERSHIP_PERMISSION = "faculty_gradebook_monitor.read"
+
+
+def faculty_label(user):
+    given = " ".join(part.strip() for part in (user.first_name, user.middle_name) if part and part.strip())
+    return f"{user.last_name.strip()}, {given}".strip(", ") if user.last_name else given or user.username
+
+
+def leadership_access(request, campus_id):
+    """Existing supervised-gradebook authority permits class aggregates, never identities.
+
+    This permission is seeded for academic leaders and can be explicitly assigned
+    to other academic administrators. A role title alone grants no exception.
+    The assignment inventory still determines every authorized class.
+    """
+    tenant_id = request.scope["tenant_id"]
+    denied = UserPermission.objects.filter(
+        user=request.user, permission__code=LEADERSHIP_PERMISSION, permission__is_active=True,
+        grant_type=UserPermission.GrantType.DENY,
+    ).filter(Q(tenant_id=tenant_id) | Q(tenant__isnull=True)).filter(
+        Q(campus_id=campus_id) | Q(campus__isnull=True)
+    ).exists()
+    return not denied and PermissionService.has_permission(
+        request.user, LEADERSHIP_PERMISSION, tenant_id=tenant_id, campus_id=campus_id,
+    )
 
 
 def campus_allowed(request, campus_id):
@@ -50,6 +75,17 @@ class Selection:
             campus_source = campus_source.filter(id=request.scope.get("campus_id"))
         self.campuses = [c for c in campus_source if campus_allowed(request, c.id)]
         campus_ids = {c.id for c in self.campuses}
+        self.leadership_campuses = {c.id for c in self.campuses if leadership_access(request, c.id)}
+        saved_scores = StudentActivityScore.objects.filter(
+            activity__offering_id=OuterRef("offering_id"), activity__tenant_id=tenant_id,
+            activity__campus_id=OuterRef("offering__campus_id"), activity__is_active=True,
+            student__tenant_id=tenant_id, student__campus_id=OuterRef("offering__campus_id"), is_active=True,
+        )
+        saved_grades = StudentPeriodGrade.objects.filter(
+            offering_id=OuterRef("offering_id"), tenant_id=tenant_id,
+            campus_id=OuterRef("offering__campus_id"), student__tenant_id=tenant_id,
+            student__campus_id=OuterRef("offering__campus_id"),
+        )
         assignments = AdminScopeService.scoped_faculty_assignments(
             request, include_all_campuses=True,
         ).filter(
@@ -59,8 +95,11 @@ class Selection:
             offering__course__tenant_id=tenant_id, offering__section__tenant_id=tenant_id,
             campus_id=F("offering__campus_id"),
             campus_id__in=campus_ids, offering__campus_id__in=campus_ids,
-            offering__status="OPEN", is_active=True, response_status="ACCEPTED",
+            is_active=True, response_status="ACCEPTED",
             faculty_user__is_active=True,
+        ).alias(saved_scores=Exists(saved_scores), saved_grades=Exists(saved_grades)).filter(
+            Q(offering__status="OPEN") | (Q(offering__status__in=("CLOSED", "ARCHIVED")) &
+                                         (Q(saved_scores=True) | Q(saved_grades=True)))
         ).select_related("offering__section__program", "offering__course", "faculty_user")
         self.assignments = list(assignments)
         self.offerings = {a.offering_id: a.offering for a in self.assignments}
@@ -72,7 +111,7 @@ class Selection:
             ))
         self.departments = list(Department.objects.filter(
             department_scope, tenant_id=tenant_id, is_active=True,
-        ).select_related("campus").order_by("campus__code", "code"))
+        ).select_related("campus").order_by("name", "id"))
         self.faculty_departments = defaultdict(set)
         for role in UserRole.objects.filter(
             user_id__in=self.faculty, is_active=True, role__code="FACULTY", role__is_active=True,
@@ -82,13 +121,13 @@ class Selection:
             self.faculty_departments[(role.user_id, campus_id)].add(department_id)
         self._periods = {}
 
-    def matching(self, filters):
+    def matching_assignments(self, filters):
         department_ids = None
         if filters.get("department_id"):
             department_ids = set(AdminScopeService.expand_department_filter_ids(
                 filters["department_id"], campus_id=filters.get("campus_id"),
             ))
-        ids = set()
+        matches = []
         for assignment in self.assignments:
             offering = assignment.offering
             if any(filters.get(key) and getattr(offering, key) != filters[key]
@@ -102,10 +141,22 @@ class Selection:
                 self.faculty_departments[(assignment.faculty_user_id, offering.campus_id)]
             ):
                 continue
-            ids.add(offering.id)
+            matches.append(assignment)
+        return matches
+
+    def matching(self, filters):
+        ids = {assignment.offering_id for assignment in self.matching_assignments(filters)}
         return sorted((self.offerings[pk] for pk in ids), key=lambda o: (
             o.campus.code, o.course.code, o.section.code, o.id,
         ))
+
+    def allows_aggregates(self, offering):
+        return offering.id in self.offerings and offering.campus_id in self.leadership_campuses
+
+    def hidden_sections(self, sections):
+        return {pk for pk in disclosure_mask(sections) if not self.allows_aggregates(sections[pk]["offering"])} | {
+            pk for pk, section in sections.items() if section["invalid_scope"]
+        }
 
     def periods(self, offering):
         key = (offering.course_id, offering.campus_id, offering.department_id,
@@ -139,8 +190,7 @@ class Selection:
         if not filters["campus_id"] and not self.role["can_compare_campuses"] and self.campuses:
             filters["campus_id"] = self.campuses[0].id
         parent = {k: filters[k] for k in ("academic_year_id", "term_id", "campus_id")}
-        relevant_faculty = {(a.faculty_user_id, a.offering.campus_id) for a in self.assignments
-                            if a.offering_id in {o.id for o in self.matching(parent)}}
+        relevant_faculty = {(a.faculty_user_id, a.offering.campus_id) for a in self.matching_assignments(parent)}
         departments = []
         for department in self.departments:
             if filters["campus_id"] and department.campus_id != filters["campus_id"]:
@@ -148,18 +198,25 @@ class Selection:
             expanded = set(AdminScopeService.expand_department_filter_ids(department.id, campus_id=department.campus_id))
             if any(expanded.intersection(self.faculty_departments[pair]) for pair in relevant_faculty
                    if pair[1] == department.campus_id):
-                departments.append({"value": department.id, "label": f"{department.campus.code} / {department.code}"})
+                departments.append({"value": department.id, "label": department.name})
         choose("department_id", departments)
         parent["department_id"] = filters["department_id"]
         offerings = self.matching(parent)
         courses = {o.course.code: o.course.title for o in offerings}
         choose("course_code", [{"value": code, "label": f"{code} - {title}"} for code, title in sorted(courses.items())])
         parent["course_code"] = filters["course_code"]
-        ids = {o.id for o in self.matching(parent)}
-        faculty_ids = {a.faculty_user_id for a in self.assignments if a.offering_id in ids}
-        choose("faculty_id", [{"value": pk, "label": Official._faculty_name(self.faculty[pk])}
-                              for pk in sorted(faculty_ids)])
+        faculty_ids = {a.faculty_user_id for a in self.matching_assignments(parent)}
+        choose("faculty_id", [{"value": pk, "label": faculty_label(self.faculty[pk])}
+                              for pk in sorted(faculty_ids, key=lambda pk: (
+                                  (self.faculty[pk].last_name or "").casefold(),
+                                  (self.faculty[pk].first_name or "").casefold(),
+                                  (self.faculty[pk].middle_name or "").casefold(), pk))])
         parent["faculty_id"] = filters["faculty_id"]
+        # A selected teacher also narrows the course catalogue, using assignments.
+        courses = {o.course.code: o.course.title for o in self.matching({
+            **parent, "course_code": "",
+        })}
+        choose("course_code", [{"value": code, "label": f"{code} - {title}"} for code, title in sorted(courses.items())])
         periods = {}
         if filters["academic_year_id"] and filters["term_id"]:
             for offering in self.matching(parent):
@@ -199,6 +256,9 @@ def collect_sections(selection, filters):
     if key in selection._sections:
         return selection._sections[key]
     universe = selection.matching({k: filters[k] for k in ("academic_year_id", "term_id")})
+    supervised_by_offering = defaultdict(list)
+    for assignment in selection.matching_assignments(filters):
+        supervised_by_offering[assignment.offering_id].append(assignment)
     sections = {}
     for offering in universe:
         period = next((p for p in selection.periods(offering) if p.code == filters["period_code"]), None)
@@ -221,10 +281,9 @@ def collect_sections(selection, filters):
             section["grade_signature"] = (*section["grading_context"]["signature"],
                                           str(FacultyGradingService.resolve_base_value(offering, period.template)))
             section["invalid_scope"] = invalid_scope or any(r["student_id"] not in valid_ids for r in section["coverage"]["rows"])
-            supervised = [a for a in selection.assignments if a.offering_id == offering.id
-                          and (not filters.get("faculty_id") or a.faculty_user_id == filters["faculty_id"])]
+            supervised = supervised_by_offering[offering.id]
             if supervised:
-                section["faculty_name"] = Official._faculty_name(supervised[0].faculty_user)
+                section["faculty_name"] = faculty_label(supervised[0].faculty_user)
                 section["faculty_id"] = supervised[0].faculty_user_id
             sections[offering.id] = section
     selection._sections[key] = sections
@@ -245,8 +304,7 @@ def withheld_section(offering, period):
 
 def report(selection, filters):
     sections = collect_sections(selection, filters)
-    hidden = disclosure_mask(sections)
-    hidden.update(pk for pk, section in sections.items() if section["invalid_scope"])
+    hidden = selection.hidden_sections(sections)
     below_memberships = defaultdict(set)
     for pk, section in sections.items():
         if pk in hidden:
@@ -258,7 +316,8 @@ def report(selection, filters):
     outcome_hidden = {pk for ids, count in below_atoms.items() if count < MIN_STUDENTS for pk in ids}
     selected = selection.matching(filters)
     raw = [sections[o.id] for o in selected if o.id in sections]
-    rows = [public_section(s, s["offering"].id in hidden, s["offering"].id in outcome_hidden) for s in raw]
+    rows = [public_section(s, s["offering"].id in hidden, s["offering"].id in outcome_hidden,
+                           selection.allows_aggregates(s["offering"])) for s in raw]
     visible = [s for s in raw if s["offering"].id not in hidden]
     signatures = {s["grade_signature"] for s in visible}
     values = [Decimal(r["current_grade"]) for s in visible for r in s["coverage"]["rows"] if r["usable_grade"]]
@@ -266,7 +325,20 @@ def report(selection, filters):
     below = {r["student_id"] for s in visible for r in s["coverage"]["rows"]
              if r["usable_grade"] and Decimal(r["current_grade"]) < s["coverage"]["passing_threshold"]}
     average = str(GradingGovernanceService._round(sum(values) / len(values))) if values and len(signatures) == 1 else UNAVAILABLE
-    below_count = len(below) if visible and not any(s["offering"].id in outcome_hidden for s in visible) and releasable_partition(len(below), len(students)) else SUPPRESSED
+    all_leadership = bool(visible) and all(selection.allows_aggregates(s["offering"]) for s in visible)
+    outcomes_safe = not any(s["offering"].id in outcome_hidden and not selection.allows_aggregates(s["offering"]) for s in visible)
+    below_count = len(below) if visible and (all_leadership or (outcomes_safe and releasable_partition(len(below), len(students)))) else SUPPRESSED
+    groups = defaultdict(list)
+    for section in visible:
+        groups[(section["offering"].course.code, section["grade_signature"])].append(section)
+    averages = []
+    if len(signatures) > 1:
+        for (course, signature), members in groups.items():
+            grades = [Decimal(r["current_grade"]) for s in members for r in s["coverage"]["rows"] if r["usable_grade"]]
+            if grades:
+                averages.append({"course": course, "template": members[0]["grading_context"]["template_label"],
+                                 "group": len(averages) + 1,
+                                 "average": str(GradingGovernanceService._round(sum(grades) / len(grades)))})
     structures = {}
     trends = Counter(summary_trend(selection, section, structures) for section in visible)
     trend_text = ", ".join(f"{trends[label]} {label.lower()}" for label in ("Improving", "Stable", "Declining")) if any(trends[label] for label in ("Improving", "Stable", "Declining")) else UNAVAILABLE
@@ -274,30 +346,33 @@ def report(selection, filters):
                "attention": sum(r["attention"] for r in rows if not r["suppressed"]),
                "trend": trend_text, "trend_unavailable": trends[UNAVAILABLE], "classes": len(rows),
                "disclosed": len(visible), "suppressed": len(rows) - len(visible),
-               "average_note": "Different grading configurations; review class details." if len(signatures) > 1 else "Usable grade records; repeated enrollments count separately."}
+               "averages": averages,
+               "average_note": "Different grading configurations; see compatible course groups below." if len(signatures) > 1 else "Usable grade records; repeated enrollments count separately."}
     return {"summary": summary, "rows": rows, "priority": [r for r in rows if r["attention"] and not r["suppressed"]][:5]}, raw
 
 
-def public_section(section, hidden, outcome_hidden=False):
+def public_section(section, hidden, outcome_hidden=False, leadership=False):
     offering = section["offering"]
     coverage = section["coverage"]
     n = coverage["computed_grade_count"]
-    category_safe = not outcome_hidden and releasable_partition(coverage["below_threshold_count"], n)
-    distribution_safe = not outcome_hidden and all(releasable_partition(row["count"], n) for row in coverage["distribution"])
+    category_safe = leadership or (not outcome_hidden and releasable_partition(coverage["below_threshold_count"], n))
+    distribution_safe = leadership or (not outcome_hidden and all(releasable_partition(row["count"], n) for row in coverage["distribution"]))
+    coverage_safe = leadership or releasable_partition(coverage["no_grade_count"], coverage["active_enrollment_count"])
     return {
         "id": offering.id, "campus": offering.campus.code, "year": offering.academic_year.code,
         "term": offering.term.code, "course": offering.course.code, "title": offering.course.title,
         "section": offering.section.code, "faculty": section["faculty_name"],
         "period": section["period"].name, "period_code": section["period"].code,
-        "suppressed": hidden, "average": SUPPRESSED if hidden else str(coverage["average"]),
+        "suppressed": hidden, "average": SUPPRESSED if hidden else str(coverage["average"]) if coverage["average"] is not None else UNAVAILABLE,
+        "withholding_reason": "Record scope could not be verified." if section.get("invalid_scope") else "Exact analytics require at least five usable graded students and safe overlapping cohorts.",
         "graded": SUPPRESSED if hidden else n,
         "below": SUPPRESSED if hidden or not category_safe else coverage["below_threshold_count"],
         "below_rate": SUPPRESSED if hidden or not category_safe else str(coverage["below_threshold_rate"]),
         "threshold": str(coverage["passing_threshold"]),
         "state": SUPPRESSED if hidden else coverage["state"],
         "concern": SUPPRESSED if hidden else section["main_concern"],
-        "attention": not hidden and (coverage["average"] < coverage["passing_threshold"] or bool(coverage["below_threshold_count"]) or coverage["no_grade_count"] > 0),
-        "class_below": not hidden and coverage["average"] < coverage["passing_threshold"],
+        "attention": not hidden and ((coverage["average"] is not None and coverage["average"] < coverage["passing_threshold"]) or bool(coverage["below_threshold_count"]) or coverage["no_grade_count"] > 0),
+        "class_below": not hidden and coverage["average"] is not None and coverage["average"] < coverage["passing_threshold"],
         "distribution": [] if hidden or not distribution_safe else [
             {"label": r["label"], "lower": str(r["lower"]) if r["lower"] is not None else None,
              "upper": str(r["upper"]) if r["upper"] is not None else None,
@@ -308,16 +383,16 @@ def public_section(section, hidden, outcome_hidden=False):
         "template": section["grading_context"]["template_label"],
         "formula": section["grading_context"]["formula_mode"],
         "profile": section["grading_context"]["profile_label"],
-        "enrolled": SUPPRESSED if hidden or not releasable_partition(coverage["no_grade_count"], coverage["active_enrollment_count"]) else coverage["active_enrollment_count"],
-        "no_grade": SUPPRESSED if hidden or not releasable_partition(coverage["no_grade_count"], coverage["active_enrollment_count"]) else coverage["no_grade_count"],
-        "coverage_rate": SUPPRESSED if hidden or not releasable_partition(coverage["no_grade_count"], coverage["active_enrollment_count"]) else str(coverage["coverage_rate"]),
+        "enrolled": SUPPRESSED if hidden or not coverage_safe else coverage["active_enrollment_count"],
+        "no_grade": SUPPRESSED if hidden or not coverage_safe else coverage["no_grade_count"],
+        "coverage_rate": SUPPRESSED if hidden or not coverage_safe else str(coverage["coverage_rate"]),
         "passing": SUPPRESSED if hidden or not category_safe else coverage["passing_count"],
         "passing_rate": SUPPRESSED if hidden or not category_safe else str(coverage["passing_rate"]),
-        "median": SUPPRESSED if hidden else str(coverage["median"]),
+        "median": SUPPRESSED if hidden else str(coverage["median"]) if coverage["median"] is not None else UNAVAILABLE,
     }
 
 
-def activity_metrics(offerings, periods, cohorts, eligible):
+def activity_metrics(offerings, periods, cohorts, eligible, leadership_ids=frozenset()):
     """Two bulk reads. A score is evidence of recording, never proof of conduct."""
     activities = list(GradeActivity.objects.filter(
         offering_id__in=offerings, template_period_id__in=periods.values(), is_active=True,
@@ -353,7 +428,7 @@ def activity_metrics(offerings, periods, cohorts, eligible):
         recorded = [a for a in configured if scores[a.id]]
         quizzes = [a for a in recorded if FacultyGradingService.is_quiz_activity(a)]
         cohort = cohorts.get(pk, set())
-        comparable = bool(quizzes) and len(cohort) >= MIN_STUDENTS and all(
+        comparable = bool(quizzes) and len(cohort) >= (1 if pk in leadership_ids else MIN_STUDENTS) and all(
             set(scores[a.id]) == cohort and all(v is not None for v in scores[a.id].values()) for a in quizzes
         )
         quiz_average = GradingGovernanceService._round(sum(sum(scores[a.id].values()) / len(cohort) for a in quizzes) / len(quizzes)) if comparable else None
@@ -376,8 +451,8 @@ def period_trends(selection, offering, current):
             continue
         coverage = section["coverage"]
         ids = {r["student_id"] for r in coverage["rows"] if r["usable_grade"]}
-        usable = (offering.id not in disclosure_mask(basis) and not section.get("invalid_scope")
-                  and ids == current_ids and len(ids) >= MIN_STUDENTS and not coverage["is_provisional"]
+        usable = (offering.id not in selection.hidden_sections(basis) and not section.get("invalid_scope")
+                  and ids == current_ids and len(ids) >= (1 if selection.allows_aggregates(offering) else MIN_STUDENTS) and not coverage["is_provisional"]
                   and coverage["computed_grade_count"] == coverage["active_enrollment_count"])
         average = coverage["average"] if usable else None
         # Period weights/components may differ; only identical component definitions are comparable.
@@ -415,7 +490,7 @@ def component_signature(period):
 def summary_trend(selection, section, structures):
     """Apply the full-scope disclosure plan to both periods of a comparison."""
     coverage = section["coverage"]
-    if coverage["is_provisional"] or coverage["computed_grade_count"] != coverage["active_enrollment_count"]:
+    if not coverage["computed_grade_count"] or coverage["is_provisional"] or coverage["computed_grade_count"] != coverage["active_enrollment_count"]:
         return UNAVAILABLE
     periods = selection.periods(section["offering"])
     previous = [p for p in periods if (p.sequence_no, p.id) < (section["period"].sequence_no, section["period"].id)]
@@ -431,7 +506,7 @@ def summary_trend(selection, section, structures):
     basis = collect_sections(selection, {"academic_year_id": offering.academic_year_id,
         "term_id": offering.term_id, "period_code": previous.code})
     baseline = basis.get(offering.id)
-    if not baseline or baseline["invalid_scope"] or offering.id in disclosure_mask(basis):
+    if not baseline or baseline["invalid_scope"] or offering.id in selection.hidden_sections(basis):
         return UNAVAILABLE
     prior = baseline["coverage"]
     current_ids = {r["student_id"] for r in coverage["rows"] if r["usable_grade"]}
