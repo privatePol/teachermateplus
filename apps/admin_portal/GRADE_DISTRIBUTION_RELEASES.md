@@ -1,3 +1,5 @@
+> Historical release infrastructure retained for schema/record compatibility. The approved internal-monitor policy supersedes the frozen-release requirement below: normal monitor requests use authorized live saved aggregates and never read, prepare or publish release records. These operator commands are legacy controls, not prerequisites for monitor use. No release operation is authorized by the internal-policy remediation gate.
+
 # Grade Distribution v1 operator gate
 
 This source implementation does not authorize a deployment, a normal database

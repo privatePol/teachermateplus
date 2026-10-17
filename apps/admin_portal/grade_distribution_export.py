@@ -1,4 +1,4 @@
-"""Bounded count-only export of authorized, privacy-filtered Gradebook aggregates."""
+"""Bounded count-only export of authorized, internal Gradebook aggregates."""
 from collections import defaultdict
 from io import BytesIO
 
@@ -85,7 +85,7 @@ def grade_distribution_workbook(rows, *, range_heading=None):
             disclosed = measure.get("range_state") == "disclosed"
             values = [measure["range_count"], measure["range_denominator"], measure["range_percentage"]] if disclosed else [None] * 3
             notice = " ".join(filter(None, (measure.get("privacy_message"), measure.get("source_notice"), measure.get("history_notice"), measure.get("calculation_note"), measure.get("unit"))))
-            sheet.append(common + [label] + values + ["Disclosed" if disclosed else "Withheld", notice])
+            sheet.append(common + [label] + values + ["Available" if disclosed else "Unavailable", notice])
     sheet.freeze_panes = "F2"
     sheet.auto_filter.ref = sheet.dimensions
     sheet.sheet_view.showGridLines = False

@@ -11,8 +11,7 @@ from django.utils import timezone
 from apps.academics.models import CourseOffering
 from apps.admin_portal.grade_distribution_selection import MonitorSelection, faculty_name, logical_period
 from apps.admin_portal.grade_distribution_metrics import PrivacyFamily, component_measures, percentage, threshold_for
-from apps.admin_portal.grade_distribution_disclosure import HOLD_MESSAGE, public_measure
-from apps.admin_portal.grade_distribution_releases import published_map, released_values, source_candidate
+from apps.admin_portal.grade_distribution_disclosure import internal_measure
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import GradingTemplatePeriod, StudentPeriodGrade
@@ -137,7 +136,7 @@ class GradeDistributionMonitorService:
         selection = MonitorSelection(request)
         context = {"selected": selection.selected, "filter_options": selection.options, "rows": [],
                    "searched": False, "errors": list(selection.errors), "page_obj": None, "page_query": "", "export_query": "",
-                   "range_label": selection.range_label, "disclosure_notice": HOLD_MESSAGE}
+                   "range_label": selection.range_label, "disclosure_notice": "Internal academic oversight: aggregates reflect authorized saved Gradebook values. Reapply to refresh changing saved grades."}
         if shell:
             return context
         if request.method != "POST" and not any(request.GET.get(k) for k in ("apply", "export", "page", "context")):
@@ -145,7 +144,7 @@ class GradeDistributionMonitorService:
         try:
             selection, assignments, offerings, saved, groups, periods, unresolved, count = cls.prepare(request, selection)
             context["searched"] = True
-            # Privacy requires the full source family, not a SQL count of 100s.
+            # Global numeric sorting requires the complete bounded selection.
             # prepare() bounds this complete selection before any source loading.
             rows = cls.rows(selection, assignments, offerings, saved, list(groups), periods)
             rows.sort(key=lambda row: cls.sort_key(row, selection.selected["sort"]))
@@ -159,8 +158,8 @@ class GradeDistributionMonitorService:
                 display = row.pop("_display", None)
                 if display:
                     _, row["measures"], notes, _, row["quiz"] = display()
-                    row["measures"] = [public_measure(m, selection.bounds, historical=row["historical"]) for m in row["measures"]]
-                    row["quiz"] = public_measure(row["quiz"], selection.bounds, historical=row["historical"])
+                    row["measures"] = [internal_measure(m, selection.bounds, historical=row["historical"]) for m in row["measures"]]
+                    row["quiz"] = internal_measure(row["quiz"], selection.bounds, historical=row["historical"])
             query = selection.query(selection.token())
             context["page_query"] = query.urlencode()
             query["export"] = "xlsx"
@@ -182,7 +181,7 @@ class GradeDistributionMonitorService:
         if sort == "faculty_asc":
             return identity
         disclosed = row.get("range_state") == "disclosed" and row.get("range_count") is not None
-        # Never rank by a protected count, including through a hidden tie-breaker.
+        # Rank actual qualifying counts globally; absent grade sources sort last.
         count = row["range_count"] if disclosed else 0
         return (not disclosed, -count, *identity)
 
@@ -222,9 +221,6 @@ class GradeDistributionMonitorService:
         # Identity contains the complete filter/authority selection, not a row ID.
         # Physical row identity remains in each detail URL and is reauthorized.
         detail_query = selection.query(selection.token()).urlencode()
-        # token() captured the publication boundary above. A later approval must
-        # not silently change the release set inside this applied selection.
-        releases = published_map(selection.tenant_id, offering_ids, periods, publication_limit=selection.publication_limit)
         rows = []
         for candidate in candidates:
             offering = offering_map[candidate["offering_id"]]
@@ -238,15 +234,15 @@ class GradeDistributionMonitorService:
             chosen = [r for r in records if status == "all" or r["is_finalized"] == (status == "finalized")]
             valued = [r for r in chosen if r["period_grade"] is not None]
             t, source = threshold_for(offering, service)
-            privacy = PrivacyFamily({r["student_id"]: r["is_finalized"] for r in records}, status, t)
-            # Plan all sources before even the summary/CSV statistic is released.
+            privacy = PrivacyFamily({r["student_id"]: r["is_finalized"] for r in records}, status, t, internal=release_sink is None)
+            # Reuse authoritative source/configuration reads for totals and detail.
             period_metrics, measures, notes, incomplete, quiz = component_measures(
                 offering, period, records, student_ids, t, historical, privacy, bundle=bundle, service=service, defer_display=not detail)
-            frozen_source = source_candidate(offering, period, records, student_ids, historical,
-                period_metrics.get("analytics_state") == "disclosed")
             if release_sink is not None:
-                release_sink[(offering.id, period.id)] = frozen_source
-            frozen = released_values(releases.get((offering.id, period.id)), frozen_source, selection.bounds, status)
+                # Explicit legacy operator path only; ordinary monitor reads do not use release storage.
+                from apps.admin_portal.grade_distribution_releases import source_candidate
+                release_sink[(offering.id, period.id)] = source_candidate(offering, period, records, student_ids, historical,
+                    period_metrics.get("analytics_state") == "disclosed")
             saved_ids = {r["student_id"] for r in records if r["period_grade"] is not None}
             excluded = sum(r["period_grade"] is not None for r in records) - len(valued)
             row = {
@@ -263,16 +259,16 @@ class GradeDistributionMonitorService:
                 "coverage_rate": percentage(len(saved_ids), len(student_ids)),
                 "historical": historical,
                 "notes": (["Historical roster uses retained enrollment associations, including inactive records except non-grading statuses. Current student campus, department and program do not alter this retained cohort. Original roster and threshold snapshots are unavailable. Threshold shown is currently resolved."] if historical else []),
-                **public_measure(period_metrics, selection.bounds, historical=historical, frozen=frozen),
+                **internal_measure(period_metrics, selection.bounds, historical=historical),
             }
             row["detail_query"] = detail_query
             if callable(measures):
                 row["_display"] = measures
                 row["measures"] = []
             else:
-                row["measures"] = [public_measure(m, selection.bounds, historical=historical) for m in measures]
-            row["quiz"] = public_measure(quiz, selection.bounds, historical=historical) if quiz else None
-            row["incomplete_source_count"] = None
+                row["measures"] = [internal_measure(m, selection.bounds, historical=historical) for m in measures]
+            row["quiz"] = internal_measure(quiz, selection.bounds, historical=historical) if quiz else None
+            row["incomplete_source_count"] = incomplete
             row["notes"].extend(notes)
             if candidate["saved_count"] > len(records):
                 row["notes"].append(

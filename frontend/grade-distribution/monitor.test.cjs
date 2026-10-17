@@ -81,17 +81,31 @@ test('modal groups by structural type with independent accessible accordions and
 test('late modal response after close is discarded and focus restored',async()=>{
   const s=setup();let resolve;s.w.fetch=()=>new Promise(r=>{resolve=r;});s.open();s.d.getElementById('gradeDistributionAnalyticsModal').dispatchEvent(new s.w.Event('hidden.bs.modal'));resolve(response(payload));await tick();assert.equal(s.d.getElementById('gdm-modal-body').textContent,'');assert.equal(s.d.activeElement.id,'open');s.dom.window.close();
 });
-test('actual Django disclosure payload contains no numerical grade distribution bypass',async()=>{
+test('actual Django internal payload renders authorized aggregate numbers without identities',async()=>{
   assert.ok(process.env.TMP_UX_DOM_PAYLOAD,'Run with the current Django-generated payload');
   const data=JSON.parse(readFileSync(process.env.TMP_UX_DOM_PAYLOAD,'utf8'));
-  for(const m of [data,...data.measures,data.quiz]){assert.equal(m.range_count,null);assert.equal(m.average,null);assert.deepEqual(m.frequency,[]);}
-  const s=setup();s.w.fetch=async()=>response(data);s.open();await tick();assert.equal(s.d.querySelectorAll('.gdm-accordion').length,3);assert.match(s.d.getElementById('gdm-modal-body').textContent,/Withheld/);assert.equal(s.d.querySelectorAll('#gdm-modal-body svg, #gdm-modal-body table').length,0);s.dom.window.close();
+  for(const m of [data,...data.measures,data.quiz]){
+    assert.equal(m.privacy_suppressed,false);assert.equal('student_id' in m,false);
+    if(m.graded_count){assert.notEqual(m.range_count,null);assert.notEqual(m.average,null);assert.ok(m.frequency.length);}
+    else {assert.equal(m.range_state,'unavailable');assert.equal(m.range_count,null);}
+  }
+  const s=setup();s.w.fetch=async()=>response(data);s.open();await tick();
+  assert.equal(s.d.querySelectorAll('.gdm-accordion').length,3);assert.ok(s.d.querySelectorAll('#gdm-modal-body table').length);
+  assert.doesNotMatch(s.d.getElementById('gdm-modal-body').textContent,/Withheld|approved.*release/);s.dom.window.close();
 });
 
 test('restored bfcache form cannot trigger analytics or reuse modal/page actions',async()=>{
  const s=setup();const e=new s.w.Event('pageshow');Object.defineProperty(e,'persisted',{value:true});s.w.dispatchEvent(e);await tick();await tick();assert.equal(s.requests.length,1);assert.match(s.requests[0].url,/options=1/);s.open();s.d.querySelector('.gdm-page-form')?.dispatchEvent(new s.w.Event('submit',{bubbles:true,cancelable:true}));await tick();assert.equal(s.requests.length,1);s.dom.window.close();
 });
-test('actual approved Django period release displays numbers only in PERIOD GRADES',async()=>{
+test('actual Django numeric period and unavailable child sources retain their own states',async()=>{
  assert.ok(process.env.TMP_UX_DOM_PAYLOAD);const data=JSON.parse(readFileSync(process.env.TMP_UX_DOM_PAYLOAD+'.released','utf8'));
- assert.equal(data.range_count,8);assert.equal(data.range_denominator,20);const s=setup();s.w.fetch=async()=>response(data);s.open();await tick();assert.match(s.d.getElementById('gdm-modal-body').textContent,/8 \/ 20 \(40.00%\)/);for(const group of ['examination','standing']){const b=s.d.querySelector('.gdm-'+group);const content=s.d.getElementById(b.getAttribute('aria-controls')).textContent;assert.doesNotMatch(content,/8 \/ 20/);assert.match(content,/Withheld/);}s.dom.window.close();
+ assert.equal(data.range_count,8);assert.equal(data.range_denominator,20);const s=setup();s.w.fetch=async()=>response(data);s.open();await tick();assert.match(s.d.getElementById('gdm-modal-body').textContent,/8 \/ 20 \(40.00%\)/);for(const group of ['examination','standing']){const b=s.d.querySelector('.gdm-'+group);const content=s.d.getElementById(b.getAttribute('aria-controls')).textContent;assert.doesNotMatch(content,/8 \/ 20/);assert.match(content,/Unavailable/);}s.dom.window.close();
+});
+
+test('small-class zero is numeric while absent sources are Unavailable',async()=>{
+ const data={...payload,range_state:'disclosed',range_count:0,range_denominator:1,range_percentage:'0.00',average:'0.00',minimum:'0.00',maximum:'0.00',frequency:[{grade:'0.00',count:1,percentage:'100.00'}],
+ measures:payload.measures.map(m=>({...m,range_state:'unavailable',source_notice:'No eligible saved values are available for this measure.'})),quiz:null};
+ const s=setup();s.w.fetch=async()=>response(data);s.open();await tick();
+ const body=s.d.getElementById('gdm-modal-body');assert.match(body.textContent,/0 \/ 1 \(0.00%\)/);assert.match(body.textContent,/Average: 0.00/);assert.match(body.textContent,/Unavailable/);
+ assert.equal(body.querySelectorAll('table').length,1);assert.equal(body.querySelector('th').scope,'col');assert.equal(body.querySelector('tbody td').textContent,'0.00');s.dom.window.close();
 });

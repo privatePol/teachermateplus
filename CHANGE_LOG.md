@@ -1,3 +1,9 @@
+## 2026-10-17 - Internal Grade Distribution numeric analytics
+
+- Applied the approved internal oversight policy only to Grade Distribution Monitor: authorized small classes, status subsets and custom inclusive decimal ranges now show live saved counts, denominators, percentages, averages, extrema and aggregate frequencies. Legitimate zero and unavailable source values are distinct.
+- Removed normal-request frozen-release/epoch/storage dependency while preserving tenant/campus/supervision/RBAC/direct DENY, signed selections, manual Apply/Clear/history behavior, Gradebook/Base-50/Quiz semantics, responsive accordions and safe Excel formatting.
+- Kept legacy release schema, migration and records intact. No new migration or normal database changes; no release preparation/publication, commit/push, deployment or restart in this remediation gate. Historical policy entries below describe earlier gates.
+
 ## 2026-10-17 - Grade Distribution manual Apply and immutable numeric releases
 
 - Only explicit Apply starts a search. Initial GET, refresh, bookmarks and history/BFCache restoration render/restore controls without analytics. Changes to filters/sort require Apply again. Clear restores 97–100 and clears results without a results request. CSRF-protected POST retains non-JS Apply and pagination; AJAX retains loading, cancellation, deduplication, race/error/retry and signed-context protections.

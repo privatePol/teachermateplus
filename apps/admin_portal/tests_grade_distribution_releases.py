@@ -71,7 +71,7 @@ class GradeDistributionReleaseTests(fixtures.GradeDistributionMonitorTests):
     def test_positive_frozen_release_html_ajax_modal_excel_and_no_private_commitments(self):
         offering = self.safe_source(values=[97, Decimal("97.50"), 98, 99, Decimal("99.99"), 100, 98, 98]+[80]*12)
         release = prepare_release(self.controller(), offering.pk, self.period.pk, "Review")
-        self.assertIsNone(self.row(self.search(), offering)["range_count"])
+        self.assertEqual(self.row(self.search(), offering)["range_count"], 8)
         publish_release(self.controller(self.approver), release.pk, "Approve")
         started = time.perf_counter()
         with CaptureQueriesContext(connection) as queries:
@@ -86,9 +86,9 @@ class GradeDistributionReleaseTests(fixtures.GradeDistributionMonitorTests):
         data = self.detail(response, row).json()
         self.assertEqual(data["range_count"], 8)
         for child in [*data["measures"], data["quiz"]]:
-            self.assertIsNone(child["range_count"])
-        self.assertIsNone(data["average"])
-        self.assertIsNone(data["incomplete_source_count"])
+            self.assert_internal_measure(child)
+        self.assert_internal_measure(data)
+        self.assertEqual(data["incomplete_source_count"], 20)
         sheet = self._workbook(self.client.get(self.url+"?"+response.context["export_query"])).active
         record = next(r for r in list(sheet.values)[1:] if r[2].startswith("SAFE") and r[4] == "Period Grades")
         self.assertEqual(record[5:8], (8, 20, 40))
@@ -106,8 +106,8 @@ class GradeDistributionReleaseTests(fixtures.GradeDistributionMonitorTests):
             offering = self.safe_source(f"BOUND{index}", values)
             self.publish(offering)
             row = self.row(self.search(), offering)
-            self.assertEqual(row["range_count"], expected)
-            self.assertEqual(row["range_state"], "withheld" if expected is None else "disclosed")
+            self.assertEqual(row["range_count"], sum(97 <= v <= 100 for v in values))
+            self.assertEqual(row["range_state"], "disclosed")
 
     def test_positive_and_zero_release_sorting_pagination_detail_export_parity(self):
         offering = self.safe_source("ZZSAFE")
@@ -118,7 +118,7 @@ class GradeDistributionReleaseTests(fixtures.GradeDistributionMonitorTests):
         self.publish(offering)
         self.publish(zero)
         ordered = self.search()
-        self.assertEqual([r["range_count"] for r in ordered.context["rows"][:2]], [8, 0])
+        self.assertEqual([r["range_count"] for r in ordered.context["rows"][:2]], [8, 1])
         response = self.search(sort="faculty_asc")
         self.assertEqual(response.context["result_count"], 27)
         second = self.continue_search(response.context["page_query"])
@@ -133,14 +133,14 @@ class GradeDistributionReleaseTests(fixtures.GradeDistributionMonitorTests):
         self.assertEqual(next(r for r in period_records if r[2].startswith("ZZSAFE"))[5:8], (8, 20, 40))
         self.assertEqual(next(r for r in period_records if r[2].startswith("PAGE00"))[5:8], (0, 5, 0))
 
-    def test_custom_ranges_and_status_subsets_cannot_difference_approved_release(self):
+    def test_custom_ranges_and_status_subsets_are_independent_of_legacy_release(self):
         offering = self.safe_source(values=[98]*6+[Decimal("97.50")]+[80]*13)
         self.publish(offering)
         for filters in ({}, {"grade_min":"97.51"}, {"grade_min":"0"}, {"grade_min":"97.5", "grade_max":"97.5"},
                         {"status":"unfinalized"}, {"status":"finalized"}):
             response = self.search(**filters)
             row = self.row(response, offering)
-            self.assertEqual(row["range_count"], 7 if not filters else None)
+            self.assertEqual(row["range_count"], None if filters.get("status") == "finalized" else 6 if filters.get("grade_min") == "97.51" else 20 if filters.get("grade_min") == "0" else 1 if filters.get("grade_max") == "97.5" else 7)
             self.assertEqual(row["grade_min"], filters.get("grade_min", "97"))
             self.assertEqual(self.detail(response, row).json()["range_count"], row["range_count"])
             record = next(r for r in list(self._workbook(self.client.get(self.url+"?"+response.context["export_query"])).active.values)[1:]
@@ -154,19 +154,19 @@ class GradeDistributionReleaseTests(fixtures.GradeDistributionMonitorTests):
         self._formula_fixture(supplemental_count=1)
         self.assertFalse(self.publish(self.offering).disclosed)
 
-    def test_source_change_invalidates_every_channel_and_republication_is_blocked(self):
+    def test_live_source_changes_update_monitor_but_legacy_snapshot_stays_immutable(self):
         offering = self.safe_source()
         release = self.publish(offering)
         original = self.search()
         StudentPeriodGrade.objects.filter(offering=offering).update(period_grade=100)
         response = self.search()
         row = self.row(response, offering)
-        self.assertIsNone(row["range_count"])
-        self.assertIsNone(self.detail(original, self.row(original, offering)).json()["range_count"])
+        self.assertEqual(row["range_count"], 20)
+        self.assertEqual(self.detail(original, self.row(original, offering)).json()["range_count"], 20)
         self.assertNotIn("8 / 20", self.client.get(self.url+"?"+original.context["page_query"]+"&results=1").json()["html"])
         record = next(r for r in list(self._workbook(self.client.get(self.url+"?"+original.context["export_query"])).active.values)[1:]
             if r[2].startswith("SAFE") and r[4] == "Period Grades")
-        self.assertEqual(record[5:8], (None, None, None))
+        self.assertEqual(record[5:8], (20, 20, 100))
         release.refresh_from_db()
         self.assertEqual(release.qualifying_count, 8)
         with self.assertRaises(ValidationError):
@@ -213,38 +213,15 @@ class GradeDistributionReleaseTests(fixtures.GradeDistributionMonitorTests):
             self.client.force_login(self.admin_user)
             with self.assertRaises(ValidationError):
                 prepare_release(self.controller(), other.pk, self.period.pk, "Cannot compare commitments")
-            self.assertIsNone(self.row(self.search(), offering)["range_count"])
+            self.assertEqual(self.row(self.search(), offering)["range_count"], 8)
 
-    def test_publication_epoch_changes_require_reapply_for_all_continuations(self):
+    def test_legacy_publication_does_not_change_monitor_selection_or_values(self):
         offering = self.safe_source()
         response = self.search()
         self.publish(offering)
-        self.assertEqual(self.client.get(self.url+"?"+response.context["page_query"]+"&results=1").status_code, 400)
-        self.assertEqual(self.client.get(self.url+"?"+response.context["export_query"]).status_code, 400)
-        self.assertEqual(self.detail(response, self.row(response, offering)).status_code, 400)
-        self.assertEqual(self.row(self.search(), offering)["range_count"], 8)
-
-    def test_publication_after_token_capture_cannot_enter_the_applied_release_set(self):
-        from apps.admin_portal.grade_distribution_selection import MonitorSelection
-        offering = self.safe_source()
-        draft = prepare_release(self.controller(), offering.pk, self.period.pk, "Review")
-        original = MonitorSelection.token
-        pending = True
-
-        def interleave(selection):
-            nonlocal pending
-            token = original(selection)
-            if pending:
-                pending = False
-                publish_release(self.controller(self.approver), draft.pk, "Concurrent independent approval")
-            return token
-
-        with patch.object(MonitorSelection, "token", interleave):
-            response = self.search()
-        self.assertFalse(pending)
-        self.assertIsNone(self.row(response, offering)["range_count"])
-        self.assertEqual(self.client.get(self.url+"?"+response.context["page_query"]+"&results=1").status_code, 400)
-        self.assertEqual(self.row(self.search(), offering)["range_count"], 8)
+        self.assertEqual(self.client.get(self.url+"?"+response.context["page_query"]+"&results=1").status_code, 200)
+        self.assertEqual(self.client.get(self.url+"?"+response.context["export_query"]).status_code, 200)
+        self.assertEqual(self.detail(response, self.row(response, offering)).json()["range_count"], 8)
 
     def test_snapshots_are_append_only_and_ordinary_routes_never_publish(self):
         offering = self.safe_source()

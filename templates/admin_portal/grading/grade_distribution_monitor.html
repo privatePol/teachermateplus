@@ -58,7 +58,7 @@
       <div class="col-sm-6"><label class="form-label fw-semibold" for="gdm-max">Maximum Grade</label><input id="gdm-max" class="form-control" type="number" name="grade_max" min="0" max="100" step="any" value="{{ selected.grade_max }}" required></div>
     </div><p class="small mb-0 mt-2">Both bounds are inclusive. All eligible saved-period classes remain visible.</p>
   </fieldset>
-  <div class="mt-3"><label class="form-label" for="gdm-sort">Sort by</label><select id="gdm-sort" class="form-select w-auto" name="sort">{% for choice in filter_options.sorts %}<option value="{{ choice.id }}" {% if selected.sort == choice.id %}selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select><div class="form-text">Uses disclosed saved Period Grade counts across all matching classes before pagination. Withheld counts do not affect ranking.</div></div>
+  <div class="mt-3"><label class="form-label" for="gdm-sort">Sort by</label><select id="gdm-sort" class="form-select w-auto" name="sort">{% for choice in filter_options.sorts %}<option value="{{ choice.id }}" {% if selected.sort == choice.id %}selected{% endif %}>{{ choice.label }}</option>{% endfor %}</select><div class="form-text">Uses actual saved Period Grade counts across all matching classes before pagination. Classes without saved grades remain visible.</div></div>
   <div class="d-flex gap-2 mt-3"><button type="submit" class="btn btn-success">Apply Filters</button><a class="btn btn-outline-secondary" href="{% url 'admin_portal:grade_distribution_monitor' %}" id="gdm-clear">Clear Filters</a></div>
   <p class="small text-muted mt-2 mb-0">25 rows per page. Search/export limits: 500 class/period rows, 50,000 saved grades and roster associations, 2,000 students per class. Narrow criteria if a limit is exceeded.</p>
 </form>
@@ -71,5 +71,5 @@
   <div class="modal-header"><h3 class="modal-title h5" id="gdm-modal-title">Class Analytics</h3><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close analytics"></button></div>
   <div class="modal-body" id="gdm-modal-body" aria-live="polite"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
 </div></div></div>
-<script src="{% static 'admin_portal/js/grade_distribution_monitor.js' %}?v=20261017-manual-frozen-release" defer></script>
+<script src="{% static 'admin_portal/js/grade_distribution_monitor.js' %}?v=20261017-manual-internal-analytics" defer></script>
 {% endblock %}

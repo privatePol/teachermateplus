@@ -1,7 +1,6 @@
-"""Saved-source fixtures and public HOLD regressions.
+"""Saved-source fixtures and authorized internal-monitor regressions.
 
-Internal population/formula admission is tested separately below; public routes
-must withhold even when a fixture would formerly have disclosed exact grades.
+Legacy release-helper suppression is tested separately below.
 """
 from datetime import date
 from decimal import Decimal
@@ -195,10 +194,11 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.search()
         self.assertEqual(response.status_code, 200)
         row = response.context["rows"][0]
-        self.assertIsNone(row["average"])
+        self.assert_internal_measure(row)
+        self.assertEqual(row["average"], Decimal("90.40"))
         self.assertEqual(row["graded_count"], 10)
         self.assertEqual(row["status"], "Unfinalized")
-        self.assertEqual(row["distribution"], [])
+        self.assert_internal_measure(row)
         self.assertContains(response, "Average Grade")
         self.assertNotContains(response, "Review Flags")
         self.assertNotContains(response, "Masked Student")
@@ -214,15 +214,15 @@ class GradeDistributionMonitorTests(TestCase):
         row = response.context["rows"][0]
         data = self.detail(response).json()
         export = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]))
-        self.assertEqual(row["high_grade_breakdown"], [])
+        self.assert_internal_measure(row)
         self.assertContains(response, "Grades 97\u2013100")
-        self.assertContains(response, "Withheld")
+        self.assertNotContains(response, "Withheld")
         for local, public in zip(row["high_grade_breakdown"], data["high_grade_breakdown"]):
             label = local["grade"]
             self.assertEqual(public["count"], local["count"])
             self.assertEqual(public["total_graded_students"], 9)
             self.assertEqual(Decimal(public["percentage"]), local["percentage"])
-        self.assertIn(export["Grades 97\u2013100"], (None, ""))
+        self._assert_count_export_reconciliation(response)
         self.assertNotIn("Actual examination percentage", json.dumps(data))
         self.assertEqual(data["missing_count"], 1)
 
@@ -237,15 +237,15 @@ class GradeDistributionMonitorTests(TestCase):
         data = self.detail(self.search()).json()
         self.assertEqual([m["label"] for m in data["measures"]], ["Examination Grades", "Class Standing Grades", "Midterm Exam"])
         configured = data["measures"][-1]
-        self.assertNotIn('equivalent_to', configured)
-        self.assertEqual(configured["high_grade_breakdown"], [])
+        self.assert_internal_measure(configured)
+        self.assertEqual(configured["equivalent_dataset_id"], data["dataset_id"])
+        self.assert_internal_measure(configured)
         scores = list(StudentActivityScore.objects.filter(activity=activity).order_by("id"))
         for index, score in enumerate(scores):
             StudentActivityScore.objects.filter(pk=score.pk).update(computed_score=99 if index < 5 else 101)
         configured = self.detail(self.search()).json()["measures"][-1]
-        self.assertIsNone(configured["average"])
-        self.assertNotIn('equivalent_to', configured)
-        self.assertEqual(configured["high_grade_breakdown"], [])
+        self.assert_internal_measure(configured)
+        self.assertEqual(configured["equivalent_dataset_id"], "")
 
     def test_modal_template_has_accessible_responsive_collapsible_and_loading_styles(self):
         self.client.force_login(self.admin_user)
@@ -290,16 +290,16 @@ class GradeDistributionMonitorTests(TestCase):
         self.client.force_login(self.admin_user)
         row = self.search().context["rows"][0]
         self.assertEqual(row["graded_count"], 9)
-        self.assertIsNone(row["minimum"])
-        self.assertTrue(row["privacy_suppressed"])
+        self.assert_internal_measure(row)
+        self.assertFalse(row['privacy_suppressed'])
         self.assertEqual(row["missing_count"], 1)
         self.assertEqual(row["status"], "Mixed")
-        self.assertIsNone(row["average"])
-        self.assertEqual(row["privacy_reason"], "release_history_unverified")
+        self.assert_internal_measure(row)
+        self.assertEqual(row['privacy_reason'], "")
         final = self.search(status="finalized").context["rows"][0]
         self.assertEqual(final["graded_count"], 1)
-        self.assertIsNone(final["average"])
-        self.assertTrue(final["privacy_suppressed"])
+        self.assert_internal_measure(final)
+        self.assertFalse(final['privacy_suppressed'])
         self.assertEqual(final["status_excluded_count"], 8)
         self.assertEqual(final["missing_count"], 1)
         self.assertEqual(self.search(status="unfinalized").context["rows"][0]["graded_count"], 8)
@@ -312,9 +312,7 @@ class GradeDistributionMonitorTests(TestCase):
         StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=100)
         self.client.force_login(self.admin_user)
         row = self.search().context["rows"][0]
-        self.assertIsNone(row["exact_100_count"])
-        self.assertIsNone(row["exact_100_percentage"])
-        self.assertIsNone(row["all_100"])
+        self.assert_internal_measure(row)
 
     def test_profile_template_tenant_and_system_threshold_precedence(self):
         self.client.force_login(self.admin_user)
@@ -355,22 +353,31 @@ class GradeDistributionMonitorTests(TestCase):
             for forbidden in ("ACC101-001", "Student1", "student_id", "student_no", "masked_name", "masked_student", "@example.com"):
                 self.assertNotIn(forbidden, content)
         payload = detail.json()
-        self.assertEqual(payload["frequency"], [])
+        self.assert_internal_measure(payload)
         self.assertIn("Computed Grade Component", self._export_text(export))
 
-    def _privacy_assert_payload(self, payload):
-        self.assertTrue(payload["privacy_suppressed"])
-        for key in ("average", "minimum", "maximum", "exact_100_count", "exact_100_percentage", "all_100"):
-            self.assertIsNone(payload[key], key)
-        self.assertEqual(payload["frequency"], [])
-        self.assertEqual(payload["high_grade_breakdown"], [])
-        self.assertTrue(all(item["count"] is None and item["percentage"] is None
-                            for item in payload["high_grade_breakdown"]))
-        self.assertNotIn("equivalent_to", payload)
-        self.assertNotIn("equivalent_dataset_id", payload)
-        self.assertNotIn("equivalent_context", payload)
-        self.assertTrue(all(b["count"] is None and b["percentage"] is None for b in payload["distribution"]))
-        self.assertNotIn("student_id", payload)
+    def assert_internal_measure(self, measure):
+        """Check aggregate arithmetic and absence of identities on every route."""
+        from apps.admin_portal.grade_distribution_metrics import rounded, percentage
+        self.assertFalse(measure["privacy_suppressed"])
+        self.assertNotIn("student_id", measure)
+        self.assertNotIn("student_no", measure)
+        frequency = measure["frequency"]
+        total = sum(f["count"] for f in frequency)
+        self.assertEqual(total, measure["graded_count"])
+        if total:
+            self.assertEqual(measure["analytics_state"], "disclosed")
+            self.assertEqual(Decimal(str(measure["average"])), rounded(sum(Decimal(str(f["grade"])) * f["count"] for f in frequency) / total))
+            self.assertEqual(Decimal(str(measure["minimum"])), min(Decimal(str(f["grade"])) for f in frequency))
+            self.assertEqual(Decimal(str(measure["maximum"])), max(Decimal(str(f["grade"])) for f in frequency))
+            count = sum(f["count"] for f in frequency if Decimal(measure["grade_min"]) <= Decimal(str(f["grade"])) <= Decimal(measure["grade_max"]))
+            self.assertEqual(measure["range_count"], count)
+            self.assertEqual(measure["range_denominator"], total)
+            self.assertEqual(Decimal(str(measure["range_percentage"])), percentage(count, total))
+        else:
+            self.assertEqual(measure["analytics_state"], "unavailable")
+            for key in ("average", "minimum", "maximum", "range_count", "range_denominator", "range_percentage"):
+                self.assertIsNone(measure[key])
 
     def _workbook(self, response):
         from io import BytesIO
@@ -387,7 +394,7 @@ class GradeDistributionMonitorTests(TestCase):
         record = next(r for r in records if r["Computed Grade Component"] == component)
         return {key: "" if value is None else str(value) for key, value in record.items()}
 
-    def test_privacy_zero_one_to_four_five_and_six_html_json_xlsx_parity(self):
+    def test_internal_zero_one_to_four_five_and_six_channel_parity(self):
         self.client.force_login(self.admin_user)
         grades = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id"))
         for count in range(7):
@@ -397,50 +404,30 @@ class GradeDistributionMonitorTests(TestCase):
                 response = self.search()
                 row = response.context["rows"][0]
                 modal = self.detail(response).json()
-                csv_response = self.client.get(self.url + "?" + response.context["export_query"])
-                csv_row = self._privacy_xlsx_row(csv_response)
-                self.assertEqual((row["graded_count"], row["missing_count"]), (count, 10 - count))
-                self.assertEqual(row["analytics_state"], modal["analytics_state"])
-                if 0 < count < 5:
-                    self._privacy_assert_payload(row)
-                    self._privacy_assert_payload(modal)
-                    self.assertContains(response, "fewer than five students")
-                    self.assertNotContains(response, "83.27")
-                    self.assertNotIn("83.27", self._export_text(csv_response))
-                    self.assertNotIn("83.27", str(modal))
-                    self.assertNotContains(response, 'class="gdm-distribution"')
-                    for grade in range(100, 94, -1):
-                        self.assertIn(csv_row["Grades 97\u2013100"], (None, ""))
-                elif count == 0:
-                    self.assertEqual(row["analytics_state"], "privacy_suppressed")
-                    self.assertTrue(row["privacy_suppressed"])
-                    self.assertIsNone(row["average"])
-                else:
-                    self.assertEqual(row["analytics_state"], "privacy_suppressed")
-                    self.assertIsNone(row["average"])
-                    self.assertIsNone(modal["average"])
-                    self.assertIn(csv_row["Grades 97\u2013100"], (None, ""))
-        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=None, exam_grade=None)
-        StudentPeriodGrade.objects.filter(pk__in=[g.pk for g in grades[:5]]).update(period_grade=0, exam_grade=0)
-        self.assertIsNone(self.search().context["rows"][0]["average"])
+                self.assertEqual((row["graded_count"], row["missing_count"]), (count, 10-count))
+                for measure in (row, modal, modal["measures"][0]):
+                    self.assert_internal_measure(measure)
+                    self.assertEqual(measure["range_count"], 0 if count else None)
+                    self.assertEqual(measure["range_denominator"], count or None)
+                self._assert_count_export_reconciliation(response)
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=0, exam_grade=0)
+        row = self.search(grade_min="0", grade_max="0").context["rows"][0]
+        self.assertEqual((row["average"], row["range_count"], row["range_percentage"]), (0, 10, 100))
 
-    def test_privacy_complementary_status_suppression_is_identical_across_endpoints(self):
+    def test_internal_status_subsets_use_actual_saved_values(self):
         self.client.force_login(self.admin_user)
         ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id").values_list("id", flat=True))
         StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=Decimal("87.43"), is_finalized=True)
-        StudentPeriodGrade.objects.filter(pk=ids[-1]).update(is_finalized=False)
-        for status in ("all", "finalized", "unfinalized"):
-            response = self.search(status=status)
-            row = response.context["rows"][0]
-            self._privacy_assert_payload(row)
-            self._privacy_assert_payload(self.detail(response).json())
-            self.assertEqual(row["missing_count"], 0)
-            for output in (response.content.decode(), self._export_text(self.client.get(self.url + "?" + response.context["export_query"]))):
-                self.assertNotIn("87.43", output)
-        StudentPeriodGrade.objects.filter(pk__in=ids[5:]).update(is_finalized=False)
-        for status, count in (("all", 10), ("finalized", 5), ("unfinalized", 5)):
-            row = self.search(status=status).context["rows"][0]
-            self.assertEqual((row["analytics_state"], row["graded_count"]), ("privacy_suppressed", count))
+        for unfinalized in (1, 5):
+            StudentPeriodGrade.objects.filter(offering=self.offering).update(is_finalized=True)
+            StudentPeriodGrade.objects.filter(pk__in=ids[-unfinalized:]).update(is_finalized=False)
+            for status, count in (("all", 10), ("finalized", 10-unfinalized), ("unfinalized", unfinalized)):
+                response = self.search(status=status)
+                row = response.context["rows"][0]
+                self.assertEqual(row["graded_count"], count)
+                self.assertEqual(row["average"], Decimal("87.43"))
+                self.assert_internal_measure(self.detail(response).json())
+                self._assert_count_export_reconciliation(response)
 
     def test_privacy_saved_measures_and_component_distinct_populations(self):
         self.client.force_login(self.admin_user)
@@ -454,15 +441,15 @@ class GradeDistributionMonitorTests(TestCase):
             for sid in ids[:3]:
                 StudentActivityScore.objects.create(activity=activity, student_id=sid, raw_score=Decimal("82.17"), computed_score=Decimal("82.17"))
         data = self.detail(self.search()).json()
-        self._privacy_assert_payload(data)
-        self._privacy_assert_payload(data["measures"][0])
-        self._privacy_assert_payload(data["measures"][1])
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(data["measures"][0])
+        self.assert_internal_measure(data["measures"][1])
         self.assertEqual(data["measures"][1]["graded_count"], 5)
         for measure in data["measures"][2:]:
             self.assertEqual(measure["graded_count"], 3)
-            self._privacy_assert_payload(measure)
-        self.assertNotIn("86.19", str(data))
-        self.assertNotIn("82.17", str(data))
+            self.assert_internal_measure(measure)
+        self.assertIn("86.19", str(data))
+        self.assertIn("82.17", str(data))
 
     def _formula_fixture(self, *, supplemental_count=1, exam=True, supplemental_weight=20, common_weight=40, other_weight=40):
         """Persist engine-derived totals in the disposable test DB, not invented formulas."""
@@ -492,30 +479,27 @@ class GradeDistributionMonitorTests(TestCase):
                 period_grade=detail["period_grade"], exam_grade=detail["exam_grade"],
                 class_standing_grade=detail["class_standing"])
 
-    def test_formula_privacy_independent_public_payload_subtraction_attack(self):
+    def test_internal_formula_independent_public_payload_subtraction_attack(self):
         self._formula_fixture()
         self.assertEqual(sum(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("exam_grade", flat=True)), 788)
         response = self.search()
         data = self.detail(response).json()
         common = next(m for m in data["measures"] if m["label"] == "Common")
         total = data["measures"][0]
-        # Attacker uses only the actual public JSON, including chart/table frequencies.
+        # Authorized internal aggregates intentionally retain exact arithmetic across sources.
         attacks = []
         if total["average"] is not None and common["average"] is not None:
             attacks.append(Decimal(total["average"]) * total["graded_count"] - Decimal(common["average"]) * common["graded_count"])
         if total["frequency"] and common["frequency"]:
             public_sum = lambda m: sum(Decimal(f["grade"]) * f["count"] for f in m["frequency"])
             attacks.append(public_sum(total) - public_sum(common))
-        self.assertNotIn(Decimal("43"), attacks, "745/43/788 recovered from released fields")
-        self._privacy_assert_payload(total)
-        # A useful common breakdown remains public, but no related total can
-        # complete the subtraction. This tests the actual retained disclosures.
-        self.assertEqual(common["analytics_state"], "privacy_suppressed")
-        self.assertEqual(common["frequency"], [])
-        self.assertIsNone(common["average"])
-        self._privacy_assert_payload(data)
+        self.assertIn(Decimal("43"), attacks)
+        self.assert_internal_measure(total)
+        # Saved totals and the sparse configured source remain available to this authorized role.
+        self.assert_internal_measure(common)
+        self.assert_internal_measure(data)
 
-    def test_formula_privacy_html_json_xlsx_chart_consistency_and_statuses(self):
+    def test_internal_formula_html_json_xlsx_chart_consistency_and_statuses(self):
         ids, _ = self._formula_fixture()
         StudentPeriodGrade.objects.filter(offering=self.offering, student_id__in=ids[:5]).update(is_finalized=True)
         for status in ("all", "finalized", "unfinalized"):
@@ -524,29 +508,22 @@ class GradeDistributionMonitorTests(TestCase):
             modal = self.detail(response).json()
             export = self.client.get(self.url + "?" + response.context["export_query"])
             csv_row = self._privacy_xlsx_row(export)
-            self._privacy_assert_payload(row)
-            self._privacy_assert_payload(modal)
-            for grade in range(100, 94, -1):
-                self.assertIn(csv_row["Grades 97\u2013100"], (None, ""))
+            self.assert_internal_measure(row)
+            self.assert_internal_measure(modal)
+            self._assert_count_export_reconciliation(response)
             self.assertNotContains(response, 'class="gdm-distribution"')
             for measure in modal["measures"]:
-                if measure["analytics_state"] != "disclosed":
-                    self.assertEqual(measure["frequency"], [])
-                    self.assertIsNone(measure["average"])
-                    self.assertEqual(measure["distribution"], [])
-                else:
-                    self.assertGreaterEqual(measure["graded_count"], 5)
-                    self.assertEqual(measure["frequency"], [])
-            self.assertNotIn('"grade": "43', json.dumps(modal))
+                self.assert_internal_measure(measure)
+            self.assert_internal_measure(modal)
             self.assertEqual(row["missing_count"], 0)
-            self.assertEqual(row["privacy_reason"], "release_history_unverified")
+            self.assertEqual(row['privacy_reason'], "")
         # A different physical class has no formula connection to this one.
         other = self._create_extra_offering("SAFE", "Unaffected", "SAFE-A")
         self._seed_grades(other, [90] * 10)
         safe = next(r for r in self.search().context["rows"] if r["offering_id"] == other.id)
-        self.assertIsNone(safe["average"])
+        self.assert_internal_measure(safe)
 
-    def test_formula_privacy_different_weights_period_and_bucket_equations(self):
+    def test_internal_formula_different_weights_period_and_bucket_equations(self):
         self._formula_fixture(common_weight=100, supplemental_weight=200, other_weight=100)
         rows = list(StudentPeriodGrade.objects.filter(offering=self.offering).values("period_grade", "exam_grade", "class_standing_grade"))
         self.assertEqual(sum(r["period_grade"] - r["exam_grade"] - r["class_standing_grade"] for r in rows), Decimal("43"))
@@ -561,14 +538,13 @@ class GradeDistributionMonitorTests(TestCase):
             totals = [public_sum(m) for m in (data, exam, standing)]
             if all(v is not None for v in totals):
                 attacks.append(totals[0] - totals[1] - totals[2])
-        # With weights 100/200/100, these three totals recover supplemental 43
-        # even if BOTH individual exam components are withheld.
-        self.assertNotIn(Decimal("43"), attacks)
+        # Weights 100/200/100 preserve the exact authorized saved-total arithmetic.
+        self.assertIn(Decimal("43"), attacks)
         for measure in (data, exam):
-            self._privacy_assert_payload(measure)
-        self.assertIsNone(standing["average"])
+            self.assert_internal_measure(measure)
+        self.assert_internal_measure(standing)
 
-    def test_formula_privacy_class_standing_activity_average_and_subtotal(self):
+    def test_internal_formula_class_standing_activity_average_and_subtotal(self):
         ids, components = self._formula_fixture(supplemental_count=5, exam=False)
         activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering,
             template_period=self.period, template_component=components[0], title="Small quiz", total_score=100,
@@ -576,16 +552,15 @@ class GradeDistributionMonitorTests(TestCase):
         StudentActivityScore.objects.create(activity=activity, student_id=ids[0], raw_score=43, computed_score=43)
         self._persist_formula_totals(ids)
         data = self.detail(self.search()).json()
-        # One quiz has ONE student. Withhold its dependent standing/period
-        # totals while retaining the independently safe common activity.
+        # One Quiz has one student; its saved values and related totals remain numeric.
         common = next(m for m in data["measures"] if m["label"] == "Common")
         self.assertEqual(common["graded_count"], 10)
-        self.assertEqual(common["analytics_state"], "privacy_suppressed")
-        self._privacy_assert_payload(next(m for m in data["measures"] if m["label"] == "Small quiz"))
-        self._privacy_assert_payload(data["measures"][1])
-        self._privacy_assert_payload(data)
+        self.assert_internal_measure(common)
+        self.assert_internal_measure(next(m for m in data["measures"] if m["label"] == "Small quiz"))
+        self.assert_internal_measure(data["measures"][1])
+        self.assert_internal_measure(data)
 
-    def test_formula_privacy_actual_percentage_configured_grade_differ(self):
+    def test_internal_formula_actual_percentage_configured_grade_differ(self):
         _, components = self._formula_fixture()
         activity = GradeActivity.objects.get(template_component=components[1])
         activity.total_score = 50
@@ -594,11 +569,11 @@ class GradeDistributionMonitorTests(TestCase):
         self._persist_formula_totals(list(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("student_id", flat=True)))
         data = self.detail(self.search()).json()
         self.assertFalse(any("Actual examination percentage" in m["label"] for m in data["measures"]))
-        self._privacy_assert_payload(next(m for m in data["measures"] if m["label"] == "Supplemental"))
-        self._privacy_assert_payload(data["measures"][0])
-        self._privacy_assert_payload(data)
+        self.assert_internal_measure(next(m for m in data["measures"] if m["label"] == "Supplemental"))
+        self.assert_internal_measure(data["measures"][0])
+        self.assert_internal_measure(data)
 
-    def test_formula_privacy_weighted_subcomponent_details_with_small_activity(self):
+    def test_internal_formula_weighted_subcomponent_details_with_small_activity(self):
         ids, components = self._formula_fixture(supplemental_count=5, exam=False)
         sub = GradingTemplateSubcomponent.objects.create(template_component=components[0], code="DETAILS",
             name="Weighted details", weight_percentage=100)
@@ -615,11 +590,11 @@ class GradeDistributionMonitorTests(TestCase):
         self._persist_formula_totals(ids)
         response = self.search()
         data = self.detail(response).json()
-        self._privacy_assert_payload(data)
-        self._privacy_assert_payload(data["measures"][1])
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(data["measures"][1])
         self.assertEqual(next(m for m in data["measures"] if m["label"] == "Common")["graded_count"], 10)
 
-    def test_formula_privacy_sparse_attendance_session_protects_dense_standing(self):
+    def test_internal_formula_sparse_attendance_session_protects_dense_standing(self):
         from apps.attendance.models import AttendanceRecord, AttendanceSession
         ids, components = self._formula_fixture(supplemental_count=5, exam=False)
         sub = GradingTemplateSubcomponent.objects.create(template_component=components[0], code="ATT",
@@ -631,36 +606,35 @@ class GradeDistributionMonitorTests(TestCase):
                 AttendanceRecord.objects.create(session=session, student_id=sid, status_code="P")
         self._persist_formula_totals(ids)
         data = self.detail(self.search()).json()
-        self._privacy_assert_payload(data)
-        self.assertEqual(next(m for m in data["measures"] if m["label"] == "Common")["analytics_state"], "privacy_suppressed")
-        self._privacy_assert_payload(data["measures"][1])
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(next((m for m in data['measures'] if m['label'] == 'Common')))
+        self.assert_internal_measure(data["measures"][1])
 
-    def test_formula_privacy_five_boundary_remains_held_without_release_history(self):
+    def test_internal_five_boundary_and_source_edits_remain_numeric(self):
         ids, _ = self._formula_fixture(supplemental_count=5)
         for status in ("all", "unfinalized"):
             data = self.detail(self.search(status=status)).json()
-            self.assertEqual(data["analytics_state"], "privacy_suppressed")
-            self.assertTrue(all(m["analytics_state"] == "privacy_suppressed" for m in data["measures"]))
+            self.assert_internal_measure(data)
+            self.assertTrue(all(m["analytics_state"] == "disclosed" for m in data["measures"]))
             supplemental = next(m for m in data["measures"] if m["label"] == "Supplemental")
-            self.assertIsNone(supplemental["average"])
+            self.assert_internal_measure(supplemental)
         score = StudentActivityScore.objects.get(student_id=ids[4], activity__title="Supplemental")
         score.delete()
         self._persist_formula_totals(ids)
         data = self.detail(self.search()).json()
-        self._privacy_assert_payload(data)
-        self._privacy_assert_payload(data["measures"][0])
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(data["measures"][0])
 
-    def test_formula_zero_weight_independence_does_not_bypass_public_hold(self):
+    def test_internal_zero_weight_sources_keep_saved_aggregates(self):
         self._formula_fixture(common_weight=0, supplemental_weight=0, other_weight=100)
         response = self.search()
         row = response.context["rows"][0]
         data = self.detail(response).json()
-        self.assertIsNone(row["average"])
-        self.assertIsNone(row["average"])
-        self.assertIsNone(data["average"])
-        self._privacy_assert_payload(data["measures"][0])
-        self.assertIsNone(data["measures"][1]["average"])
-        self.assertIn(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]))["Grades 97\u2013100"], (None, ""))
+        self.assert_internal_measure(row)
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(data["measures"][0])
+        self.assert_internal_measure(data['measures'][1])
+        self._assert_count_export_reconciliation(response)
 
     def test_privacy_overlap_guard_does_not_change_summary_when_opening_modal(self):
         ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("id").values_list("student_id", flat=True))
@@ -670,13 +644,13 @@ class GradeDistributionMonitorTests(TestCase):
             response = self.search(status=status)
             row = response.context["rows"][0]
             data = self.detail(response).json()
-            self.assertIsNone(row["average"])
-            self.assertIsNone(data["average"])
-            self._privacy_assert_payload(row)
-            self._privacy_assert_payload(data)
-            self._privacy_assert_payload(data["measures"][0])
-            self.assertEqual(data["measures"][0]["privacy_reason"], "release_history_unverified")
-            self.assertNotIn("84.29", str(data))
+            self.assert_internal_measure(row)
+            self.assert_internal_measure(data)
+            self.assert_internal_measure(row)
+            self.assert_internal_measure(data)
+            self.assert_internal_measure(data["measures"][0])
+            self.assertEqual(data['measures'][0]['privacy_reason'], "")
+            self.assertIn("84.29", str(data))
         # Changed status without matching signed filters cannot obtain another population.
         params = parse_qs(response.context["page_query"])
         params["status"] = "finalized"
@@ -694,8 +668,8 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.search(campus_id="all")
         self.assertEqual(len(response.context["rows"]), 2)
         for row in response.context["rows"]:
-            self._privacy_assert_payload(row)
-            self._privacy_assert_payload(self.detail(response, row=row).json())
+            self.assert_internal_measure(row)
+            self.assert_internal_measure(self.detail(response, row=row).json())
         retained = next(r for r in response.context["rows"] if r["offering_id"] == self.offering.id)
         self.assertEqual(retained["eligible_count"], 10)
         self.assertNotIn("88.13", self._export_text(self.client.get(self.url + "?" + response.context["export_query"])))
@@ -744,7 +718,7 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.search()
         row = response.context["rows"][0]
         self.assertEqual(row["graded_count"], 10)
-        self.assertIsNone(row["average"])
+        self.assert_internal_measure(row)
         self.assertTrue(row["historical"])
         payload = self.detail(response).json()
         self.assertEqual(len(payload["measures"]), 2)
@@ -782,8 +756,7 @@ class GradeDistributionMonitorTests(TestCase):
                     self.assertEqual(after_modal, modal)
                     self.assertEqual(self._export_text(self.client.get(self.url + "?" + after.context["export_query"])), csv)
                 row = self.search().context["rows"][0]
-                self.assertIsNone(row["average"])
-                self.assertEqual(row["distribution"], [])
+                self.assert_internal_measure(row)
                 self.assertEqual(list(Enrollment.objects.filter(student=student).values()), old_enrollment)
                 self.assertEqual(list(StudentPeriodGrade.objects.filter(offering=self.offering).values()), saved_before)
         authorized = self.search()
@@ -817,7 +790,7 @@ class GradeDistributionMonitorTests(TestCase):
         Student.objects.filter(pk=student.pk).update(tenant=foreign)
         self.client.force_login(self.admin_user)
         row = self.search().context["rows"][0]
-        self.assertIsNone(row["average"])
+        self.assert_internal_measure(row)
         Student.objects.filter(pk=student.pk).update(tenant=self.tenant)
         Enrollment.objects.filter(student=student).delete()
         row = self.search().context["rows"][0]
@@ -1001,7 +974,7 @@ class GradeDistributionMonitorTests(TestCase):
     def test_summary_uses_simple_gradebook_labels_and_excel_link(self):
         self.client.force_login(self.admin_user)
         response = self.search()
-        for text in ("Period Grades", "Grade Range", "Average Grade", "Export Excel", "Withheld"):
+        for text in ("Period Grades", "Grade Range", "Average Grade", "Export Excel", "Saved Grades"):
             self.assertContains(response, text)
         self.assertIn("export=xlsx", response.context["export_query"])
         for text in ("Threshold-Aware Distribution", "Class Ave.", "Export CSV"):
@@ -1073,10 +1046,10 @@ class GradeDistributionMonitorTests(TestCase):
         measures = {m["label"]: m for m in data["measures"]}
         self.assertNotIn("Exam - Actual examination percentage", measures)
         self.assertEqual(set(StudentActivityScore.objects.filter(activity=activity).values_list("raw_score", flat=True)), {Decimal("25")})
-        self.assertIsNone(measures["Exam"]["average"])
-        self.assertIsNone(measures["Quiz"]["average"])
+        self.assert_internal_measure(measures['Exam'])
+        self.assert_internal_measure(measures['Quiz'])
         self.assertNotIn("Examination - Exam", measures)
-        self.assertIsNone(data["incomplete_source_count"])
+        self.assertEqual(data["incomplete_source_count"], 5)
 
     def test_direct_percentage_multiple_components_and_no_combined_normalization(self):
         students = list(Student.objects.filter(enrollments__course_offering=self.offering).order_by("id")[:5])
@@ -1089,12 +1062,11 @@ class GradeDistributionMonitorTests(TestCase):
         self.client.force_login(self.admin_user)
         data = self.detail(self.search()).json()
         total = data["measures"][0]
-        self.assertIsNone(total["average"])
-        self.assertIsNone(total["exact_100_count"])
+        self.assert_internal_measure(total)
         components = [m for m in data["measures"] if m["label"].startswith("Exam ")]
         self.assertEqual(len(components), 2)
         for measure in components:
-            self.assertIsNone(measure["all_100"])
+            self.assert_internal_measure(measure)
 
     def test_monitor_scope_follows_faculty_assignment_scope_not_offering_department(self):
         reviewer_department = Department.objects.create(
@@ -1230,7 +1202,7 @@ class GradeDistributionMonitorTests(TestCase):
         data = self.detail(self.search()).json()
         for field, measure in (("period_grade", data), ("exam_grade", data["measures"][0]), ("class_standing_grade", data["measures"][1])):
             values = [r[field] for r in before if r[field] is not None]
-            self.assertIsNone(measure["average"])
+            self.assert_internal_measure(measure)
         self.assertEqual(list(StudentPeriodGrade.objects.filter(offering=self.offering).values()), before)
         self.assertFalse(any("component grade" in m["unit"] for m in data["measures"]))
 
@@ -1247,8 +1219,8 @@ class GradeDistributionMonitorTests(TestCase):
         with CaptureQueriesContext(connection) as queries:
             data = self.detail(response).json()
         self.assertEqual([m["label"] for m in data["measures"]], ["Examination Grades", "Class Standing Grades"])
-        self.assertEqual(data["measures"][1]["analytics_state"], "privacy_suppressed")
-        self.assertIsNone(data["incomplete_source_count"])
+        self.assert_internal_measure(data['measures'][1])
+        self.assertEqual(data["incomplete_source_count"], 5)
         self.assertLessEqual(sum('attendance_records' in q["sql"] for q in queries), 2)
 
     def test_missing_assessment_routes_and_zero_sources_are_not_missing_saved_grades(self):
@@ -1263,13 +1235,13 @@ class GradeDistributionMonitorTests(TestCase):
         self.client.force_login(self.admin_user)
         data = self.detail(self.search()).json()
         self.assertEqual(data["missing_count"], 0)
-        self.assertIsNone(data["incomplete_source_count"])
+        self.assertEqual(data["incomplete_source_count"], 10)
         self.assertFalse(any("Actual examination percentage" in m["label"] for m in data["measures"]))
         configured = next(m for m in data["measures"] if m["label"] == "Zero exam")
         self.assertEqual(configured["graded_count"], 5)
-        self.assertIsNone(configured["minimum"])
+        self.assert_internal_measure(configured)
         self.assertEqual(set(StudentActivityScore.objects.filter(activity=activity).values_list("raw_score", flat=True)), {Decimal("0")})
-        self.assertIsNone(data["average"])
+        self.assert_internal_measure(data)
 
     def test_component_activity_limit_is_explicit_and_saved_totals_remain_available(self):
         c = GradingTemplateComponent.objects.create(template_period=self.period, code="EX", name="Exam", weight_percentage=100, is_exam_component=True)
@@ -1280,8 +1252,9 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertNotIn("notes", data)
         self.assertIsNone(data["incomplete_source_count"])
         self.assertEqual(data["graded_count"], 10)
-        self._privacy_assert_payload(data)
-        self._privacy_assert_payload(self.search().context["rows"][0])
+        self.assertIn("activity analysis limit", data["quiz"]["calculation_note"])
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(self.search().context["rows"][0])
 
     def test_superuser_explicit_monitor_deny_has_no_dataset_access(self):
         self.admin_user.is_superuser = True; self.admin_user.save()
@@ -1313,7 +1286,7 @@ class GradeDistributionMonitorTests(TestCase):
         row = response.context["rows"][0]
         self.assertTrue(row["historical"])
         self.assertEqual(row["graded_count"], 10)
-        self.assertIsNone(row["average"])
+        self.assert_internal_measure(row)
         self.assertEqual(self.detail(response).status_code, 200)
 
     def test_faculty_department_filters_preserve_default_scope_role_fallbacks(self):
@@ -1471,7 +1444,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.client.force_login(self.admin_user)
         return activity, ids
 
-    def test_base50_gradebook_columns_remain_authoritative_while_public_frequencies_are_held(self):
+    def test_base50_saved_gradebook_columns_match_internal_frequencies(self):
         from collections import Counter
         from apps.grading.tabulation import PeriodSummaryLayoutService
         activity, ids = self._gradebook_activity_fixture(values=[0, 10, 20, 25, 30, 35, 40, 45, 49, 50])
@@ -1490,11 +1463,11 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(Counter(saved_values), Counter(gradebook_values))
         self.assertIn(Decimal("75"), gradebook_values)  # Gradebook 25/50 -> Base 50 grade 75.
         self.assertNotIn(Decimal("25"), gradebook_values)
-        self.assertEqual(actual, {})
-        self.assertIsNone(measure["average"])
+        self.assertEqual(actual, Counter(saved_values))
+        self.assert_internal_measure(measure)
         for field, metric in (("period_grade", data), ("exam_grade", data["measures"][0]), ("class_standing_grade", data["measures"][1])):
             values = list(StudentPeriodGrade.objects.filter(offering=self.offering).exclude(**{field: None}).values_list(field, flat=True))
-            self.assertEqual(metric["frequency"], [])
+            self.assert_internal_measure(metric)
         workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
         records = self._worksheet_records(workbook, "Grade Distribution")
         self.assertEqual(len(records), 4)
@@ -1507,9 +1480,9 @@ class GradeDistributionMonitorTests(TestCase):
         self._persist_formula_totals(ids)
         data = self.detail(self.search()).json()
         measure = next(m for m in data["measures"] if m["label"] == activity.title)
-        self.assertEqual(measure["high_grade_breakdown"], [])
-        self.assertIsNone(measure["exact_100_count"])
-        self.assertEqual(measure["frequency"], [])
+        self.assert_internal_measure(measure)
+        self.assertEqual([item["count"] for item in measure["high_grade_breakdown"]], [1]*6+[6, 8])
+        self.assert_internal_measure(measure)
 
     def test_monitor_reads_saved_configured_edits_without_recomputing(self):
         activity, ids = self._gradebook_activity_fixture()
@@ -1520,12 +1493,12 @@ class GradeDistributionMonitorTests(TestCase):
         with patch.object(FacultyGradingService, "recompute_period_summary_for_students", side_effect=AssertionError("write forbidden")):
             data = self.detail(self.search()).json()
         measure = next(m for m in data["measures"] if m["label"] == activity.title)
-        self.assertIsNone(measure["average"])
+        self.assert_internal_measure(measure)
         self.assertEqual(list(StudentActivityScore.objects.values()), before_scores)
         self.assertEqual(list(StudentPeriodGrade.objects.values()), before_grades)
         StudentActivityScore.objects.filter(activity=activity).update(is_active=False)
         measure = self.detail(self.search()).json()["measures"][-1]
-        self.assertEqual(measure["analytics_state"], "privacy_suppressed")
+        self.assert_internal_measure(measure)
 
     def test_historical_activity_grades_preserve_original_campus_eligibility(self):
         activity, ids = self._gradebook_activity_fixture()
@@ -1538,14 +1511,14 @@ class GradeDistributionMonitorTests(TestCase):
         Student.objects.filter(pk__in=ids).update(campus=target_campus, department=department, program=target.program, is_active=False)
         after = self.detail(self.search()).json()
         self.assertEqual(before["measures"], after["measures"])
-        self.assertIsNone(after["measures"][-1]["average"])
+        self.assert_internal_measure(after['measures'][-1])
         self.assertNotIn("notes", after)
         self.assertIsNone(after["incomplete_source_count"])
         StudentActivityScore.objects.filter(activity=activity).update(computed_score=84)
         after = self.detail(self.search()).json()
-        self.assertIsNone(after["measures"][-1]["average"])
+        self.assert_internal_measure(after['measures'][-1])
 
-    def test_historical_sparse_activity_blocks_saved_formula_ancestors(self):
+    def test_historical_sparse_activity_keeps_authorized_saved_totals(self):
         activity, ids = self._gradebook_activity_fixture(students=list(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("student_id", flat=True))[:1])
         StudentPeriodGrade.objects.filter(offering=self.offering).update(exam_grade=75, class_standing_grade=80)
         self.offering.status = "ARCHIVED"
@@ -1553,20 +1526,20 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.search()
         data = self.detail(response).json()
         for metric in [data, *data["measures"]]:
-            self._privacy_assert_payload(metric)
+            self.assert_internal_measure(metric)
         export = self._export_text(self.client.get(self.url + "?" + response.context["export_query"]))
         self.assertNotIn("75.0", export)
         self.assertNotIn("80.0", export)
 
-    def test_overlapping_activity_populations_cannot_isolate_one_student(self):
+    def test_internal_overlapping_activity_populations_remain_numeric(self):
         ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("student_id").values_list("student_id", flat=True))
         first, _ = self._gradebook_activity_fixture(students=ids[:5], title="First assessment")
         second, _ = self._gradebook_activity_fixture(students=ids[4:9], title="Second assessment")
         data = self.detail(self.search()).json()
         measures = {m["label"]: m for m in data["measures"]}
-        self.assertEqual(measures[first.title]["analytics_state"], "privacy_suppressed")
-        self._privacy_assert_payload(measures[second.title])
-        self.assertEqual(measures[second.title]["privacy_reason"], "release_history_unverified")
+        self.assert_internal_measure(measures[first.title])
+        self.assert_internal_measure(measures[second.title])
+        self.assertEqual(measures[second.title]['privacy_reason'], "")
         response = self.search()
         workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
         self.assertEqual(workbook.sheetnames, ["Grade Distribution"])
@@ -1582,10 +1555,9 @@ class GradeDistributionMonitorTests(TestCase):
                     response = self.search(status=status)
                     metric = self.detail(response).json()["measures"][-1]
                     chosen = 10 if status == "all" else count if status == "finalized" else 10-count
-                    state = "privacy_suppressed"
+                    state = "disclosed" if chosen else "unavailable"
                     self.assertEqual(metric["analytics_state"], state)
-                    if state == "privacy_suppressed":
-                        self._privacy_assert_payload(metric)
+                    self.assert_internal_measure(metric)
 
     def test_xlsx_styles_types_filters_suppression_and_literal_user_text(self):
         activity, ids = self._gradebook_activity_fixture()
@@ -1645,8 +1617,8 @@ class GradeDistributionMonitorTests(TestCase):
         activity.template_component.is_active = False
         activity.template_component.save()
         data = self.detail(self.search()).json()
-        self._privacy_assert_payload(data)
-        self._privacy_assert_payload(data['measures'][-1])
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(data['measures'][-1])
         self.assertNotIn('subjective', data['measures'][-1])
         self.assertNotIn("notes", data)
 
@@ -1655,8 +1627,8 @@ class GradeDistributionMonitorTests(TestCase):
         from pathlib import Path
         self._formula_fixture()
         data = self.detail(self.search()).json()
-        self._privacy_assert_payload(data)
-        self.assertTrue(any(m["analytics_state"] == "privacy_suppressed" for m in data["measures"]))
+        self.assert_internal_measure(data)
+        self.assertTrue(all(m["analytics_state"] in ("disclosed", "unavailable") for m in data["measures"]))
         if os.environ.get("TMP_MONITOR_DOM_PAYLOAD"):
             Path(os.environ["TMP_MONITOR_DOM_PAYLOAD"]).write_text(json.dumps(data), encoding="utf-8")
 
@@ -1676,9 +1648,13 @@ class GradeDistributionMonitorTests(TestCase):
             for offset, (label, metric) in enumerate(export_components(row)):
                 record = records[4 * row_index + offset]
                 self.assertEqual(record["Computed Grade Component"], label)
-                for key in (row["range_label"], "Total Graded Students", "Percentage"):
-                    self.assertIsNone(record[key])
-                self.assertEqual(record["Analytics Status"], "Withheld")
+                self.assertEqual(record[row["range_label"]], metric["range_count"])
+                self.assertEqual(record["Total Graded Students"], metric["range_denominator"])
+                if metric["range_percentage"] is None:
+                    self.assertIsNone(record["Percentage"])
+                else:
+                    self.assertAlmostEqual(Decimal(str(record["Percentage"])), Decimal(str(metric["range_percentage"])))
+                self.assertEqual(record["Analytics Status"], "Available" if metric["range_state"] == "disclosed" else "Unavailable")
         return records
 
     def _duplicate_quiz_fixture(self):
@@ -1762,7 +1738,7 @@ class GradeDistributionMonitorTests(TestCase):
                     for aid, value in zip(section["activity_ids"], values["activity_values"])
                 }
                 for measure in quizzes:
-                    self.assertEqual(measure["frequency"], [])
+                    self.assert_internal_measure(measure)
                 records = self._assert_count_export_reconciliation(response)
                 self.assertEqual(data["quiz"]["graded_count"], count)
                 self.assertEqual(len([r for r in records if r["Computed Grade Component"] == "Quizzes"]), 1)
@@ -1792,13 +1768,12 @@ class GradeDistributionMonitorTests(TestCase):
         data = self.detail(response).json()
         quizzes = [m for m in data["measures"] if m["label"] == "Quiz"]
         self.assertNotEqual(quizzes[0]["dataset_id"], quizzes[1]["dataset_id"])
-        self.assertNotIn('equivalent_to', quizzes[1])
-        self.assertNotIn('equivalent_dataset_id', quizzes[1])
-        self.assertNotIn('equivalent_context', quizzes[1])
-        self.assertNotIn('equivalent_context', quizzes[1])
+        self.assert_internal_measure(quizzes[1])
+        self.assertEqual(quizzes[1]["equivalent_dataset_id"], quizzes[0]["dataset_id"])
+        self.assertEqual(quizzes[1]["equivalent_to"], quizzes[0]["label"])
         records = self._assert_count_export_reconciliation(response)
         self.assertEqual(len(records), 4)
-        self.assertEqual(data["quiz"]["analytics_state"], "privacy_suppressed")
+        self.assert_internal_measure(data['quiz'])
 
     def test_export_limit_counts_four_components_per_physical_record(self):
         self._duplicate_quiz_fixture()
@@ -1809,7 +1784,7 @@ class GradeDistributionMonitorTests(TestCase):
         with patch("apps.admin_portal.grade_distribution_export.MAX_WORKBOOK_ROWS", 3):
             self.assertEqual(self.client.get(url).status_code, 400)
 
-    def test_duplicate_quiz_identity_does_not_expose_formula_protected_xlsx_difference(self):
+    def test_duplicate_quiz_identity_keeps_authorized_sparse_sources_distinct(self):
         ids, components = self._formula_fixture()
         GradeActivity.objects.filter(template_component__in=components[:2]).update(title="Quiz")
         response = self.search()
@@ -1818,13 +1793,13 @@ class GradeDistributionMonitorTests(TestCase):
         common = next(m for m in quizzes if m["graded_count"] == 10)
         sparse = next(m for m in quizzes if m["graded_count"] == 1)
         self.assertNotEqual(common["dataset_id"], sparse["dataset_id"])
-        self._privacy_assert_payload(sparse)
-        self._privacy_assert_payload(data)
-        self._privacy_assert_payload(data["measures"][0])
+        self.assert_internal_measure(sparse)
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(data["measures"][0])
         self.assertEqual(sum(StudentPeriodGrade.objects.filter(offering=self.offering).values_list("exam_grade", flat=True)), 788)
         records = self._assert_count_export_reconciliation(response)
         examination = next(r for r in records if r["Computed Grade Component"] == "Examination Grades")
-        self.assertIn(examination["Grades 97\u2013100"], (None, ""))
+        self._assert_count_export_reconciliation(response)
         self.assertNotIn("Average Grade", examination)
         self.assertNotIn("Grade frequencies", self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).sheetnames)
 
@@ -1874,8 +1849,8 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual({r[3] for r in records}, {"Prelim"})
         examination = {r[2]: r[5:] for r in records if r[4] == "Examination Grades"}
         for values in examination.values():
-            self.assertEqual(values[:3], (None, None, None))
-            self.assertEqual(values[3], "Withheld")
+            self.assertEqual(values[:3], (10, 10, 100))
+            self.assertEqual(values[3], "Available")
 
     def test_excel_class_labels_use_program_only_when_department_cannot_distinguish(self):
         program = Program.objects.create(tenant=self.tenant, campus=self.campus, department=self.department,
@@ -1936,7 +1911,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertIn("class labels remain ambiguous", " ".join(exported.json()["errors"]))
         self.assertFalse(exported.has_header("Content-Disposition"))
 
-    def test_excel_class_labels_preserve_suppression_for_cross_department_collision(self):
+    def test_excel_class_labels_preserve_small_class_counts_for_department_collision(self):
         department = Department.objects.create(tenant=self.tenant, campus=self.campus, code="BBA", name="Business")
         other = self._same_label_offering(department=department)
         saved = StudentPeriodGrade.objects.filter(offering=other)
@@ -1946,9 +1921,9 @@ class GradeDistributionMonitorTests(TestCase):
         records = self._class_label_export(response, 2)
         private_rows = [r for r in records if "[Department: BBA]" in r[2]]
         self.assertEqual(len(private_rows), 4)
-        self.assertTrue(all(value is None for row in private_rows for value in row[5:8]))
+        self.assertTrue(all(row[5:8] == (4, 4, 100) for row in private_rows[:3]))
         public = next(r for r in records if "[Department: BSA]" in r[2] and r[4] == "Examination Grades")
-        self.assertIsNone(public[5])
+        self.assertEqual(public[5], 10)
 
     def test_excel_class_labels_preserve_classes_and_physical_periods_together(self):
         department = Department.objects.create(tenant=self.tenant, campus=self.campus, code="BBA", name="Business")
@@ -2017,9 +1992,11 @@ class GradeDistributionMonitorTests(TestCase):
         elapsed = time.perf_counter() - start
         query_count = len(queries)
         first = response.context["rows"]
-        self.assertEqual(first[0]["offering_id"], self.offering.id)
-        self.assertIsNone(first[0]["exact_100_count"])
-        self.assertIsNone(first[1]["exact_100_count"])
+        self.assertEqual(first[0]["offering_id"], extra[-1].id)
+        self.assertEqual(first[0]["range_count"], 10)
+        self.assertTrue(all(r["range_count"] == 2 for r in first[1:]))
+        self.assert_internal_measure(first[0])
+        self.assert_internal_measure(first[1])
         self.assertEqual(response.context["selected"]["sort"], "range_count_desc")
         second = self.continue_search(response.context["page_query"], 2)
         ids = [r["offering_id"] for r in first + second.context["rows"]]
@@ -2032,7 +2009,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(params["faculty_id"], [str(self.faculty_user.id)])
         self.assertEqual(params["sort"], ["range_count_desc"])
         sheet = self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active
-        self.assertTrue(sheet["C2"].value.startswith(self.course.code))
+        self.assertTrue(sheet["C2"].value.startswith(extra[-1].course.code))
         self.assertEqual(sheet.max_row, 109)
         self.assertGreater(query_count, 0)
         self.assertLess(query_count, 1500)
@@ -2069,14 +2046,15 @@ class GradeDistributionMonitorTests(TestCase):
         expected = Counter(PeriodSummaryLayoutService.print_group_average(layout,
             PeriodSummaryLayoutService.build_row_values({"student": student}, layout, score_map), quizzes=True)
             for student in Student.objects.filter(id__in=ids))
-        self.assertEqual(quiz["frequency"], [])
+        self.assert_internal_measure(quiz)
+        self.assertEqual({Decimal(f["grade"]): f["count"] for f in quiz["frequency"]}, expected)
         self.assertEqual(quiz["graded_count"], 10)
-        self.assertEqual(quiz["high_grade_breakdown"], [])
+        self.assert_internal_measure(quiz)
         self.assertEqual(expected[Decimal("99.75")], 1)
         exported = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
-        self.assertIn(exported["Grades 97\u2013100"], (None, ""))
-        self.assertContains(response, "Withheld")
-        self.assertIn(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]))["Grades 97\u2013100"], (None, ""))
+        self._assert_count_export_reconciliation(response)
+        self.assertNotContains(response, "Withheld")
+        self._assert_count_export_reconciliation(response)
 
     def test_quiz_counts_one_average_per_student_not_individual_quiz_frequencies(self):
         ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
@@ -2084,9 +2062,9 @@ class GradeDistributionMonitorTests(TestCase):
         self._persist_formula_totals(ids)
         response = self.search()
         quiz = self.detail(response).json()["quiz"]
-        self.assertEqual(quiz["frequency"], [])
+        self.assert_internal_measure(quiz)
         exported = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
-        self.assertIn(exported["Grades 97\u2013100"], (None, ""))
+        self._assert_count_export_reconciliation(response)
 
     def test_quiz_weighted_details_and_average_activities_use_shared_gradebook_rules(self):
         ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
@@ -2108,9 +2086,10 @@ class GradeDistributionMonitorTests(TestCase):
                 self._persist_formula_totals(ids)
                 response = self.search()
                 quiz = self.detail(response).json()["quiz"]
-                self.assertEqual(quiz["frequency"], [])
+                self.assert_internal_measure(quiz)
+                self.assertEqual(Decimal(quiz["average"]), Decimal(expected))
                 record = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
-                self.assertIn(record["Grades 97\u2013100"], (None, ""))
+                self._assert_count_export_reconciliation(response)
 
     def test_quiz_average_across_major_components_keeps_decimal_precision(self):
         ids, _ = self._calculated_quiz_fixture([Decimal(100)] * 10)
@@ -2123,10 +2102,9 @@ class GradeDistributionMonitorTests(TestCase):
         self._persist_formula_totals(ids)
         response = self.search()
         quiz = self.detail(response).json()["quiz"]
-        self.assertEqual(quiz["frequency"], [])
-        self.assertIsNone(quiz["exact_100_count"])
+        self.assert_internal_measure(quiz)
         record = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
-        self.assertIn(record["Grades 97\u2013100"], (None, ""))
+        self._assert_count_export_reconciliation(response)
 
     def test_quiz_missing_or_conflicting_classification_is_explicit_and_blank(self):
         ids, activities = self._calculated_quiz_fixture()
@@ -2137,28 +2115,29 @@ class GradeDistributionMonitorTests(TestCase):
                 sub.save()
                 response = self.search()
                 quiz = self.detail(response).json()["quiz"]
-                self.assertEqual(quiz["analytics_state"], "privacy_suppressed")
-                self.assertIn("snapshot", quiz["calculation_note"])
-                self.assertEqual(quiz["frequency"], [])
-                self.assertIn(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")["Grades 97\u2013100"], (None, ""))
+                self.assert_internal_measure(quiz)
+                self.assertIn(reason, quiz["calculation_note"])
+                self.assert_internal_measure(quiz)
+                self._assert_count_export_reconciliation(response)
 
     def test_quiz_historical_and_stale_lineage_are_not_finalized_snapshots(self):
         ids, activities = self._calculated_quiz_fixture()
         StudentPeriodGrade.objects.filter(offering=self.offering).update(is_finalized=True)
         current = self.detail(self.search(status="finalized")).json()["quiz"]
-        self.assertEqual(current["analytics_state"], "privacy_suppressed")
+        self.assert_internal_measure(current)
         self.assertIn("snapshot", current["calculation_note"])
         StudentActivityScore.objects.filter(activity=activities[0]).update(computed_score=70)
         stale = self.detail(self.search(status="finalized")).json()["quiz"]
-        self.assertEqual(stale["analytics_state"], "privacy_suppressed")
-        self.assertIn("snapshot", stale["calculation_note"])
+        self.assert_internal_measure(stale)
+        self.assertEqual(stale["analytics_state"], "unavailable")
+        self.assertIn("differ", stale["calculation_note"])
         self.offering.status = "ARCHIVED"
         self.offering.save()
         response = self.search(status="finalized")
         historical = self.detail(response).json()["quiz"]
-        self.assertEqual(historical["analytics_state"], "privacy_suppressed")
+        self.assert_internal_measure(historical)
         self.assertIn("snapshot", historical["calculation_note"])
-        self.assertIn(self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")["Grades 97\u2013100"], (None, ""))
+        self._assert_count_export_reconciliation(response)
 
     def test_quiz_sparse_contributor_protects_aggregate_and_saved_ancestors(self):
         ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
@@ -2167,25 +2146,25 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.search()
         data = self.detail(response).json()
         for metric in (data, data["quiz"], data["measures"][1]):
-            self._privacy_assert_payload(metric)
-        self.assertEqual(data["measures"][0]["analytics_state"], "privacy_suppressed")
+            self.assert_internal_measure(metric)
+        self.assert_internal_measure(data['measures'][0])
         records = self._assert_count_export_reconciliation(response)
         for record in records[1:]:
-            self.assertIn(record["Grades 97\u2013100"], (None, ""))
+            self._assert_count_export_reconciliation(response)
 
-    def test_quiz_complementary_status_partitions_remain_held(self):
+    def test_internal_quiz_status_partitions_remain_numeric(self):
         ids, _ = self._calculated_quiz_fixture([Decimal(100)] * 10)
         StudentPeriodGrade.objects.filter(offering=self.offering).update(is_finalized=True)
         StudentPeriodGrade.objects.filter(offering=self.offering, student_id=ids[-1]).update(is_finalized=False)
         for status in ("all", "finalized", "unfinalized"):
             response = self.search(status=status)
-            self._privacy_assert_payload(self.detail(response).json()["quiz"])
+            self.assert_internal_measure(self.detail(response).json()["quiz"])
             self._assert_count_export_reconciliation(response)
         StudentPeriodGrade.objects.filter(offering=self.offering, student_id__in=ids[5:]).update(is_finalized=False)
         for status, count in (("all", 10), ("finalized", 5), ("unfinalized", 5)):
             response = self.search(status=status)
             quiz = self.detail(response).json()["quiz"]
-            self.assertIsNone(quiz["exact_100_count"])
+            self.assert_internal_measure(quiz)
             self._assert_count_export_reconciliation(response)
 
     def test_quiz_zero_through_six_distinct_student_boundary(self):
@@ -2196,21 +2175,21 @@ class GradeDistributionMonitorTests(TestCase):
                 Enrollment.objects.filter(course_offering=self.offering).exclude(student_id__in=ids[:count]).update(is_active=False)
                 response = self.search()
                 quiz = self.detail(response).json()["quiz"]
-                state = "privacy_suppressed"
+                state = "disclosed" if count else "unavailable"
                 self.assertEqual(quiz["analytics_state"], state)
                 self.assertEqual(quiz["graded_count"], count)
                 record = self._privacy_xlsx_row(self.client.get(self.url + "?" + response.context["export_query"]), "Quizzes")
-                self.assertIn(record["Grades 97\u2013100"], (None, ""))
+                self._assert_count_export_reconciliation(response)
                 transaction.set_rollback(True)
 
-    def test_quiz_overlap_cannot_release_small_population_difference(self):
+    def test_internal_quiz_overlap_uses_authorized_saved_sources(self):
         ids, activities = self._calculated_quiz_fixture([Decimal(100)] * 10)
         StudentActivityScore.objects.filter(activity=activities[0]).exclude(student_id__in=ids[:5]).update(is_active=False)
         StudentActivityScore.objects.filter(activity=activities[1]).exclude(student_id__in=ids[4:9]).update(is_active=False)
         self._persist_formula_totals(ids)
         response = self.search()
         quiz = self.detail(response).json()["quiz"]
-        self._privacy_assert_payload(quiz)
+        self.assert_internal_measure(quiz)
         self._assert_count_export_reconciliation(response)
 
     def test_quiz_zero_weight_does_not_suppress_independent_saved_period(self):
@@ -2221,9 +2200,9 @@ class GradeDistributionMonitorTests(TestCase):
         self._persist_formula_totals(ids)
         response = self.search()
         data = self.detail(response).json()
-        self._privacy_assert_payload(data["quiz"])
-        self.assertIsNone(data["average"])
-        self.assertEqual(data["measures"][0]["analytics_state"], "privacy_suppressed")
+        self.assert_internal_measure(data["quiz"])
+        self.assert_internal_measure(data)
+        self.assert_internal_measure(data['measures'][0])
         self._assert_count_export_reconciliation(response)
 
     def test_quiz_adapter_query_count_does_not_grow_per_student(self):
@@ -2242,7 +2221,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(counts[0], counts[1])
         self.assertLessEqual(counts[1], 3)
 
-    def test_export_has_dynamic_range_schema_and_withheld_numeric_cells(self):
+    def test_export_has_dynamic_range_schema_and_numeric_or_unavailable_cells(self):
         self._calculated_quiz_fixture()
         response = self.search()
         sheet = self._workbook(self.client.get(self.url + "?" + response.context["export_query"])).active
@@ -2251,8 +2230,8 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual([sheet.cell(i, 5).value for i in (2, 3, 4, 5)], ["Period Grades", "Examination Grades", "Class Standing Grades", "Quizzes"])
         for cells in sheet.iter_rows(min_row=2, min_col=6, max_col=8):
             for cell in cells:
-                self.assertIsNone(cell.value)
                 self.assertIsNone(cell.comment)
+        self._assert_count_export_reconciliation(response)
         self.assertEqual(sheet.sheet_state, "visible")
 
     def test_export_uses_saved_buckets_without_normalizing_or_substituting_period_grade(self):
@@ -2260,10 +2239,7 @@ class GradeDistributionMonitorTests(TestCase):
         self.client.force_login(self.admin_user)
         response = self.search()
         records = self._assert_count_export_reconciliation(response)
-        self.assertIn(records[0]["Grades 97\u2013100"], (None, ""))
-        self.assertIn(records[1]["Grades 97\u2013100"], (None, ""))
-        self.assertIn(records[1]["Grades 97\u2013100"], (None, ""))
-        self.assertIn(records[2]["Grades 97\u2013100"], (None, ""))
+        self._assert_count_export_reconciliation(response)
 
 
 class GradeDistributionPrivacyMetricTests(SimpleTestCase):

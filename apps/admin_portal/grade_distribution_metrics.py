@@ -82,12 +82,15 @@ FORMULA_MESSAGE = "Related grade analytics are withheld because grading formulas
 class PrivacyFamily:
     """One physical class/period; server-only student sets never enter payloads.
 
+    Internal monitor mode skips legacy release population suppression.
+
     Decisions use all saved sources before status filtering. Period, saved exam,
     saved standing, then component/activity measures have a fixed priority. A new
     measure is withheld if it would split any already disclosed membership/status
     cell below five; previous decisions never change when detail is requested.
     """
-    def __init__(self, status_by_student, status, threshold):
+    def __init__(self, status_by_student, status, threshold, *, internal=False):
+        self.internal = internal
         self.status_by_student = status_by_student
         self.status = status
         self.threshold = threshold
@@ -119,7 +122,7 @@ class PrivacyFamily:
         samples = {sid: value for sid, value in samples.items() if value is not None}
         chosen = {sid: value for sid, value in samples.items() if self.status == "all"
                   or self.status_by_student.get(sid) is (self.status == "finalized")}
-        admitted = not forced_reason and len(samples) >= MIN_ANALYTICS_STUDENTS and self._admit(samples)
+        admitted = self.internal or (not forced_reason and len(samples) >= MIN_ANALYTICS_STUDENTS and self._admit(samples))
         reason = ("minimum_population" if len(chosen) < MIN_ANALYTICS_STUDENTS else "complementary_population")
         if forced_reason and len(chosen) >= MIN_ANALYTICS_STUDENTS:
             reason = forced_reason
@@ -182,6 +185,11 @@ class FormulaPrivacyPlan:
         self.edges[source].add(total)
 
     def finalize(self, *, unresolved=False):
+        if self.privacy.internal:
+            # Internal monitor authorization permits small/overlapping populations.
+            # Source availability is still decided by the Gradebook adapter.
+            self.blocked = set()
+            return
         probe = PrivacyFamily(self.privacy.status_by_student, "all", self.privacy.threshold)
         # Full-source, fixed-order check, independent of requested status/route.
         protected = set(self.samples) if unresolved else set()
@@ -359,6 +367,7 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
                         "template_component", "template_subcomponent", "template_detail").order_by("id")[:201])
     if len(activities) > 200:
         notes.append("Activity analysis limit: 200 activities per class/period. Formula safety cannot be established; related analytics are withheld.")
+        quiz_note = "Quiz calculations unavailable: activity analysis limit exceeded; no partial calculation is shown."
         return finish(unresolved=True, unknown_links=True)
     activity_map = {a.id: a for a in activities}
     scores = bundle.scores[pair] if bundle else list(StudentActivityScore.objects.filter(
@@ -366,7 +375,15 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
             "student_id", "activity_id", "raw_score", "computed_score")[:20001])
     if len(scores) > 20000:
         notes.append("Activity analysis limit: 20,000 saved assessment scores per class/period. Formula safety cannot be established; related analytics are withheld.")
+        quiz_note = "Quiz calculations unavailable: assessment-score analysis limit exceeded; no partial calculation is shown."
         return finish(unresolved=True, unknown_links=True)
+    if privacy.internal:
+        saved_activity_values = defaultdict(dict)
+        for record in scores:
+            saved_activity_values[record["activity_id"]][record["student_id"]] = record["computed_score"]
+        for activity in activities:
+            add_measure(("configured", activity.id), saved_activity_values[activity.id],
+                activity.title, "Saved Gradebook activity grade, including the configured base. A grade of 100 need not mean a perfect raw score.")
     inactive_routes = any(not a.template_component.is_active or
         (a.template_subcomponent and not a.template_subcomponent.is_active) or
         (a.template_detail and not a.template_detail.is_active) for a in activities)
@@ -376,8 +393,9 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         quiz_note = "Quiz calculations unavailable: no immutable historical Quiz calculation or original formula snapshot is saved."
         for activity in activities:
             configured_key, input_key = ("configured", activity.id), ("raw_input", activity.id)
-            add_measure(configured_key, {r["student_id"]: r["computed_score"] for r in scores if r["activity_id"] == activity.id},
-                        activity.title, "Saved Gradebook activity grade (100-point scale).")
+            if not privacy.internal:
+                add_measure(configured_key, {r["student_id"]: r["computed_score"] for r in scores if r["activity_id"] == activity.id},
+                            activity.title, "Saved Gradebook activity grade (100-point scale).")
             plan.add(input_key, {r["student_id"]: r["raw_score"] for r in scores if r["activity_id"] == activity.id})
             plan.link(configured_key, input_key)
             # Original formulas are unavailable. Every retained activity may
@@ -505,8 +523,9 @@ def component_measures(offering, period, saved_rows, student_ids, threshold, his
         plan.depends_on(("component", activity.template_component_id), input_key)
         plan.link(raw_key, configured_key)
         plan.link(raw_key, input_key)
-        measures.append((configured_key, activity.title,
-                         "Saved Gradebook activity grade (100-point scale), including the configured base. A grade of 100 need not mean a perfect raw score."))
+        if not privacy.internal:
+            measures.append((configured_key, activity.title,
+                             "Saved Gradebook activity grade (100-point scale), including the configured base. A grade of 100 need not mean a perfect raw score."))
     lineage_matches = all(all(r[field] == engine_totals[r["student_id"]][field]
                               for field in ("period_grade", "exam_grade", "class_standing_grade")) for r in saved_rows)
     notes.append("Activity analytics use saved Gradebook grades, including the configured base. The read-only grading engine checks formula dependencies internally; analytics do not recompute or overwrite saved grades. Exactly 100 need not mean a perfect raw score.")

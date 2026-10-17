@@ -1,4 +1,4 @@
-"""Current public UX contract; historical arithmetic fixtures stay in the monitor suite."""
+"""Authorized internal UX plus retained legacy serializer arithmetic fixtures."""
 import json
 import os
 import unittest
@@ -108,15 +108,8 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
     def params(self, **kwargs):
         return dict(apply="1", academic_year_id=self.academic_year.id, term_id=self.term.id, period="PRELIM", **kwargs)
 
-    def assert_withheld(self, measure):
-        for key in ("range_count", "range_denominator", "range_percentage", "average", "minimum", "maximum", "exact_100_count", "all_100"):
-            self.assertIsNone(measure[key], key)
-        for key in ("frequency", "distribution", "high_grade_breakdown"):
-            self.assertEqual(measure[key], [], key)
-        self.assertNotIn("equivalent_dataset_id", measure)
-
     def local_analysis(self, *, historical=False, status="all"):
-        """Inspect the internal arithmetic separately from the public HOLD."""
+        """Inspect retained legacy candidate admission separately from monitor policy."""
         offering = fixtures.CourseOffering.objects.select_related("tenant", "campus", "department", "program", "course", "section", "term").get(pk=self.offering.pk)
         records = list(StudentPeriodGrade.objects.filter(offering=offering, template_period=self.period).values("student_id", "period_grade", "exam_grade", "class_standing_grade", "is_finalized"))
         ids = set(fixtures.Enrollment.objects.filter(course_offering=offering).values_list("student_id", flat=True))
@@ -136,7 +129,7 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
         self.assertIn(Decimal("75"), actual)
         self.assertNotIn(Decimal("25"), actual)
         self.assertEqual(period["analytics_state"], "disclosed")
-        self.assert_withheld(self.detail(self.search()).json())
+        self.assert_internal_measure(self.detail(self.search()).json())
 
     def test_internal_exact_decimal_counts_and_over_100_values_are_not_clamped(self):
         StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=Decimal("99.75"), exam_grade=Decimal("150"), class_standing_grade=Decimal("99.75"))
@@ -144,14 +137,14 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
         self.assertEqual(period["frequency"], [{"grade": Decimal("99.75"), "count": 10, "percentage": Decimal("100")}])
         self.assertEqual(measures[0]["maximum"], Decimal("150"))
         self.assertEqual(candidate_range(measures[0]["frequency"], (Decimal("97"), Decimal("100"))), (0, 10))
-        self.assert_withheld(self.detail(self.search()).json())
+        self.assert_internal_measure(self.detail(self.search()).json())
 
-    def test_internal_sparse_formula_protection_survives_new_public_boundary(self):
+    def test_legacy_candidate_admission_does_not_gate_internal_monitor(self):
         self._formula_fixture(supplemental_count=1)
         period, measures, _, _, _ = self.local_analysis()
         self.assertEqual(period["analytics_state"], "privacy_suppressed")
         self.assertEqual(measures[0]["analytics_state"], "privacy_suppressed")
-        self.assert_withheld(self.detail(self.search()).json())
+        self.assert_internal_measure(self.detail(self.search()).json())
 
     def test_internal_quiz_adapter_and_historical_snapshot_semantics_remain_authoritative(self):
         self._calculated_quiz_fixture()
@@ -161,7 +154,7 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
         _, _, _, _, historical = self.local_analysis(historical=True)
         self.assertEqual(historical["frequency"], [])
         self.assertIn("historical", historical["calculation_note"])
-        self.assert_withheld(self.detail(self.search()).json()["quiz"])
+        self.assert_internal_measure(self.detail(self.search()).json()["quiz"])
 
     def test_applied_shell_is_grade_free_and_has_fallback_and_range(self):
         with patch.object(Monitor, "prepare", side_effect=AssertionError("shell ran analytics")), CaptureQueriesContext(connection) as queries:
@@ -191,25 +184,26 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
         self.assertIn("Select criteria", data["html"])
         self.assertEqual(data["url"], self.url)
 
-    def test_ajax_full_detail_and_excel_share_hold_and_requested_bounds(self):
+    def test_ajax_full_detail_and_excel_share_authorized_values_and_bounds(self):
         response = self.search(grade_min="97.51")
         self.assertEqual(response.status_code, 200)
         row = response.context["rows"][0]
-        self.assert_withheld(row)
+        self.assert_internal_measure(row)
         self.assertContains(response, "Grades 97.51–100")
         ajax = self.client.post(self.url, self.params(results="1", grade_min="97.51"))
         self.assertEqual(ajax.status_code, 200)
         self.assertIn("Grades 97.51–100", ajax.json()["html"])
         data = self.detail(response).json()
         for measure in [data, *data["measures"], data["quiz"]]:
-            self.assert_withheld(measure)
+            self.assert_internal_measure(measure)
             self.assertEqual(measure["grade_min"], "97.51")
         self.assertNotIn("notes", data)
         workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
         rows = list(workbook.active.values)
         self.assertEqual(rows[0][5:9], ("Grades 97.51–100", "Total Graded Students", "Percentage", "Analytics Status"))
         self.assertEqual([r[4] for r in rows[1:]], ["Period Grades", "Examination Grades", "Class Standing Grades", "Quizzes"])
-        self.assertTrue(all(r[5:8] == (None, None, None) and r[8] == "Withheld" for r in rows[1:]))
+        self.assertEqual(rows[1][5:8], (0, 10, 0))
+        self.assertTrue(all(r[8] in ("Available", "Unavailable") for r in rows[1:]))
 
     def test_saved_values_and_sources_remain_unchanged_by_every_route(self):
         self._gradebook_activity_fixture()
@@ -225,7 +219,7 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
     def test_current_django_dom_payload(self):
         self._gradebook_activity_fixture(exam=True, title="Standing title")
         data = self.detail(self.search()).json()
-        self.assert_withheld(data)
+        self.assert_internal_measure(data)
         if os.environ.get("TMP_UX_DOM_PAYLOAD"):
             Path(os.environ["TMP_UX_DOM_PAYLOAD"]).write_text(json.dumps(data), encoding="utf-8")
 
@@ -236,7 +230,7 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
         measure = next(m for m in data["measures"] if m["activity_id"] == activity.id)
         self.assertEqual(measure["group"], "examination")
         self.assertIn("may exceed 100", data["measures"][0]["unit"])
-        self.assert_withheld(measure)
+        self.assert_internal_measure(measure)
 
     def test_range_context_cannot_be_tampered_reused_by_user_or_expired(self):
         response = self.search(grade_min="97.500")
@@ -284,7 +278,7 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
         workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
         self.assertEqual(workbook.active.cell(1, 6).value, "Grades 98.5–100")
 
-    def test_overlapping_cohorts_statuses_and_live_edits_never_release(self):
+    def test_overlapping_cohorts_statuses_and_live_edits_stay_authorized(self):
         other = self._create_extra_offering("OVERLAP", "Overlap", "OVERLAP")
         for record in StudentPeriodGrade.objects.filter(offering=self.offering):
             fixtures.Enrollment.objects.create(tenant=self.tenant, campus=self.campus, academic_year=self.academic_year, term=self.term, student=record.student, course_offering=other)
@@ -294,12 +288,12 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
                 response = self.search(status=status, grade_min=lower)
                 self.assertEqual(response.context["result_count"], 2)
                 for row in response.context["rows"]:
-                    self.assert_withheld(row)
+                    self.assert_internal_measure(row)
         StudentPeriodGrade.objects.filter(offering=other).update(period_grade=100, is_finalized=True)
         for row in self.search().context["rows"]:
-            self.assert_withheld(row)
+            self.assert_internal_measure(row)
 
-    def test_seven_minus_six_attack_across_html_ajax_modal_and_excel(self):
+    def test_custom_overlapping_ranges_across_html_ajax_modal_and_excel(self):
         other = self._create_extra_offering("DIFFERENCE", "Differencing probe", "DIFF")
         self._seed_grades(other, [98] * 6 + [Decimal("97.50")] + [80] * 13)
         orders = []
@@ -307,17 +301,16 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
             response = self.search(grade_min=minimum)
             orders.append([row["offering_id"] for row in response.context["rows"]])
             row = next(r for r in response.context["rows"] if r["offering_id"] == other.id)
-            self.assert_withheld(row)
+            self.assert_internal_measure(row)
             data = self.detail(response, row).json()
-            self.assert_withheld(data)
-            self.assertNotIn("97.50", json.dumps(data))
+            self.assert_internal_measure(data)
+            self.assertIn("97.50", json.dumps(data))
             self.assertNotContains(response, "97.50")
             ajax = self.client.post(self.url, self.params(results="1", grade_min=minimum))
             self.assertNotIn("97.50", ajax.json()["html"])
             workbook = self._workbook(self.client.get(self.url + "?" + response.context["export_query"]))
             for record in list(workbook.active.values)[1:]:
-                self.assertEqual(record[5:8], (None, None, None))
-                self.assertEqual(record[8], "Withheld")
+                self.assertIn(record[8], ("Available", "Unavailable"))
         self.assertEqual(orders[0], orders[1])
         self.assertEqual(orders[1], orders[2])
 
@@ -337,3 +330,62 @@ class GradeDistributionUXTests(fixtures.GradeDistributionMonitorTests):
             counts.append((len(queries), len(option_queries)))
         self.assertEqual(counts[0], counts[1])
         print("GRADE_UX_SHELL_QUERIES=" + json.dumps(counts))
+
+    def test_internal_population_matrix_decimal_boundaries_and_channel_parity(self):
+        values = [Decimal("97.50"), Decimal("99.75"), Decimal("97.49"), Decimal("0"), Decimal("99.76")]
+        for n in (0, 1, 4, 5, 20):
+            with self.subTest(graded=n):
+                offering = self._create_extra_offering(f"INTERNAL{n}", "Population matrix", f"I{n}")
+                sample = [values[i % len(values)] for i in range(n)]
+                self._seed_grades(offering, sample or [0])
+                if not n:
+                    StudentPeriodGrade.objects.filter(offering=offering).update(period_grade=None)
+                response = self.search(grade_min="97.5", grade_max="99.75")
+                row = next(r for r in response.context["rows"] if r["offering_id"] == offering.pk)
+                count = sum(Decimal("97.5") <= v <= Decimal("99.75") for v in sample)
+                self.assertEqual(row["range_count"], count if n else None)
+                self.assertEqual(row["range_denominator"], n or None)
+                if n:
+                    from apps.admin_portal.grade_distribution_metrics import percentage
+                    self.assertEqual(row["range_percentage"], percentage(count, n))
+                    from apps.admin_portal.grade_distribution_metrics import rounded
+                    from collections import Counter
+                    self.assertEqual(row["average"], rounded(sum(sample)/n))
+                    self.assertEqual((row["minimum"], row["maximum"]), (min(sample), max(sample)))
+                    self.assertEqual({f["grade"]: f["count"] for f in row["frequency"]}, Counter(sample))
+                self.assert_internal_measure(row)
+                data = self.detail(response, row).json()
+                self.assert_internal_measure(data)
+                self.assertEqual(data["range_count"], row["range_count"])
+                sheet = self._workbook(self.client.get(self.url+"?"+response.context["export_query"])).active
+                record = next(r for r in list(sheet.values)[1:] if r[2].startswith(f"INTERNAL{n}") and r[4] == "Period Grades")
+                self.assertEqual(record[5:7], (count, n) if n else (None, None))
+                self.assertEqual(record[8], "Available" if n else "Unavailable")
+
+    def test_monitor_never_reads_or_writes_release_storage(self):
+        from apps.admin_portal.models import GradeDistributionRelease, GradeDistributionPublication
+        with patch("apps.admin_portal.grade_distribution_releases.source_candidate", side_effect=AssertionError("release candidate")), \
+             patch("apps.admin_portal.grade_distribution_releases.prepare_release", side_effect=AssertionError("prepare")), \
+             patch("apps.admin_portal.grade_distribution_releases.publish_release", side_effect=AssertionError("publish")), CaptureQueriesContext(connection) as queries:
+            response = self.search()
+            self.detail(response)
+            self.client.get(self.url+"?"+response.context["page_query"]+"&results=1")
+            self.client.get(self.url+"?"+response.context["export_query"])
+        for model in (GradeDistributionRelease, GradeDistributionPublication):
+            self.assertFalse(any(model._meta.db_table in q["sql"] for q in queries))
+        self.assertEqual(GradeDistributionRelease.objects.count(), 0)
+        self.assertEqual(GradeDistributionPublication.objects.count(), 0)
+
+    def test_zero_grade_zero_qualifiers_and_unavailable_are_distinct(self):
+        ids = list(StudentPeriodGrade.objects.filter(offering=self.offering).order_by("pk").values_list("pk", flat=True))
+        StudentPeriodGrade.objects.filter(offering=self.offering).update(period_grade=None)
+        StudentPeriodGrade.objects.filter(pk=ids[0]).update(period_grade=0)
+        row = self.search().context["rows"][0]
+        self.assertEqual((row["range_count"], row["range_denominator"], row["average"]), (0, 1, 0))
+        zero = self.search(grade_min="0", grade_max="0").context["rows"][0]
+        self.assertEqual((zero["range_count"], zero["range_percentage"]), (1, 100))
+        StudentPeriodGrade.objects.filter(pk=ids[0]).update(period_grade=None)
+        row = self.search().context["rows"][0]
+        self.assertEqual(row["analytics_state"], "unavailable")
+        self.assertIsNone(row["range_count"])
+        self.assertEqual(row["missing_count"], 10)

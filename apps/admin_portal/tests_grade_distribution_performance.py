@@ -148,7 +148,7 @@ class GradeDistributionPerformanceTests(fixtures.GradeDistributionMonitorTests):
         self.assertEqual(len(bundle.activities[(offering.id, self.period.id)]), 201)
         self.assertFalse(bundle.scores[(offering.id, self.period.id)])
         self.client.force_login(self.admin_user)
-        self.assertEqual(self.search().context["rows"][0]["analytics_state"], "privacy_suppressed")
+        self.assertEqual(self.search().context["rows"][0]["analytics_state"], "disclosed")
         GradeActivity.objects.filter(id__in=[a.id for a in activities[101:]]).delete()
         students = Student.objects.bulk_create([Student(tenant=self.tenant, campus=self.campus, department=self.department,
             student_no=f"DENSE{i}", last_name="Dense", first_name="Test") for i in range(201)])
@@ -253,4 +253,4 @@ class GradeDistributionPerformanceTests(fixtures.GradeDistributionMonitorTests):
         for row in rows:
             self.assertNotIn("_display", row)
             self.assertIn("grade_min=97", row["detail_query"])
-            self.assertIsNone(row["range_count"])
+            self.assertEqual(row["range_count"], 1 if row["offering_id"] == self.offering.pk else 0)

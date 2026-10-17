@@ -22,7 +22,7 @@ from apps.rbac.models import UserRole
 from apps.tenants.models import Department
 
 PERIODS = (("PRELIM", "Prelim"), ("MIDTERM", "Midterm"), ("PREFINAL", "Pre-Final"), ("FINAL", "Final"))
-SALT = "grade-distribution-search-v3-manual-frozen"
+SALT = "grade-distribution-search-v4-manual-internal"
 
 
 def faculty_name(user):
@@ -182,16 +182,9 @@ class MonitorSelection:
         return qs
 
     def identity(self):
-        if not hasattr(self, "_release_epoch"):
-            from django.db.models import Max
-            from django.utils.crypto import salted_hmac
-            from apps.admin_portal.models import GradeDistributionPublication
-            latest = GradeDistributionPublication.objects.filter(release__tenant_id=self.tenant_id).aggregate(value=Max("pk"))["value"]
-            self.publication_limit = latest or 0
-            self._release_epoch = salted_hmac("gdm-release-epoch", f"{self.tenant_id}:{latest}").hexdigest()
         scope = getattr(self.request, "scope", {})
         authority = {"faculty": {k: sorted(v) for k, v in self.faculty_map.items()}, "tenant": self.tenant_id, "campus": scope.get("campus_id")}
-        return {"user": self.request.user.pk, "filters": self.selected, "release_epoch": self._release_epoch,
+        return {"user": self.request.user.pk, "filters": self.selected,
                 "authority": hashlib.sha256(json.dumps(authority, sort_keys=True).encode()).hexdigest()}
 
     def token(self):

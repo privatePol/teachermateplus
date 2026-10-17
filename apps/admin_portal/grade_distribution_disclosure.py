@@ -1,4 +1,4 @@
-"""Decimal range validation and the public release serialization boundary."""
+"""Decimal ranges and aggregate-only projections; legacy release policy is retained."""
 import re
 from decimal import Decimal
 
@@ -68,7 +68,7 @@ def candidate_range(frequency, bounds):
 
 
 def public_measure(measure, bounds, *, historical=False, frozen=None):
-    """Erase live numerical analytics; admit only the verified frozen aggregate."""
+    """Legacy frozen-release serializer; normal monitor reads use internal_measure."""
     keys = ("dataset_id", "offering_id", "physical_period_id", "activity_id",
             "selection_status", "gradebook_context", "label", "unit", "group",
             "graded_count", "eligible_count", "finalized_count", "unfinalized_count", "status")
@@ -97,6 +97,32 @@ def public_measure(measure, bounds, *, historical=False, frozen=None):
             "Historical Quiz calculations have no immutable original formula snapshot."
             if historical else "Quiz averages use current saved Gradebook grades and configuration, including the configured base; not an immutable finalized snapshot."
         )
+    if historical:
+        result["history_notice"] = "Historical analytics use retained saved records; original roster, formula and score-revision snapshots are unavailable."
+    return result
+
+
+def internal_measure(measure, bounds, *, historical=False):
+    """Aggregate-only projection for authorized internal academic oversight."""
+    keys = ("dataset_id", "offering_id", "physical_period_id", "activity_id",
+            "selection_status", "gradebook_context", "label", "unit", "group",
+            "graded_count", "eligible_count", "finalized_count", "unfinalized_count", "status",
+            "average", "minimum", "maximum", "exact_100_count", "exact_100_percentage",
+            "all_100", "high_grade_breakdown", "frequency", "distribution",
+            "equivalent_to", "equivalent_dataset_id", "equivalent_context", "calculation_note")
+    result = {key: measure[key] for key in keys if key in measure}
+    count, total = candidate_range(measure.get("frequency", []), bounds)
+    from apps.admin_portal.grade_distribution_metrics import percentage
+    available = total > 0
+    result.update(analytics_state="disclosed" if available else "unavailable",
+        privacy_suppressed=False, privacy_reason="", privacy_message="",
+        range_label=range_label(bounds), grade_min=decimal_label(bounds[0]),
+        grade_max=decimal_label(bounds[1]), range_state="disclosed" if available else "unavailable",
+        range_count=count if available else None, range_denominator=total if available else None,
+        range_percentage=percentage(count, total) if available else None,
+        disclosure_policy="internal-authorized-v1")
+    if not available and not measure.get("calculation_note"):
+        result["source_notice"] = "No eligible saved values are available for this measure."
     if historical:
         result["history_notice"] = "Historical analytics use retained saved records; original roster, formula and score-revision snapshots are unavailable."
     return result

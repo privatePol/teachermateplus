@@ -170,7 +170,19 @@ document.addEventListener("DOMContentLoaded", () => {
     section.append(node("p", measure.range_label, "fw-semibold"));
     if (measure.range_state === "disclosed") {
       section.append(node("p", `${measure.range_count} / ${measure.range_denominator} (${Number(measure.range_percentage).toFixed(2)}%)`));
-    } else section.append(node("p", "Withheld", "fw-semibold"));
+    } else section.append(node("p", "Unavailable", "fw-semibold"));
+    if (measure.average != null) section.append(node("p", `Average: ${measure.average}; Minimum: ${measure.minimum}; Maximum: ${measure.maximum}`));
+    if (measure.frequency?.length) {
+      const table = node("table", undefined, "table table-sm"), head = node("thead"), tr = node("tr"), tbody = node("tbody");
+      table.append(node("caption", "Saved grade frequencies"));
+      for (const label of ["Grade", "Count", "Percentage"]) { const th = node("th", label); th.scope = "col"; tr.append(th); }
+      head.append(tr); table.append(head);
+      for (const item of measure.frequency) {
+        const row = node("tr");
+        row.append(node("td", item.grade), node("td", item.count), node("td", `${Number(item.percentage).toFixed(2)}%`)); tbody.append(row);
+      }
+      table.append(tbody); section.append(table);
+    }
     for (const key of ["source_notice", "calculation_note", "unit"]) {
       if (measure[key]) section.append(node("p", measure[key], "small text-muted"));
     }
@@ -187,7 +199,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const header = node("header", undefined, "gdm-class-header");
       header.append(node("h4", data.faculty_name, "h5"), node("p", `${data.course_code} — ${data.course_title} / ${data.section}`),
         node("p", `${data.campus} · ${data.school_year} / ${data.term} · ${data.status}`, "small mb-0"));
-      header.append(node("p", "Counts require an approved 97–100 saved Period Grade release with All Statuses. Other analytics and unavailable releases are withheld.", "small text-muted mt-2 mb-0"));
+      header.append(node("p", "Authorized saved Gradebook aggregates for the selected status and inclusive Grade Range.", "small text-muted mt-2 mb-0"));
+      if (data.incomplete_source_count != null) header.append(node("p", `Current assessment sources incomplete for ${data.incomplete_source_count} eligible students.`, "small text-muted"));
       if (data.history_notice) header.append(node("p", data.history_notice, "small text-muted"));
       body.replaceChildren(header);
       const groups = [["period", "PERIOD GRADES", [data]],

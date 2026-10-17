@@ -647,9 +647,9 @@ class GradeDistributionGuideContentTests(TestCase):
         for phrase in ("Grade Range defaults to 97–100", "both bounds are inclusive", "Clear Filters",
                        "Obsolete bookmarked course filters are rejected", "zero-qualifying classes",
                        "before analytics", "Browser Back/Forward", "Without JavaScript", "before pagination",
-                       "Withheld counts never affect ranking", "Only explicit Apply Filters",
-                       "comparisons across overlapping classes", "approved immutable", "Minimum-five",
-                       "formula privacy", "No individual student records", "PERIOD GRADES", "EXAMINATION GRADES",
+                       "actual saved counts before pagination", "Only explicit Apply Filters",
+                       "internal, access-controlled", "1–4 graded students", "missing grades are Unavailable",
+                       "direct DENY", "No individual student records", "PERIOD GRADES", "EXAMINATION GRADES",
                        "CLASS STANDING GRADES", "Base 50", "not an immutable finalized", "one Grade Distribution worksheet",
                        "Matching class labels add department", "ambiguous export is rejected", "2,000", "50,000"):
             self.assertIn(phrase, text)
