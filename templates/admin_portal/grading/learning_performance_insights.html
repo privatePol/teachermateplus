@@ -1,12 +1,13 @@
 {% extends "admin_portal/base.html" %}
 {% load static %}
+{% block title %}Academic Performance Insights | TeacherMate+{% endblock %}
 {% block admin_content %}
 <link rel="stylesheet" href="{% static 'admin_portal/learning_insights.css' %}">
 <div class="learning-insights">
   <header class="learning-header mb-4">
     <span class="badge text-bg-light border mb-2">Authorized preview</span>
-    <h1 class="h3 mb-2">Learning Performance Insights</h1>
-    <p class="text-muted mb-3">Explore how quizzes, class standing, and examination results move across concluded grading periods.</p>
+    <h1 class="h3 mb-2">Academic Performance Insights</h1>
+    <p class="text-muted mb-3"><em>Exploring relationships between learning activities, class standing, and examination performance.</em></p>
     <div class="d-flex flex-wrap gap-2">
       <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:midterm_exam_performance' %}">Midterm Exam Performance</a>
       <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:academic_activity_consistency' %}">Activity Consistency</a>

@@ -1,6 +1,7 @@
 """Isolated, read-only learning analysis. Never compute or finalize academic records."""
 from collections import Counter, defaultdict
 from decimal import Decimal
+from fractions import Fraction
 
 from django.db.models import F, Q
 from django.utils import timezone
@@ -20,7 +21,8 @@ from django.utils.crypto import salted_hmac
 
 
 PERIODS = (("PRELIM", "Prelim"), ("MIDTERM", "Midterm"), ("PREFINAL", "Pre-Final"), ("FINAL", "Final"))
-PATTERNS = ("Moved Together", "Moved Opposite", "Mixed / Unchanged")
+PATTERNS = ("Moved Together", "Moved Opposite", "Mixed / Stable")
+MEANINGFUL_CHANGE = Decimal("3.00")
 INSUFFICIENT = "Insufficient Comparable Data"
 METRICS = ("quizzes", "quiz", "activities", "standing", "exam", "periodic")
 
@@ -29,8 +31,25 @@ def key(period):
     return GradingGovernanceService.canonical_correction_period_key(period)
 
 
+def exact_average(values):
+    """Preserve score ratios and class means until after threshold comparisons."""
+    return sum((Fraction(v) for v in values), Fraction(0)) / len(values) if values else None
+
+
+def displayed(value):
+    return GradingGovernanceService._round(Decimal(value.numerator) / Decimal(value.denominator)) if value is not None else None
+
+
 def average(values):
-    return GradingGovernanceService._round(sum((Decimal(v) for v in values), Decimal("0")) / Decimal(len(values))) if values else None
+    return displayed(exact_average(values))
+
+
+def performance_change(previous, current):
+    """Call only for comparable percentage scales; missing values have no direction."""
+    if previous is None or current is None:
+        return None
+    delta = Fraction(current) - Fraction(previous)
+    return "IMPROVING" if delta >= MEANINGFUL_CHANGE else "DECLINING" if delta <= -MEANINGFUL_CHANGE else "STABLE"
 
 
 class LearningSelection(Selection):
@@ -117,7 +136,8 @@ def learning_fingerprint(selection, filters, now=None):
     now = now or timezone.now()
     ids = [o.id for o in selection.matching({k: filters[k] for k in ("academic_year_id", "term_id")})]
     tenant_id = selection.request.scope["tenant_id"]
-    payload = [fingerprint(selection, filters)]
+    # Reject pre-threshold cached reports/tokens even when academic records are unchanged.
+    payload = [fingerprint(selection, filters), "percentage-point-patterns-v2", str(MEANINGFUL_CHANGE)]
     for qs in (
         ActiveGradingPeriodSetting.objects.filter(tenant_id=tenant_id, term_id=filters["term_id"]),
         TenantTermGradingPeriod.objects.filter(tenant_id=tenant_id, term_id=filters["term_id"]),
@@ -143,9 +163,9 @@ def score_percentage(score, activity):
     if not value.is_finite():
         return None
     if mode == "DIRECT_PERCENTAGE":
-        return value if 0 <= value <= 100 else None
+        return Fraction(value) if 0 <= value <= 100 else None
     if mode == "RAW_BASE50" and activity.total_score > 0 and 0 <= value <= activity.total_score:
-        return value * 100 / activity.total_score
+        return Fraction(value) * 100 / Fraction(activity.total_score)
     return None
 
 
@@ -158,10 +178,11 @@ def activity_values(activities, scores, cohort):
         recorded.append(activity)
         if FacultyGradingService.is_quiz_activity(activity):
             quizzes.append(activity)
-    quiz = None
+    quiz_exact = None
     if quizzes and all(set(scores[a.id]) == cohort and all(v is not None for v in scores[a.id].values()) for a in quizzes):
-        quiz = average([sum(scores[a.id].values(), Decimal("0")) / Decimal(len(cohort)) for a in quizzes])
-    return {"quizzes": len(quizzes) if recorded else None, "activities": len(recorded) if recorded else None, "quiz": quiz}
+        quiz_exact = exact_average([exact_average(list(scores[a.id].values())) for a in quizzes])
+    return {"quizzes": len(quizzes) if recorded else None, "activities": len(recorded) if recorded else None,
+            "quiz": displayed(quiz_exact), "comparison_values": {"quiz": quiz_exact}}
 
 
 def scale_definitions(period):
@@ -185,24 +206,29 @@ def scale_definitions(period):
 
 
 def classify(history):
-    """Most recent matching pair; a missing period never becomes an artificial zero."""
-    usable = [r for r in history if r["eligible"] and all(r[m] is not None for m in ("quiz", "standing", "exam"))]
+    """Most recent matching percentage-based pair, using exact unrounded means."""
+    metrics = ("quiz", "standing", "exam")
+    usable = [r for r in history if r["eligible"]
+              and all(r.get("scales", {}).get(m) for m in ("standing", "exam"))
+              and all(r.get("comparison_values", r).get(m) is not None
+                      and 0 <= r.get("comparison_values", r)[m] <= 100 for m in metrics)]
     for current in reversed(usable):
         for previous in reversed([r for r in usable if r["sequence"] < current["sequence"]]):
             if current["signature"] != previous["signature"] or current["cohort"] != previous["cohort"]:
                 continue
-            deltas = {m: current[m] - previous[m] for m in ("quiz", "standing", "exam", "quizzes", "activities")}
-            signs = [0 if deltas[m] == 0 else 1 if deltas[m] > 0 else -1 for m in ("quiz", "standing", "exam")]
-            if signs[0] == signs[1] == signs[2] and signs[0]:
+            changes = {m: performance_change(previous.get("comparison_values", previous)[m], current.get("comparison_values", current)[m]) for m in metrics}
+            directions = [changes[m] for m in metrics]
+            if directions[0] == directions[1] == directions[2] and directions[0] != "STABLE":
                 category = PATTERNS[0]
-                direction = "Improved together" if signs[0] > 0 else "Declined together"
-            elif signs[0] == signs[1] and signs[0] and signs[2] == -signs[0]:
+                direction = "Improved together" if directions[0] == "IMPROVING" else "Declined together"
+            elif directions[0] == directions[1] and {directions[0], directions[2]} == {"IMPROVING", "DECLINING"}:
                 category, direction = PATTERNS[1], "Quiz and class standing moved opposite to examination results"
             else:
-                category, direction = PATTERNS[2], "Mixed directions or unchanged results"
+                category, direction = PATTERNS[2], "Mixed directions or stable results"
             return {"category": category, "detail": direction, "from": previous["period"], "to": current["period"],
-                    "quiz_count_change": deltas["quizzes"], "activity_count_change": deltas["activities"]}
-    return {"category": INSUFFICIENT, "detail": "Two comparable concluded periods with the same cohort are required."}
+                    "changes": changes, "quiz_count_change": current["quizzes"] - previous["quizzes"],
+                    "activity_count_change": current["activities"] - previous["activities"]}
+    return {"category": INSUFFICIENT, "detail": "Two comparable concluded periods with the same cohort and verified percentage-based component scales are required."}
 
 
 def build_report(selection, filters, now=None):
@@ -308,7 +334,10 @@ def build_report(selection, filters, now=None):
                 if row["quiz"] is None:
                     row["reason"] = "Quiz average unavailable: recorded quizzes need valid non-excused scores for the complete class cohort."
                 for name, field in (("standing", "class_standing_grade"), ("exam", "exam_grade"), ("periodic", "period_grade")):
-                    row[name] = average([getattr(saved[s], field) for s in cohort])
+                    values = [getattr(saved[s], field) for s in cohort]
+                    row[name] = average(values)
+                    if name in ("standing", "exam"):
+                        row["comparison_values"][name] = exact_average(values)
                     if name in ("standing", "exam") and any(not 0 <= getattr(saved[s], field) <= 100 for s in cohort):
                         row["scales"][name] = False
                 row["scales"]["periodic"] = (all(0 <= saved[s].period_grade <= 100 for s in cohort)
@@ -384,11 +413,12 @@ def build_report(selection, filters, now=None):
                              "quizzes": r["quizzes"], "exam": r["exam"] if r["scales"]["exam"] else None} for o, r in candidates]
                     bar_period = label
                 break
-    public_table = [{k: v for k, v in r.items() if k not in {"cohort", "signature", "sequence", "cohort_basis"}} for r in table]
+    public_table = [{k: v for k, v in r.items() if k not in {"cohort", "signature", "sequence", "cohort_basis", "comparison_values"}} for r in table]
     return {"rows": public_table, "patterns": patterns, "classifications": classifications,
             "analyzed": denominator, "insufficient": len(chosen) - denominator, "sections": len(chosen),
             "view": "Class Performance Analysis" if selected_id else "Overall Learning Performance",
             "class_label": next((f"{o.course.code} / {o.section.code} — {o.campus.code}" for o in chosen), "") if selected_id else "",
             "export_periods": sorted({(r["export_code"], r["period"]) for o in chosen for r in histories[o.id] if r["eligible"]}),
-            "charts": {"line": line, "bars": bars, "bar_period": bar_period, "patterns": patterns},
+            "threshold": str(MEANINGFUL_CHANGE),
+            "charts": {"line": line, "bars": bars, "bar_period": bar_period, "patterns": patterns, "threshold": str(MEANINGFUL_CHANGE)},
             "line_note": "Progression requires the same class cohort and compatible grading definitions; only verified 0–100 grade scales are plotted."}

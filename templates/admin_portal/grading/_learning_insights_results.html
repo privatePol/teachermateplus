@@ -23,10 +23,10 @@
   </div></div>
   <div class="col-lg-5"><div class="card card-body h-100">
     <h3 class="h5">Overall Patterns</h3>
-    <p class="small text-muted">Each classifiable section counts once. The two most recent comparable concluded periods are used.</p>
+    <p class="small text-muted">Each classifiable section counts once. The two most recent comparable concluded periods are used. Meaningful change is at least {{ threshold }} percentage points on verified percentage-based component scales; smaller changes are stable. Directions use unrounded averages; chart and table values are rounded for display.</p>
     {% if analyzed %}<div class="learning-chart"><canvas id="learning-patterns" role="img" aria-label="Pattern distribution; all counts and percentages are listed below."></canvas></div>{% endif %}
     <ul class="list-unstyled small mt-3 mb-0">{% for pattern in patterns %}<li class="d-flex justify-content-between gap-2 py-1"><span>{{ pattern.label }}</span><strong>{{ pattern.count }}{% if pattern.percentage != None %} ({{ pattern.percentage }}%){% endif %}</strong></li>{% endfor %}</ul>
-    {% if not analyzed %}<p class="text-muted mt-2">No sections have two comparable concluded periods.</p>{% endif %}
+    {% if not analyzed %}<p class="text-muted mt-2">No sections have two comparable concluded periods with reliable percentage-point differences.</p>{% endif %}
   </div></div>
 </div>
 <div class="card mb-4"><div class="card-body"><h3 class="h5">{% if class_label %}Class Period Results{% else %}Average Results per Section{% endif %}</h3>
@@ -46,8 +46,8 @@
   </table></div>
 </div>
 <details class="card card-body"><summary>How section results moved</summary>
-  <p class="small text-muted mt-2">Moved Together means quiz, class standing, and examination averages all rose or all fell. Moved Opposite means quiz and class standing moved together while examinations moved the other way. Other valid combinations are Mixed / Unchanged. No high/low activity threshold is used.</p>
-  <ul class="list-unstyled small mb-0">{% for item in classifications %}<li class="border-top py-2"><strong>{{ item.course }} / {{ item.section }} — {{ item.campus }}: {{ item.category }}</strong><div>{{ item.detail }}{% if item.from %} ({{ item.from }} → {{ item.to }}). Quiz count change: {{ item.quiz_count_change }}; class-standing activity count change: {{ item.activity_count_change }}.{% endif %}</div></li>{% empty %}<li>No authorized sections match this selection.</li>{% endfor %}</ul>
+  <p class="small text-muted mt-2">Improving means a rise of at least {{ threshold }} percentage points; declining means a fall of at least {{ threshold }} percentage points. All smaller changes, including zero, are stable. Moved Together means quiz, class standing, and examination averages all improve meaningfully or all decline meaningfully. Moved Opposite means quiz and class standing improve meaningfully while examinations decline meaningfully, or the reverse. Other valid combinations are Mixed / Stable. Unsupported component units are Insufficient Comparable Data and excluded from pattern percentages. Quiz/activity counts are supporting indicators with no minimum-count threshold; these patterns do not establish causation.</p>
+  <ul class="list-unstyled small mb-0">{% for item in classifications %}<li class="border-top py-2"><strong>{{ item.course }} / {{ item.section }} — {{ item.campus }}: {{ item.category }}</strong><div>{{ item.detail }}{% if item.from %} ({{ item.from }} → {{ item.to }}). Quiz: {{ item.changes.quiz|title }}; class standing: {{ item.changes.standing|title }}; exam: {{ item.changes.exam|title }}. Quiz count change: {{ item.quiz_count_change }}; class-standing activity count change: {{ item.activity_count_change }}.{% endif %}</div></li>{% empty %}<li>No authorized sections match this selection.</li>{% endfor %}</ul>
 </details>
 {% if page.paginator.num_pages > 1 %}<nav class="d-flex align-items-center gap-3 mt-3" aria-label="Section comparison pages">
 {% if page.has_previous %}<button type="button" class="btn btn-sm btn-outline-success" data-learning-page="{{ page.previous_page_number }}">Previous sections</button>{% endif %}

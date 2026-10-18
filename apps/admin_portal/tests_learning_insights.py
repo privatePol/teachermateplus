@@ -1,11 +1,12 @@
 """Representative finalized records; all databases are disposable Django test databases."""
 from datetime import timedelta
 from decimal import Decimal
+from fractions import Fraction
 from unittest.mock import patch
 
 from django.core.cache import cache
 from django.db import connection
-from django.test import Client, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -14,7 +15,9 @@ from apps.academics.models import ActiveGradingPeriodSetting, Course, FacultyAss
 from apps.admin_portal import tests_academic_performance_insights as fixtures
 from apps.admin_portal import learning_insights_views as views
 from apps.admin_portal.insights import Selection
-from apps.admin_portal.learning_insights import INSUFFICIENT, PATTERNS, LearningSelection, build_report, classify
+from apps.admin_portal.learning_insights import (
+    INSUFFICIENT, PATTERNS, LearningSelection, build_report, classify, performance_change,
+)
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
@@ -96,6 +99,10 @@ class LearningInsightsTests(TestCase):
         with patch.object(views, "build_report") as compute:
             response = self.client.get(self.url, {**{k: v for k, v in self.filters.items() if v is not None}, "action": "report"})
         compute.assert_not_called()
+        self.assertContains(response, '<h1 class="h3 mb-2">Academic Performance Insights</h1>', html=True)
+        self.assertContains(response, '<title>Academic Performance Insights | TeacherMate+</title>', html=True)
+        self.assertContains(response, '<p class="text-muted mb-3"><em>Exploring relationships between learning activities, class standing, and examination performance.</em></p>', html=True)
+        self.assertNotContains(response, '<h1 class="h3 mb-2">Learning Performance Insights</h1>', html=True)
         self.assertContains(response, "Authorized preview")
         self.assertContains(response, "View Performance")
         self.assertContains(response, reverse("admin_portal:academic_performance_insights"))
@@ -243,13 +250,14 @@ class LearningInsightsTests(TestCase):
         StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm, student=self.student_a2).delete()
         self.assertEqual(self.raw()["analyzed"], 1)
 
-    def test_pattern_rules_include_decline_opposite_mixed_and_unchanged(self):
+    def test_pattern_rules_include_decline_opposite_mixed_and_stable(self):
         def row(sequence, quiz, standing, exam):
             return {"eligible": True, "period": str(sequence), "sequence": sequence, "signature": (1,),
-                    "cohort": {1, 2}, "quiz": Decimal(quiz), "standing": Decimal(standing), "exam": Decimal(exam), "quizzes": 2, "activities": 3}
+                    "cohort": {1, 2}, "quiz": Decimal(quiz), "standing": Decimal(standing), "exam": Decimal(exam),
+                    "scales": {"standing": True, "exam": True}, "quizzes": 2, "activities": 3}
         first = row(1, 70, 80, 75)
         for values, expected, detail in (((80, 85, 90), PATTERNS[0], "Improved"), ((60, 70, 65), PATTERNS[0], "Declined"),
-                                         ((80, 85, 70), PATTERNS[1], "opposite"), ((70, 85, 90), PATTERNS[2], "unchanged"),
+                                         ((80, 85, 70), PATTERNS[1], "opposite"), ((70, 85, 90), PATTERNS[2], "stable"),
                                          ((80, 75, 90), PATTERNS[2], "Mixed")):
             result = classify([first, row(2, *values)])
             self.assertEqual(result["category"], expected)
@@ -257,7 +265,8 @@ class LearningInsightsTests(TestCase):
         self.assertEqual(classify([first])["category"], INSUFFICIENT)
 
     def test_most_recent_comparable_pair_skips_incompatible_period(self):
-        base = {"eligible": True, "signature": (1,), "cohort": {1}, "quiz": Decimal(50), "standing": Decimal(60), "exam": Decimal(70), "quizzes": 1, "activities": 1}
+        base = {"eligible": True, "signature": (1,), "cohort": {1}, "quiz": Decimal(50), "standing": Decimal(60), "exam": Decimal(70),
+                "scales": {"standing": True, "exam": True}, "quizzes": 1, "activities": 1}
         history = [{**base, "period": "Prelim", "sequence": 1}, {**base, "period": "Midterm", "sequence": 2},
                    {**base, "period": "Pre-Final", "sequence": 3, "signature": (2,)}]
         result = classify(history)
@@ -411,6 +420,64 @@ class LearningInsightsTests(TestCase):
             self.assertNotIn(student.student_no, response.content.decode())
         self.assertNotIn('"cohort"', response.content.decode())
         self.assertNotIn('"signature"', response.content.decode())
+        self.assertNotIn('"comparison_values"', response.content.decode())
+
+    def test_unrounded_class_and_quiz_means_do_not_cross_threshold(self):
+        # Displayed changes round to +3, but the saved observations establish +2.995.
+        StudentActivityScore.objects.filter(activity__offering=self.offering_a, activity__template_period=self.midterm).update(raw_score="73.00")
+        StudentActivityScore.objects.filter(activity__offering=self.offering_a, activity__template_period=self.midterm,
+            student=self.student_a1).update(raw_score="72.99")
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm).update(class_standing_grade="88.00", exam_grade="78.00")
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm,
+            student=self.student_a1).update(class_standing_grade="87.99", exam_grade="77.99")
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(raw["classifications"][0]["category"], "Mixed / Stable")
+        self.assertEqual(raw["classifications"][0]["changes"], dict.fromkeys(("quiz", "standing", "exam"), "STABLE"))
+        self.assertEqual([r["quiz"] for r in raw["charts"]["line"]], [Decimal("70.00"), Decimal("73.00")])
+        self.assertEqual([r["standing"] for r in raw["charts"]["line"]], [Decimal("85.00"), Decimal("88.00")])
+        self.assertEqual([r["exam"] for r in raw["charts"]["line"]], [Decimal("75.00"), Decimal("78.00")])
+        self.assertEqual(raw["charts"]["bars"][0]["quiz"], Decimal("73.00"))
+        self.assertNotIn("comparison_values", raw["rows"][0])
+
+    def test_repeating_quiz_percentages_retain_exact_three_point_boundaries(self):
+        GradeActivity.objects.filter(offering=self.offering_a).update(total_score=300)
+        for first, second, grade, expected, status in ((100, 109, (88, 78), "Improved together", "IMPROVING"),
+                                                       (109, 100, (82, 72), "Declined together", "DECLINING")):
+            StudentActivityScore.objects.filter(activity=self.activity_a).update(raw_score=first)
+            StudentActivityScore.objects.filter(activity__offering=self.offering_a, activity__template_period=self.midterm).update(raw_score=second)
+            StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm).update(class_standing_grade=grade[0], exam_grade=grade[1])
+            result = self.raw(offering_id=self.offering_a.id)["classifications"][0]
+            self.assertEqual(result["category"], "Moved Together")
+            self.assertEqual(result["detail"], expected)
+            self.assertEqual(result["changes"], dict.fromkeys(("quiz", "standing", "exam"), status))
+
+    def test_multi_bucket_original_units_are_excluded_from_pattern_denominator(self):
+        for period in (self.period, self.midterm):
+            GradingTemplateComponent.objects.create(template_period=period, code="LAB", name="Lab", weight_percentage=0)
+        StudentPeriodGrade.objects.filter(template_period=self.period).update(class_standing_grade=150)
+        StudentPeriodGrade.objects.filter(template_period=self.midterm).update(class_standing_grade=160)
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual((raw["analyzed"], raw["insufficient"]), (0, 1))
+        self.assertEqual(raw["rows"][0]["standing"], 150)
+        self.assertEqual(raw["classifications"][0]["category"], INSUFFICIENT)
+        self.assertTrue(all(p["count"] == 0 and p["percentage"] is None for p in raw["patterns"]))
+
+    def test_threshold_pattern_counts_and_denominators_exclude_unavailable_sections(self):
+        for period, raw_score in ((self.period, "70.00"), (self.midterm, "72.99")):
+            StudentActivityScore.objects.filter(activity__offering=self.offering_a, activity__template_period=period).update(raw_score=raw_score)
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm).update(class_standing_grade="87.99", exam_grade="77.99")
+        offering = self._offering("NO-FINALIZED-RESULTS", self.campus, self.department, self.program)
+        self._assign(offering, self.faculty)
+        raw = self.raw()
+        self.assertEqual((raw["sections"], raw["analyzed"], raw["insufficient"]), (3, 2, 1))
+        self.assertEqual([(p["label"], p["count"], p["percentage"]) for p in raw["patterns"]],
+                         [("Moved Together", 1, Decimal("50.00")), ("Moved Opposite", 0, Decimal("0.00")), ("Mixed / Stable", 1, Decimal("50.00"))])
+        data = self.report()
+        self.assertEqual(data["charts"]["threshold"], "3.00")
+        self.assertEqual([p["count"] for p in data["charts"]["patterns"]], [1, 0, 1])
+        self.assertIn("at least 3.00 percentage points", data["html"])
+        self.assertIn("Mixed / Stable", data["html"])
+        self.assertNotIn("Mixed / Unchanged", data["html"])
 
     def test_scope_bound_token_cache_miss_and_record_changes(self):
         data = self.report()
@@ -420,6 +487,11 @@ class LearningInsightsTests(TestCase):
         response = self.post("page", token=data["token"], page=1)
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["code"], "records_changed")
+
+    def test_threshold_policy_change_invalidates_cached_classification(self):
+        with patch("apps.admin_portal.learning_insights.MEANINGFUL_CHANGE", Decimal("2.00")):
+            data = self.report()
+        self.assertEqual(self.post("page", token=data["token"]).status_code, 409)
 
     def test_governance_and_correction_changes_invalidate_report(self):
         data = self.report()
@@ -460,3 +532,58 @@ class LearningInsightsTests(TestCase):
         SystemSettingService.set(FeatureSettingsService.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY, False,
             tenant_id=self.tenant.id, value_type="BOOL", is_active=True)
         self.assertEqual(self.client.get(self.url).status_code, 404)
+
+
+class PercentagePointThresholdTests(SimpleTestCase):
+    @staticmethod
+    def row(sequence, quiz="80", standing="80", exam="80", **overrides):
+        return {"eligible": True, "period": str(sequence), "sequence": sequence, "signature": (1,),
+                "cohort": {1, 2}, "scales": {"standing": True, "exam": True},
+                "quiz": Decimal(quiz) if quiz is not None else None,
+                "standing": Decimal(standing) if standing is not None else None,
+                "exam": Decimal(exam) if exam is not None else None,
+                "quizzes": 1, "activities": 2, **overrides}
+
+    def test_exact_positive_boundary_is_improving(self):
+        self.assertEqual(performance_change(Decimal("80"), Decimal("83.00")), "IMPROVING")
+
+    def test_exact_negative_boundary_is_declining(self):
+        self.assertEqual(performance_change(Decimal("80"), Decimal("77.00")), "DECLINING")
+
+    def test_immediately_inside_boundaries_and_unchanged_are_stable(self):
+        for value in ("82.99", "77.01", "80", "82.999999999999999999", "77.000000000000000001"):
+            with self.subTest(value=value):
+                self.assertEqual(performance_change(Decimal("80"), Decimal(value)), "STABLE")
+
+    def test_mean_comparisons_do_not_round_before_classification(self):
+        for previous, current in (("80.004", "83.003"), ("79.996", "76.997")):
+            self.assertEqual(performance_change(Decimal(previous), Decimal(current)), "STABLE")
+        self.assertEqual(performance_change(Fraction(241, 3), Fraction(250, 3)), "IMPROVING")
+        self.assertEqual(performance_change(Fraction(250, 3), Fraction(241, 3)), "DECLINING")
+
+    def test_missing_values_have_no_stable_classification(self):
+        self.assertIsNone(performance_change(None, Decimal("80")))
+        self.assertIsNone(performance_change(Decimal("80"), None))
+
+    def test_both_together_and_opposite_patterns_use_meaningful_directions(self):
+        for values, category, statuses in (
+            (("83", "83", "83"), "Moved Together", ("IMPROVING",) * 3),
+            (("77", "77", "77"), "Moved Together", ("DECLINING",) * 3),
+            (("83", "83", "77"), "Moved Opposite", ("IMPROVING", "IMPROVING", "DECLINING")),
+            (("77", "77", "83"), "Moved Opposite", ("DECLINING", "DECLINING", "IMPROVING")),
+            (("82.99", "82.99", "77.01"), "Mixed / Stable", ("STABLE",) * 3),
+            (("83", "82.99", "83"), "Mixed / Stable", ("IMPROVING", "STABLE", "IMPROVING")),
+            (("83", "77", "83"), "Mixed / Stable", ("IMPROVING", "DECLINING", "IMPROVING")),
+            (("80", "80", "80"), "Mixed / Stable", ("STABLE",) * 3),
+        ):
+            with self.subTest(values=values):
+                result = classify([self.row(1), self.row(2, *values)])
+                self.assertEqual(result["category"], category)
+                self.assertEqual(tuple(result["changes"][m] for m in ("quiz", "standing", "exam")), statuses)
+
+    def test_unverified_units_missing_evidence_and_incompatible_periods_are_insufficient(self):
+        for overrides in ({"scales": {}}, {"scales": {"standing": False, "exam": True}},
+                          {"scales": {"standing": True, "exam": False}}, {"signature": (2,)},
+                          {"cohort": {1}}, {"eligible": False}, {"quiz": None}, {"exam": None}):
+            with self.subTest(overrides=overrides):
+                self.assertEqual(classify([self.row(1), self.row(2, **overrides)])["category"], INSUFFICIENT)

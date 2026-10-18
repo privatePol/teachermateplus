@@ -111,12 +111,13 @@
       if (canvas) charts.push(new window.Chart(canvas, config));
     };
     const palette = ["#3884e9", "#239963", "#ed8545", "#8c65c6"];
+    const patternRule = `Meaningful change: at least ${data.threshold} percentage points on comparable percentage-based component scales. Smaller changes are stable; unsupported units are excluded.`;
     add("learning-line", {type: "line", data: {labels: data.line.map(r => r.period), datasets:
-      [["quiz", "Quiz average (%)"], ["standing", "Class standing (grade points)"], ["exam", "Exam (grade points)"], ["periodic", "Periodic grade"]].map(([key, label], i) => ({label, data: data.line.map(r => number(r[key])), borderColor: palette[i], backgroundColor: palette[i], tension: .15, spanGaps: false}))}, options: {...common, scales: {y: scoreScale}}});
+      [["quiz", "Quiz average (%)"], ["standing", "Class standing (grade points)"], ["exam", "Exam (grade points)"], ["periodic", "Periodic grade"]].map(([key, label], i) => ({label, data: data.line.map(r => number(r[key])), borderColor: palette[i], backgroundColor: palette[i], tension: .15, spanGaps: false}))}, options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: () => patternRule}}}}});
     add("learning-bars", {type: "bar", data: {labels: data.bars.map(r => r.section), datasets:
       [["quiz", "Quiz average (%)"], ["exam", "Exam (grade points)"]].map(([key, label], i) => ({label, data: data.bars.map(r => number(r[key])), backgroundColor: palette[i], borderRadius: 5}))},
-      options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: items => items.length ? `Recorded quizzes: ${data.bars[items[0].dataIndex].quizzes ?? "Not Available"}` : ""}}}}});
-    add("learning-patterns", {type: "doughnut", data: {labels: data.patterns.map(r => r.label), datasets: [{data: data.patterns.map(r => r.count), backgroundColor: ["#239963", "#ed8545", "#3884e9"]}]}, options: {...common, cutout: "64%", plugins: {...common.plugins, tooltip: {callbacks: {label: item => `${item.label}: ${data.patterns[item.dataIndex].count} sections (${data.patterns[item.dataIndex].percentage}%)`}}}}});
+      options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: items => items.length ? `Recorded quizzes: ${data.bars[items[0].dataIndex].quizzes ?? "Not Available"}\n${patternRule}` : ""}}}}});
+    add("learning-patterns", {type: "doughnut", data: {labels: data.patterns.map(r => r.label), datasets: [{data: data.patterns.map(r => r.count), backgroundColor: ["#239963", "#ed8545", "#3884e9"]}]}, options: {...common, cutout: "64%", plugins: {...common.plugins, title: {display: true, text: `Meaningful change: at least ${data.threshold} percentage points`}, tooltip: {callbacks: {label: item => `${item.label}: ${data.patterns[item.dataIndex].count} sections (${data.patterns[item.dataIndex].percentage}%)`, afterBody: () => patternRule}}}}});
   }
   function render(data) {
     token = data.token; results.innerHTML = data.html;

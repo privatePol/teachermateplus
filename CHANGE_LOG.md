@@ -1,3 +1,13 @@
+## Academic Performance Insights preview display alignment - 2026-10-19
+
+- Align only the new preview heading/browser title to Academic Performance Insights and its subtitle to Exploring relationships between learning activities, class standing, and examination performance. Preserve internal Learning module names, preview URL, old production-facing dashboard, permissions, charts and calculations.
+
+## Learning Performance Insights meaningful-change threshold - 2026-10-19
+
+- Apply the approved inclusive +3.00/-3.00 percentage-point boundary to quiz, class-standing and exam comparisons on verified compatible 0–100 component scales. Smaller differences are Stable; missing evidence or unsupported original units are Insufficient Comparable Data and excluded from pattern percentages.
+- Use exact score ratios and unrounded class means for direction decisions, retaining the existing historical values and display rounding in charts/tables. Moved Together requires all three meaningful improvements or all three meaningful declines; Moved Opposite requires quiz/class standing to move meaningfully together against the exam; other valid cases are Mixed / Stable.
+- Preserve concluded-period/cohort/grading compatibility, one-section-one-vote, authorization and independent activity-count indicators. Update pattern legends, tooltips, text and guide; bind the threshold policy into generation checks so older cached classifications are rejected. No Gradebook, schema, navigation or CSV contract changes.
+
 ## Learning Performance Insights authorized preview - 2026-10-18
 
 - Add the isolated `/admin-portal/grading/learning-performance-insights/preview/` page under existing Insights feature/RBAC/supervision controls. Keep the original dashboard/menu, protected reports, and both CSV schemas/destinations unchanged.
