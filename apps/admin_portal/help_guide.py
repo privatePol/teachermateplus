@@ -812,6 +812,20 @@ ADMIN_HELP_SECTIONS = [
                         "for grade states, period trends, threshold-relative categories and the existing Activity Consistency context."
                     ),
                     (
+                        "Learning Performance Insights is an authorized preview at "
+                        "/admin-portal/grading/learning-performance-insights/preview/. The existing menu still opens Academic Performance Insights. "
+                        "Select campus, academic year and term, optionally a course and section, then click View Performance. "
+                        "Choose a section for Class Performance Analysis; Return to Overall Analysis clears the section and waits for View Performance. "
+                        "Only officially concluded periods with submitted, complete finalized class results and no active reopen/correction window are analyzed. "
+                        "Missing official period authority is Not Available. Class-standing activity counts include quizzes as a subset, exclude examinations/attendance, "
+                        "and must not be added to quiz counts. Score points retain their original units; only verified 0–100 grade scales appear on score charts. "
+                        "Patterns compare each section's two most recent comparable concluded periods with the same cohort. Moved Together distinguishes improvement "
+                        "from decline; Moved Opposite and Mixed / Unchanged describe directions, not causation or faculty effectiveness. "
+                        "Each classifiable section contributes one vote; insufficient evidence is excluded from percentages and counted separately. "
+                        "Choose one compatible course for overall score averages and direct section comparison. CSV buttons retain their original reports: "
+                        "choose a CSV grading period after viewing results; section selection applies only to this preview."
+                    ),
+                    (
                         "For Midterm Exam Performance, select the Midterm examination cycle, then use Load more "
                         "to show additional course tables and sections. Each heading shows COURSE CODE | COURSE TITLE; "
                         "ranked sections appear in numeric rank order, followed by unranked sections. An exact Course "

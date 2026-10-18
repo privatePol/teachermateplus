@@ -1,0 +1,56 @@
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+  <div><h2 class="h4 mb-1">{{ view }}</h2>{% if class_label %}<p class="text-muted mb-0">{{ class_label }}</p>{% endif %}</div>
+  <span class="small text-muted">Only concluded periods with complete finalized results</span>
+</div>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-4"><div class="card card-body h-100"><span class="text-muted">Sections selected</span><strong class="h3 mb-0">{{ sections }}</strong></div></div>
+  <div class="col-6 col-lg-4"><div class="card card-body h-100"><span class="text-muted">Sections analyzed for patterns</span><strong class="h3 mb-0">{{ analyzed }}</strong></div></div>
+  <div class="col-12 col-lg-4"><div class="card card-body h-100"><span class="text-muted">Insufficient comparable data</span><strong class="h3 mb-0">{{ insufficient }}</strong></div></div>
+</div>
+<div class="card card-body mb-4">
+  <h3 class="h5">Performance Progression</h3>
+  <p class="small text-muted">{{ line_note }} Quiz values are raw percentages; the other series are official grade points on a verified 0–100 scale. Gaps are unavailable, never zero.</p>
+  <div class="learning-chart"><canvas id="learning-line" role="img" aria-label="Performance progression; equivalent measurements appear in the results table below."></canvas></div>
+</div>
+<div class="row g-4 mb-4">
+  <div class="col-lg-7"><div class="card card-body h-100">
+    <h3 class="h5">Section Comparison{% if charts.bar_period %} — {{ charts.bar_period }}{% endif %}</h3>
+    <p class="small text-muted">One course and compatible grading definitions only. Quiz counts appear in tooltips and the text below, separately from scores. Common examination difficulty cannot be inferred from matching grading definitions.</p>
+    {% if bars %}<div class="learning-chart"><canvas id="learning-bars" role="img" aria-label="Quiz and examination section comparison; equivalent values are listed below."></canvas></div>
+    <details class="mt-2"><summary>Section comparison values</summary><ul class="small mt-2 mb-0">
+    {% for bar in bars %}<li>{{ bar.section }}: quizzes {{ bar.quizzes|default_if_none:'Not Available' }}; quiz average {{ bar.quiz|default_if_none:'Not Available' }}%; exam {{ bar.exam|default_if_none:'Not Available' }} grade points.</li>{% endfor %}
+    </ul></details>{% else %}<p class="text-muted my-auto py-5">Select a course with comparable concluded results to compare sections.</p>{% endif %}
+  </div></div>
+  <div class="col-lg-5"><div class="card card-body h-100">
+    <h3 class="h5">Overall Patterns</h3>
+    <p class="small text-muted">Each classifiable section counts once. The two most recent comparable concluded periods are used.</p>
+    {% if analyzed %}<div class="learning-chart"><canvas id="learning-patterns" role="img" aria-label="Pattern distribution; all counts and percentages are listed below."></canvas></div>{% endif %}
+    <ul class="list-unstyled small mt-3 mb-0">{% for pattern in patterns %}<li class="d-flex justify-content-between gap-2 py-1"><span>{{ pattern.label }}</span><strong>{{ pattern.count }}{% if pattern.percentage != None %} ({{ pattern.percentage }}%){% endif %}</strong></li>{% endfor %}</ul>
+    {% if not analyzed %}<p class="text-muted mt-2">No sections have two comparable concluded periods.</p>{% endif %}
+  </div></div>
+</div>
+<div class="card mb-4"><div class="card-body"><h3 class="h5">{% if class_label %}Class Period Results{% else %}Average Results per Section{% endif %}</h3>
+  <p class="small text-muted mb-0">Class-standing activity counts include quizzes; the quiz count is a subset and must not be added again. Exam activities and attendance sessions are excluded. Score averages use equally weighted sections and their valid observations. Class standing and examination values retain their original grade points.</p></div>
+  <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+    <caption class="px-3">Unavailable measurements have no contribution to averages or patterns. Counts and quiz averages require valid saved, non-excused evidence.</caption>
+    <thead><tr><th>Period</th><th>Quizzes Count</th><th>Quiz Avg (%)</th><th>Class Standing Count</th><th>Class Standing Avg (points)</th><th>Exam Avg (points)</th><th>Periodic Avg (grade)</th></tr></thead>
+    <tbody>{% for row in rows %}<tr><th scope="row">{{ row.period }}{% if row.sections != None %}<div class="small text-muted">{{ row.sections }} sections with finalized results</div>{% endif %}</th>
+      <td>{{ row.quizzes|default_if_none:'Not Available' }}{% if row.quizzes_sections != None %}<small class="d-block text-muted">{{ row.quizzes_sections }} sections</small>{% endif %}</td>
+      <td>{{ row.quiz|default_if_none:'Not Available' }}{% if row.quiz_sections != None %}<small class="d-block text-muted">{{ row.quiz_sections }} sections</small>{% endif %}</td>
+      <td>{{ row.activities|default_if_none:'Not Available' }}{% if row.activities_sections != None %}<small class="d-block text-muted">{{ row.activities_sections }} sections</small>{% endif %}</td>
+      <td>{{ row.standing|default_if_none:'Not Available' }}{% if row.standing_sections != None %}<small class="d-block text-muted">{{ row.standing_sections }} sections</small>{% endif %}</td>
+      <td>{{ row.exam|default_if_none:'Not Available' }}{% if row.exam_sections != None %}<small class="d-block text-muted">{{ row.exam_sections }} sections</small>{% endif %}</td>
+      <td>{{ row.periodic|default_if_none:'Not Available' }}{% if row.periodic_sections != None %}<small class="d-block text-muted">{{ row.periodic_sections }} sections</small>{% endif %}</td></tr>
+      {% if row.reason %}<tr><td colspan="7" class="small text-muted">{{ row.period }}: {{ row.reason }}</td></tr>{% endif %}
+    {% empty %}<tr><td colspan="7" class="text-muted p-3">No concluded periods with complete finalized results are available. Check official period governance, submissions, and finalized results.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+<details class="card card-body"><summary>How section results moved</summary>
+  <p class="small text-muted mt-2">Moved Together means quiz, class standing, and examination averages all rose or all fell. Moved Opposite means quiz and class standing moved together while examinations moved the other way. Other valid combinations are Mixed / Unchanged. No high/low activity threshold is used.</p>
+  <ul class="list-unstyled small mb-0">{% for item in classifications %}<li class="border-top py-2"><strong>{{ item.course }} / {{ item.section }} — {{ item.campus }}: {{ item.category }}</strong><div>{{ item.detail }}{% if item.from %} ({{ item.from }} → {{ item.to }}). Quiz count change: {{ item.quiz_count_change }}; class-standing activity count change: {{ item.activity_count_change }}.{% endif %}</div></li>{% empty %}<li>No authorized sections match this selection.</li>{% endfor %}</ul>
+</details>
+{% if page.paginator.num_pages > 1 %}<nav class="d-flex align-items-center gap-3 mt-3" aria-label="Section comparison pages">
+{% if page.has_previous %}<button type="button" class="btn btn-sm btn-outline-success" data-learning-page="{{ page.previous_page_number }}">Previous sections</button>{% endif %}
+<span class="small">Section page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+{% if page.has_next %}<button type="button" class="btn btn-sm btn-outline-success" data-learning-page="{{ page.next_page_number }}">Next sections</button>{% endif %}
+</nav>{% endif %}

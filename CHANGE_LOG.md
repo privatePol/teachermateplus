@@ -1,3 +1,11 @@
+## Learning Performance Insights authorized preview - 2026-10-18
+
+- Add the isolated `/admin-portal/grading/learning-performance-insights/preview/` page under existing Insights feature/RBAC/supervision controls. Keep the original dashboard/menu, protected reports, and both CSV schemas/destinations unchanged.
+- Provide overall and course/section analysis, explicit AJAX View Performance, progress/retry, three locally bundled charts with textual equivalents, and a concise period table. Use distinct recorded activities; class-standing counts include quizzes as a disclosed subset and exclude exam/attendance activities.
+- Read persisted period authority, submitted complete finalized results, and reopen/correction windows without lifecycle writes or grade recomputation. Ongoing/future/unknown periods are unavailable. A terminal active Final needs explicit locked, expired-deadline closure plus finalized submission.
+- Compare each section's latest compatible concluded pair with the same cohort. Apply the agreed Together/Opposite/Mixed directions, one vote per classifiable section, explicit insufficient-data counts, and full-scope aggregate disclosure. Preserve original component points; never invent percentage normalization. Across unrelated courses, summarize within-section patterns rather than pooling raw exam averages.
+- Extend signed generation checks with period authority, correction/reopen evidence and time boundaries. Apply Section.program fallback only in preview selection with existing supervision. Staging browser/MariaDB acceptance and navigation cutover remain pending.
+
 ## Academic Performance Insights staging acceptance corrections - 2026-10-17
 
 - Resolve faculty and course selections from actual authorized teaching assignments for campus/year/term/department. Reuse assignment-level filtering for co-teachers; narrow courses by selected faculty. Show stored department names without campus prefixes and sort/display faculty as Lastname, Firstname Middlename. Retain identifiers and supervised-faculty authorization.

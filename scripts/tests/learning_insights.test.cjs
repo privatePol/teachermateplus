@@ -1,0 +1,186 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+
+function harness({offering = '', chartFailure = false, reducedMotion = false} = {}) {
+  const calls = [], handlers = {}, formHandlers = {}, windowHandlers = {}, drawn = [];
+  class Element {
+    constructor() { this.hidden = true; this.value = ''; this.dataset = {}; this.attributes = {}; this.options = [{textContent: ''}]; }
+    replaceChildren(...children) { this.innerHTML = ''; this.children = children; this.options = children; this.value = ''; }
+    add(option) { this.options.push(option); }
+    addEventListener(event, callback) { this[event] = callback; }
+    setAttribute(name, value) { this.attributes[name] = value; }
+    getAttribute(name) { return this.attributes[name]; }
+  }
+  const elements = {};
+  for (const id of ['learning-filters', 'learning-results', 'learning-progress', 'learning-message', 'learning-view', 'learning-retry', 'learning-overall', 'learning-csv-controls', 'learning-csv-period', 'learning-selected', 'learning-line', 'learning-bars', 'learning-patterns']) elements[id] = new Element();
+  const selects = ['campus_id', 'academic_year_id', 'term_id', 'course_code', 'offering_id'].map(name => Object.assign(new Element(), {name}));
+  const form = elements['learning-filters'];
+  form.elements = {namedItem: name => selects.find(s => s.name === name)};
+  form.querySelectorAll = () => selects;
+  form.reportValidity = () => true;
+  form.addEventListener = (event, callback) => formHandlers[event] = callback;
+  elements['learning-selected'].textContent = JSON.stringify({campus_id: 1, academic_year_id: 1, term_id: 1, course_code: 'IT', offering_id: offering});
+  const links = ['sections', 'students'].map(kind => Object.assign(new Element(), {href: `/admin-portal/grading/performance-insights/?export=${kind}`, dataset: {learningExport: kind}}));
+  class Data extends Map { constructor() { super(selects.map(s => [s.name, s.value])); this.set('csrfmiddlewaretoken', 'csrf-value'); } }
+  class Chart {
+    constructor(canvas, config) { if (chartFailure) throw new Error('drawing failed'); this.config = config; this.canvas = canvas; drawn.push(this); }
+    destroy() { this.destroyed = true; }
+  }
+  const context = {URLSearchParams, FormData: Data, Option: function(text, value) { this.textContent = text; this.value = value; }, AbortController,
+    location: {pathname: '/admin-portal/grading/learning-performance-insights/preview/'},
+    document: {getElementById: id => elements[id], querySelectorAll: selector => selector === '[data-learning-export]' ? links : [], addEventListener: (event, callback) => handlers[event] = callback},
+    window: {Chart, matchMedia: () => ({matches: reducedMotion}), addEventListener: (event, callback) => windowHandlers[event] = callback},
+    fetch: (url, options) => new Promise((resolve, reject) => calls.push({url, options, resolve, reject})),
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../static/admin_portal/learning_insights.js'), 'utf8'), context);
+  const respond = (index, data, status = 200, type = 'application/json') => calls[index].resolve({status, ok: status < 400, headers: {get: () => type}, json: async () => data});
+  const submit = () => formHandlers.submit({preventDefault() {}});
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  const click = (kind, value) => handlers.click({preventDefault() { if (kind === 'export') links[0].prevented = true; }, target: {closest: selector => selector === '[data-learning-export]' && kind === 'export' ? links[0] : selector === '[data-learning-page]' && kind === 'page' ? {dataset: {learningPage: value}} : null}});
+  return {calls, elements, selects, links, drawn, respond, submit, tick, click, formHandlers, windowHandlers};
+}
+
+function report(token = 'generation') {
+  return {token, html: '<p>Accessible period results</p>', export_periods: [['PRELIM', 'Prelim']], charts: {
+    line: [{period: 'Prelim', quiz: '0.00', standing: null, exam: '75.00', periodic: '82.00'}],
+    bars: [{section: 'A', quizzes: 4, quiz: '0.00', exam: '75.00'}],
+    patterns: [{label: 'Moved Together', count: 1, percentage: '100.00'}],
+  }};
+}
+
+test('initial page and restored history never generate reports', () => {
+  const h = harness();
+  assert.equal(h.calls.length, 0);
+  h.windowHandlers.pagehide(); h.windowHandlers.pageshow({persisted: true});
+  assert.equal(h.calls.length, 0);
+  assert.match(h.elements['learning-message'].textContent, /View Performance/);
+});
+
+test('explicit View Performance shows immediate progress and sends CSRF', async () => {
+  const h = harness(); const pending = h.submit();
+  assert.equal(h.elements['learning-progress'].hidden, false);
+  assert.equal(h.elements['learning-results'].attributes['aria-busy'], 'true');
+  assert.equal(h.calls[0].options.body.get('action'), 'report');
+  assert.equal(h.calls[0].options.body.get('csrfmiddlewaretoken'), 'csrf-value');
+  h.respond(0, report()); await pending;
+  assert.equal(h.elements['learning-progress'].hidden, true);
+  assert.match(h.elements['learning-results'].innerHTML, /Accessible/);
+  assert.equal(h.drawn.length, 3);
+});
+
+test('only three charts render; missing is null and saved zero remains zero', async () => {
+  const h = harness({reducedMotion: true}); const pending = h.submit(); h.respond(0, report()); await pending;
+  assert.deepEqual(h.drawn.map(c => c.config.type), ['line', 'bar', 'doughnut']);
+  assert.equal(h.drawn[0].config.data.datasets[0].data[0], 0);
+  assert.equal(h.drawn[0].config.data.datasets[1].data[0], null);
+  assert.equal(h.drawn[0].config.options.animation, false);
+  assert.equal(h.drawn[0].config.data.datasets[0].spanGaps, false);
+  assert.equal(h.drawn[1].config.data.datasets.length, 2);
+  const tooltip = h.drawn[1].config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]);
+  assert.match(tooltip, /4/); // Count is textual context, never a score dataset.
+});
+
+test('filter change aborts and discards an old report even when transport ignores abort', async () => {
+  const h = harness(); const first = h.submit(); const changed = h.formHandlers.change();
+  assert.equal(h.calls[0].options.signal.aborted, true);
+  h.respond(0, report('stale')); await first;
+  assert.equal(h.elements['learning-results'].innerHTML, '');
+  assert.equal(h.drawn.length, 0);
+  h.respond(1, {filters: {}, options: {}}); await changed;
+  assert.equal(h.elements['learning-view'].disabled, false);
+  assert.equal(h.calls.length, 2);
+});
+
+for (const mode of ['json', 'non-json', 'network']) {
+  test(`options ${mode} failure offers retry without report generation`, async () => {
+    const h = harness(); const failed = h.formHandlers.change();
+    if (mode === 'network') h.calls[0].reject(new Error('Network unavailable'));
+    else h.respond(0, {error: 'Temporarily unavailable'}, 503, mode === 'json' ? 'application/json' : 'text/html');
+    await failed;
+    assert.equal(h.elements['learning-retry'].hidden, false);
+    assert.equal(h.elements['learning-retry'].disabled, false);
+    assert.equal(h.elements['learning-view'].disabled, true);
+    await h.submit(); assert.equal(h.calls.length, 1);
+    const retry = h.elements['learning-retry'].click();
+    h.respond(1, {filters: {}, options: {}}); await retry;
+    assert.equal(h.elements['learning-view'].disabled, false);
+    assert.equal(h.calls[1].options.body.get('action'), 'options');
+    assert.equal(h.calls.length, 2);
+  });
+}
+
+test('latest options alone may restore controls', async () => {
+  const h = harness(); const first = h.formHandlers.change(); const second = h.formHandlers.change();
+  h.respond(0, {filters: {}, options: {}}); await first;
+  assert.equal(h.elements['learning-view'].disabled, true);
+  h.respond(1, {filters: {course_code: 'IT'}, options: {course_code: [{value: 'IT', label: 'IT'}]}}); await second;
+  assert.equal(h.elements['learning-view'].disabled, false);
+  assert.equal(h.selects.find(s => s.name === 'course_code').value, 'IT');
+});
+
+test('record-change page response clears charts, results, export state and token', async () => {
+  const h = harness(); let pending = h.submit(); h.respond(0, report()); await pending;
+  pending = h.click('page', '2');
+  assert.equal(h.calls[1].options.body.get('token'), 'generation');
+  h.respond(1, {code: 'records_changed', error: 'Academic records changed. Refresh.'}, 409); await pending;
+  assert.equal(h.elements['learning-results'].innerHTML, '');
+  assert.equal(h.drawn.every(c => c.destroyed), true);
+  assert.equal(h.links[0].attributes['aria-disabled'], 'true');
+  assert.match(h.elements['learning-message'].textContent, /records changed/);
+  await h.click('page', '3'); assert.equal(h.calls.length, 2);
+});
+
+test('a report changed during generation can be explicitly retried', async () => {
+  const h = harness(); let pending = h.submit(); h.respond(0, {error: 'Records changed'}, 409); await pending;
+  assert.equal(h.elements['learning-view'].disabled, false);
+  pending = h.submit(); h.respond(1, report()); await pending;
+  assert.match(h.elements['learning-results'].innerHTML, /Accessible/);
+});
+
+test('late page result cannot overwrite new filter state and destroys old charts', async () => {
+  const h = harness(); let pending = h.submit(); h.respond(0, report()); await pending;
+  pending = h.click('page', '2'); const changed = h.formHandlers.change();
+  h.respond(1, report('old-page')); await pending;
+  h.respond(2, {filters: {}, options: {}}); await changed;
+  assert.equal(h.elements['learning-results'].innerHTML, '');
+  assert.equal(h.drawn.every(c => c.destroyed), true);
+});
+
+test('CSVs keep original destination and explicit period without preview section or tokens', async () => {
+  const h = harness({offering: '22'});
+  await h.click('export'); assert.equal(h.links[0].prevented, true);
+  const pending = h.submit(); h.respond(0, report()); await pending;
+  assert.equal(h.links[0].attributes['aria-disabled'], 'true');
+  h.elements['learning-csv-period'].value = 'PRELIM'; h.elements['learning-csv-period'].change();
+  assert.equal(h.links[0].attributes['aria-disabled'], 'false');
+  assert.match(h.links[0].href, /^\/admin-portal\/grading\/performance-insights\/\?/);
+  assert.match(h.links[0].href, /period_code=PRELIM/);
+  assert.match(h.links[1].href, /export=students/);
+  assert.doesNotMatch(h.links[0].href, /offering_id|csrf|token/);
+});
+
+test('return to overall clears section and asks for explicit generation', async () => {
+  const h = harness({offering: '22'});
+  assert.equal(h.elements['learning-overall'].hidden, false);
+  const pending = h.elements['learning-overall'].click();
+  assert.equal(h.selects.find(s => s.name === 'offering_id').value, '');
+  assert.equal(h.calls[0].options.body.get('action'), 'options');
+  h.respond(0, {filters: {}, options: {}}); await pending;
+  assert.equal(h.calls.length, 1);
+});
+
+test('chart failure keeps accessible results and reports the fallback', async () => {
+  const h = harness({chartFailure: true}); const pending = h.submit(); h.respond(0, report()); await pending;
+  assert.match(h.elements['learning-results'].innerHTML, /Accessible/);
+  assert.match(h.elements['learning-message'].textContent, /equivalent values/);
+});
+
+test('report network error ends progress and re-enables explicit retry', async () => {
+  const h = harness(); const pending = h.submit(); h.calls[0].reject(new Error('Network unavailable')); await pending;
+  assert.equal(h.elements['learning-progress'].hidden, true);
+  assert.equal(h.elements['learning-view'].disabled, false);
+  assert.match(h.elements['learning-message'].textContent, /Network unavailable/);
+});

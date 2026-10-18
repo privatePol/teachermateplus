@@ -1,4 +1,5 @@
 from django.urls import path
+from .learning_insights_views import learning_performance_insights_view
 from .insights_views import (
     academic_performance_insights_view,
     academic_performance_section_detail_view,
@@ -206,6 +207,11 @@ urlpatterns = [
         name="academic_data_reconciliation_roster",
     ),
     path("admin-portal/grading/analytics/", grading_analytics_view, name="grading_analytics"),
+    path(
+        "admin-portal/grading/learning-performance-insights/preview/",
+        learning_performance_insights_view,
+        name="learning_performance_insights_preview",
+    ),
     path(
         "admin-portal/grading/performance-insights/",
         academic_performance_insights_view,

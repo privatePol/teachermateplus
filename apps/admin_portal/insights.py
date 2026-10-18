@@ -62,6 +62,10 @@ def campus_allowed(request, campus_id):
 
 class Selection:
     """One supervised assignment inventory; never use offering department ownership."""
+    @staticmethod
+    def assignment_source(request):
+        return AdminScopeService.scoped_faculty_assignments(request, include_all_campuses=True)
+
     def __init__(self, request):
         self.request = request
         tenant_id = request.scope["tenant_id"]
@@ -86,9 +90,7 @@ class Selection:
             campus_id=OuterRef("offering__campus_id"), student__tenant_id=tenant_id,
             student__campus_id=OuterRef("offering__campus_id"),
         )
-        assignments = AdminScopeService.scoped_faculty_assignments(
-            request, include_all_campuses=True,
-        ).filter(
+        assignments = self.assignment_source(request).filter(
             tenant_id=tenant_id, offering__tenant_id=tenant_id,
             offering__academic_year__tenant_id=tenant_id, offering__term__tenant_id=tenant_id,
             offering__term__academic_year_id=F("offering__academic_year_id"),
