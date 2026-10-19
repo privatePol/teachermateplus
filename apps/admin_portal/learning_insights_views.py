@@ -1,5 +1,6 @@
 """Authorized preview only; existing dashboard, menu and CSV contracts stay independent."""
 import secrets
+import hashlib
 
 from django.core import signing
 from django.core.cache import cache
@@ -10,7 +11,7 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_http_methods
 
 from apps.core.decorators import permission_required, portal_required
-from apps.admin_portal.insights_generation import RecordsChanged, authority, changed_response
+from apps.admin_portal.insights_generation import RecordsChanged, authority, changed_response, encoded
 from apps.admin_portal.insights_views import enabled, page_context
 from apps.admin_portal.learning_insights import LearningSelection, build_report, learning_fingerprint
 
@@ -79,19 +80,26 @@ def learning_performance_insights_view(request):
         if state and state["generation"] != generation:
             raise RecordsChanged
         token = data.get("token") if state else None
+        scope = authority(selection)
+        # Repeated View Performance requests can reuse the same public result.
+        # Both live digests and fresh closing authorization remain mandatory.
+        result_key = "learning-insights-result:" + hashlib.sha256(encoded([scope, generation, filters])).hexdigest()
         result = cache.get("learning-insights:" + state["nonce"]) if state else None
         if result is None:
-            # Hydrate records after the opening fingerprint, just like the existing report.
-            selection = LearningSelection(request)
+            result = cache.get(result_key)
+        if result is None:
+            selection.refresh_offerings()
             result = build_report(selection, filters)
         if not state:
-            state = {"scope": authority(selection), "generation": generation, "filters": filters,
+            state = {"scope": scope, "generation": generation, "filters": filters,
                      "nonce": secrets.token_urlsafe(32)}
             token = signing.dumps(state, salt=TOKEN_SALT, compress=True)
         payload = response_data(request, result, token, data.get("page"))
-        if learning_fingerprint(LearningSelection(request), filters) != generation:
+        closing_selection = LearningSelection(request)
+        if authority(closing_selection) != scope or learning_fingerprint(closing_selection, filters) != generation:
             raise RecordsChanged
         cache.set("learning-insights:" + state["nonce"], result, timeout=300)
+        cache.set(result_key, result, timeout=300)
         response = JsonResponse(payload)
     else:
         return JsonResponse({"error": "Unknown report action."}, status=400)

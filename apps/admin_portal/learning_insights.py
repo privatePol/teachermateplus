@@ -4,22 +4,23 @@ from decimal import Decimal
 from fractions import Fraction
 from itertools import combinations
 
+from django.core.exceptions import ValidationError
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.academics.models import ActiveGradingPeriodSetting, FacultyAssignment, TenantTermGradingPeriod
+from apps.academics.models import ActiveGradingPeriodSetting, CourseOffering, FacultyAssignment, TenantTermGradingPeriod
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService as Reference
 from apps.admin_portal.insights import (
     LEADERSHIP_PERMISSION, MIN_STUDENTS, Selection, campus_allowed, component_signature, leadership_access,
 )
-from apps.admin_portal.insights_generation import encoded, fingerprint
+from apps.admin_portal.insights_generation import RecordsChanged, encoded, fingerprint
 from apps.admin_portal.services import AdminScopeService
 from apps.enrollment.models import Enrollment
 from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
 from apps.grading.models import (
     GradeActivity, GradeCorrectionUnlockWindow, GradeSubmission, GradeSubmissionReopenRequest,
-    GradingPeriodLock, StudentActivityScore, StudentPeriodGrade,
+    GradingPeriodLock, GradingTemplatePeriod, StudentActivityScore, StudentPeriodGrade,
 )
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.students.models import Student
@@ -64,6 +65,10 @@ class LearningSelection(Selection):
     # Accepted, currently scoped assignments remain selectable even when a closed
     # offering has no finalized results yet; report availability is separate.
     include_offerings_without_grade_records = True
+    assignment_related = Selection.assignment_related + (
+        "offering__campus", "offering__academic_year", "offering__term", "offering__department",
+        "offering__program__department", "offering__section__program__department",
+    )
 
     @staticmethod
     def assignment_scope(tenant_id, campus_ids):
@@ -157,7 +162,11 @@ class LearningSelection(Selection):
 
     def __init__(self, request):
         super().__init__(request)
-        tenant_id = request.scope["tenant_id"]
+        self._contexts = {}
+        self.normalize_programs()
+
+    def normalize_programs(self):
+        tenant_id = self.request.scope["tenant_id"]
         # Resolve optional/stale offering program values through the already
         # validated section program for this read-only analysis instance only.
         for assignment in self.assignments:
@@ -166,6 +175,60 @@ class LearningSelection(Selection):
             if (not program or not program.is_active or not program.department.is_active
                     or program.tenant_id != tenant_id or program.campus_id != offering.campus_id):
                 offering.program_id = offering.section.program_id
+
+    def refresh_offerings(self):
+        """Hydrate academic objects after the opening digest without rebuilding RBAC.
+
+        The closing, independent selection still revalidates assignments and grants.
+        Clear resolved configuration so a reused selection never mixes generations.
+        """
+        related = [path.removeprefix("offering__") for path in self.assignment_related if path.startswith("offering__")]
+        offerings = CourseOffering.objects.filter(pk__in=self.offerings).select_related(*related).in_bulk()
+        if offerings.keys() != self.offerings.keys():
+            raise RecordsChanged
+        self.offerings = offerings
+        for assignment in self.assignments:
+            assignment.offering = self.offerings[assignment.offering_id]
+        self._periods.clear()
+        self._contexts.clear()
+        self.normalize_programs()
+
+    @staticmethod
+    def configuration_key(offering):
+        return (offering.course_id, offering.campus_id, offering.department_id,
+                offering.program_id, offering.section.program_id, offering.term_id)
+
+    def prepare_periods(self, offerings):
+        """Resolve each official configuration once and batch its active periods."""
+        templates, keys = {}, {}
+        for offering in offerings:
+            context_key = self.configuration_key(offering)
+            if context_key in self._periods or context_key in keys:
+                continue
+            try:
+                template = FacultyGradingService.resolve_template_for_offering(offering)
+            except ValidationError:
+                self._periods[context_key] = []
+                continue
+            templates[template.id] = template
+            keys[context_key] = template.id
+        periods = defaultdict(list)
+        for period in GradingTemplatePeriod.objects.filter(template_id__in=templates, is_active=True).order_by("sequence_no", "id"):
+            period.template = templates[period.template_id]
+            periods[period.template_id].append(period)
+        for context_key, template_id in keys.items():
+            self._periods[context_key] = periods[template_id]
+
+    def grading_context(self, offering, period):
+        # Only template/profile/formula/transmutation facts are consumed below;
+        # their resolution does not depend on the individual grading period.
+        context_key = self.configuration_key(offering)
+        if context_key not in self._contexts:
+            self._contexts[context_key] = (
+                Reference._grading_context(offering, period),
+                str(FacultyGradingService.resolve_base_value(offering, period.template)),
+            )
+        return self._contexts[context_key]
 
     def assignment_source(self, request):
         """Same supervision chain; optional offering.program uses its valid section program."""
@@ -296,7 +359,8 @@ def score_percentage(score, activity):
     return None
 
 
-def activity_values(activities, scores, cohort, complete_cohort=None):
+def activity_population(activities, scores, cohort):
+    """Membership evidence shared by numeric analysis and the full privacy basis."""
     recorded, quizzes = [], []
     for activity in activities:
         evidence = scores.get(activity.id, {})
@@ -305,12 +369,17 @@ def activity_values(activities, scores, cohort, complete_cohort=None):
         recorded.append(activity)
         if FacultyGradingService.is_quiz_activity(activity):
             quizzes.append(activity)
+    quiz_cohort = {sid for sid in cohort if quizzes and all(scores[a.id].get(sid) is not None for a in quizzes)}
+    return recorded, quizzes, quiz_cohort
+
+
+def activity_values(activities, scores, cohort, complete_cohort=None):
+    recorded, quizzes, quiz_cohort = activity_population(activities, scores, cohort)
     quiz_values = {}
     if quizzes:
-        for student_id in cohort:
+        for student_id in quiz_cohort:
             observations = [scores[a.id].get(student_id) for a in quizzes]
-            if all(value is not None for value in observations):
-                quiz_values[student_id] = exact_average(observations)
+            quiz_values[student_id] = exact_average(observations)
     complete_cohort = set(complete_cohort if complete_cohort is not None else cohort)
     quiz_exact = (exact_average([quiz_values[sid] for sid in complete_cohort])
                   if quizzes and complete_cohort and complete_cohort.issubset(quiz_values) else None)
@@ -465,10 +534,39 @@ def student_eligible(student):
             and (not student.program_id or student.program.is_active))
 
 
+def privacy_history_row(finalized, scales, signature, period_authorized, activities, scores, enrolled, active_enrolled, base_value):
+    """Keep actual contributor/matched sets without calculating unrelated averages.
+
+    These private rows are used only by disclosed_populations, never by charts,
+    classifications, public results or snapshots. Eligibility and scale checks
+    match the numeric path, including historical and partially finalized records.
+    """
+    _, quizzes, quiz_cohort = activity_population(activities, scores, enrolled) if period_authorized else ([], [], set())
+    scales = dict(scales)
+    for metric in ("standing", "exam"):
+        if any(metric in values and not 0 <= values[metric] <= 100 for values in finalized.values()):
+            scales[metric] = False
+    if not 0 <= Decimal(base_value) <= 100:
+        scales = dict.fromkeys(scales, False)
+    contributors = {metric: {sid for sid, values in finalized.items() if metric in values}
+                    for metric in ("standing", "exam", "periodic")}
+    contributors["quiz"] = set(active_enrolled) if quizzes and active_enrolled and active_enrolled <= quiz_cohort else set()
+    return {"eligible": period_authorized and bool(finalized), "cohort": set(finalized),
+            "contributors": contributors, "signature": signature, "scales": scales,
+            "pattern_values": {sid for sid, values in finalized.items() if sid in quiz_cohort
+                               and all(metric in values for metric in ("standing", "exam"))},
+            "student_values": {sid for sid, values in finalized.items() if sid in quiz_cohort and len(values) == 3}}
+
+
 def build_report(selection, filters, now=None):
     now = now or timezone.now()
     # Membership disclosure is planned across the authorized year/term before optional filters.
     universe = selection.matching({k: filters[k] for k in ("academic_year_id", "term_id")})
+    chosen = [o for o in selection.matching(filters) if not filters.get("offering_id") or o.id == filters["offering_id"]]
+    numeric_ids = {o.id for o in chosen}
+    if filters.get("course_code"):
+        numeric_ids.update(o.id for o in selection.matching({**filters, "offering_id": None}))
+    selection.prepare_periods(universe)
     ids = [o.id for o in universe]
     offerings = {o.id: o for o in universe}
     tenant_id = selection.request.scope["tenant_id"]
@@ -505,6 +603,17 @@ def build_report(selection, filters, now=None):
         tenant_id=tenant_id, term_id=filters["term_id"], is_active=True, period__is_active=True,
     ).select_related("period")}
     catalog = list(TenantTermGradingPeriod.objects.filter(tenant_id=tenant_id, term_id=filters["term_id"], is_active=True))
+    # Same course-over-campus precedence and newest-lock ordering as resolve_lock.
+    locks = {}
+    for lock in GradingPeriodLock.objects.filter(
+        tenant_id=tenant_id, academic_year_id=filters["academic_year_id"], term_id=filters["term_id"],
+        campus_id__in={o.campus_id for o in universe}, is_active=True,
+    ).order_by("-updated_at"):
+        lock_key = GradingGovernanceService._normalize_period_key(lock.period_code)
+        if lock.scope_type == GradingPeriodLock.ScopeType.COURSE:
+            locks.setdefault((lock.campus_id, lock_key, lock.course_offering_id), lock)
+        elif lock.scope_type == GradingPeriodLock.ScopeType.CAMPUS and lock.course_offering_id is None:
+            locks.setdefault((lock.campus_id, lock_key, None), lock)
     blocked = set(GradeCorrectionUnlockWindow.objects.filter(
         offering_id__in=ids, is_active=True, is_consumed=False, start_at__lte=now, end_at__gte=now,
         correction_request__status="APPROVED",
@@ -536,7 +645,7 @@ def build_report(selection, filters, now=None):
         a = valid_activities[s.activity_id]
         if s.student_id in enrolled[a.offering_id]:
             scores[a.id][s.student_id] = score_percentage(s, a)
-    histories, structures, contexts = {}, {}, {}
+    histories, structures = {}, {}
     for o in universe:
         history = []
         counts = Counter(key(p) for p in selection.periods(o))
@@ -544,7 +653,8 @@ def build_report(selection, filters, now=None):
             if key(p) not in dict(PERIODS):
                 continue
             pair = (o.id, p.id)
-            lock = GradingGovernanceService.resolve_lock(offering=o, template_period=p)
+            lock_key = GradingGovernanceService._normalize_period_key(p.code or p.name)
+            lock = locks.get((o.campus_id, lock_key, o.id)) or locks.get((o.campus_id, lock_key, None))
             reason = governance_reason(o, p, active.get(o.campus_id), catalog, submissions.get(pair), lock, pair in blocked, now)
             if counts[key(p)] != 1:
                 reason = "Grading-period mapping is ambiguous."
@@ -556,10 +666,7 @@ def build_report(selection, filters, now=None):
                 scales, components = scale_definitions(p)
                 structures[p.id] = (scales, components, component_signature(p))
             scales, components, structure = structures[p.id]
-            context_key = (o.course_id, o.campus_id, o.department_id, o.program_id or o.section.program_id, o.term_id, p.id)
-            if context_key not in contexts:
-                contexts[context_key] = (Reference._grading_context(o, p), str(FacultyGradingService.resolve_base_value(o, p.template)))
-            context, base_value = contexts[context_key]
+            context, base_value = selection.grading_context(o, p)
             signature = (o.course_id, context["template_id"], context["profile_id"], context["formula_mode"],
                          tuple(context["signature"][3]), base_value, structure)
             finalized = {}
@@ -580,6 +687,12 @@ def build_report(selection, filters, now=None):
                     reason = "No valid finalized student results are available for this concluded period."
                 elif any(sid not in finalized or len(finalized[sid]) < 3 for sid in active_enrolled[o.id]):
                     reason = "Partial finalized component results; missing values are excluded and remain unavailable."
+            if o.id not in numeric_ids:
+                history.append(privacy_history_row(
+                    finalized, scales, signature, period_authorized, activities[pair], scores,
+                    enrolled[o.id], active_enrolled[o.id], base_value,
+                ))
+                continue
             activity_data = activity_values(activities[pair], scores, enrolled[o.id], active_enrolled[o.id]) if period_authorized else {
                 "quizzes": None, "activities": None, "quiz": None, "comparison_values": {"quiz": None}, "quiz_values": {},
             }
@@ -620,11 +733,11 @@ def build_report(selection, filters, now=None):
                 if row["quiz"] is None and not row["reason"]:
                     row["reason"] = "Quiz average unavailable: no students have valid non-excused scores for every recorded quiz."
             history.append(row)
-        histories[o.id] = sorted(history, key=lambda r: r["sequence"])
+        histories[o.id] = sorted(history, key=lambda r: r["sequence"]) if o.id in numeric_ids else history
     leadership_ids = {pk for pk, offering in offerings.items() if selection.allows_aggregates(offering)}
     disclosed_groups = disclosed_populations(histories, active_enrolled, leadership_ids)
     for pk, history in histories.items():
-        if pk in leadership_ids:
+        if pk in leadership_ids or pk not in numeric_ids:
             continue
         for r in history:
             withheld = False
@@ -638,7 +751,6 @@ def build_report(selection, filters, now=None):
                 r.update({m: None for m in METRICS})
             elif withheld:
                 r["reason"] = "Some component results are withheld by aggregate privacy rules."
-    chosen = [o for o in selection.matching(filters) if not filters.get("offering_id") or o.id == filters["offering_id"]]
     classifications = []
     for offering in chosen:
         minimum = 1 if selection.allows_aggregates(offering) else MIN_STUDENTS

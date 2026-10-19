@@ -15,6 +15,7 @@ from django.utils import timezone
 from apps.academics.models import ActiveGradingPeriodSetting, Course, FacultyAssignment, TenantTermGradingPeriod
 from apps.admin_portal import tests_academic_performance_insights as fixtures
 from apps.admin_portal import learning_insights_views as views
+from apps.admin_portal import learning_insights as learning
 from apps.admin_portal.insights import Selection
 from apps.admin_portal.learning_insights import (
     INSUFFICIENT, PATTERNS, LearningSelection, build_report, classify, performance_change,
@@ -119,6 +120,164 @@ class LearningInsightsTests(TestCase):
     def selected_offerings(self, selection_type=LearningSelection):
         request = self.client.get(self.url).wsgi_request
         return set(selection_type(request).offerings)
+
+    def analysis_inventory(self, count=12, start=0):
+        """Real finalized unrelated classes; no mocked calculation/query paths."""
+        offerings = []
+        course, _ = Course.objects.get_or_create(tenant=self.tenant, code="UNRELATED", defaults={"title": "Unrelated course"})
+        for index in range(start, start + count):
+            offering = self._offering(f"ANALYSIS-{index}", self.campus, self.department, self.program)
+            offering.course = course
+            offering.save(update_fields=["course"])
+            self._assign(offering, self.faculty)
+            FacultyAssignment.objects.filter(offering=offering).update(tenant=None, campus=None)
+            students = [self._student(offering, f"ANALYSIS-{index}-{sid}", "Synthetic") for sid in range(6)]
+            for period, component, quiz, raw, standing, exam, periodic in (
+                (self.period, self.component, self.quiz_sub, 70, 85, 75, 82),
+                (self.midterm, self.mid_cs, self.mid_quiz, 80, 90, 85, 89),
+            ):
+                activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=offering,
+                    template_period=period, template_component=component, template_subcomponent=quiz, title="Quiz", total_score=100)
+                StudentActivityScore.objects.bulk_create([
+                    StudentActivityScore(activity=activity, student=student, raw_score=raw, computed_score=standing)
+                    for student in students])
+                StudentPeriodGrade.objects.bulk_create([
+                    StudentPeriodGrade(tenant=self.tenant, campus=self.campus, offering=offering, template_period=period,
+                        student=student, class_standing_grade=standing, exam_grade=exam, period_grade=periodic, is_finalized=True)
+                    for student in students])
+                GradeSubmission.objects.create(tenant=self.tenant, campus=self.campus, offering=offering, template_period=period,
+                    status="SUBMITTED", submitted_at=timezone.now() - timedelta(days=2))
+            offerings.append(offering)
+        return offerings
+
+    def test_filtered_numeric_analysis_preserves_siblings_and_skips_unrelated_averages(self):
+        self.analysis_inventory()
+        original = learning.activity_values
+        for overrides, sections, numeric in (({"offering_id": self.offering_a.id}, 1, 2), ({}, 2, 2),
+                                             ({"course_code": ""}, 14, 14)):
+            with self.subTest(filters=overrides), patch.object(learning, "activity_values", wraps=original) as calculate:
+                raw = self.raw(**overrides)
+                self.assertEqual((raw["sections"], raw["analyzed"]), (sections, sections))
+                # Two concluded periods per class. Wrapping executes the real work.
+                self.assertEqual(calculate.call_count, numeric * 2)
+                if overrides.get("course_code") != "":
+                    self.assertEqual(len(raw["comparison_rows"]), 2)
+                for call in calculate.call_args_list:
+                    if overrides.get("course_code") != "":
+                        self.assertTrue(all(a.offering_id in {self.offering_a.id, self.offering_b.id} for a in call.args[0]))
+
+    def test_report_query_growth_is_bounded_for_shared_configurations(self):
+        request = self.client.get(self.url).wsgi_request
+        def measured():
+            with CaptureQueriesContext(connection) as captured:
+                raw = build_report(LearningSelection(request), self.filters)
+            sql = [row["sql"] for row in captured]
+            self.assertEqual(sum('FROM "grading_period_locks"' in query for query in sql), 1)
+            self.assertEqual((raw["sections"], raw["analyzed"]), (2, 2))
+            return len(sql)
+        self.analysis_inventory(2)
+        small = measured()
+        self.analysis_inventory(12, start=2)
+        large = measured()
+        self.assertLessEqual(large, small + 2)
+
+    def test_unrelated_course_privacy_membership_withholds_recoverable_complement(self):
+        students = self.complete_students(6)
+        unrelated = self.analysis_inventory(1)[0]
+        # A related authorized aggregate excludes one member of the selected six.
+        for student in students[:5]:
+            Enrollment.objects.create(tenant=self.tenant, campus=self.campus, academic_year=self.academic_year,
+                term=self.term, student=student, course_offering=unrelated)
+            for period, standing, exam, periodic in ((self.period, 85, 75, 82), (self.midterm, 90, 85, 89)):
+                activity = GradeActivity.objects.get(offering=unrelated, template_period=period)
+                self._score(activity, student, 70, standing)
+                StudentPeriodGrade.objects.create(tenant=self.tenant, campus=self.campus, offering=unrelated,
+                    template_period=period, student=student, class_standing_grade=standing, exam_grade=exam,
+                    period_grade=periodic, is_finalized=True)
+        self.deny_aggregate_access()
+        filtered = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(filtered["analyzed"], 0)
+        self.assertTrue(all(row["exam"] is None for row in filtered["rows"]))
+        overall = self.raw(course_code="")
+        self.assertEqual(filtered["classifications"][0], next(c for c in overall["classifications"] if c["id"] == self.offering_a.id))
+
+    def test_membership_only_rows_match_the_full_numeric_disclosure_basis(self):
+        unrelated = self.analysis_inventory(3)
+        self.deny_aggregate_access()
+        first = StudentPeriodGrade.objects.filter(offering=unrelated[0]).first()
+        StudentPeriodGrade.objects.filter(pk=first.pk).update(exam_grade=None)
+        StudentPeriodGrade.objects.filter(offering=unrelated[1], template_period=self.midterm).update(class_standing_grade=101)
+        score = StudentActivityScore.objects.filter(activity__offering=unrelated[2]).first()
+        StudentActivityScore.objects.filter(pk=score.pk).update(is_excused=True)
+        projections = []
+        original = learning.disclosed_populations
+        def observe(histories, enrolled, leadership):
+            projections.append({pk: [(row["eligible"], row["cohort"], row["contributors"], row["signature"],
+                {metric: row["scales"][metric] for metric in ("standing", "exam")},
+                set(row["student_values"]), set(row["pattern_values"])) for row in rows] for pk, rows in histories.items()})
+            return original(histories, enrolled, leadership)
+        with patch.object(learning, "disclosed_populations", side_effect=observe):
+            self.raw()
+            self.raw(course_code="")
+        self.assertEqual(projections[0], projections[1])
+
+    def test_batched_locks_preserve_official_precedence_and_period_normalization(self):
+        common = {"tenant": self.tenant, "campus": self.campus, "academic_year": self.academic_year, "term": self.term}
+        GradingPeriodLock.objects.create(**common, scope_type="COURSE", course_offering=self.offering_a,
+            period_code="FINAL", is_locked=False)
+        GradingPeriodLock.objects.create(**common, period_code="Final", is_locked=True,
+            deadline_at=timezone.now() - timedelta(hours=1))
+        GradingPeriodLock.objects.create(**common, period_code="Pre-Final", is_locked=True)
+        request = self.client.get(self.url).wsgi_request
+        selection = LearningSelection(request)
+        expected = {(o.id, p.id): learning.GradingGovernanceService.resolve_lock(offering=o, template_period=p)
+                    for o in selection.matching(self.filters) for p in selection.periods(o)}
+        with patch.object(learning, "governance_reason", wraps=learning.governance_reason) as governance:
+            build_report(selection, self.filters)
+        for call in governance.call_args_list:
+            offering, period = call.args[:2]
+            actual = call.args[5]
+            official = expected[(offering.id, period.id)]
+            self.assertEqual(actual.pk if actual else None, official.pk if official else None)
+
+    def test_unchanged_report_reuses_public_snapshot_but_checks_live_generation(self):
+        original = views.build_report
+        with patch.object(views, "build_report", wraps=original) as build:
+            first = self.report(offering_id=self.offering_a.id)
+            second = self.report(offering_id=self.offering_a.id)
+            self.assertEqual(build.call_count, 1)
+            self.assertEqual(first["charts"], second["charts"])
+            self.assertEqual(first["html"], second["html"])
+            StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm).update(exam_grade=70)
+            self.assertEqual(self.post("page", token=first["token"]).status_code, 409)
+            self.report(offering_id=self.offering_a.id)
+            self.assertEqual(build.call_count, 2)
+
+    def test_cached_report_reauthorizes_and_detects_revocation_during_render(self):
+        self.report()
+        original = views.response_data
+        def revoke(*args, **kwargs):
+            payload = original(*args, **kwargs)
+            UserPermission.objects.create(user=self.area_chair, permission=self.permission, tenant=self.tenant,
+                campus=self.campus, grant_type="DENY")
+            return payload
+        with patch.object(views, "response_data", side_effect=revoke), patch.object(views, "build_report", wraps=views.build_report) as build:
+            self.assertEqual(self.post().status_code, 409)
+            self.assertEqual(build.call_count, 0)
+
+    def test_request_reuses_selection_with_independent_closing_reauthorization(self):
+        with patch.object(views, "LearningSelection", wraps=LearningSelection) as selections:
+            self.report()
+        self.assertEqual(selections.call_count, 2)
+
+    def test_rehydration_does_not_use_pre_digest_offering_values(self):
+        request = self.client.get(self.url).wsgi_request
+        selection = LearningSelection(request)
+        Course.objects.filter(pk=self.course.id).update(title="Changed before opening digest")
+        selection.refresh_offerings()
+        self.assertEqual(selection.offerings[self.offering_a.id].course.title, "Changed before opening digest")
+        self.assertEqual(selection._periods, {})
+        self.assertEqual(selection._contexts, {})
 
     def other_department_class(self, campus=None):
         campus = campus or self.campus
