@@ -1,3 +1,13 @@
+## Academic Performance Insights disclosure and eligibility remediation - 2026-10-19
+
+- Apply aggregate privacy checks to the actual contributors of each released component and to potential matched populations across the full authorized year/term. Withhold unsafe overlap families and excluded complements, including active-roster aggregates available from related reports; retain effective scoped academic-leadership access and direct-DENY precedence.
+- Exclude inactive/ineligible students from analysis without invalidating valid classmates or changing historical data. Continue withholding genuine record-scope failures. Bind the disclosure policy and saved-record student eligibility into generation checks; cache only public aggregate results.
+
+## Academic Performance Insights complete analysis coverage - 2026-10-19
+
+- Provide overall all-course/all-section, selected-course/all-section, and selected-section progression scopes in the existing preview. Keep accepted authorized offerings selectable independently of finalized-result availability; course comparisons list unavailable sections and compare score averages only within compatible grading signatures/scales.
+- Match students with valid records across concluded periods and recompute both periods on the same paired population. Apply existing aggregate privacy minimums to matched counts; keep quiz/activity counts class-level and separate. Preserve course/campus/tenant authorization, direct-DENY precedence, and Gradebook behavior.
+
 ## Academic Performance Insights preview display alignment - 2026-10-19
 
 - Align only the new preview heading/browser title to Academic Performance Insights and its subtitle to Exploring relationships between learning activities, class standing, and examination performance. Preserve internal Learning module names, preview URL, old production-facing dashboard, permissions, charts and calculations.

@@ -5,6 +5,7 @@ from fractions import Fraction
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.core import signing
 from django.db import connection
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
@@ -95,6 +96,176 @@ class LearningInsightsTests(TestCase):
         request = self.client.get(self.url).wsgi_request
         return build_report(LearningSelection(request), {**self.filters, **kwargs})
 
+    def complete_students(self, total, offering=None):
+        offering = offering or self.offering_a
+        students = [e.student for e in Enrollment.objects.filter(course_offering=offering).select_related("student")]
+        for index in range(total - len(students)):
+            student = self._student(offering, f"PRIVACY-{offering.id}-{index}", f"Privacy{index}")
+            students.append(student)
+            for period, quiz, standing, exam, periodic in (
+                (self.period, 70, 85, 75, 82), (self.midterm, 80, 90, 85, 89),
+            ):
+                activity = GradeActivity.objects.get(offering=offering, template_period=period)
+                self._score(activity, student, quiz, standing)
+                StudentPeriodGrade.objects.create(tenant=self.tenant, campus=self.campus, offering=offering,
+                    template_period=period, student=student, class_standing_grade=standing,
+                    exam_grade=exam, period_grade=periodic, is_finalized=True)
+        return students
+
+    def deny_aggregate_access(self):
+        UserPermission.objects.create(user=self.area_chair, permission=self.permission, tenant=self.tenant,
+            campus=self.campus, grant_type="DENY")
+
+    def test_blocker_sparse_component_uses_actual_contributors(self):
+        students = self.complete_students(5)
+        self.deny_aggregate_access()
+        StudentPeriodGrade.objects.filter(offering=self.offering_a).exclude(student=students[0]).update(exam_grade=None)
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, student=students[0]).update(exam_grade="61.37")
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertTrue(all(row["exam"] is None for row in raw["rows"]))
+        self.assertTrue(all(row["exam"] is None for row in raw["comparison_rows"]))
+        self.assertEqual(raw["analyzed"], 0)
+        self.assertTrue(all(row["exam"] is None for row in self.raw(course_code="")["rows"]))
+        response = self.post(offering_id=self.offering_a.id)
+        self.assertNotIn("61.37", response.content.decode())
+        data = response.json()
+        self.assertNotIn("61.37", self.post("page", token=data["token"]).content.decode())
+        state = signing.loads(data["token"], salt=views.TOKEN_SALT)
+        snapshot = cache.get("learning-insights:" + state["nonce"])
+        self.assertNotIn("61.37", str(snapshot))
+        for row in snapshot["rows"]:
+            for internal in ("contributors", "student_values", "pattern_values", "cohort", "comparison_values"):
+                self.assertNotIn(internal, row)
+
+    def test_blocker_matched_five_cannot_expose_excluded_single_student(self):
+        students = self.complete_students(6)
+        self.deny_aggregate_access()
+        excluded = students[-1]
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.period,
+            student=excluded).update(exam_grade="61.37")
+        StudentActivityScore.objects.filter(activity__offering=self.offering_a,
+            activity__template_period=self.midterm, student=excluded).delete()
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(raw["charts"]["line"], [])
+        self.assertEqual(raw["classifications"][0]["category"], INSUFFICIENT)
+        self.assertEqual(raw["analyzed"], 0)
+        self.assertEqual(self.raw(course_code="")["analyzed"], 0)
+        self.assertEqual(self.report(offering_id=self.offering_a.id)["charts"]["line"], [])
+
+    def test_blocker_inactive_student_does_not_invalidate_remaining_class(self):
+        students = self.complete_students(6)
+        self.deny_aggregate_access()
+        inactive = students[-1]
+        inactive.is_active = False
+        inactive.save(update_fields=["is_active"])
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(raw["analyzed"], 1)
+        self.assertEqual(raw["rows"][1]["exam"], Decimal("85.00"))
+        self.assertEqual([row["matched_students"] for row in raw["charts"]["line"]], [5, 5])
+        self.assertEqual(StudentPeriodGrade.objects.filter(offering=self.offering_a, student=inactive).count(), 2)
+
+    def test_leadership_sparse_component_visibility_and_direct_deny_reauthorization(self):
+        students = self.complete_students(5)
+        StudentPeriodGrade.objects.filter(offering=self.offering_a).exclude(student=students[0]).update(exam_grade=None)
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, student=students[0]).update(exam_grade="61.37")
+        self.assertEqual(self.raw(offering_id=self.offering_a.id)["rows"][0]["exam"], Decimal("61.37"))
+        prior = self.report(offering_id=self.offering_a.id)
+        self.area_chair.is_superuser = True
+        self.area_chair.save(update_fields=["is_superuser"])
+        self.deny_aggregate_access()
+        self.assertEqual(self.post("page", token=prior["token"]).status_code, 409)
+        self.assertNotIn("61.37", self.post(offering_id=self.offering_a.id).content.decode())
+
+    def test_leadership_matched_five_visibility_is_preserved(self):
+        students = self.complete_students(6)
+        StudentActivityScore.objects.filter(activity__offering=self.offering_a,
+            activity__template_period=self.midterm, student=students[-1]).delete()
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(raw["analyzed"], 1)
+        self.assertEqual([row["matched_students"] for row in raw["charts"]["line"]], [5, 5])
+        self.deny_aggregate_access()
+        self.assertEqual(self.raw(offering_id=self.offering_a.id)["charts"]["line"], [])
+
+    def test_matched_five_and_excluded_five_are_safe_without_leadership(self):
+        students = self.complete_students(10)
+        self.deny_aggregate_access()
+        StudentActivityScore.objects.filter(activity__offering=self.offering_a,
+            activity__template_period=self.midterm, student__in=students[-5:]).delete()
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(raw["analyzed"], 1)
+        self.assertEqual([row["matched_students"] for row in raw["charts"]["line"]], [5, 5])
+        self.assertEqual(raw["rows"][0]["exam"], Decimal("75.00"))
+
+    def test_component_minimum_and_complement_are_checked_independently(self):
+        students = self.complete_students(10)
+        self.deny_aggregate_access()
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, student__in=students[5:]).update(exam_grade=None)
+        self.assertEqual(self.raw(offering_id=self.offering_a.id)["rows"][0]["exam"], Decimal("75.00"))
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, student=students[4]).update(exam_grade=None)
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertIsNone(raw["rows"][0]["exam"])
+        self.assertEqual(raw["rows"][0]["standing"], Decimal("85.00"))
+        self.assertEqual(raw["analyzed"], 0)
+
+    def test_full_active_roster_from_related_report_protects_its_complement(self):
+        students = self.complete_students(6)
+        self.deny_aggregate_access()
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, student=students[-1]).update(is_finalized=False)
+        exam = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+            template_period=self.period, template_component=self.pre_exam, title="Related report exam", total_score=100)
+        for student in students:
+            self._score(exam, student, 75, 75)
+        # The original report can release a full six-student aggregate from its
+        # official calculator. The preview must not add the complementary five.
+        legacy = self.client.post(reverse("admin_portal:academic_performance_insights"), {
+            **{k: v for k, v in self.filters.items() if v is not None and k != "offering_id"},
+            "period_code": "PRELIM", "action": "report",
+        })
+        self.assertEqual(legacy.status_code, 200, legacy.content)
+        self.assertEqual(legacy.json()["summary"]["disclosed"], 1)
+        self.assertFalse(StudentPeriodGrade.objects.get(offering=self.offering_a,
+            student=students[-1], template_period=self.period).is_finalized)
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(raw["charts"]["line"], [])
+        self.assertEqual(raw["analyzed"], 0)
+
+    def test_privacy_denominator_retains_only_the_safe_section(self):
+        students = self.complete_students(6)
+        self.complete_students(5, self.offering_b)
+        self.deny_aggregate_access()
+        StudentActivityScore.objects.filter(activity__offering=self.offering_a,
+            activity__template_period=self.midterm, student=students[-1]).delete()
+        raw = self.raw(course_code="")
+        self.assertEqual((raw["sections"], raw["analyzed"], raw["insufficient"]), (2, 1, 1))
+        self.assertEqual([p["count"] for p in raw["patterns"]], [1, 0, 0])
+        self.assertEqual([p["percentage"] for p in raw["patterns"]], [Decimal("100.00"), Decimal("0.00"), Decimal("0.00")])
+
+    def test_inactive_historical_student_does_not_bypass_real_scope_failure(self):
+        students = self.complete_students(6)
+        students[-1].is_active = False
+        students[-1].save(update_fields=["is_active"])
+        foreign = Tenant.objects.create(code="INVALID-SAVED-SCOPE", name="Invalid saved scope")
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, student=students[-1]).update(tenant=foreign)
+        raw = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(raw["analyzed"], 0)
+        self.assertIn("scope is unavailable", raw["rows"][0]["reason"])
+
+    def test_saved_student_eligibility_and_policy_changes_invalidate_snapshots(self):
+        students = self.complete_students(6)
+        student = students[-1]
+        Enrollment.objects.filter(course_offering=self.offering_a, student=student).delete()
+        student.is_active = False
+        student.save(update_fields=["is_active"])
+        data = self.report(offering_id=self.offering_a.id)
+        self.assertEqual(len(data["charts"]["line"]), 2)
+        student.is_active = True
+        student.save(update_fields=["is_active"])
+        self.assertEqual(self.post("page", token=data["token"]).status_code, 409)
+        self.assertEqual(self.raw(offering_id=self.offering_a.id)["analyzed"], 0)
+        with patch("apps.admin_portal.learning_insights.DISCLOSURE_POLICY_VERSION", "pre-remediation"):
+            previous_policy = self.report(offering_id=self.offering_b.id)
+        self.assertEqual(self.post("page", token=previous_policy["token"]).status_code, 409)
+
     def test_initial_get_is_filters_only_and_old_menu_is_unchanged(self):
         with patch.object(views, "build_report") as compute:
             response = self.client.get(self.url, {**{k: v for k, v in self.filters.items() if v is not None}, "action": "report"})
@@ -124,6 +295,74 @@ class LearningInsightsTests(TestCase):
             self.assertIn(reverse("admin_portal:" + route), html)
         self.assertIn(reverse("admin_portal:academic_performance_insights") + "?export=sections", html)
         self.assertIn("does not filter either CSV", html)
+
+    def test_five_accepted_course_offerings_remain_selectable_without_period_grades(self):
+        self.course.code = "AE105-FAR"
+        self.course.save(update_fields=["code"])
+        inactive_offering_program = Program.objects.create(
+            tenant=self.tenant, campus=self.campus, department=self.department,
+            code="OLD-PROGRAM", name="Inactive offering program", is_active=False,
+        )
+        extra = []
+        for index in range(3):
+            offering = self._offering(f"AE105-{index}", self.campus, self.department, self.program)
+            self._assign(offering, self.faculty)
+            offering.status = "CLOSED" if index == 0 else "ARCHIVED"
+            if index == 0:
+                offering.program = inactive_offering_program
+            offering.save(update_fields=["status", "program"])
+            extra.append(offering)
+        selection = LearningSelection(self.client.get(self.url).wsgi_request)
+        filters, options = selection.options({**self.filters, "course_code": "AE105-FAR"})
+        self.assertEqual(filters["course_code"], "AE105-FAR")
+        self.assertEqual(len(options["offering_id"]), 5)
+        result = build_report(selection, {**filters, "offering_id": None})
+        self.assertEqual(result["sections"], 5)
+        self.assertEqual(len(result["comparison_rows"]), 5)
+        unavailable = [row for row in result["comparison_rows"] if row["status"] != "Comparable results available."]
+        self.assertEqual(len(unavailable), 3)
+        self.assertEqual(len(result["charts"]["bars"]), 5)
+        self.assertEqual(result["view"], "Course Performance Comparison")
+        section = build_report(selection, {**filters, "offering_id": self.offering_a.id})
+        self.assertEqual(section["view"], "Individual Section Progression")
+        overall = build_report(selection, {**filters, "course_code": "", "offering_id": None})
+        self.assertEqual(overall["view"], "Overall Academic Performance")
+        self.assertEqual(overall["sections"], 5)
+
+    def test_paired_comparisons_recalculate_on_matched_students_including_dropped_links(self):
+        midterm_activity = GradeActivity.objects.get(offering=self.offering_a, template_period=self.midterm)
+        matched_students = []
+        for index in range(3):
+            student = self._student(self.offering_a, f"PAIR-{index}", f"Pair{index}")
+            matched_students.append(student)
+            if index == 0:
+                Enrollment.objects.filter(course_offering=self.offering_a, student=student).update(
+                    is_active=False, enrollment_status=Enrollment.Status.DRP,
+                )
+            for activity, score in ((self.activity_a, 20), (midterm_activity, 23)):
+                self._score(activity, student, score, score)
+            for period, standing, exam, periodic in ((self.period, 60, 70, 60), (self.midterm, 63, 73, 63)):
+                StudentPeriodGrade.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+                    template_period=period, student=student, class_standing_grade=standing, exam_grade=exam,
+                    period_grade=periodic, is_finalized=True)
+        dropped_only = self._student(self.offering_a, "PAIR-DROPPED", "Dropped")
+        Enrollment.objects.filter(course_offering=self.offering_a, student=dropped_only).update(
+            is_active=False, enrollment_status=Enrollment.Status.DRP,
+        )
+        self._score(self.activity_a, dropped_only, 99, 99)
+        StudentPeriodGrade.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+            template_period=self.period, student=dropped_only, class_standing_grade=99, exam_grade=99,
+            period_grade=99, is_finalized=True)
+
+        result = self.raw(offering_id=self.offering_a.id)
+        classification = result["classifications"][0]
+        self.assertEqual(classification["category"], "Moved Together")
+        self.assertEqual(classification["matched_students"], 5)
+        self.assertEqual([row["quiz"] for row in result["charts"]["line"]], [Decimal("40.00"), Decimal("45.80")])
+        self.assertEqual([row["matched_students"] for row in result["charts"]["line"]], [5, 5])
+        self.assertNotIn("pattern_values", result["rows"][0])
+        self.assertNotIn("student_values", result["rows"][0])
+        self.assertNotIn(dropped_only.student_no, str(result))
 
     def test_concluded_periods_only_in_charts(self):
         data = self.report()
@@ -239,7 +478,7 @@ class LearningInsightsTests(TestCase):
         raw = self.raw(offering_id=self.offering_a.id)
         self.assertEqual(raw["rows"][0]["standing"], 160)
         self.assertFalse(raw["rows"][0]["scales"]["standing"])
-        self.assertIsNone(raw["charts"]["line"][0]["standing"])
+        self.assertEqual(raw["charts"]["line"], [])
 
     def test_changing_configuration_or_cohort_prevents_longitudinal_classification(self):
         self.mid_cs.weight_percentage = 60
@@ -248,7 +487,9 @@ class LearningInsightsTests(TestCase):
         self.mid_cs.weight_percentage = 70
         self.mid_cs.save()
         StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm, student=self.student_a2).delete()
-        self.assertEqual(self.raw()["analyzed"], 1)
+        result = self.raw()
+        self.assertEqual(result["analyzed"], 2)
+        self.assertEqual(result["classifications"][0]["matched_students"], 1)
 
     def test_pattern_rules_include_decline_opposite_mixed_and_stable(self):
         def row(sequence, quiz, standing, exam):
@@ -421,6 +662,8 @@ class LearningInsightsTests(TestCase):
         self.assertNotIn('"cohort"', response.content.decode())
         self.assertNotIn('"signature"', response.content.decode())
         self.assertNotIn('"comparison_values"', response.content.decode())
+        self.assertNotIn('"pattern_values"', response.content.decode())
+        self.assertIn("Period averages describe each period’s valid class data", response.json()["html"])
 
     def test_unrounded_class_and_quiz_means_do_not_cross_threshold(self):
         # Displayed changes round to +3, but the saved observations establish +2.995.
@@ -436,7 +679,10 @@ class LearningInsightsTests(TestCase):
         self.assertEqual([r["quiz"] for r in raw["charts"]["line"]], [Decimal("70.00"), Decimal("73.00")])
         self.assertEqual([r["standing"] for r in raw["charts"]["line"]], [Decimal("85.00"), Decimal("88.00")])
         self.assertEqual([r["exam"] for r in raw["charts"]["line"]], [Decimal("75.00"), Decimal("78.00")])
-        self.assertEqual(raw["charts"]["bars"][0]["quiz"], Decimal("73.00"))
+        section_bar = next((bar for bar in raw["charts"]["bars"]
+                            if bar["section"].startswith(f"{self.offering_a.section.code} /")), None)
+        self.assertIsNotNone(section_bar, (raw["charts"]["bar_period"], raw["comparison_note"], raw["comparison_rows"]))
+        self.assertEqual(section_bar["quiz"], Decimal("73.00"))
         self.assertNotIn("comparison_values", raw["rows"][0])
 
     def test_repeating_quiz_percentages_retain_exact_three_point_boundaries(self):

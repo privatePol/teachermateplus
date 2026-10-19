@@ -62,6 +62,7 @@ def campus_allowed(request, campus_id):
 
 class Selection:
     """One supervised assignment inventory; never use offering department ownership."""
+    include_offerings_without_grade_records = False
     @staticmethod
     def assignment_source(request):
         return AdminScopeService.scoped_faculty_assignments(request, include_all_campuses=True)
@@ -99,10 +100,13 @@ class Selection:
             campus_id__in=campus_ids, offering__campus_id__in=campus_ids,
             is_active=True, response_status="ACCEPTED",
             faculty_user__is_active=True,
-        ).alias(saved_scores=Exists(saved_scores), saved_grades=Exists(saved_grades)).filter(
-            Q(offering__status="OPEN") | (Q(offering__status__in=("CLOSED", "ARCHIVED")) &
-                                         (Q(saved_scores=True) | Q(saved_grades=True)))
-        ).select_related("offering__section__program", "offering__course", "faculty_user")
+        ).alias(saved_scores=Exists(saved_scores), saved_grades=Exists(saved_grades))
+        if not self.include_offerings_without_grade_records:
+            assignments = assignments.filter(
+                Q(offering__status="OPEN") | (Q(offering__status__in=("CLOSED", "ARCHIVED")) &
+                                               (Q(saved_scores=True) | Q(saved_grades=True)))
+            )
+        assignments = assignments.select_related("offering__program", "offering__section__program", "offering__course", "faculty_user")
         self.assignments = list(assignments)
         self.offerings = {a.offering_id: a.offering for a in self.assignments}
         self.faculty = {a.faculty_user_id: a.faculty_user for a in self.assignments}

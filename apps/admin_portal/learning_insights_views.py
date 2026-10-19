@@ -32,10 +32,12 @@ def response_data(request, result, token, page_number):
     # Large selections remain bounded in the DOM, chart and textual equivalents.
     items = result["classifications"]
     bars = result["charts"]["bars"]
-    paginator = Paginator(range(max(len(items), len(bars))), 25)
+    comparison_rows = result.get("comparison_rows", [])
+    paginator = Paginator(range(max(len(items), len(bars), len(comparison_rows))), 25)
     page = paginator.get_page(page_number)
     start, stop = (page.number - 1) * 25, page.number * 25
-    context = {**result, "classifications": items[start:stop], "bars": bars[start:stop], "page": page}
+    context = {**result, "classifications": items[start:stop], "bars": bars[start:stop],
+               "comparison_rows": comparison_rows[start:stop], "page": page}
     charts = {**result["charts"], "bars": bars[start:stop]}
     return {"token": token, "charts": charts, "export_periods": result["export_periods"],
             "html": render_to_string("admin_portal/grading/_learning_insights_results.html", context, request=request)}

@@ -2,6 +2,7 @@
 from collections import Counter, defaultdict
 from decimal import Decimal
 from fractions import Fraction
+from itertools import combinations
 
 from django.db.models import F, Q
 from django.utils import timezone
@@ -17,6 +18,7 @@ from apps.grading.models import (
     GradingPeriodLock, StudentActivityScore, StudentPeriodGrade,
 )
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
+from apps.students.models import Student
 from django.utils.crypto import salted_hmac
 
 
@@ -25,6 +27,7 @@ PATTERNS = ("Moved Together", "Moved Opposite", "Mixed / Stable")
 MEANINGFUL_CHANGE = Decimal("3.00")
 INSUFFICIENT = "Insufficient Comparable Data"
 METRICS = ("quizzes", "quiz", "activities", "standing", "exam", "periodic")
+DISCLOSURE_POLICY_VERSION = "component-and-paired-populations-v1"
 
 
 def key(period):
@@ -53,6 +56,22 @@ def performance_change(previous, current):
 
 
 class LearningSelection(Selection):
+    # Accepted, currently scoped assignments remain selectable even when a closed
+    # offering has no finalized results yet; report availability is separate.
+    include_offerings_without_grade_records = True
+
+    def __init__(self, request):
+        super().__init__(request)
+        tenant_id = request.scope["tenant_id"]
+        # Resolve optional/stale offering program values through the already
+        # validated section program for this read-only analysis instance only.
+        for assignment in self.assignments:
+            offering = assignment.offering
+            program = offering.program
+            if (not program or not program.is_active or not program.department.is_active
+                    or program.tenant_id != tenant_id or program.campus_id != offering.campus_id):
+                offering.program_id = offering.section.program_id
+
     @staticmethod
     def assignment_source(request):
         """Same supervision chain; optional offering.program uses its valid section program."""
@@ -76,7 +95,10 @@ class LearningSelection(Selection):
             Q(offering__program__isnull=True) | Q(
                 offering__program__is_active=True, offering__program__department__is_active=True,
                 offering__program__tenant_id=tenant_id, offering__program__campus_id=F("offering__campus_id"),
-            )
+            ) | Q(offering__section__program__is_active=True,
+                  offering__section__program__department__is_active=True,
+                  offering__section__program__tenant_id=tenant_id,
+                  offering__section__program__campus_id=F("offering__campus_id"))
         ).filter(Q(offering__course__department__isnull=True) | Q(offering__course__department__is_active=True))
         return AdminScopeService._visible_queryset(request, source)
 
@@ -137,7 +159,13 @@ def learning_fingerprint(selection, filters, now=None):
     ids = [o.id for o in selection.matching({k: filters[k] for k in ("academic_year_id", "term_id")})]
     tenant_id = selection.request.scope["tenant_id"]
     # Reject pre-threshold cached reports/tokens even when academic records are unchanged.
-    payload = [fingerprint(selection, filters), "percentage-point-patterns-v2", str(MEANINGFUL_CHANGE)]
+    payload = [fingerprint(selection, filters), "percentage-point-patterns-v2", str(MEANINGFUL_CHANGE),
+               DISCLOSURE_POLICY_VERSION]
+    # Saved records can outlive enrollment links. Their students' eligibility must
+    # invalidate snapshots too, even when the shared enrollment digest omits them.
+    payload.append(list(Student.objects.filter(pk__in=StudentPeriodGrade.objects.filter(
+        offering_id__in=ids).values("student_id")).order_by("pk").values_list(
+            "id", "tenant_id", "campus_id", "department_id", "program_id", "is_active")))
     for qs in (
         ActiveGradingPeriodSetting.objects.filter(tenant_id=tenant_id, term_id=filters["term_id"]),
         TenantTermGradingPeriod.objects.filter(tenant_id=tenant_id, term_id=filters["term_id"]),
@@ -160,7 +188,7 @@ def score_percentage(score, activity):
         template_detail=activity.template_detail,
     )
     value = score.raw_score
-    if not value.is_finite():
+    if value is None or not value.is_finite():
         return None
     if mode == "DIRECT_PERCENTAGE":
         return Fraction(value) if 0 <= value <= 100 else None
@@ -169,7 +197,7 @@ def score_percentage(score, activity):
     return None
 
 
-def activity_values(activities, scores, cohort):
+def activity_values(activities, scores, cohort, complete_cohort=None):
     recorded, quizzes = [], []
     for activity in activities:
         evidence = scores.get(activity.id, {})
@@ -178,11 +206,18 @@ def activity_values(activities, scores, cohort):
         recorded.append(activity)
         if FacultyGradingService.is_quiz_activity(activity):
             quizzes.append(activity)
-    quiz_exact = None
-    if quizzes and all(set(scores[a.id]) == cohort and all(v is not None for v in scores[a.id].values()) for a in quizzes):
-        quiz_exact = exact_average([exact_average(list(scores[a.id].values())) for a in quizzes])
+    quiz_values = {}
+    if quizzes:
+        for student_id in cohort:
+            observations = [scores[a.id].get(student_id) for a in quizzes]
+            if all(value is not None for value in observations):
+                quiz_values[student_id] = exact_average(observations)
+    complete_cohort = set(complete_cohort if complete_cohort is not None else cohort)
+    quiz_exact = (exact_average([quiz_values[sid] for sid in complete_cohort])
+                  if quizzes and complete_cohort and complete_cohort.issubset(quiz_values) else None)
     return {"quizzes": len(quizzes) if recorded else None, "activities": len(recorded) if recorded else None,
-            "quiz": displayed(quiz_exact), "comparison_values": {"quiz": quiz_exact}}
+            "quiz": displayed(quiz_exact), "comparison_values": {"quiz": quiz_exact},
+            "quiz_values": quiz_values}
 
 
 def scale_definitions(period):
@@ -205,18 +240,60 @@ def scale_definitions(period):
     return {"standing": known(standing), "exam": known(exam), "periodic": False}, components
 
 
-def classify(history):
-    """Most recent matching percentage-based pair, using exact unrounded means."""
+def classify(history, minimum_matched_students=1, disclosed_groups=None):
+    """Classify the latest comparable pair using one internally matched population."""
     metrics = ("quiz", "standing", "exam")
-    usable = [r for r in history if r["eligible"]
-              and all(r.get("scales", {}).get(m) for m in ("standing", "exam"))
-              and all(r.get("comparison_values", r).get(m) is not None
-                      and 0 <= r.get("comparison_values", r)[m] <= 100 for m in metrics)]
+    usable = [r for r in history if r.get("eligible")]
+    failure = "Two comparable concluded periods with valid finalized results are required."
     for current in reversed(usable):
         for previous in reversed([r for r in usable if r["sequence"] < current["sequence"]]):
-            if current["signature"] != previous["signature"] or current["cohort"] != previous["cohort"]:
+            if current["signature"] != previous["signature"]:
+                failure = "Grading methods or component scales differ between concluded periods."
                 continue
-            changes = {m: performance_change(previous.get("comparison_values", previous)[m], current.get("comparison_values", current)[m]) for m in metrics}
+            current_values = current.get("pattern_values", current.get("student_values"))
+            previous_values = previous.get("pattern_values", previous.get("student_values"))
+            if current_values is not None and previous_values is not None:
+                matched = set(current_values) & set(previous_values)
+                matched = {sid for sid in matched if all(
+                    current_values[sid].get(metric) is not None
+                    and previous_values[sid].get(metric) is not None
+                    for metric in metrics
+                )}
+                if len(matched) < minimum_matched_students:
+                    failure = "Too few students have valid comparable records in both periods to meet the applicable privacy minimum."
+                    continue
+                if disclosed_groups is not None and frozenset(matched) not in disclosed_groups:
+                    failure = "Paired results withheld because overlapping populations or excluded students do not meet aggregate privacy rules."
+                    continue
+                if any(not previous.get("scales", {}).get(m) or not current.get("scales", {}).get(m)
+                       for m in ("standing", "exam")):
+                    failure = "Verified percentage-based grading scales are unavailable for one or more components."
+                    continue
+                values = {
+                    metric: (exact_average([previous_values[sid][metric] for sid in matched]),
+                             exact_average([current_values[sid][metric] for sid in matched]))
+                    for metric in metrics
+                }
+                if any(v is None or v < 0 or v > 100 for pair in values.values() for v in pair):
+                    failure = "Component values do not establish reliable percentage-point differences."
+                    continue
+            else:
+                # Retain compatibility for pure classifier callers; production rows
+                # always carry student_values and take the matched-population path.
+                if current.get("cohort") != previous.get("cohort"):
+                    failure = "Student records are not comparable across the concluded periods."
+                    continue
+                if any(not previous.get("scales", {}).get(m) or not current.get("scales", {}).get(m)
+                       for m in ("standing", "exam")):
+                    failure = "Verified percentage-based grading scales are unavailable for one or more components."
+                    continue
+                values = {m: (previous.get("comparison_values", previous).get(m),
+                              current.get("comparison_values", current).get(m)) for m in metrics}
+                if any(v is None or v < 0 or v > 100 for pair in values.values() for v in pair):
+                    failure = "Verified percentage-based component results are unavailable."
+                    continue
+                matched = set(current.get("cohort", ()))
+            changes = {m: performance_change(*values[m]) for m in metrics}
             directions = [changes[m] for m in metrics]
             if directions[0] == directions[1] == directions[2] and directions[0] != "STABLE":
                 category = PATTERNS[0]
@@ -227,8 +304,66 @@ def classify(history):
                 category, direction = PATTERNS[2], "Mixed directions or stable results"
             return {"category": category, "detail": direction, "from": previous["period"], "to": current["period"],
                     "changes": changes, "quiz_count_change": current["quizzes"] - previous["quizzes"],
-                    "activity_count_change": current["activities"] - previous["activities"]}
-    return {"category": INSUFFICIENT, "detail": "Two comparable concluded periods with the same cohort and verified percentage-based component scales are required."}
+                    "activity_count_change": current["activities"] - previous["activities"],
+                    "matched_students": len(matched)}
+    return {"category": INSUFFICIENT, "detail": failure, "matched_students": None}
+
+
+def disclosed_populations(histories, active_enrolled, leadership_ids):
+    """Plan all component and potential paired releases before optional filters.
+
+    Membership atoms protect intersections and excluded complements, including
+    full active-roster aggregates available through related authorized reports.
+    A small group that is never releasable adds no equation to the disclosure
+    basis; an authorized leadership release does, even when that group is small.
+    """
+    groups = set()
+
+    def include(offering_id, population):
+        population = frozenset(population)
+        if population and (len(population) >= MIN_STUDENTS or offering_id in leadership_ids):
+            groups.add(population)
+
+    for pk, history in histories.items():
+        include(pk, active_enrolled[pk])
+        rows = [row for row in history if row["eligible"]]
+        for row in rows:
+            include(pk, row["cohort"])
+            for contributors in row["contributors"].values():
+                include(pk, contributors)
+        for previous, current in combinations(rows, 2):
+            if previous["signature"] == current["signature"] and all(
+                row["scales"].get(metric) for row in (previous, current) for metric in ("standing", "exam")
+            ):
+                include(pk, set(previous["pattern_values"]) & set(current["pattern_values"]))
+        # There are at most four logical periods. Include every possible line
+        # population, so withholding a period cannot create an unplanned subset.
+        for size in range(1, len(rows) + 1):
+            for subset in combinations(rows, size):
+                if len({row["signature"] for row in subset}) == 1:
+                    include(pk, set.intersection(*(set(row["student_values"]) for row in subset)))
+
+    memberships = defaultdict(set)
+    for population in groups:
+        for sid in population:
+            memberships[sid].add(population)
+    atoms = Counter(frozenset(member) for member in memberships.values())
+    hidden = {population for member, count in atoms.items() if count < MIN_STUDENTS for population in member}
+    # Withholding only the larger population is insufficient: that aggregate may
+    # already be known from another authorized request. Withhold its connected
+    # overlap family, including subsets that exclude the protected small atom.
+    pending = list(hidden)
+    while pending:
+        for sid in pending.pop():
+            for population in memberships[sid] - hidden:
+                hidden.add(population)
+                pending.append(population)
+    return {population for population in groups - hidden if len(population) >= MIN_STUDENTS}
+
+
+def student_eligible(student):
+    return (student.is_active and student.department.is_active
+            and (not student.program_id or student.program.is_active))
 
 
 def build_report(selection, filters, now=None):
@@ -239,25 +374,33 @@ def build_report(selection, filters, now=None):
     offerings = {o.id: o for o in universe}
     tenant_id = selection.request.scope["tenant_id"]
     enrolled = defaultdict(set)
+    active_enrolled = defaultdict(set)
     invalid = set()
-    enrollment_rows = Enrollment.objects.filter(course_offering_id__in=ids, is_active=True,
-        student__is_active=True, student__department__is_active=True).filter(
-        Q(student__program__isnull=True) | Q(student__program__is_active=True)
-    ).exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES).select_related("student")
+    # Keep scoped historical roster links too: a dropped/transferred student may
+    # have valid finalized evidence in both periods even when no longer active.
+    enrollment_rows = Enrollment.objects.filter(course_offering_id__in=ids).select_related(
+        "student__department", "student__program")
     for e in enrollment_rows:
         o = offerings[e.course_offering_id]
         if (e.tenant_id, e.campus_id, e.academic_year_id, e.term_id, e.student.tenant_id, e.student.campus_id) != (
             o.tenant_id, o.campus_id, o.academic_year_id, o.term_id, o.tenant_id, o.campus_id
         ):
             invalid.add(o.id)
-        else:
+        elif student_eligible(e.student):
             enrolled[o.id].add(e.student_id)
+            if e.is_active and e.enrollment_status not in Enrollment.NON_ACTIVE_GRADING_STATUSES:
+                active_enrolled[o.id].add(e.student_id)
     grades = defaultdict(dict)
-    for g in StudentPeriodGrade.objects.filter(offering_id__in=ids).select_related("student"):
+    for g in StudentPeriodGrade.objects.filter(offering_id__in=ids).select_related("student__department", "student__program"):
         o = offerings[g.offering_id]
         if (g.tenant_id, g.campus_id, g.student.tenant_id, g.student.campus_id) != (o.tenant_id, o.campus_id, o.tenant_id, o.campus_id):
             invalid.add(o.id)
-        grades[(o.id, g.template_period_id)][g.student_id] = g
+        elif not student_eligible(g.student):
+            continue
+        elif g.student_id in enrolled[o.id]:
+            grades[(o.id, g.template_period_id)][g.student_id] = g
+        else:
+            invalid.add(o.id)
     submissions = {(s.offering_id, s.template_period_id): s for s in GradeSubmission.objects.filter(offering_id__in=ids)}
     active = {a.campus_id: a for a in ActiveGradingPeriodSetting.objects.filter(
         tenant_id=tenant_id, term_id=filters["term_id"], is_active=True, period__is_active=True,
@@ -306,16 +449,10 @@ def build_report(selection, filters, now=None):
             reason = governance_reason(o, p, active.get(o.campus_id), catalog, submissions.get(pair), lock, pair in blocked, now)
             if counts[key(p)] != 1:
                 reason = "Grading-period mapping is ambiguous."
-            cohort = enrolled[o.id]
             saved = grades[pair]
-            complete = bool(cohort) and all(student_id in saved and saved[student_id].is_finalized and all(
-                getattr(saved[student_id], f) is not None and getattr(saved[student_id], f).is_finite() and getattr(saved[student_id], f) >= 0
-                for f in ("class_standing_grade", "exam_grade", "period_grade")
-            ) for student_id in cohort)
-            if not reason and not complete:
-                reason = "Complete finalized class results are unavailable."
             if o.id in invalid:
                 reason = "Academic record scope is unavailable."
+            period_authorized = not reason
             if p.id not in structures:
                 scales, components = scale_definitions(p)
                 structures[p.id] = (scales, components, component_signature(p))
@@ -326,46 +463,90 @@ def build_report(selection, filters, now=None):
             context, base_value = contexts[context_key]
             signature = (o.course_id, context["template_id"], context["profile_id"], context["formula_mode"],
                          tuple(context["signature"][3]), base_value, structure)
-            row = {"period": dict(PERIODS)[key(p)], "code": key(p), "export_code": p.code, "sequence": dict((k, n) for n, (k, _) in enumerate(PERIODS))[key(p)],
-                   "eligible": not reason, "reason": reason, "cohort": cohort, "signature": signature,
-                   "scales": dict(scales), **{m: None for m in METRICS}}
+            finalized = {}
             if not reason:
-                row.update(activity_values(activities[pair], scores, cohort))
-                if row["quiz"] is None:
-                    row["reason"] = "Quiz average unavailable: recorded quizzes need valid non-excused scores for the complete class cohort."
-                for name, field in (("standing", "class_standing_grade"), ("exam", "exam_grade"), ("periodic", "period_grade")):
-                    values = [getattr(saved[s], field) for s in cohort]
-                    row[name] = average(values)
+                for sid in enrolled[o.id]:
+                    grade = saved.get(sid)
+                    if not grade or not grade.is_finalized:
+                        continue
+                    values = {name: getattr(grade, field) for name, field in (
+                        ("standing", "class_standing_grade"), ("exam", "exam_grade"), ("periodic", "period_grade"),
+                    )}
+                    values = {name: value for name, value in values.items()
+                              if value is not None and value.is_finite() and value >= 0}
+                    if not values:
+                        continue
+                    finalized[sid] = values
+                if not finalized:
+                    reason = "No valid finalized student results are available for this concluded period."
+                elif any(sid not in finalized or len(finalized[sid]) < 3 for sid in active_enrolled[o.id]):
+                    reason = "Partial finalized component results; missing values are excluded and remain unavailable."
+            activity_data = activity_values(activities[pair], scores, enrolled[o.id], active_enrolled[o.id]) if period_authorized else {
+                "quizzes": None, "activities": None, "quiz": None, "comparison_values": {"quiz": None}, "quiz_values": {},
+            }
+            student_values, pattern_values = {}, {}
+            for sid, values in finalized.items():
+                if sid in activity_data["quiz_values"]:
+                    student_components = {**values, "quiz": activity_data["quiz_values"][sid]}
+                    if all(student_components.get(metric) is not None for metric in ("quiz", "standing", "exam")):
+                        pattern_values[sid] = {metric: student_components[metric] for metric in ("quiz", "standing", "exam")}
+                    if all(student_components.get(metric) is not None for metric in ("quiz", "standing", "exam", "periodic")):
+                        student_values[sid] = student_components
+            row = {"period": dict(PERIODS)[key(p)], "code": key(p), "export_code": p.code, "sequence": dict((k, n) for n, (k, _) in enumerate(PERIODS))[key(p)],
+                   "concluded": period_authorized, "eligible": period_authorized and bool(finalized), "reason": reason,
+                   "cohort": set(finalized), "signature": signature,
+                   "contributors": {metric: {sid for sid, values in finalized.items() if metric in values}
+                                    for metric in ("standing", "exam", "periodic")},
+                   "scales": dict(scales), "student_values": student_values, "pattern_values": pattern_values,
+                   **{m: None for m in METRICS}, "quizzes": activity_data["quizzes"], "activities": activity_data["activities"]}
+            row["quiz"] = activity_data["quiz"]
+            row["contributors"]["quiz"] = set(active_enrolled[o.id]) if row["quiz"] is not None else set()
+            row["comparison_values"] = dict(activity_data["comparison_values"])
+            if finalized:
+                for name in ("standing", "exam", "periodic"):
+                    component_values = [values[name] for values in finalized.values() if name in values]
+                    exact = exact_average(component_values)
+                    row[name] = displayed(exact)
                     if name in ("standing", "exam"):
-                        row["comparison_values"][name] = exact_average(values)
-                    if name in ("standing", "exam") and any(not 0 <= getattr(saved[s], field) <= 100 for s in cohort):
+                        row["comparison_values"][name] = exact
+                    if name in ("standing", "exam") and any(not 0 <= value <= 100 for value in component_values):
                         row["scales"][name] = False
-                row["scales"]["periodic"] = (all(0 <= saved[s].period_grade <= 100 for s in cohort)
+                periodic_values = [values["periodic"] for values in finalized.values() if "periodic" in values]
+                row["scales"]["periodic"] = (bool(periodic_values) and all(0 <= value <= 100 for value in periodic_values)
                     and sum(c.weight_percentage for c in components) == 100 and all(0 <= c.weight_percentage <= 100 for c in components)
                     and all(row["scales"][name] for name in ("standing", "exam"))
                     and all(0 <= Decimal(band[2]) <= 100 for band in context["signature"][3]))
                 if not 0 <= Decimal(base_value) <= 100:
                     row["scales"] = dict.fromkeys(row["scales"], False)
+                if row["quiz"] is None and not row["reason"]:
+                    row["reason"] = "Quiz average unavailable: no students have valid non-excused scores for every recorded quiz."
             history.append(row)
         histories[o.id] = sorted(history, key=lambda r: r["sequence"])
-    memberships = defaultdict(set)
+    leadership_ids = {pk for pk, offering in offerings.items() if selection.allows_aggregates(offering)}
+    disclosed_groups = disclosed_populations(histories, active_enrolled, leadership_ids)
     for pk, history in histories.items():
-        for r in history:
-            if r["eligible"]:
-                for sid in r["cohort"]:
-                    memberships[sid].add((pk, r["code"]))
-    atoms = Counter(frozenset(v) for v in memberships.values())
-    hidden = {pair for pairs, n in atoms.items() if n < MIN_STUDENTS for pair in pairs}
-    for pk, history in histories.items():
-        if selection.allows_aggregates(offerings[pk]):
+        if pk in leadership_ids:
             continue
         for r in history:
-            if (pk, r["code"]) in hidden or len(r["cohort"]) < MIN_STUDENTS:
+            withheld = False
+            for metric, contributors in r["contributors"].items():
+                if r[metric] is not None and frozenset(contributors) not in disclosed_groups:
+                    r[metric] = None
+                    r["comparison_values"][metric] = None
+                    withheld = True
+            if r["eligible"] and not any(r[metric] is not None for metric in ("quiz", "standing", "exam", "periodic")):
                 r.update(eligible=False, reason="Class results withheld by aggregate privacy rules.")
                 r.update({m: None for m in METRICS})
+            elif withheld:
+                r["reason"] = "Some component results are withheld by aggregate privacy rules."
     chosen = [o for o in selection.matching(filters) if not filters.get("offering_id") or o.id == filters["offering_id"]]
-    classifications = [{"id": o.id, "course": o.course.code, "section": o.section.code, "campus": o.campus.code,
-                        **classify(histories[o.id])} for o in chosen]
+    classifications = []
+    for offering in chosen:
+        minimum = 1 if selection.allows_aggregates(offering) else MIN_STUDENTS
+        classifications.append({"id": offering.id, "course": offering.course.code, "section": offering.section.code,
+                                "campus": offering.campus.code,
+                                **classify(histories[offering.id], minimum_matched_students=minimum,
+                                           disclosed_groups=None if offering.id in leadership_ids else disclosed_groups)})
     pattern_counts = Counter(c["category"] for c in classifications if c["category"] in PATTERNS)
     denominator = sum(pattern_counts.values())
     patterns = [{"label": label, "count": pattern_counts[label],
@@ -388,37 +569,92 @@ def build_report(selection, filters, now=None):
         entry["signature"] = rows[0]["signature"] if compatible else None
         overall.append(entry)
     selected_id = filters.get("offering_id")
+    selected_course = bool(filters.get("course_code"))
     table = histories.get(selected_id, []) if selected_id else overall
-    # Do not connect overall averages when the underlying classes/cohorts or definitions change.
-    line = []
-    line_rows = [r for r in table if r["eligible"]]
-    consistent_basis = bool(selected_id) or len({r["cohort_basis"] for r in line_rows}) <= 1
-    consistent_signature = len({r["signature"] for r in line_rows}) <= 1
-    for r in line_rows:
-        line.append({"period": r["period"], **{m: r[m] if consistent_basis and consistent_signature and (
-            m == "quiz" or r["scales"].get(m)
-        ) else None for m in ("quiz", "standing", "exam", "periodic")}})
-    if selected_id and len({tuple(sorted(r["cohort"])) for r in line_rows}) > 1:
-        line = [{"period": r["period"], **{m: None for m in ("quiz", "standing", "exam", "periodic")}} for r in line_rows]
-    # Direct section bars: one course, most recent common concluded period and identical arrangement.
-    bars = []
-    bar_period = ""
-    if filters.get("course_code"):
-        for code, label in reversed(PERIODS):
-            candidates = [(o, r) for o in selection.matching({**filters, "offering_id": None})
-                          for r in histories[o.id] if r["code"] == code and r["eligible"]]
-            if candidates:
-                if len({r["signature"] for _, r in candidates}) == 1:
-                    bars = [{"section": f"{o.section.code} / {o.campus.code}", "quiz": r["quiz"],
-                             "quizzes": r["quizzes"], "exam": r["exam"] if r["scales"]["exam"] else None} for o, r in candidates]
-                    bar_period = label
-                break
-    public_table = [{k: v for k, v in r.items() if k not in {"cohort", "signature", "sequence", "cohort_basis", "comparison_values"}} for r in table]
+    line, line_note = [], "Choose one course and compatible grading definitions to plot raw period averages."
+    if selected_id:
+        line_rows = [r for r in table if r["eligible"]]
+        minimum = 1 if selection.allows_aggregates(selection.offerings[selected_id]) else MIN_STUDENTS
+        compatible = bool(line_rows) and len({r["signature"] for r in line_rows}) == 1
+        paired = set.intersection(*(set(r["student_values"]) for r in line_rows)) if compatible else set()
+        if len(paired) >= minimum and (selected_id in leadership_ids or frozenset(paired) in disclosed_groups):
+            by_code = {}
+            for row in line_rows:
+                paired_values = {metric: exact_average([row["student_values"][sid][metric] for sid in paired])
+                                 for metric in ("quiz", "standing", "exam", "periodic")}
+                item = {"period": row["period"], **{metric: displayed(value) if value is not None and
+                    (metric == "quiz" or row["scales"].get(metric)) else None
+                    for metric, value in paired_values.items()}, "matched_students": len(paired)}
+                line.append(item)
+                by_code[row["code"]] = item
+            for row in table:
+                item = by_code.get(row["code"])
+                if item:
+                    row["matched_students"] = len(paired)
+            line_note = f"Progression uses the same {len(paired)} students with valid records in every displayed period; activity counts remain class-level."
+        else:
+            line_note = ("Progression is withheld because matched students or their excluded complements do not meet aggregate privacy rules."
+                         if paired and frozenset(paired) not in disclosed_groups and selected_id not in leadership_ids else
+                         "Progression is unavailable because concluded periods do not share enough students with valid comparable records or compatible grading definitions.")
+            for row in table:
+                if row["eligible"]:
+                    row["matched_students"] = None
+    else:
+        line_rows = [r for r in table if r.get("eligible")]
+        consistent_basis = len({r["cohort_basis"] for r in line_rows}) <= 1
+        consistent_signature = len({r["signature"] for r in line_rows}) <= 1
+        if consistent_basis and consistent_signature:
+            line = [{"period": r["period"], **{metric: r[metric] if metric == "quiz" or r["scales"].get(metric) else None
+                    for metric in ("quiz", "standing", "exam", "periodic")}} for r in line_rows]
+            line_note = "Period averages appear only when authorized sections share compatible grading definitions and cohort coverage."
+
+    bars, comparison_rows, bar_period, comparison_note = [], [], "", ""
+    if selected_course:
+        course_offerings = [o for o in selection.matching({**filters, "offering_id": None})
+                            if o.course.code == filters["course_code"]]
+        bar_code = next((code for code, _ in reversed(PERIODS) if any(
+            r["concluded"] for offering in course_offerings for r in histories[offering.id] if r["code"] == code
+        )), None)
+        bar_period = dict(PERIODS).get(bar_code, "")
+        period_rows = {o.id: next((r for r in histories[o.id] if r["code"] == bar_code and r["concluded"]), None)
+                       if bar_code else None for o in course_offerings}
+        available = [r for r in period_rows.values() if r and r["eligible"]]
+        compatible = bool(available) and len({r["signature"] for r in available}) == 1 and all(
+            all(r["scales"].get(metric) for metric in ("standing", "exam")) for r in available
+        )
+        comparison_note = ("Section score averages are withheld from direct comparison because grading arrangements or percentage scales differ."
+                           if available and not compatible else
+                           "No selected section has finalized results for a concluded period." if not available else "")
+        for offering in course_offerings:
+            row = period_rows.get(offering.id)
+            reason = row["reason"] if row else ""
+            if not row:
+                reason = f"No concluded-period results are available for {bar_period or 'a concluded period'}."
+            values = row if row and compatible else {}
+            minimum = 1 if selection.allows_aggregates(offering) else MIN_STUDENTS
+            category = classify(histories[offering.id], minimum_matched_students=minimum,
+                                disclosed_groups=None if offering.id in leadership_ids else disclosed_groups)["category"]
+            comparison_rows.append({"section": f"{offering.section.code} / {offering.campus.code}",
+                "status": reason if reason else ("Comparable results available." if compatible else "Not comparable across selected sections."),
+                "quizzes": row["quizzes"] if row else None, "activities": row["activities"] if row else None,
+                "quiz": values.get("quiz"), "standing": values.get("standing") if values.get("scales", {}).get("standing") else None,
+                "exam": values.get("exam") if values.get("scales", {}).get("exam") else None,
+                "periodic": values.get("periodic") if values.get("scales", {}).get("periodic") else None,
+                "pattern": category})
+        if compatible:
+            bars = [{"section": r["section"], "quiz": r["quiz"], "quizzes": r["quizzes"],
+                     "standing": r["standing"], "exam": r["exam"]} for r in comparison_rows]
+    public_table = [{k: v for k, v in r.items() if k not in {
+        "cohort", "signature", "sequence", "cohort_basis", "comparison_values", "student_values", "pattern_values", "contributors",
+    }} for r in table]
     return {"rows": public_table, "patterns": patterns, "classifications": classifications,
+            "comparison_rows": comparison_rows, "comparison_note": comparison_note,
             "analyzed": denominator, "insufficient": len(chosen) - denominator, "sections": len(chosen),
-            "view": "Class Performance Analysis" if selected_id else "Overall Learning Performance",
-            "class_label": next((f"{o.course.code} / {o.section.code} — {o.campus.code}" for o in chosen), "") if selected_id else "",
+            "view": "Individual Section Progression" if selected_id else
+                    "Course Performance Comparison" if selected_course else "Overall Academic Performance",
+            "class_label": (f"{chosen[0].course.code} / {chosen[0].section.code} — {chosen[0].campus.code}"
+                            if selected_id and chosen else filters.get("course_code") or ""),
             "export_periods": sorted({(r["export_code"], r["period"]) for o in chosen for r in histories[o.id] if r["eligible"]}),
             "threshold": str(MEANINGFUL_CHANGE),
             "charts": {"line": line, "bars": bars, "bar_period": bar_period, "patterns": patterns, "threshold": str(MEANINGFUL_CHANGE)},
-            "line_note": "Progression requires the same class cohort and compatible grading definitions; only verified 0–100 grade scales are plotted."}
+            "line_note": line_note}

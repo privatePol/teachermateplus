@@ -47,7 +47,7 @@ function report(token = 'generation') {
   return {token, html: '<p>Accessible period results</p>', export_periods: [['PRELIM', 'Prelim']], charts: {
     threshold: '3.00',
     line: [{period: 'Prelim', quiz: '0.00', standing: null, exam: '75.00', periodic: '82.00'}],
-    bars: [{section: 'A', quizzes: 4, quiz: '0.00', exam: '75.00'}],
+    bars: [{section: 'A', quizzes: 4, quiz: '0.00', standing: '82.00', exam: '75.00'}],
     patterns: [{label: 'Moved Together', count: 1, percentage: '100.00'}],
   }};
 }
@@ -79,7 +79,7 @@ test('only three charts render; missing is null and saved zero remains zero', as
   assert.equal(h.drawn[0].config.data.datasets[1].data[0], null);
   assert.equal(h.drawn[0].config.options.animation, false);
   assert.equal(h.drawn[0].config.data.datasets[0].spanGaps, false);
-  assert.equal(h.drawn[1].config.data.datasets.length, 2);
+  assert.equal(h.drawn[1].config.data.datasets.length, 3);
   const tooltip = h.drawn[1].config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]);
   assert.match(tooltip, /4/); // Count is textual context, never a score dataset.
 });
@@ -88,7 +88,7 @@ test('threshold explanations and Mixed / Stable legend preserve actual historica
   const h = harness(); const pending = h.submit(); const data = report();
   data.charts.line = [{period: 'Prelim', quiz: '80.00', standing: '85.00', exam: '75.00', periodic: '82.00'},
     {period: 'Midterm', quiz: '82.99', standing: '87.99', exam: '77.01', periodic: '83.01'}];
-  data.charts.bars = [{section: 'A', quizzes: 1, quiz: '82.99', exam: '77.01'}];
+  data.charts.bars = [{section: 'A', quizzes: 1, quiz: '82.99', standing: '87.99', exam: '77.01'}];
   data.charts.patterns = [{label: 'Moved Together', count: 1, percentage: '50.00'},
     {label: 'Moved Opposite', count: 0, percentage: '0.00'}, {label: 'Mixed / Stable', count: 1, percentage: '50.00'}];
   h.respond(0, data); await pending;
@@ -96,12 +96,37 @@ test('threshold explanations and Mixed / Stable legend preserve actual historica
   assert.deepEqual(Array.from(h.drawn[0].config.data.datasets[0].data), [80, 82.99]);
   assert.deepEqual(Array.from(h.drawn[0].config.data.datasets[2].data), [75, 77.01]);
   assert.equal(h.drawn[1].config.data.datasets[0].data[0], 82.99);
-  assert.equal(h.drawn[1].config.data.datasets[1].data[0], 77.01);
+  assert.equal(h.drawn[1].config.data.datasets[1].data[0], 87.99);
+  assert.equal(h.drawn[1].config.data.datasets[2].data[0], 77.01);
   assert.deepEqual(Array.from(h.drawn[2].config.data.labels), ['Moved Together', 'Moved Opposite', 'Mixed / Stable']);
   assert.deepEqual(Array.from(h.drawn[2].config.data.datasets[0].data), [1, 0, 1]);
   for (const chart of h.drawn) assert.match(chart.config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]), /at least 3\.00 percentage points/);
   assert.match(h.drawn[2].config.options.plugins.title.text, /3\.00 percentage points/);
   assert.match(h.drawn[2].config.options.plugins.tooltip.callbacks.label({label: 'Mixed / Stable', dataIndex: 2}), /1 sections \(50\.00%\)/);
+});
+
+test('withheld component response clears earlier grades and leaves a chart gap', async () => {
+  const h = harness();
+  const first = h.submit(); h.respond(0, report('earlier-authority')); await first;
+  const previousCharts = [...h.drawn];
+  const next = h.submit();
+  const withheld = report('restricted-authority');
+  withheld.html = '<p>Component results withheld by aggregate privacy rules.</p>';
+  withheld.charts.line = [];
+  withheld.charts.bars[0].exam = null;
+  withheld.charts.patterns = [];
+  // The server omits canvases for unavailable matched progression and patterns.
+  delete h.elements['learning-line'];
+  delete h.elements['learning-patterns'];
+  h.respond(1, withheld); await next;
+  assert.ok(previousCharts.every(chart => chart.destroyed));
+  const visible = h.drawn.filter(chart => !chart.destroyed);
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].config.type, 'bar');
+  assert.equal(visible[0].config.data.datasets[2].data[0], null);
+  assert.equal(visible[0].config.data.datasets[1].data[0], 82);
+  assert.match(h.elements['learning-results'].innerHTML, /withheld/);
+  assert.doesNotMatch(h.elements['learning-results'].innerHTML, /75/);
 });
 
 test('filter change aborts and discards an old report even when transport ignores abort', async () => {

@@ -14,7 +14,7 @@
   const links = [...document.querySelectorAll("[data-learning-export]")];
   const exportBase = links[0]?.href.split("?")[0];
   const labels = {campus_id: "Campus", academic_year_id: "Academic Year", term_id: "Term", course_code: "Course", offering_id: "Section"};
-  const empty = {campus_id: "All authorized campuses", academic_year_id: "Select academic year", term_id: "Select term", course_code: "All authorized courses", offering_id: "Overall analysis / select course first"};
+  const empty = {campus_id: "All authorized campuses", academic_year_id: "Select academic year", term_id: "Select term", course_code: "All authorized courses", offering_id: "All sections in selected course"};
   const selected = JSON.parse(document.getElementById("learning-selected").textContent);
   const field = name => form.elements.namedItem(name);
   form.querySelectorAll("select").forEach(select => {
@@ -115,7 +115,7 @@
     add("learning-line", {type: "line", data: {labels: data.line.map(r => r.period), datasets:
       [["quiz", "Quiz average (%)"], ["standing", "Class standing (grade points)"], ["exam", "Exam (grade points)"], ["periodic", "Periodic grade"]].map(([key, label], i) => ({label, data: data.line.map(r => number(r[key])), borderColor: palette[i], backgroundColor: palette[i], tension: .15, spanGaps: false}))}, options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: () => patternRule}}}}});
     add("learning-bars", {type: "bar", data: {labels: data.bars.map(r => r.section), datasets:
-      [["quiz", "Quiz average (%)"], ["exam", "Exam (grade points)"]].map(([key, label], i) => ({label, data: data.bars.map(r => number(r[key])), backgroundColor: palette[i], borderRadius: 5}))},
+      [["quiz", "Quiz average (%)"], ["standing", "Class-standing average"], ["exam", "Exam average"]].map(([key, label], i) => ({label, data: data.bars.map(r => number(r[key])), backgroundColor: palette[i], borderRadius: 5}))},
       options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: items => items.length ? `Recorded quizzes: ${data.bars[items[0].dataIndex].quizzes ?? "Not Available"}\n${patternRule}` : ""}}}}});
     add("learning-patterns", {type: "doughnut", data: {labels: data.patterns.map(r => r.label), datasets: [{data: data.patterns.map(r => r.count), backgroundColor: ["#239963", "#ed8545", "#3884e9"]}]}, options: {...common, cutout: "64%", plugins: {...common.plugins, title: {display: true, text: `Meaningful change: at least ${data.threshold} percentage points`}, tooltip: {callbacks: {label: item => `${item.label}: ${data.patterns[item.dataIndex].count} sections (${data.patterns[item.dataIndex].percentage}%)`, afterBody: () => patternRule}}}}});
   }
