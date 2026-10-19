@@ -9,16 +9,21 @@ from django.utils import timezone
 
 from apps.academics.models import ActiveGradingPeriodSetting, FacultyAssignment, TenantTermGradingPeriod
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService as Reference
-from apps.admin_portal.insights import MIN_STUDENTS, Selection, component_signature
+from apps.admin_portal.insights import (
+    LEADERSHIP_PERMISSION, MIN_STUDENTS, Selection, campus_allowed, component_signature, leadership_access,
+)
 from apps.admin_portal.insights_generation import encoded, fingerprint
 from apps.admin_portal.services import AdminScopeService
 from apps.enrollment.models import Enrollment
+from apps.core.services.permissions import PermissionService
+from apps.core.services.scope import ScopeService
 from apps.grading.models import (
     GradeActivity, GradeCorrectionUnlockWindow, GradeSubmission, GradeSubmissionReopenRequest,
     GradingPeriodLock, StudentActivityScore, StudentPeriodGrade,
 )
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.students.models import Student
+from apps.rbac.models import UserPermission, UserRole
 from django.utils.crypto import salted_hmac
 
 
@@ -60,6 +65,96 @@ class LearningSelection(Selection):
     # offering has no finalized results yet; report availability is separate.
     include_offerings_without_grade_records = True
 
+    @staticmethod
+    def assignment_scope(tenant_id, campus_ids):
+        # Both NULL means this offering's scope, never a global teaching grant.
+        return Selection.assignment_scope(tenant_id, campus_ids) | Q(
+            tenant__isnull=True, campus__isnull=True, accepted_at__isnull=False,
+        )
+
+    @staticmethod
+    def assigned_permission(request, code, campus_id):
+        """Use assigned grants, including global grants, without the superuser shortcut."""
+        scope = (Q(tenant_id=request.scope["tenant_id"]) | Q(tenant__isnull=True)) & (
+            Q(campus_id=campus_id) | Q(campus__isnull=True))
+        direct = UserPermission.objects.filter(scope, user=request.user, permission__code=code,
+                                               permission__is_active=True)
+        if direct.filter(grant_type="DENY").exists():
+            return False
+        return (PermissionService.has_assigned_permission(
+            request.user, code, tenant_id=request.scope["tenant_id"], campus_id=campus_id, exact_scope=True,
+        ) or direct.filter(grant_type="ALLOW").exists() or UserRole.objects.filter(
+            scope, user=request.user, is_active=True, role__is_active=True,
+            role__role_permissions__permission__code=code,
+            role__role_permissions__permission__is_active=True,
+        ).exists())
+
+    def monitoring_scope(self, request):
+        tenant_id = request.scope["tenant_id"]
+        self.monitoring_roles = list(UserRole.objects.filter(
+            Q(tenant_id=tenant_id) | Q(tenant__isnull=True), user=request.user,
+            is_active=True, role__is_active=True,
+        ).exclude(role__code="FACULTY").select_related("role", "department"))
+        codes = {row.role.code.upper() for row in self.monitoring_roles}
+        compare = bool(codes & ({"CAO", "SUPER_ADMIN"} | Reference.DEAN_CODES))
+        campuses, leadership, self.institution_campuses = [], set(), set()
+        for campus in AdminScopeService.active_scoped_campuses(request).filter(tenant_id=tenant_id):
+            if not compare and campus.id != request.scope.get("campus_id"):
+                continue
+            superadmin = any(row.role.code == "SUPER_ADMIN" and row.campus_id in (None, campus.id)
+                             for row in self.monitoring_roles)
+            explicit = request.user.is_superuser or superadmin
+            permitted = (all(self.assigned_permission(request, code, campus.id)
+                             for code in ("admin_portal.access", "grading_analytics.read"))
+                         if explicit else campus_allowed(request, campus.id))
+            if not permitted:
+                continue
+            campuses.append(campus)
+            if superadmin:
+                self.institution_campuses.add(campus.id)
+            if (self.assigned_permission(request, LEADERSHIP_PERMISSION, campus.id) if explicit
+                    else leadership_access(request, campus.id)):
+                leadership.add(campus.id)
+        return {"can_compare_campuses": compare}, campuses, leadership
+
+    def faculty_scope(self, request):
+        if not request.user.is_superuser:
+            scoped = AdminScopeService._faculty_ids_by_monitoring_campus(request, include_all_campuses=True)
+        else:
+            # Reuse role hierarchy, not the shared helper's superuser bypass.
+            scoped = {}
+        for campus in self.campuses:
+            if campus.id not in self.institution_campuses and not request.user.is_superuser:
+                continue
+            roles = [row for row in self.monitoring_roles if row.campus_id in (None, campus.id)]
+            departments = None
+            if campus.id not in self.institution_campuses:
+                if not any(row.department_id is None for row in roles):
+                    departments = ScopeService.expand_department_ids(
+                        [row.department_id for row in roles if row.department.is_active
+                         and row.department.tenant_id == request.scope["tenant_id"]
+                         and row.department.campus_id == campus.id],
+                        tenant_id=request.scope["tenant_id"], campus_id=campus.id,
+                    )
+                if roles and all(row.role.code == "COLLEGE_DEAN" for row in self.monitoring_roles):
+                    departments = AdminScopeService._college_dean_area_chair_department_ids(
+                        request, tenant_ids=[request.scope["tenant_id"]], campus_ids=[campus.id],
+                        dean_department_ids=departments,
+                    ) if departments is None or departments else []
+            faculty = UserRole.objects.filter(
+                Q(tenant_id=request.scope["tenant_id"]) | Q(
+                    tenant__isnull=True, user__default_tenant_id=request.scope["tenant_id"]),
+                Q(campus_id=campus.id) | Q(campus__isnull=True, user__default_campus_id=campus.id),
+                is_active=True, role__is_active=True, role__code="FACULTY", user__is_active=True,
+            )
+            if departments is not None:
+                faculty = faculty.filter(Q(department_id__in=departments) | Q(
+                    department__isnull=True, user__default_campus_id=campus.id,
+                    user__default_department_id__in=departments,
+                ))
+            scoped[campus.id] = list(faculty.values_list("user_id", flat=True).distinct())
+        return scoped
+
     def __init__(self, request):
         super().__init__(request)
         tenant_id = request.scope["tenant_id"]
@@ -72,22 +167,26 @@ class LearningSelection(Selection):
                     or program.tenant_id != tenant_id or program.campus_id != offering.campus_id):
                 offering.program_id = offering.section.program_id
 
-    @staticmethod
-    def assignment_source(request):
+    def assignment_source(self, request):
         """Same supervision chain; optional offering.program uses its valid section program."""
         tenant_id = request.scope["tenant_id"]
         supervised = Q(pk__in=[])
-        for campus_id, faculty_ids in AdminScopeService._faculty_ids_by_monitoring_campus(
-            request, include_all_campuses=True,
-        ).items():
+        for campus_id, faculty_ids in self.faculty_scope(request).items():
             supervised |= Q(offering__campus_id=campus_id, faculty_user_id__in=faculty_ids)
         source = FacultyAssignment.objects.filter(
             supervised, offering__tenant_id__in=AdminScopeService.active_scoped_tenants(request).values("id"),
             offering__term_id__in=AdminScopeService.active_scoped_terms(request).values("id"),
             offering__is_active=True, offering__department__is_active=True,
             offering__course__is_active=True, offering__section__is_active=True,
+            offering__campus__tenant_id=tenant_id,
+            offering__department__tenant_id=tenant_id,
+            offering__department__campus_id=F("offering__campus_id"),
             offering__section__department__is_active=True,
+            offering__section__department__tenant_id=tenant_id,
+            offering__section__department__campus_id=F("offering__campus_id"),
             offering__section__program__is_active=True, offering__section__program__department__is_active=True,
+            offering__section__program__department__tenant_id=tenant_id,
+            offering__section__program__department__campus_id=F("offering__campus_id"),
             offering__section__tenant_id=tenant_id, offering__section__campus_id=F("offering__campus_id"),
             offering__section__program__tenant_id=tenant_id,
             offering__section__program__campus_id=F("offering__campus_id"),

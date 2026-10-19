@@ -67,20 +67,28 @@ class Selection:
     def assignment_source(request):
         return AdminScopeService.scoped_faculty_assignments(request, include_all_campuses=True)
 
-    def __init__(self, request):
-        self.request = request
+    @staticmethod
+    def assignment_scope(tenant_id, campus_ids):
+        return Q(tenant_id=tenant_id, campus_id=F("offering__campus_id"), campus_id__in=campus_ids)
+
+    @staticmethod
+    def monitoring_scope(request):
         tenant_id = request.scope["tenant_id"]
         codes = {str(code).upper() for code in UserRole.objects.filter(
             user=request.user, is_active=True, role__is_active=True,
         ).filter(Q(tenant_id=tenant_id) | Q(tenant__isnull=True)).values_list("role__code", flat=True)}
         compare = request.user.is_superuser or "CAO" in codes or bool(codes & Official.DEAN_CODES)
-        self.role = {"can_compare_campuses": compare}
         campus_source = AdminScopeService.active_scoped_campuses(request).filter(tenant_id=tenant_id)
         if not compare:
             campus_source = campus_source.filter(id=request.scope.get("campus_id"))
-        self.campuses = [c for c in campus_source if campus_allowed(request, c.id)]
+        campuses = [c for c in campus_source if campus_allowed(request, c.id)]
+        return {"can_compare_campuses": compare}, campuses, {c.id for c in campuses if leadership_access(request, c.id)}
+
+    def __init__(self, request):
+        self.request = request
+        tenant_id = request.scope["tenant_id"]
+        self.role, self.campuses, self.leadership_campuses = self.monitoring_scope(request)
         campus_ids = {c.id for c in self.campuses}
-        self.leadership_campuses = {c.id for c in self.campuses if leadership_access(request, c.id)}
         saved_scores = StudentActivityScore.objects.filter(
             activity__offering_id=OuterRef("offering_id"), activity__tenant_id=tenant_id,
             activity__campus_id=OuterRef("offering__campus_id"), activity__is_active=True,
@@ -92,12 +100,11 @@ class Selection:
             student__campus_id=OuterRef("offering__campus_id"),
         )
         assignments = self.assignment_source(request).filter(
-            tenant_id=tenant_id, offering__tenant_id=tenant_id,
+            self.assignment_scope(tenant_id, campus_ids), offering__tenant_id=tenant_id,
             offering__academic_year__tenant_id=tenant_id, offering__term__tenant_id=tenant_id,
             offering__term__academic_year_id=F("offering__academic_year_id"),
             offering__course__tenant_id=tenant_id, offering__section__tenant_id=tenant_id,
-            campus_id=F("offering__campus_id"),
-            campus_id__in=campus_ids, offering__campus_id__in=campus_ids,
+            offering__campus_id__in=campus_ids,
             is_active=True, response_status="ACCEPTED",
             faculty_user__is_active=True,
         ).alias(saved_scores=Exists(saved_scores), saved_grades=Exists(saved_grades))

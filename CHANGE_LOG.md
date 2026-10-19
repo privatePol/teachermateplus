@@ -1,3 +1,9 @@
+## Academic Performance Insights legacy assignments and Superadmin scope - 2026-10-19
+
+- Preview selection accepts active, accepted legacy faculty assignments with an acceptance timestamp and both tenant/campus NULL using the verified offering scope. Explicit matching assignments retain eligibility; partial NULL, conflicting scopes, inactive/unaccepted assignments and unauthorized faculty remain excluded. No stored assignment is changed. Cross-campus lecturers require faculty authorization for the offering campus.
+- Active `SUPER_ADMIN` membership permits institution-wide faculty monitoring only in its authorized tenant/campuses with assigned portal/analytics grants. The superuser flag alone supplies neither grants nor wider supervision. Direct DENY and separate small-class aggregate authority remain enforced; ordinary CAO/College Dean/Area Chairman supervision is preserved. Shared RBAC is unchanged.
+- Concluded-period rules, the +/-3-point policy, grading comparability/calculations, privacy, charts, original dashboard/buttons, exports, Midterm and Activity Consistency remain unchanged. The staging 0-of-21 comparison issue is outside this correction. No schema change or data update is required.
+
 ## Academic Performance Insights disclosure and eligibility remediation - 2026-10-19
 
 - Apply aggregate privacy checks to the actual contributors of each released component and to potential matched populations across the full authorized year/term. Withhold unsafe overlap families and excluded complements, including active-roster aggregates available from related reports; retain effective scoped academic-leadership access and direct-DENY precedence.

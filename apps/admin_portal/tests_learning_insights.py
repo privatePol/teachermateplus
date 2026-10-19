@@ -116,6 +116,233 @@ class LearningInsightsTests(TestCase):
         UserPermission.objects.create(user=self.area_chair, permission=self.permission, tenant=self.tenant,
             campus=self.campus, grant_type="DENY")
 
+    def selected_offerings(self, selection_type=LearningSelection):
+        request = self.client.get(self.url).wsgi_request
+        return set(selection_type(request).offerings)
+
+    def other_department_class(self, campus=None):
+        campus = campus or self.campus
+        department = Department.objects.create(tenant=self.tenant, campus=campus, code="OTHER", name="Other")
+        program = Program.objects.create(tenant=self.tenant, campus=campus, department=department,
+                                         code="OTHER", name="Other")
+        faculty = self._user("other-faculty", campus, department)
+        UserRole.objects.create(user=faculty, role=self.faculty_role, tenant=self.tenant,
+                                campus=campus, department=department)
+        offering = self._offering("OTHER", campus, department, program)
+        self._assign(offering, faculty)
+        return offering, faculty, department
+
+    def monitoring_user(self, code, *, superuser=False, department=None):
+        role = self._role_with_access(code, code)
+        RolePermission.objects.get_or_create(role=role, permission=self.permission)
+        user = self._user("monitor-" + code.lower(), self.campus, self.department)
+        user.is_superuser = superuser
+        user.save(update_fields=["is_superuser"])
+        UserRole.objects.create(user=user, role=role, tenant=self.tenant,
+                                campus=self.campus, department=department)
+        return user, role
+
+    def test_legacy_five_offerings_keep_four_eligible_without_writes(self):
+        # Explicit 55, legacy 64/73/82 and inactive 506, with finalized evidence.
+        FacultyAssignment.objects.filter(offering=self.offering_b).update(tenant=None, campus=None)
+        extras = []
+        for code in ("LEGACY-73", "LEGACY-82", "INACTIVE-506"):
+            offering = self._offering(code, self.campus, self.department, self.program)
+            self._assign(offering, self.faculty)
+            FacultyAssignment.objects.filter(offering=offering).update(
+                tenant=None, campus=None, is_active=code != "INACTIVE-506")
+            for index in range(2):
+                student = self._student(offering, f"{code}-{index}", "Legacy")
+                for period, standing, exam, periodic in ((self.period, 85, 75, 82), (self.midterm, 90, 85, 89)):
+                    StudentPeriodGrade.objects.create(tenant=self.tenant, campus=self.campus, offering=offering,
+                        template_period=period, student=student, class_standing_grade=standing,
+                        exam_grade=exam, period_grade=periodic, is_finalized=True)
+            for period, component, subcomponent, score in (
+                (self.period, self.component, self.quiz_sub, 70), (self.midterm, self.mid_cs, self.mid_quiz, 80),
+            ):
+                activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=offering,
+                    template_period=period, template_component=component, template_subcomponent=subcomponent,
+                    title="Quiz", total_score=100)
+                for enrollment in Enrollment.objects.filter(course_offering=offering):
+                    self._score(activity, enrollment.student, score, score)
+                GradeSubmission.objects.create(tenant=self.tenant, campus=self.campus, offering=offering,
+                    template_period=period, status="SUBMITTED", submitted_at=timezone.now() - timedelta(days=2))
+            extras.append(offering)
+        expected = {self.offering_a.id, self.offering_b.id, extras[0].id, extras[1].id}
+        request = self.client.get(self.url).wsgi_request
+        before = list(FacultyAssignment.objects.order_by("id").values())
+        with CaptureQueriesContext(connection) as queries:
+            selection = LearningSelection(request)
+            raw = build_report(selection, {**self.filters, "course_code": ""})
+        self.assertEqual(set(selection.offerings), expected)
+        self.assertEqual((raw["sections"], raw["analyzed"]), (4, 4))
+        self.assertFalse(any(q["sql"].lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for q in queries))
+        self.assertEqual(list(FacultyAssignment.objects.order_by("id").values()), before)
+        self.assertEqual(self.selected_offerings(Selection), {self.offering_a.id})
+        options = self.post("options").json()["options"]
+        self.assertEqual({row["value"] for row in options["offering_id"]}, expected)
+
+    def test_legacy_partial_and_conflicting_assignment_scopes_rejected(self):
+        foreign = Tenant.objects.create(code="FOREIGN", name="Foreign")
+        other = Campus.objects.create(tenant=self.tenant, code="SECOND", name="Second")
+        for tenant_id, campus_id in ((None, self.campus.id), (self.tenant.id, None),
+                                     (foreign.id, self.campus.id), (self.tenant.id, other.id)):
+            with self.subTest(tenant_id=tenant_id, campus_id=campus_id):
+                FacultyAssignment.objects.filter(offering=self.offering_b).update(tenant_id=tenant_id, campus_id=campus_id)
+                self.assertEqual(self.selected_offerings(), {self.offering_a.id})
+
+    def test_legacy_requires_active_accepted_assignment_and_active_faculty(self):
+        assignments = FacultyAssignment.objects.filter(offering=self.offering_b)
+        assignments.update(tenant=None, campus=None)
+        accepted_at = assignments.get().accepted_at
+        for changes in ({"is_active": False}, {"response_status": "PENDING"}, {"accepted_at": None}):
+            with self.subTest(changes=changes):
+                assignments.update(**{"is_active": True, "response_status": "ACCEPTED",
+                                      "accepted_at": accepted_at, **changes})
+                self.assertNotIn(self.offering_b.id, self.selected_offerings())
+        assignments.update(is_active=True, response_status="ACCEPTED", accepted_at=accepted_at)
+        self.faculty.is_active = False
+        self.faculty.save(update_fields=["is_active"])
+        self.assertEqual(self.selected_offerings(), set())
+
+    def test_legacy_does_not_bypass_related_academic_scope(self):
+        FacultyAssignment.objects.filter(offering=self.offering_b).update(tenant=None, campus=None)
+        foreign = Tenant.objects.create(code="FOREIGN", name="Foreign")
+        # Bulk updates deliberately represent inconsistent imported records.
+        for obj, changes in ((self.offering_b, {"tenant_id": foreign.id}),
+                             (self.academic_year, {"tenant_id": foreign.id}),
+                             (self.term, {"tenant_id": foreign.id}),
+                             (self.course, {"tenant_id": foreign.id}),
+                             (self.offering_b.section, {"campus_id": Campus.objects.create(
+                                 tenant=self.tenant, code="OTHER", name="Other").id})):
+            original = {field: getattr(obj, field) for field in changes}
+            with self.subTest(model=obj._meta.label):
+                type(obj).objects.filter(pk=obj.pk).update(**changes)
+                self.assertNotIn(self.offering_b.id, self.selected_offerings())
+                type(obj).objects.filter(pk=obj.pk).update(**original)
+
+    def test_legacy_preserves_area_chair_and_college_dean_supervision(self):
+        offering, _, _ = self.other_department_class()
+        FacultyAssignment.objects.update(tenant=None, campus=None)
+        expected = {self.offering_a.id, self.offering_b.id}
+        self.assertEqual(self.selected_offerings(), expected)
+        dean, _ = self.monitoring_user("COLLEGE_DEAN", department=self.department)
+        self.client.force_login(dean)
+        for superuser in (False, True):
+            with self.subTest(superuser=superuser):
+                dean.is_superuser = superuser
+                dean.save(update_fields=["is_superuser"])
+                self.assertEqual(self.selected_offerings(), expected)
+                self.assertNotIn(offering.id, self.selected_offerings())
+        # Even a campus-wide Dean membership retains the Area Chairman chain.
+        UserRole.objects.filter(user=dean).update(department=None)
+        UserRole.objects.filter(user=self.area_chair).update(is_active=False)
+        self.assertEqual(self.selected_offerings(), set())
+
+    def test_legacy_cross_campus_lecturer_uses_offering_campus_role(self):
+        campus = Campus.objects.create(tenant=self.tenant, code="SECOND", name="Second")
+        offering, _, department = self.other_department_class(campus)
+        FacultyAssignment.objects.filter(offering=offering).update(
+            faculty_user=self.faculty, tenant=None, campus=None)
+        cao, role = self.monitoring_user("CAO")
+        UserRole.objects.create(user=cao, role=role, tenant=self.tenant, campus=campus)
+        self.client.force_login(cao)
+        self.assertNotIn(offering.id, self.selected_offerings())
+        membership = UserRole.objects.create(user=self.faculty, role=self.faculty_role,
+            tenant=self.tenant, campus=campus, department=department)
+        self.assertIn(offering.id, self.selected_offerings())
+        self.assertEqual(self.faculty.default_campus_id, self.campus.id)
+        membership.is_active = False
+        membership.save(update_fields=["is_active"])
+        self.assertNotIn(offering.id, self.selected_offerings())
+
+    def test_superadmin_matches_cao_without_area_chair_inventory_limit(self):
+        offering, _, _ = self.other_department_class()
+        FacultyAssignment.objects.filter(offering=offering).update(tenant=None, campus=None)
+        self.assertNotIn(offering.id, self.selected_offerings())
+        cao, _ = self.monitoring_user("CAO")
+        self.client.force_login(cao)
+        expected = self.selected_offerings()
+        self.assertEqual(expected, {self.offering_a.id, self.offering_b.id, offering.id})
+        user, _ = self.monitoring_user("SUPER_ADMIN", department=self.department)
+        for superuser in (False, True):
+            with self.subTest(superuser=superuser):
+                user.is_superuser = superuser
+                user.save(update_fields=["is_superuser"])
+                self.client.force_login(user)
+                self.assertEqual(self.selected_offerings(), expected)
+                self.assertEqual(self.raw(course_code="")["sections"], 3)
+                self.assertEqual(self.raw()["analyzed"], 2)
+
+    def test_superuser_flag_does_not_expand_area_chair_scope(self):
+        offering, _, _ = self.other_department_class()
+        self.area_chair.is_superuser = True
+        self.area_chair.save(update_fields=["is_superuser"])
+        self.assertEqual(self.selected_offerings(), {self.offering_a.id, self.offering_b.id})
+        self.assertNotIn(offering.id, self.selected_offerings())
+
+    def test_superadmin_requires_actual_feature_grants_and_active_role(self):
+        user, role = self.monitoring_user("SUPER_ADMIN", superuser=True)
+        self.client.force_login(user)
+        permission = Permission.objects.get(code="grading_analytics.read")
+        for code in ("admin_portal.access", "grading_analytics.read"):
+            with self.subTest(permission=code):
+                removed = Permission.objects.get(code=code)
+                RolePermission.objects.filter(role=role, permission=removed).delete()
+                self.assertEqual(self.selected_offerings(), set())
+                self.assertEqual(self.post().status_code, 400)
+                RolePermission.objects.create(role=role, permission=removed)
+        UserRole.objects.filter(user=user).update(is_active=False)
+        for granted in ("admin_portal.access", "grading_analytics.read"):
+            UserPermission.objects.create(user=user, permission=Permission.objects.get(code=granted),
+                tenant=self.tenant, campus=self.campus, grant_type="ALLOW")
+        self.assertEqual(self.selected_offerings(), set())
+        self.assertTrue(permission.is_active)
+
+    def test_superadmin_campus_tenant_limits_and_revocation(self):
+        campus = Campus.objects.create(tenant=self.tenant, code="SECOND", name="Second")
+        offering, _, _ = self.other_department_class(campus)
+        user, role = self.monitoring_user("SUPER_ADMIN", superuser=True)
+        self.client.force_login(user)
+        self.assertNotIn(offering.id, self.selected_offerings())
+        foreign = Tenant.objects.create(code="FOREIGN", name="Foreign")
+        foreign_campus = Campus.objects.create(tenant=foreign, code="FOREIGN", name="Foreign")
+        UserRole.objects.create(user=user, role=role, tenant=foreign, campus=foreign_campus)
+        self.assertNotIn(foreign_campus.id, [c["value"] for c in self.post("options").json()["options"]["campus_id"]])
+        membership = UserRole.objects.create(user=user, role=role, tenant=self.tenant, campus=campus)
+        self.assertIn(offering.id, self.selected_offerings())
+        prior = self.report()
+        membership.delete()
+        self.assertEqual(self.post("page", token=prior["token"]).status_code, 409)
+        self.assertNotIn(offering.id, self.selected_offerings())
+
+    def test_superadmin_direct_and_global_denies_override_grants(self):
+        user, _ = self.monitoring_user("SUPER_ADMIN", superuser=True)
+        self.client.force_login(user)
+        for tenant, campus in ((self.tenant, self.campus), (None, None)):
+            for code in ("admin_portal.access", "grading_analytics.read"):
+                with self.subTest(tenant=tenant, permission=code):
+                    prior = self.report()
+                    denial = UserPermission.objects.create(user=user, permission=Permission.objects.get(code=code),
+                        tenant=tenant, campus=campus, grant_type="DENY")
+                    self.assertEqual(self.selected_offerings(), set())
+                    self.assertEqual(self.post("page", token=prior["token"]).status_code, 409)
+                    denial.delete()
+
+    def test_superadmin_aggregate_deny_and_permission_revocation(self):
+        user, role = self.monitoring_user("SUPER_ADMIN", superuser=True)
+        self.client.force_login(user)
+        prior = self.report()
+        denial = UserPermission.objects.create(user=user, permission=self.permission,
+            tenant=self.tenant, campus=self.campus, grant_type="DENY")
+        self.assertEqual(self.post("page", token=prior["token"]).status_code, 409)
+        self.assertEqual(self.raw()["analyzed"], 0)
+        denial.delete()
+        prior = self.report()
+        RolePermission.objects.filter(role=role, permission=self.permission).delete()
+        self.assertEqual(self.post("page", token=prior["token"]).status_code, 409)
+        self.assertEqual(self.raw()["analyzed"], 0)
+
     def test_blocker_sparse_component_uses_actual_contributors(self):
         students = self.complete_students(5)
         self.deny_aggregate_access()
