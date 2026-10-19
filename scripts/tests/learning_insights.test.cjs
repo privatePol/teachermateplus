@@ -46,8 +46,8 @@ function harness({offering = '', chartFailure = false, reducedMotion = false} = 
 function report(token = 'generation') {
   return {token, html: '<p>Accessible period results</p>', export_periods: [['PRELIM', 'Prelim']], charts: {
     threshold: '3.00',
-    line: [{period: 'Prelim', quiz: '0.00', standing: null, exam: '75.00', periodic: '82.00'}],
-    bars: [{section: 'A', quizzes: 4, quiz: '0.00', standing: '82.00', exam: '75.00'}],
+    line: [{period: 'Prelim', quiz: '0.00', quiz_grade: '0.00', standing: null, exam: '75.00', periodic: '82.00'}],
+    bars: [{section: 'A', quizzes: 4, quiz: '0.00', quiz_grade: '0.00', standing: '82.00', exam: '75.00'}],
     patterns: [{label: 'Moved Together', count: 1, percentage: '100.00'}],
   }};
 }
@@ -86,16 +86,16 @@ test('only three charts render; missing is null and saved zero remains zero', as
 
 test('threshold explanations and Mixed / Stable legend preserve actual historical values', async () => {
   const h = harness(); const pending = h.submit(); const data = report();
-  data.charts.line = [{period: 'Prelim', quiz: '80.00', standing: '85.00', exam: '75.00', periodic: '82.00'},
-    {period: 'Midterm', quiz: '82.99', standing: '87.99', exam: '77.01', periodic: '83.01'}];
-  data.charts.bars = [{section: 'A', quizzes: 1, quiz: '82.99', standing: '87.99', exam: '77.01'}];
+  data.charts.line = [{period: 'Prelim', quiz: '80.00', quiz_grade: '90.00', standing: '85.00', exam: '75.00', periodic: '82.00'},
+    {period: 'Midterm', quiz: '82.99', quiz_grade: '91.50', standing: '87.99', exam: '77.01', periodic: '83.01'}];
+  data.charts.bars = [{section: 'A', quizzes: 1, quiz: '82.99', quiz_grade: '91.50', standing: '87.99', exam: '77.01'}];
   data.charts.patterns = [{label: 'Moved Together', count: 1, percentage: '50.00'},
     {label: 'Moved Opposite', count: 0, percentage: '0.00'}, {label: 'Mixed / Stable', count: 1, percentage: '50.00'}];
   h.respond(0, data); await pending;
   assert.equal(h.drawn.length, 3);
-  assert.deepEqual(Array.from(h.drawn[0].config.data.datasets[0].data), [80, 82.99]);
+  assert.deepEqual(Array.from(h.drawn[0].config.data.datasets[0].data), [90, 91.5]);
   assert.deepEqual(Array.from(h.drawn[0].config.data.datasets[2].data), [75, 77.01]);
-  assert.equal(h.drawn[1].config.data.datasets[0].data[0], 82.99);
+  assert.equal(h.drawn[1].config.data.datasets[0].data[0], 91.5);
   assert.equal(h.drawn[1].config.data.datasets[1].data[0], 87.99);
   assert.equal(h.drawn[1].config.data.datasets[2].data[0], 77.01);
   assert.deepEqual(Array.from(h.drawn[2].config.data.labels), ['Moved Together', 'Moved Opposite', 'Mixed / Stable']);
@@ -103,6 +103,50 @@ test('threshold explanations and Mixed / Stable legend preserve actual historica
   for (const chart of h.drawn) assert.match(chart.config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]), /at least 3\.00 percentage points/);
   assert.match(h.drawn[2].config.options.plugins.title.text, /3\.00 percentage points/);
   assert.match(h.drawn[2].config.options.plugins.tooltip.callbacks.label({label: 'Mixed / Stable', dataIndex: 2}), /1 sections \(50\.00%\)/);
+});
+
+test('Gradebook series and raw context stay distinct; descriptive points are not connected', async () => {
+  const h = harness(); const pending = h.submit(); const data = report();
+  data.charts.line_mode = 'descriptive';
+  data.charts.line = [{period: 'Midterm', quiz: '36.05', quiz_grade: '68.03', standing: '78.88', exam: '80.00'}];
+  data.charts.bars = [{section: 'BSA 1C', quiz: '36.05', quiz_grade: '68.03', quizzes: 2}];
+  h.respond(0, data); await pending;
+  assert.equal(h.drawn[0].config.data.datasets[0].data[0], 68.03);
+  assert.equal(h.drawn[1].config.data.datasets[0].data[0], 68.03);
+  assert.match(h.drawn[0].config.data.datasets[0].label, /Gradebook points/);
+  assert.equal(h.drawn[0].config.data.datasets.every(series => series.showLine === false), true);
+  assert.match(h.drawn[0].config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]), /36\.05/);
+  assert.match(h.drawn[1].config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]), /36\.05/);
+});
+
+test('an unavailable Gradebook quiz stays a gap even when raw attainment exists', async () => {
+  const h = harness(); const pending = h.submit(); const data = report();
+  data.charts.line[0].quiz = '36.05'; data.charts.line[0].quiz_grade = null;
+  data.charts.bars[0].quiz_grade = null;
+  h.respond(0, data); await pending;
+  assert.equal(h.drawn[0].config.data.datasets[0].data[0], null);
+  assert.equal(h.drawn[1].config.data.datasets[0].data[0], null);
+});
+
+test('unsupported mixed quiz rollup leaves gaps and preserves other component series', async () => {
+  const h = harness(); const pending = h.submit(); const data = report();
+  data.charts.line_mode = 'descriptive';
+  data.charts.line[0].quiz = null; data.charts.line[0].quiz_grade = null;
+  data.charts.line[0].standing = '85';
+  data.charts.bars[0].quiz = null; data.charts.bars[0].quiz_grade = null;
+  data.charts.bars[0].exam = '75';
+  data.charts.patterns = [];
+  delete h.elements['learning-patterns'];
+  h.respond(0, data); await pending;
+  assert.equal(h.drawn[0].config.data.datasets[0].data[0], null);
+  assert.equal(h.drawn[1].config.data.datasets[0].data[0], null);
+  assert.equal(h.drawn[0].config.data.datasets[1].data[0], 85);
+  assert.equal(h.drawn[1].config.data.datasets[2].data[0], 75);
+  for (const chart of h.drawn) {
+    assert.match(chart.config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]), /Raw quiz attainment: Not Available/);
+    assert.equal(chart.config.data.datasets.some(series => series.data.includes(42.5)), false);
+  }
+  assert.equal(h.drawn.length, 2);
 });
 
 test('withheld component response clears earlier grades and leaves a chart gap', async () => {

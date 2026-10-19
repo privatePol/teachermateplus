@@ -105,18 +105,18 @@
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const common = {responsive: true, maintainAspectRatio: false, animation: reduce ? false : {duration: 350},
       plugins: {legend: {position: "bottom"}}, interaction: {mode: "index", intersect: false}};
-    const scoreScale = {min: 0, max: 100, title: {display: true, text: "Quiz % / official grade points (0–100)"}};
+    const scoreScale = {min: 0, max: 100, title: {display: true, text: "Gradebook quiz / official grade points (0–100)"}};
     const add = (id, config) => {
       const canvas = document.getElementById(id);
       if (canvas) charts.push(new window.Chart(canvas, config));
     };
     const palette = ["#3884e9", "#239963", "#ed8545", "#8c65c6"];
-    const patternRule = `Meaningful change: at least ${data.threshold} percentage points on comparable percentage-based component scales. Smaller changes are stable; unsupported units are excluded.`;
+    const patternRule = `Meaningful change: at least ${data.threshold} percentage points. Patterns use raw quiz attainment %, class standing and exam values on verified scales. The quiz series displays Gradebook points; raw % is supporting context.`;
     add("learning-line", {type: "line", data: {labels: data.line.map(r => r.period), datasets:
-      [["quiz", "Quiz average (%)"], ["standing", "Class standing (grade points)"], ["exam", "Exam (grade points)"], ["periodic", "Periodic grade"]].map(([key, label], i) => ({label, data: data.line.map(r => number(r[key])), borderColor: palette[i], backgroundColor: palette[i], tension: .15, spanGaps: false}))}, options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: () => patternRule}}}}});
+      [["quiz_grade", "Quiz average (Gradebook points)"], ["standing", "Class standing (grade points)"], ["exam", "Exam (grade points)"], ["periodic", "Periodic grade"]].map(([key, label], i) => ({label, data: data.line.map(r => number(r[key])), borderColor: palette[i], backgroundColor: palette[i], tension: .15, spanGaps: false, showLine: data.line_mode !== "descriptive"}))}, options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: items => `Raw quiz attainment: ${items.length ? data.line[items[0].dataIndex].quiz ?? "Not Available" : "Not Available"}%\n${patternRule}`}}}}});
     add("learning-bars", {type: "bar", data: {labels: data.bars.map(r => r.section), datasets:
-      [["quiz", "Quiz average (%)"], ["standing", "Class-standing average"], ["exam", "Exam average"]].map(([key, label], i) => ({label, data: data.bars.map(r => number(r[key])), backgroundColor: palette[i], borderRadius: 5}))},
-      options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: items => items.length ? `Recorded quizzes: ${data.bars[items[0].dataIndex].quizzes ?? "Not Available"}\n${patternRule}` : ""}}}}});
+      [["quiz_grade", "Quiz average (Gradebook points)"], ["standing", "Class-standing average"], ["exam", "Exam average"]].map(([key, label], i) => ({label, data: data.bars.map(r => number(r[key])), backgroundColor: palette[i], borderRadius: 5}))},
+      options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: items => items.length ? `Recorded quizzes: ${data.bars[items[0].dataIndex].quizzes ?? "Not Available"}\nRaw quiz attainment: ${data.bars[items[0].dataIndex].quiz ?? "Not Available"}%\n${patternRule}` : ""}}}}});
     add("learning-patterns", {type: "doughnut", data: {labels: data.patterns.map(r => r.label), datasets: [{data: data.patterns.map(r => r.count), backgroundColor: ["#239963", "#ed8545", "#3884e9"]}]}, options: {...common, cutout: "64%", plugins: {...common.plugins, title: {display: true, text: `Meaningful change: at least ${data.threshold} percentage points`}, tooltip: {callbacks: {label: item => `${item.label}: ${data.patterns[item.dataIndex].count} sections (${data.patterns[item.dataIndex].percentage}%)`, afterBody: () => patternRule}}}}});
   }
   function render(data) {

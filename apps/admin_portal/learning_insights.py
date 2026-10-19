@@ -23,6 +23,7 @@ from apps.grading.models import (
     GradingPeriodLock, GradingTemplatePeriod, StudentActivityScore, StudentPeriodGrade,
 )
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
+from apps.grading.tabulation import PeriodSummaryLayoutService
 from apps.students.models import Student
 from apps.rbac.models import UserPermission, UserRole
 from django.utils.crypto import salted_hmac
@@ -32,8 +33,10 @@ PERIODS = (("PRELIM", "Prelim"), ("MIDTERM", "Midterm"), ("PREFINAL", "Pre-Final
 PATTERNS = ("Moved Together", "Moved Opposite", "Mixed / Stable")
 MEANINGFUL_CHANGE = Decimal("3.00")
 INSUFFICIENT = "Insufficient Comparable Data"
-METRICS = ("quizzes", "quiz", "activities", "standing", "exam", "periodic")
+METRICS = ("quizzes", "quiz", "quiz_grade", "activities", "standing", "exam", "periodic")
 DISCLOSURE_POLICY_VERSION = "component-and-paired-populations-v1"
+COMPARABILITY_POLICY_VERSION = "period-component-prefixes-v1"
+QUIZ_DISPLAY_POLICY_VERSION = "saved-gradebook-quiz-and-descriptive-points-v2-mixed-unavailable"
 
 
 def key(period):
@@ -322,7 +325,7 @@ def learning_fingerprint(selection, filters, now=None):
     tenant_id = selection.request.scope["tenant_id"]
     # Reject pre-threshold cached reports/tokens even when academic records are unchanged.
     payload = [fingerprint(selection, filters), "percentage-point-patterns-v2", str(MEANINGFUL_CHANGE),
-               DISCLOSURE_POLICY_VERSION]
+               DISCLOSURE_POLICY_VERSION, COMPARABILITY_POLICY_VERSION, QUIZ_DISPLAY_POLICY_VERSION]
     # Saved records can outlive enrollment links. Their students' eligibility must
     # invalidate snapshots too, even when the shared enrollment digest omits them.
     payload.append(list(Student.objects.filter(pk__in=StudentPeriodGrade.objects.filter(
@@ -373,8 +376,84 @@ def activity_population(activities, scores, cohort):
     return recorded, quizzes, quiz_cohort
 
 
-def activity_values(activities, scores, cohort, complete_cohort=None):
+def unsupported_mixed_quiz_rollup(quizzes, components):
+    """A mixed weighted detail category has no supported standalone quiz rollup.
+
+    Use the same configured-code classification as is_quiz_activity, including
+    quiz-only parents whose details are individual quiz labels (Q1, Q2, etc.).
+    Inspect prefetched definitions only; missing project scores do not make its
+    configured weight disappear or turn the remaining category into quizzes.
+    """
+    sub_ids = {activity.template_subcomponent_id for activity in quizzes}
+    is_quiz_code = FacultyGradingService._is_quiz_template_code
+    for component in components:
+        for sub in component.subcomponents.all():
+            if not sub.is_active or sub.pk not in sub_ids or sub.detail_computation_mode != "WEIGHTED_DETAILS":
+                continue
+            parent_is_quiz = is_quiz_code(component.code) or is_quiz_code(sub.code)
+            detail_kinds = {parent_is_quiz or is_quiz_code(detail.code)
+                            for detail in sub.details.all() if detail.is_active}
+            if detail_kinds == {True, False}:
+                return True
+    return False
+
+
+def gradebook_quiz_values(quizzes, grade_scores, cohort, components):
+    """Reuse Gradebook rounding/rollups with already loaded definitions/scores."""
+    if unsupported_mixed_quiz_rollup(quizzes, components):
+        return {}
+    grouped = defaultdict(list)
+    for activity in quizzes:
+        grouped[(activity.template_component_id, activity.template_subcomponent_id)].append(activity)
+    plans, blocks = [], []
+    for component in components:
+        sections, section_plans = [], []
+        subcomponents = {sub.pk: sub for sub in component.subcomponents.all() if sub.is_active}
+        for (component_id, sub_id), rows in grouped.items():
+            if component_id != component.pk:
+                continue
+            sub = subcomponents.get(sub_id)
+            details = [detail for detail in sub.details.all() if detail.is_active] if sub else []
+            if (component.weight_percentage < 0 or (sub_id is None and subcomponents)
+                or (sub and (sub.weight_percentage < 0 or sub.detail_computation_mode not in {"WEIGHTED_DETAILS", "AVERAGE_ACTIVITIES"}))
+                or any(detail.weight_percentage < 0 for detail in details)):
+                return {}
+            sections.append({"color_class": "summary-group-quizzes", "weight_percentage": sub.weight_percentage if sub else Decimal(100)})
+            section_plans.append((sub, details, rows))
+        if sections:
+            blocks.append({"weight_percentage": component.weight_percentage, "sections": sections})
+            plans.append(section_plans)
+    layout = {"class_standing_blocks": blocks}
+    result = {}
+    for sid in cohort:
+        if not quizzes or not all(grade_scores.get(a.id, {}).get(sid) is not None for a in quizzes):
+            continue
+        values = []
+        for section_plans in plans:
+            sections = []
+            for sub, details, rows in section_plans:
+                if details and (sub.detail_computation_mode != "AVERAGE_ACTIVITIES" or any(a.template_detail_id for a in rows)):
+                    detail_scores = []
+                    for detail in details:
+                        observations = [grade_scores[a.id][sid] for a in rows if a.template_detail_id == detail.pk]
+                        detail_scores.append((detail.weight_percentage, observations if sub.detail_computation_mode == "AVERAGE_ACTIVITIES"
+                                              else PeriodSummaryLayoutService.average(observations)))
+                    value = FacultyGradingService.aggregate_detail_scores(subcomponent=sub, detail_scores=detail_scores)
+                else:
+                    value = PeriodSummaryLayoutService.average([grade_scores[a.id][sid] for a in rows])
+                sections.append({"average": value})
+            values.append({"sections": sections})
+        value = PeriodSummaryLayoutService.print_group_average(layout, {"class_standing_blocks": values}, quizzes=True)
+        if value is not None and value.is_finite() and 0 <= value <= 100:
+            result[sid] = value
+    return result
+
+
+def activity_values(activities, scores, cohort, complete_cohort=None, grade_scores=None, components=()):
     recorded, quizzes, quiz_cohort = activity_population(activities, scores, cohort)
+    unsupported = unsupported_mixed_quiz_rollup(quizzes, components)
+    if unsupported:
+        quiz_cohort = set()
     quiz_values = {}
     if quizzes:
         for student_id in quiz_cohort:
@@ -383,9 +462,17 @@ def activity_values(activities, scores, cohort, complete_cohort=None):
     complete_cohort = set(complete_cohort if complete_cohort is not None else cohort)
     quiz_exact = (exact_average([quiz_values[sid] for sid in complete_cohort])
                   if quizzes and complete_cohort and complete_cohort.issubset(quiz_values) else None)
+    # Gradebook summaries use saved converted activity scores and round each
+    # student's quiz mean before the class mean. Never convert that score again.
+    grade_scores = grade_scores or {}
+    quiz_grades = gradebook_quiz_values(quizzes, grade_scores, quiz_cohort, components)
+    quiz_grade = (PeriodSummaryLayoutService.average([quiz_grades[sid] for sid in complete_cohort])
+                  if complete_cohort and complete_cohort.issubset(quiz_grades) else None)
     return {"quizzes": len(quizzes) if recorded else None, "activities": len(recorded) if recorded else None,
-            "quiz": displayed(quiz_exact), "comparison_values": {"quiz": quiz_exact},
-            "quiz_values": quiz_values}
+            "quiz": displayed(quiz_exact), "quiz_grade": quiz_grade,
+            "comparison_values": {"quiz": quiz_exact, "quiz_grade": quiz_grade},
+            "quiz_unavailable_reason": "Quiz averages unavailable: unsupported mixed quiz/non-quiz weighted detail category." if unsupported else "",
+            "quiz_values": quiz_values, "quiz_grades": quiz_grades}
 
 
 def scale_definitions(period):
@@ -406,6 +493,44 @@ def scale_definitions(period):
             ) for s in rows[0].subcomponents.all() if s.is_active
         )
     return {"standing": known(standing), "exam": known(exam), "periodic": False}, components
+
+
+def comparable_component_signature(period):
+    """Ignore only the owning logical period's recognized code prefix.
+
+    Retain every semantic code suffix, weight, scoring override, examination/
+    attendance flag and nested computation rule from the shared signature. That
+    shared signature and stored template codes remain unchanged for other reports.
+    """
+    prefixes = {
+        "PRELIM": ("PRELIM",), "MIDTERM": ("MIDTERM", "MID_TERM", "MID-TERM"),
+        "PREFINAL": ("PREFINAL", "PRE_FINAL", "PRE-FINAL"), "FINAL": ("FINAL",),
+    }.get(key(period), ())
+    ambiguous = False
+
+    def identity(code):
+        for prefix in prefixes:
+            marker = prefix + "_"
+            if code.upper().startswith(marker) and len(code) > len(marker):
+                return code[len(marker):]
+        return code
+
+    def normalize(rows):
+        nonlocal ambiguous
+        result = []
+        for row in rows:
+            values = list(row)
+            values[0] = identity(row[0])
+            if isinstance(row[-1], tuple):
+                values[-1] = normalize(row[-1])
+            result.append(tuple(values))
+        if len({row[0] for row in result}) != len(result):
+            ambiguous = True
+        return tuple(sorted(result, key=lambda row: row[0]))
+
+    signature = normalize(component_signature(period))
+    # Colliding normalized identities cannot establish cross-period equivalence.
+    return ("ambiguous-component-identities", period.pk, signature) if ambiguous else signature
 
 
 def classify(history, minimum_matched_students=1, disclosed_groups=None):
@@ -534,7 +659,7 @@ def student_eligible(student):
             and (not student.program_id or student.program.is_active))
 
 
-def privacy_history_row(finalized, scales, signature, period_authorized, activities, scores, enrolled, active_enrolled, base_value):
+def privacy_history_row(finalized, scales, signature, period_authorized, activities, scores, enrolled, active_enrolled, base_value, grade_scores, components):
     """Keep actual contributor/matched sets without calculating unrelated averages.
 
     These private rows are used only by disclosed_populations, never by charts,
@@ -542,6 +667,8 @@ def privacy_history_row(finalized, scales, signature, period_authorized, activit
     match the numeric path, including historical and partially finalized records.
     """
     _, quizzes, quiz_cohort = activity_population(activities, scores, enrolled) if period_authorized else ([], [], set())
+    if unsupported_mixed_quiz_rollup(quizzes, components):
+        quiz_cohort = set()
     scales = dict(scales)
     for metric in ("standing", "exam"):
         if any(metric in values and not 0 <= values[metric] <= 100 for values in finalized.values()):
@@ -551,6 +678,8 @@ def privacy_history_row(finalized, scales, signature, period_authorized, activit
     contributors = {metric: {sid for sid, values in finalized.items() if metric in values}
                     for metric in ("standing", "exam", "periodic")}
     contributors["quiz"] = set(active_enrolled) if quizzes and active_enrolled and active_enrolled <= quiz_cohort else set()
+    grade_cohort = {sid for sid in quiz_cohort if all(grade_scores.get(a.id, {}).get(sid) is not None for a in quizzes)}
+    contributors["quiz_grade"] = set(active_enrolled) if active_enrolled and active_enrolled <= grade_cohort else set()
     return {"eligible": period_authorized and bool(finalized), "cohort": set(finalized),
             "contributors": contributors, "signature": signature, "scales": scales,
             "pattern_values": {sid for sid, values in finalized.items() if sid in quiz_cohort
@@ -641,10 +770,17 @@ def build_report(selection, filters, now=None):
         valid_activities[a.id] = a
         activities[(a.offering_id, a.template_period_id)].append(a)
     scores = defaultdict(dict)
+    grade_scores = defaultdict(dict)
     for s in StudentActivityScore.objects.filter(activity_id__in=valid_activities, is_active=True, is_excused=False):
         a = valid_activities[s.activity_id]
         if s.student_id in enrolled[a.offering_id]:
-            scores[a.id][s.student_id] = score_percentage(s, a)
+            value = score_percentage(s, a)
+            scores[a.id][s.student_id] = value
+            # The actual configured mode/base was applied by Gradebook when
+            # saving computed_score. Read that authoritative rounded value;
+            # unknown modes, invalid raw evidence and invalid grades stay absent.
+            if value is not None and s.computed_score is not None and s.computed_score.is_finite() and 0 <= s.computed_score <= 100:
+                grade_scores[a.id][s.student_id] = s.computed_score
     histories, structures = {}, {}
     for o in universe:
         history = []
@@ -664,7 +800,7 @@ def build_report(selection, filters, now=None):
             period_authorized = not reason
             if p.id not in structures:
                 scales, components = scale_definitions(p)
-                structures[p.id] = (scales, components, component_signature(p))
+                structures[p.id] = (scales, components, comparable_component_signature(p))
             scales, components, structure = structures[p.id]
             context, base_value = selection.grading_context(o, p)
             signature = (o.course_id, context["template_id"], context["profile_id"], context["formula_mode"],
@@ -690,16 +826,18 @@ def build_report(selection, filters, now=None):
             if o.id not in numeric_ids:
                 history.append(privacy_history_row(
                     finalized, scales, signature, period_authorized, activities[pair], scores,
-                    enrolled[o.id], active_enrolled[o.id], base_value,
+                    enrolled[o.id], active_enrolled[o.id], base_value, grade_scores, components,
                 ))
                 continue
-            activity_data = activity_values(activities[pair], scores, enrolled[o.id], active_enrolled[o.id]) if period_authorized else {
-                "quizzes": None, "activities": None, "quiz": None, "comparison_values": {"quiz": None}, "quiz_values": {},
+            activity_data = activity_values(activities[pair], scores, enrolled[o.id], active_enrolled[o.id], grade_scores, components) if period_authorized else {
+                "quizzes": None, "activities": None, "quiz": None, "quiz_grade": None,
+                "comparison_values": {"quiz": None, "quiz_grade": None}, "quiz_values": {}, "quiz_grades": {},
             }
             student_values, pattern_values = {}, {}
             for sid, values in finalized.items():
                 if sid in activity_data["quiz_values"]:
-                    student_components = {**values, "quiz": activity_data["quiz_values"][sid]}
+                    student_components = {**values, "quiz": activity_data["quiz_values"][sid],
+                                          "quiz_grade": activity_data["quiz_grades"].get(sid)}
                     if all(student_components.get(metric) is not None for metric in ("quiz", "standing", "exam")):
                         pattern_values[sid] = {metric: student_components[metric] for metric in ("quiz", "standing", "exam")}
                     if all(student_components.get(metric) is not None for metric in ("quiz", "standing", "exam", "periodic")):
@@ -712,7 +850,9 @@ def build_report(selection, filters, now=None):
                    "scales": dict(scales), "student_values": student_values, "pattern_values": pattern_values,
                    **{m: None for m in METRICS}, "quizzes": activity_data["quizzes"], "activities": activity_data["activities"]}
             row["quiz"] = activity_data["quiz"]
+            row["quiz_grade"] = activity_data["quiz_grade"]
             row["contributors"]["quiz"] = set(active_enrolled[o.id]) if row["quiz"] is not None else set()
+            row["contributors"]["quiz_grade"] = set(active_enrolled[o.id]) if row["quiz_grade"] is not None else set()
             row["comparison_values"] = dict(activity_data["comparison_values"])
             if finalized:
                 for name in ("standing", "exam", "periodic"):
@@ -731,7 +871,8 @@ def build_report(selection, filters, now=None):
                 if not 0 <= Decimal(base_value) <= 100:
                     row["scales"] = dict.fromkeys(row["scales"], False)
                 if row["quiz"] is None and not row["reason"]:
-                    row["reason"] = "Quiz average unavailable: no students have valid non-excused scores for every recorded quiz."
+                    row["reason"] = (activity_data.get("quiz_unavailable_reason")
+                                     or "Quiz average unavailable: no students have valid non-excused scores for every recorded quiz.")
             history.append(row)
         histories[o.id] = sorted(history, key=lambda r: r["sequence"]) if o.id in numeric_ids else history
     leadership_ids = {pk for pk, offering in offerings.items() if selection.allows_aggregates(offering)}
@@ -772,17 +913,21 @@ def build_report(selection, filters, now=None):
                  "scales": {name: compatible and all(r["scales"][name] for r in rows) for name in ("standing", "exam", "periodic")}}
         for metric in METRICS:
             values = [r[metric] for r in rows if r[metric] is not None]
-            entry[metric] = average(values) if compatible or metric in ("quizzes", "activities") else None
+            entry[metric] = ((PeriodSummaryLayoutService.average(values) if metric == "quiz_grade" else average(values))
+                             if compatible or metric in ("quizzes", "activities") else None)
             entry[metric + "_sections"] = len(values) if entry[metric] is not None else 0
         if not compatible:
             entry["reason"] = "Choose one compatible course group for score averages. Counts and within-section patterns remain available."
         entry["cohort_basis"] = frozenset((o.id, tuple(sorted(r["cohort"]))) for o in chosen for r in histories[o.id] if r["code"] == code and r["eligible"])
+        entry["quiz_grade_basis"] = frozenset(o.id for o in chosen for r in histories[o.id]
+                                             if r["code"] == code and r["eligible"] and r["quiz_grade"] is not None)
         entry["signature"] = rows[0]["signature"] if compatible else None
         overall.append(entry)
     selected_id = filters.get("offering_id")
     selected_course = bool(filters.get("course_code"))
     table = histories.get(selected_id, []) if selected_id else overall
-    line, line_note = [], "Choose one course and compatible grading definitions to plot raw period averages."
+    line, line_note = [], "Choose one course and compatible grading definitions for matched progression."
+    line_mode = "matched"
     if selected_id:
         line_rows = [r for r in table if r["eligible"]]
         minimum = 1 if selection.allows_aggregates(selection.offerings[selected_id]) else MIN_STUDENTS
@@ -796,6 +941,8 @@ def build_report(selection, filters, now=None):
                 item = {"period": row["period"], **{metric: displayed(value) if value is not None and
                     (metric == "quiz" or row["scales"].get(metric)) else None
                     for metric, value in paired_values.items()}, "matched_students": len(paired)}
+                item["quiz_grade"] = (PeriodSummaryLayoutService.average([row["student_values"][sid]["quiz_grade"] for sid in paired])
+                                      if all(row["student_values"][sid].get("quiz_grade") is not None for sid in paired) else None)
                 line.append(item)
                 by_code[row["code"]] = item
             for row in table:
@@ -818,6 +965,28 @@ def build_report(selection, filters, now=None):
             line = [{"period": r["period"], **{metric: r[metric] if metric == "quiz" or r["scales"].get(metric) else None
                     for metric in ("quiz", "standing", "exam", "periodic")}} for r in line_rows]
             line_note = "Period averages appear only when authorized sections share compatible grading definitions and cohort coverage."
+            for item, row in zip(line, line_rows):
+                item["quiz_grade"] = row["quiz_grade"]
+            if len({r["quiz_grade_basis"] for r in line_rows}) > 1:
+                line_mode = "descriptive"
+                line_note = "Descriptive period averages: the converted quiz values have different contributing sections; points are not connected into a matched trend."
+
+    # Descriptive points repeat only already-disclosable class/period aggregates.
+    # They introduce no new matched population and never imply a valid trend.
+    if not line:
+        line = [{"period": row["period"], "quiz": row["quiz"], "quiz_grade": row["quiz_grade"],
+                 **{metric: row[metric] if row["scales"].get(metric) else None
+                    for metric in ("standing", "exam", "periodic")}}
+                for row in table if row.get("eligible") and any(row.get(metric) is not None
+                    for metric in ("quiz", "quiz_grade", "standing", "exam", "periodic"))]
+        line_mode = "descriptive"
+        if line:
+            line_note = "Descriptive concluded-period class averages only; points are not connected because matched progression is unavailable. " + line_note
+    if selected_id and classifications and classifications[0]["category"] == INSUFFICIENT and line:
+        line_mode = "descriptive"
+        line_note += " Formal classification unavailable: " + classifications[0]["detail"]
+    line = [point for point in line if any(point.get(metric) is not None
+            for metric in ("quiz_grade", "standing", "exam", "periodic"))]
 
     bars, comparison_rows, bar_period, comparison_note = [], [], "", ""
     if selected_course:
@@ -848,15 +1017,16 @@ def build_report(selection, filters, now=None):
             comparison_rows.append({"section": f"{offering.section.code} / {offering.campus.code}",
                 "status": reason if reason else ("Comparable results available." if compatible else "Not comparable across selected sections."),
                 "quizzes": row["quizzes"] if row else None, "activities": row["activities"] if row else None,
-                "quiz": values.get("quiz"), "standing": values.get("standing") if values.get("scales", {}).get("standing") else None,
+                "quiz": values.get("quiz"), "quiz_grade": values.get("quiz_grade"),
+                "standing": values.get("standing") if values.get("scales", {}).get("standing") else None,
                 "exam": values.get("exam") if values.get("scales", {}).get("exam") else None,
                 "periodic": values.get("periodic") if values.get("scales", {}).get("periodic") else None,
                 "pattern": category})
         if compatible:
-            bars = [{"section": r["section"], "quiz": r["quiz"], "quizzes": r["quizzes"],
+            bars = [{"section": r["section"], "quiz": r["quiz"], "quiz_grade": r["quiz_grade"], "quizzes": r["quizzes"],
                      "standing": r["standing"], "exam": r["exam"]} for r in comparison_rows]
     public_table = [{k: v for k, v in r.items() if k not in {
-        "cohort", "signature", "sequence", "cohort_basis", "comparison_values", "student_values", "pattern_values", "contributors",
+        "cohort", "signature", "sequence", "cohort_basis", "quiz_grade_basis", "comparison_values", "student_values", "pattern_values", "contributors",
     }} for r in table]
     return {"rows": public_table, "patterns": patterns, "classifications": classifications,
             "comparison_rows": comparison_rows, "comparison_note": comparison_note,
@@ -867,5 +1037,5 @@ def build_report(selection, filters, now=None):
                             if selected_id and chosen else filters.get("course_code") or ""),
             "export_periods": sorted({(r["export_code"], r["period"]) for o in chosen for r in histories[o.id] if r["eligible"]}),
             "threshold": str(MEANINGFUL_CHANGE),
-            "charts": {"line": line, "bars": bars, "bar_period": bar_period, "patterns": patterns, "threshold": str(MEANINGFUL_CHANGE)},
+            "charts": {"line": line, "line_mode": line_mode, "bars": bars, "bar_period": bar_period, "patterns": patterns, "threshold": str(MEANINGFUL_CHANGE)},
             "line_note": line_note}
