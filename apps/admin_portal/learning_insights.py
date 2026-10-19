@@ -35,7 +35,7 @@ MEANINGFUL_CHANGE = Decimal("3.00")
 INSUFFICIENT = "Insufficient Comparable Data"
 METRICS = ("quizzes", "quiz", "quiz_grade", "activities", "standing", "exam", "periodic")
 DISCLOSURE_POLICY_VERSION = "component-and-paired-populations-v1"
-COMPARABILITY_POLICY_VERSION = "period-component-prefixes-v1"
+COMPARABILITY_POLICY_VERSION = "period-component-effective-modes-and-comparison-v2"
 QUIZ_DISPLAY_POLICY_VERSION = "saved-gradebook-quiz-and-descriptive-points-v2-mixed-unavailable"
 
 
@@ -470,7 +470,8 @@ def activity_values(activities, scores, cohort, complete_cohort=None, grade_scor
                   if complete_cohort and complete_cohort.issubset(quiz_grades) else None)
     return {"quizzes": len(quizzes) if recorded else None, "activities": len(recorded) if recorded else None,
             "quiz": displayed(quiz_exact), "quiz_grade": quiz_grade,
-            "comparison_values": {"quiz": quiz_exact, "quiz_grade": quiz_grade},
+            "comparison_values": {"quiz": quiz_exact, "quiz_grade": exact_average([quiz_grades[sid] for sid in complete_cohort]) if quiz_grade is not None else None},
+            "quiz_unsupported": unsupported,
             "quiz_unavailable_reason": "Quiz averages unavailable: unsupported mixed quiz/non-quiz weighted detail category." if unsupported else "",
             "quiz_values": quiz_values, "quiz_grades": quiz_grades}
 
@@ -498,7 +499,7 @@ def scale_definitions(period):
 def comparable_component_signature(period):
     """Ignore only the owning logical period's recognized code prefix.
 
-    Retain every semantic code suffix, weight, scoring override, examination/
+    Retain every semantic code suffix, weight, effective scoring mode, examination/
     attendance flag and nested computation rule from the shared signature. That
     shared signature and stored template codes remain unchanged for other reports.
     """
@@ -515,14 +516,18 @@ def comparable_component_signature(period):
                 return code[len(marker):]
         return code
 
-    def normalize(rows):
+    def normalize(rows, inherited_mode=None):
         nonlocal ambiguous
         result = []
         for row in rows:
             values = list(row)
             values[0] = identity(row[0])
+            # INHERIT and an explicit identical override resolve to the same
+            # Gradebook calculation. Unknown modes remain distinct/fail closed.
+            if values[2] == "INHERIT" and inherited_mode in {"RAW_BASE50", "DIRECT_PERCENTAGE"}:
+                values[2] = inherited_mode
             if isinstance(row[-1], tuple):
-                values[-1] = normalize(row[-1])
+                values[-1] = normalize(row[-1], values[2])
             result.append(tuple(values))
         if len({row[0] for row in result}) != len(result):
             ambiguous = True
@@ -533,15 +538,75 @@ def comparable_component_signature(period):
     return ("ambiguous-component-identities", period.pk, signature) if ambiguous else signature
 
 
+def period_comparison(history, classification):
+    """Describe already released period means; never create another population."""
+    concluded = [row for row in history if row.get("concluded")]
+    by_period = {row["period"]: row for row in concluded}
+    pair = [by_period[name] for name in (classification.get("from"), classification.get("to")) if name in by_period]
+    if len(pair) != 2:
+        pair = concluded[-2:]
+    previous, current = (pair if len(pair) == 2 else ({}, pair[-1] if pair else {}))
+    compatible = bool(previous and current and previous["signature"] == current["signature"])
+
+    def values(metric, label, count=False):
+        left, right = previous.get(metric), current.get(metric)
+        comparable = (count or compatible) and all(
+            metric in {"quizzes", "quiz", "quiz_grade"} or row.get("scales", {}).get(metric)
+            for row in (previous, current))
+        change = None
+        if left is not None and right is not None and comparable:
+            first = previous.get("comparison_values", {}).get(metric, left)
+            last = current.get("comparison_values", {}).get(metric, right)
+            if first is not None and last is not None:
+                delta = displayed(Fraction(last) - Fraction(first))
+                change = (f"{int(delta):+d}" if count else f"{delta:+.2f}") if delta else ("0" if count else "0.00")
+        def display(value):
+            return None if value is None else str(value) if count else f"{value:.2f}"
+        return {"indicator": label, "previous": display(left), "current": display(right), "change": change}
+
+    return {"previous": previous.get("period", "Earlier period"), "current": current.get("period", "Later period"),
+            "rows": [values(metric, label, metric == "quizzes") for metric, label in (
+                ("quizzes", "Quiz Count"), ("quiz_grade", "Quiz Average (Gradebook points)"),
+                ("standing", "Class Standing"), ("exam", "Examination Average"), ("periodic", "Periodic Average"))],
+            "raw": values("quiz", "Raw Quiz Percentage (%)"),
+            "note": ("Two concluded periods are required to show changes." if len(pair) < 2 else
+                     "Changes in grade averages are unavailable because grading configurations are incompatible." if not compatible else
+                     "Change is the later period average minus the earlier average, calculated before display rounding."),
+            "basis": "Descriptive period averages use each period's available class data. Pattern classification separately requires matched students and uses raw quiz percentages."}
+
+
 def classify(history, minimum_matched_students=1, disclosed_groups=None):
     """Classify the latest comparable pair using one internally matched population."""
     metrics = ("quiz", "standing", "exam")
     usable = [r for r in history if r.get("eligible")]
-    failure = "Two comparable concluded periods with valid finalized results are required."
+    reasons = {
+        "concluded_periods": "Two concluded periods with valid finalized results are required.",
+        "finalized_records": "Insufficient finalized student records across concluded periods.",
+        "grading_configuration": "Grading configurations are incompatible across concluded periods.",
+        "unsupported_quiz": "Unsupported mixed quiz scoring configuration; quiz comparison is unavailable.",
+        "missing_measurements": "Required quiz, examination or class-standing measurements are unavailable.",
+        "matched_records": "Insufficient matched finalized student records with all required measurements.",
+        "privacy_minimum": "Comparison withheld under the applicable minimum-student privacy rule.",
+        "privacy_overlap": "Comparison withheld under privacy rules for overlapping or complementary student groups.",
+        "unsupported_scale": "Unsupported scoring configuration; comparable percentage-based component scales are unavailable.",
+    }
+    failure = None
+    def reject(code):
+        nonlocal failure
+        # Preserve the actual reason for the most recent attempted pair, rather
+        # than overwrite it with an older pair's unrelated failure.
+        if failure is None:
+            failure = code
     for current in reversed(usable):
         for previous in reversed([r for r in usable if r["sequence"] < current["sequence"]]):
             if current["signature"] != previous["signature"]:
-                failure = "Grading methods or component scales differ between concluded periods."
+                reject("grading_configuration")
+                continue
+            if any(row.get("quiz_unsupported") for row in (previous, current)):
+                reject("unsupported_quiz")
+                continue
+            if any(not row.get("scales", {}).get(m) for row in (previous, current) for m in ("standing", "exam")):
+                reject("unsupported_scale")
                 continue
             current_values = current.get("pattern_values", current.get("student_values"))
             previous_values = previous.get("pattern_values", previous.get("student_values"))
@@ -553,14 +618,13 @@ def classify(history, minimum_matched_students=1, disclosed_groups=None):
                     for metric in metrics
                 )}
                 if len(matched) < minimum_matched_students:
-                    failure = "Too few students have valid comparable records in both periods to meet the applicable privacy minimum."
+                    missing = any(not row.get("pattern_values") and "contributors" in row
+                                  and any(not row["contributors"].get(m) for m in metrics)
+                                  for row in (previous, current))
+                    reject("missing_measurements" if missing else "privacy_minimum" if matched else "matched_records")
                     continue
                 if disclosed_groups is not None and frozenset(matched) not in disclosed_groups:
-                    failure = "Paired results withheld because overlapping populations or excluded students do not meet aggregate privacy rules."
-                    continue
-                if any(not previous.get("scales", {}).get(m) or not current.get("scales", {}).get(m)
-                       for m in ("standing", "exam")):
-                    failure = "Verified percentage-based grading scales are unavailable for one or more components."
+                    reject("privacy_overlap")
                     continue
                 values = {
                     metric: (exact_average([previous_values[sid][metric] for sid in matched]),
@@ -568,22 +632,18 @@ def classify(history, minimum_matched_students=1, disclosed_groups=None):
                     for metric in metrics
                 }
                 if any(v is None or v < 0 or v > 100 for pair in values.values() for v in pair):
-                    failure = "Component values do not establish reliable percentage-point differences."
+                    reject("unsupported_scale")
                     continue
             else:
                 # Retain compatibility for pure classifier callers; production rows
                 # always carry student_values and take the matched-population path.
                 if current.get("cohort") != previous.get("cohort"):
-                    failure = "Student records are not comparable across the concluded periods."
-                    continue
-                if any(not previous.get("scales", {}).get(m) or not current.get("scales", {}).get(m)
-                       for m in ("standing", "exam")):
-                    failure = "Verified percentage-based grading scales are unavailable for one or more components."
+                    reject("matched_records")
                     continue
                 values = {m: (previous.get("comparison_values", previous).get(m),
                               current.get("comparison_values", current).get(m)) for m in metrics}
                 if any(v is None or v < 0 or v > 100 for pair in values.values() for v in pair):
-                    failure = "Verified percentage-based component results are unavailable."
+                    reject("missing_measurements")
                     continue
                 matched = set(current.get("cohort", ()))
             changes = {m: performance_change(*values[m]) for m in metrics}
@@ -599,7 +659,11 @@ def classify(history, minimum_matched_students=1, disclosed_groups=None):
                     "changes": changes, "quiz_count_change": current["quizzes"] - previous["quizzes"],
                     "activity_count_change": current["activities"] - previous["activities"],
                     "matched_students": len(matched)}
-    return {"category": INSUFFICIENT, "detail": failure, "matched_students": None}
+    if failure is None:
+        failure = ("privacy_minimum" if any(row.get("privacy_withheld") and 0 < len(row.get("cohort", ())) < minimum_matched_students for row in history) else
+                   "privacy_overlap" if any(row.get("privacy_withheld") for row in history) else
+                   "finalized_records" if sum(bool(row.get("concluded")) for row in history) >= 2 else "concluded_periods")
+    return {"category": INSUFFICIENT, "detail": reasons[failure], "reason_code": failure, "matched_students": None}
 
 
 def disclosed_populations(histories, active_enrolled, leadership_ids):
@@ -848,6 +912,7 @@ def build_report(selection, filters, now=None):
                    "contributors": {metric: {sid for sid, values in finalized.items() if metric in values}
                                     for metric in ("standing", "exam", "periodic")},
                    "scales": dict(scales), "student_values": student_values, "pattern_values": pattern_values,
+                   "quiz_unsupported": activity_data.get("quiz_unsupported", False),
                    **{m: None for m in METRICS}, "quizzes": activity_data["quizzes"], "activities": activity_data["activities"]}
             row["quiz"] = activity_data["quiz"]
             row["quiz_grade"] = activity_data["quiz_grade"]
@@ -859,8 +924,7 @@ def build_report(selection, filters, now=None):
                     component_values = [values[name] for values in finalized.values() if name in values]
                     exact = exact_average(component_values)
                     row[name] = displayed(exact)
-                    if name in ("standing", "exam"):
-                        row["comparison_values"][name] = exact
+                    row["comparison_values"][name] = exact
                     if name in ("standing", "exam") and any(not 0 <= value <= 100 for value in component_values):
                         row["scales"][name] = False
                 periodic_values = [values["periodic"] for values in finalized.values() if "periodic" in values]
@@ -892,6 +956,7 @@ def build_report(selection, filters, now=None):
                 r.update({m: None for m in METRICS})
             elif withheld:
                 r["reason"] = "Some component results are withheld by aggregate privacy rules."
+            r["privacy_withheld"] = withheld
     classifications = []
     for offering in chosen:
         minimum = 1 if selection.allows_aggregates(offering) else MIN_STUDENTS
@@ -903,6 +968,8 @@ def build_report(selection, filters, now=None):
     denominator = sum(pattern_counts.values())
     patterns = [{"label": label, "count": pattern_counts[label],
                  "percentage": average([Decimal(pattern_counts[label]) * 100 / denominator]) if denominator else None} for label in PATTERNS]
+    rejection_counts = Counter(c["detail"] for c in classifications if c["category"] == INSUFFICIENT)
+    pattern_reasons = [{"detail": detail, "count": count} for detail, count in rejection_counts.items()]
     overall = []
     for code, label in PERIODS:
         rows = [r for o in chosen for r in histories[o.id] if r["code"] == code and r["eligible"]]
@@ -926,6 +993,7 @@ def build_report(selection, filters, now=None):
     selected_id = filters.get("offering_id")
     selected_course = bool(filters.get("course_code"))
     table = histories.get(selected_id, []) if selected_id else overall
+    comparison = period_comparison(table, classifications[0]) if selected_id and classifications else None
     line, line_note = [], "Choose one course and compatible grading definitions for matched progression."
     line_mode = "matched"
     if selected_id:
@@ -1026,9 +1094,10 @@ def build_report(selection, filters, now=None):
             bars = [{"section": r["section"], "quiz": r["quiz"], "quiz_grade": r["quiz_grade"], "quizzes": r["quizzes"],
                      "standing": r["standing"], "exam": r["exam"]} for r in comparison_rows]
     public_table = [{k: v for k, v in r.items() if k not in {
-        "cohort", "signature", "sequence", "cohort_basis", "quiz_grade_basis", "comparison_values", "student_values", "pattern_values", "contributors",
+        "cohort", "signature", "sequence", "cohort_basis", "quiz_grade_basis", "comparison_values", "student_values", "pattern_values", "contributors", "quiz_unsupported", "privacy_withheld",
     }} for r in table]
     return {"rows": public_table, "patterns": patterns, "classifications": classifications,
+            "period_comparison": comparison, "pattern_reasons": pattern_reasons,
             "comparison_rows": comparison_rows, "comparison_note": comparison_note,
             "analyzed": denominator, "insufficient": len(chosen) - denominator, "sections": len(chosen),
             "view": "Individual Section Progression" if selected_id else

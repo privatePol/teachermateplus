@@ -1,3 +1,9 @@
+## Academic Performance Insights acceptance corrections - 2026-10-19
+
+- Compare resolved scoring modes so INHERIT and an identical explicit RAW_BASE50/DIRECT_PERCENTAGE override do not falsely reject equivalent definitions. Keep semantic identities, weights, grading rules, matched students and privacy requirements. Return safe condition-specific rejection reasons and preserve the latest attempted pair's reason.
+- Individual Section Progression now shows Indicator / earlier period / later period / Change, with converted Gradebook quiz points primary and raw percentages in supporting details. Calculate differences before display rounding; keep incompatible or suppressed changes unavailable and retain other period information in expandable details.
+- Show a visible explanation when no section qualifies for patterns, without fabricated chart slices or percentages. Existing valid doughnut counts and raw +/-3 classification remain intact. Bump the comparison policy to invalidate old cached results.
+
 ## Academic Performance Insights period comparability - 2026-10-19
 
 - Return unavailable for quiz averages from unsupported mixed quiz/non-quiz WEIGHTED_DETAILS categories, including raw trend inputs, instead of retaining unrelated detail weights. Preserve other component results and quiz/activity counts, keep numeric/privacy membership paths consistent, and invalidate older preview generations. Quiz-only Gradebook rollups are unchanged.

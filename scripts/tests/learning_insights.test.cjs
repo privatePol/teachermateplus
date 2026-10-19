@@ -149,6 +149,15 @@ test('unsupported mixed quiz rollup leaves gaps and preserves other component se
   assert.equal(h.drawn.length, 2);
 });
 
+test('zero eligible sections keep the empty state without drawing fabricated pie slices', async () => {
+  const h = harness(); const pending = h.submit(); const data = report();
+  data.html = '<div role="status">No patterns available yet. Required measurements are unavailable.</div>';
+  data.charts.patterns = ['Moved Together', 'Moved Opposite', 'Mixed / Stable'].map(label => ({label, count: 0, percentage: null}));
+  h.respond(0, data); await pending;
+  assert.deepEqual(h.drawn.map(chart => chart.config.type), ['line', 'bar']);
+  assert.match(h.elements['learning-results'].innerHTML, /No patterns available yet/);
+});
+
 test('withheld component response clears earlier grades and leaves a chart gap', async () => {
   const h = harness();
   const first = h.submit(); h.respond(0, report('earlier-authority')); await first;

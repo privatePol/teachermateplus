@@ -143,6 +143,133 @@ class LearningInsightsTests(TestCase):
             StudentPeriodGrade.objects.filter(template_period=period).update(
                 class_standing_grade=cs_grade, exam_grade=exam_grade, period_grade=periodic)
 
+    def test_bsa_effective_inherited_modes_qualify_through_saved_report_path(self):
+        self.bsa_period_definitions()
+        # Same resolved RAW_BASE50 rules; the persisted override spelling differs.
+        GradingTemplateSubcomponent.objects.filter(template_component=self.mid_cs).update(score_input_mode="RAW_BASE50")
+        GradingTemplateDetail.objects.filter(template_subcomponent__template_component=self.mid_cs).update(score_input_mode="RAW_BASE50")
+        for period in (self.period, self.midterm):
+            GradeSubmission.objects.filter(template_period=period).update(template_snapshot_json={
+                "template_id": self.template.pk, "template_code": self.template.code,
+                "period_code": period.code, "period_name": period.name})
+        for activity in GradeActivity.objects.filter(offering=self.offering_a).select_related(
+                "template_component", "template_subcomponent", "template_detail"):
+            self.assertEqual(learning.FacultyGradingService.resolve_score_input_mode(
+                template_component=activity.template_component, template_subcomponent=activity.template_subcomponent,
+                template_detail=activity.template_detail), "RAW_BASE50")
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(result["classifications"][0]["category"], "Moved Together")
+        self.assertEqual(result["classifications"][0]["detail"], "Declined together")
+        self.assertEqual(result["analyzed"], 1)
+        self.assertEqual(result["charts"]["line_mode"], "matched")
+        response = self.report(offering_id=self.offering_a.id)
+        self.assertIn('id="learning-patterns"', response["html"])
+
+    def test_section_comparison_table_uses_authorized_bsa_period_data(self):
+        self.bsa_period_definitions()
+        for period, component, sub, count, raw in (
+            (self.period, self.component, self.quiz_sub, 3, Decimal("57.70")),
+            (self.midterm, self.mid_cs, self.mid_quiz, 2, Decimal("36.06")),
+        ):
+            converted = learning.FacultyGradingService.compute_activity_score(raw_score=raw, total_score=Decimal(100), base_value=Decimal(50))
+            StudentActivityScore.objects.filter(activity__offering=self.offering_a, activity__template_period=period).update(raw_score=raw, computed_score=converted)
+            for index in range(1, count):
+                activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+                    template_period=period, template_component=component, template_subcomponent=sub, title=f"Q{index+1}", total_score=100)
+                for student in (self.student_a1, self.student_a2):
+                    self._score(activity, student, raw, converted)
+        result = self.raw(offering_id=self.offering_a.id)
+        comparison = result["period_comparison"]
+        self.assertEqual((comparison["previous"], comparison["current"]), ("Prelim", "Midterm"))
+        self.assertEqual([(r["previous"], r["current"], r["change"]) for r in comparison["rows"]],
+            [("3", "2", "-1"), ("78.85", "68.03", "-10.82"), ("84.65", "78.88", "-5.77"),
+             ("83.96", "80.00", "-3.96"), ("84.35", "79.31", "-5.04")])
+        self.assertEqual(comparison["raw"]["change"], "-21.64")
+        response = self.report(offering_id=self.offering_a.id)
+        for text in ("Indicator", "Change", "-10.82", "Raw quiz percentage", "All period details"):
+            self.assertIn(text, response["html"])
+
+    def test_comparison_differences_use_unrounded_component_and_quiz_means(self):
+        students = self.complete_students(3)
+        for period, last in ((self.period, Decimal("60.02")), (self.midterm, Decimal("60.04"))):
+            for student, raw in zip(students, (Decimal(60), Decimal(60), last)):
+                converted = learning.FacultyGradingService.compute_activity_score(raw_score=raw, total_score=Decimal(100), base_value=Decimal(50))
+                StudentActivityScore.objects.filter(activity__offering=self.offering_a, activity__template_period=period, student=student).update(raw_score=raw, computed_score=converted)
+                StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=period, student=student).update(
+                    class_standing_grade=converted, exam_grade=converted, period_grade=converted)
+        rows = self.raw(offering_id=self.offering_a.id)["period_comparison"]["rows"]
+        for row in rows[1:]:
+            self.assertEqual((row["previous"], row["current"], row["change"]), ("80.00", "80.01", "0.00"))
+
+    def test_comparison_uses_latest_valid_pair_beyond_midterm(self):
+        self.active.period = self.term_periods["FINAL"]
+        self.active.save(update_fields=["period"])
+        cs = GradingTemplateComponent.objects.create(template_period=self.prefinal, code="CS", name="Class Standing", weight_percentage=70)
+        GradingTemplateComponent.objects.create(template_period=self.prefinal, code="EXAM", name="Examination", weight_percentage=30,
+            is_exam_component=True, score_input_mode="DIRECT_PERCENTAGE")
+        quiz = GradingTemplateSubcomponent.objects.create(template_component=cs, code="QUIZZES", name="Quizzes", weight_percentage=100)
+        activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+            template_period=self.prefinal, template_component=cs, template_subcomponent=quiz, title="Q1", total_score=100)
+        for student in (self.student_a1, self.student_a2):
+            self._score(activity, student, 90, 95)
+            StudentPeriodGrade.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+                template_period=self.prefinal, student=student, class_standing_grade=95, exam_grade=95, period_grade=95, is_finalized=True)
+        GradeSubmission.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+            template_period=self.prefinal, status="SUBMITTED", submitted_at=timezone.now()-timedelta(days=1))
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual((result["period_comparison"]["previous"], result["period_comparison"]["current"]), ("Midterm", "Pre-Final"))
+        self.assertEqual(result["period_comparison"]["rows"][1]["change"], "+5.00")
+        self.assertEqual(len(result["charts"]["line"]), 3)
+
+    def test_specific_missing_measurements_and_empty_pattern_placeholder(self):
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm).update(exam_grade=None)
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(result["classifications"][0]["reason_code"], "missing_measurements")
+        self.assertIsNone(result["period_comparison"]["rows"][3]["change"])
+        response = self.report(offering_id=self.offering_a.id)
+        self.assertIn("No patterns available yet", response["html"])
+        self.assertIn("measurements are unavailable", response["html"])
+        self.assertNotIn('id="learning-patterns"', response["html"])
+        self.assertTrue(all(p["count"] == 0 and p["percentage"] is None for p in result["patterns"]))
+
+    def test_missing_matched_records_are_not_grading_incompatibility(self):
+        students = self.complete_students(6)
+        for period, group in ((self.period, students[:3]), (self.midterm, students[3:])):
+            StudentActivityScore.objects.filter(activity__offering=self.offering_a, activity__template_period=period,
+                student__in=group).update(is_excused=True)
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(result["classifications"][0]["reason_code"], "matched_records")
+
+    def test_comparison_privacy_and_incompatibility_never_release_differences(self):
+        self.deny_aggregate_access()
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(result["classifications"][0]["reason_code"], "privacy_minimum")
+        self.assertTrue(all(row["change"] is None for row in result["period_comparison"]["rows"]))
+        self.assertIsNone(result["period_comparison"]["raw"]["change"])
+        UserPermission.objects.filter(user=self.area_chair, permission=self.permission).delete()
+        self.mid_cs.weight_percentage = 60
+        self.mid_cs.save()
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(result["classifications"][0]["reason_code"], "grading_configuration")
+        self.assertTrue(all(row["change"] is None for row in result["period_comparison"]["rows"][1:]))
+
+    def test_mixed_quiz_rejection_is_specific_and_preserves_other_table_values(self):
+        self.mixed_weighted_quiz_details()
+        self.mixed_weighted_quiz_details(midterm=True)
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(result["classifications"][0]["reason_code"], "unsupported_quiz")
+        self.assertIsNone(result["period_comparison"]["rows"][1]["change"])
+        self.assertEqual(result["period_comparison"]["rows"][2]["change"], "+5.00")
+
+    def test_submission_snapshot_metadata_changes_invalidate_cached_classification(self):
+        self.bsa_period_definitions()
+        previous = self.report(offering_id=self.offering_a.id)
+        GradeSubmission.objects.filter(offering=self.offering_a, template_period=self.midterm).update(
+            template_snapshot_json={"template_id": self.template.pk, "template_code": self.template.code,
+                "template_name": "Historical BSA display name", "period_code": "MIDTERM", "period_name": "Midterm"})
+        self.assertEqual(self.post("page", token=previous["token"]).status_code, 409)
+        self.assertEqual(self.raw(offering_id=self.offering_a.id)["analyzed"], 1)
+
     def test_bsa_prefixed_periods_classify_declining_matched_results_and_show_charts(self):
         self.bsa_period_definitions()
         result = self.raw(offering_id=self.offering_a.id)
@@ -197,7 +324,7 @@ class LearningInsightsTests(TestCase):
                 result = self.raw(offering_id=self.offering_a.id)
                 self.assertEqual(result["analyzed"], 0)
                 self.assertEqual(result["classifications"][0]["category"], INSUFFICIENT)
-                self.assertIn("Grading methods or component scales differ", result["classifications"][0]["detail"])
+                self.assertEqual(result["classifications"][0]["reason_code"], "grading_configuration")
                 self.assertEqual(result["charts"]["line_mode"], "descriptive")
                 self.assertTrue(result["charts"]["line"])
                 self.assertTrue(all("matched_students" not in point for point in result["charts"]["line"]))
@@ -1601,6 +1728,10 @@ class PercentagePointThresholdTests(SimpleTestCase):
 
     def test_exact_positive_boundary_is_improving(self):
         self.assertEqual(performance_change(Decimal("80"), Decimal("83.00")), "IMPROVING")
+
+    def test_latest_pair_failure_is_not_replaced_by_an_older_configuration_failure(self):
+        result = classify([self.row(1, signature=(2,)), self.row(2), self.row(3, exam=None)])
+        self.assertEqual(result["reason_code"], "missing_measurements")
 
     def test_exact_negative_boundary_is_declining(self):
         self.assertEqual(performance_change(Decimal("80"), Decimal("77.00")), "DECLINING")
