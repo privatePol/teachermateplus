@@ -1,3 +1,9 @@
+## Verified Assignment comparison identity (2026-10-20)
+
+The user supplied actual staging SELECT evidence for template 6: Prelim detail 80 and Midterm detail 86 are both named Assignment under Participation/Output, weight 0.00, INHERIT, with one active linked activity each and exactly one target offering. Earlier supplied classifier evidence established 26 matched finalized students, valid permission/privacy, otherwise identical effective signatures, and rejection caused solely by `CA_PARTICIPATION_ASSIGNMENT` versus `CA_PARTICIPATION_OUTPUT_ASSIGNMENT`. This resolves the specific missing semantic-identity evidence noted below; it is not post-fix staging acceptance.
+
+The comparison signature now canonicalizes only that exact Assignment alias at detail depth under normalized `CA / CA_PARTICIPATION_OUTPUT`. It does not remove OUTPUT generally or depend on course/offering IDs. Other identities and all effective grading facts remain significant; duplicate canonical identities fail closed. The comparison-policy version changes to invalidate old report generations. Stored templates, activity associations, saved grades and official Gradebook computations remain untouched. Browser acceptance, live MariaDB performance and post-fix staging verification remain outstanding.
+
 ## Preview acceptance comparison and diagnostics (2026-10-19)
 
 Preview comparison signatures resolve valid INHERIT modes through the component/subcomponent/detail hierarchy, matching Gradebook resolution. Explicit identical modes are equivalent; different effective modes, weights, component identities, grading rules and unsupported units remain incompatible. A persisted BSA-style fixture reproduced false rejection before this correction. This is local evidence, not proof of the current AE105-FAR staging rejection.

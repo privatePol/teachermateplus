@@ -143,6 +143,136 @@ class LearningInsightsTests(TestCase):
             StudentPeriodGrade.objects.filter(template_period=period).update(
                 class_standing_grade=cs_grade, exam_grade=exam_grade, period_grade=periodic)
 
+    def assignment_alias_definitions(self, total=26):
+        """Persist the verified staging Assignment mismatch, without production IDs."""
+        students = self.complete_students(total)
+        self.bsa_period_definitions()
+        details = []
+        for period, component, code in (
+            (self.period, self.component, "PRELIM_CA_PARTICIPATION_ASSIGNMENT"),
+            (self.midterm, self.mid_cs, "MIDTERM_CA_PARTICIPATION_OUTPUT_ASSIGNMENT"),
+        ):
+            detail = GradingTemplateDetail.objects.get(
+                template_subcomponent__template_component=component, code__endswith="_ASSIGNMENT")
+            detail.code, detail.name, detail.weight_percentage = code, "Assignment", 0
+            detail.save()
+            activity = GradeActivity.objects.create(tenant=self.tenant, campus=self.campus, offering=self.offering_a,
+                template_period=period, template_component=component,
+                template_subcomponent=detail.template_subcomponent, template_detail=detail,
+                title="Assignment", total_score=100)
+            for student in students:
+                self._score(activity, student, 80, 90)
+            details.append(detail)
+        return details
+
+    def test_verified_assignment_alias_qualifies_26_saved_students_and_report(self):
+        self.assignment_alias_definitions()
+        models = (GradingTemplateComponent, GradingTemplateSubcomponent, GradingTemplateDetail,
+                  GradeActivity, StudentActivityScore, StudentPeriodGrade)
+        before = {model: list(model.objects.order_by("pk").values()) for model in models}
+        original = [learning.component_signature(p) for p in (self.period, self.midterm)]
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(result["classifications"][0]["category"], "Moved Together")
+        self.assertEqual(result["classifications"][0]["detail"], "Declined together")
+        self.assertEqual(result["classifications"][0]["matched_students"], 26)
+        self.assertEqual((result["analyzed"], result["insufficient"]), (1, 0))
+        self.assertEqual([p["count"] for p in result["patterns"]], [1, 0, 0])
+        self.assertEqual(result["patterns"][0]["percentage"], 100)
+        self.assertEqual([r["change"] for r in result["period_comparison"]["rows"]],
+                         ["0", "-10.82", "-5.77", "-3.96", "-5.04"])
+        self.assertEqual(learning.comparable_component_signature(self.period),
+                         learning.comparable_component_signature(self.midterm))
+        response = self.report(offering_id=self.offering_a.id)
+        for text in ('id="learning-patterns"', "Declined together", "-10.82"):
+            self.assertIn(text, response["html"])
+        self.assertEqual([learning.component_signature(p) for p in (self.period, self.midterm)], original)
+        self.assertEqual({model: list(model.objects.order_by("pk").values()) for model in models}, before)
+
+    def test_assignment_alias_preserves_genuine_rule_and_identity_differences(self):
+        _, detail = self.assignment_alias_definitions(total=2)
+        parent = detail.template_subcomponent
+        for obj, changes in (
+            (detail, {"code": "MIDTERM_CA_PARTICIPATION_OUTPUT_PROJECT"}),
+            (detail, {"weight_percentage": 1}),
+            (detail, {"score_input_mode": "DIRECT_PERCENTAGE"}),
+            (parent, {"code": "MIDTERM_CA_OTHER"}),
+            (parent, {"detail_computation_mode": "WEIGHTED_DETAILS"}),
+            (parent, {"weight_percentage": 41}),
+            (self.mid_cs, {"code": "MIDTERM_LAB"}),
+            (self.mid_exam, {"is_exam_component": False}),
+        ):
+            original = type(obj).objects.filter(pk=obj.pk).values(*changes).get()
+            with self.subTest(changes=changes):
+                type(obj).objects.filter(pk=obj.pk).update(**changes)
+                result = self.raw(offering_id=self.offering_a.id)
+                self.assertEqual(result["classifications"][0]["reason_code"], "grading_configuration")
+                self.assertEqual(result["analyzed"], 0)
+            type(obj).objects.filter(pk=obj.pk).update(**original)
+
+    def test_assignment_alias_collisions_fail_closed_even_in_both_periods(self):
+        details = self.assignment_alias_definitions(total=2)
+        for detail, code in zip(details, (
+            "PRELIM_CA_PARTICIPATION_OUTPUT_ASSIGNMENT", "MIDTERM_CA_PARTICIPATION_ASSIGNMENT",
+        )):
+            GradingTemplateDetail.objects.create(template_subcomponent=detail.template_subcomponent,
+                code=code, name="Assignment", weight_percentage=0)
+        for period in (self.period, self.midterm):
+            self.assertEqual(learning.comparable_component_signature(period)[0], "ambiguous-component-identities")
+        result = self.raw(offering_id=self.offering_a.id)
+        self.assertEqual(result["classifications"][0]["reason_code"], "grading_configuration")
+
+    def test_assignment_alias_does_not_apply_outside_verified_parent_hierarchy(self):
+        details = self.assignment_alias_definitions(total=2)
+        for detail in details:
+            parent = detail.template_subcomponent
+            original = parent.code
+            parent.code = "OTHER_PARTICIPATION_OUTPUT"
+            parent.save(update_fields=["code"])
+            detail._original_parent_code = original
+        self.assertNotEqual(learning.comparable_component_signature(self.period),
+                            learning.comparable_component_signature(self.midterm))
+        for detail in details:
+            parent = detail.template_subcomponent
+            parent.code = detail._original_parent_code
+            parent.save(update_fields=["code"])
+        for component in (self.component, self.mid_cs):
+            component.code = "LAB"
+            component.save(update_fields=["code"])
+        self.assertNotEqual(learning.comparable_component_signature(self.period),
+                            learning.comparable_component_signature(self.midterm))
+
+    def test_assignment_alias_is_not_restricted_to_a_course_or_offering_id(self):
+        self.assignment_alias_definitions(total=2)
+        self.course.code = "OTHER-COURSE"
+        self.course.save(update_fields=["code"])
+        self.filters["course_code"] = self.course.code
+        self.assertEqual(self.raw(offering_id=self.offering_a.id)["analyzed"], 1)
+
+    def test_assignment_alias_does_not_mask_other_effective_grading_context_differences(self):
+        self.assignment_alias_definitions(total=2)
+        original = LearningSelection.grading_context
+        # Inject one differing effective context fact at the resolver boundary;
+        # keep persisted activity/grade rows and the real report/classifier path.
+        for field in ("formula_mode", "template_id", "profile_id", "transmutation", "base_value"):
+            def different_context(selection, offering, period):
+                context, base = original(selection, offering, period)
+                context = dict(context)
+                if period.pk == self.midterm.pk:
+                    if field == "transmutation":
+                        signature = list(context["signature"])
+                        signature[3] = (("0", "100", "75"),)
+                        context["signature"] = tuple(signature)
+                    elif field == "base_value":
+                        base = "60"
+                    else:
+                        context[field] = "different-effective-value"
+                return context, base
+            with self.subTest(field=field), patch.object(LearningSelection, "grading_context", different_context):
+                result = self.raw(offering_id=self.offering_a.id)
+                self.assertEqual(result["classifications"][0]["reason_code"], "grading_configuration")
+                self.assertEqual(result["analyzed"], 0)
+                self.assertTrue(all(row["change"] is None for row in result["period_comparison"]["rows"][1:]))
+
     def test_bsa_effective_inherited_modes_qualify_through_saved_report_path(self):
         self.bsa_period_definitions()
         # Same resolved RAW_BASE50 rules; the persisted override spelling differs.

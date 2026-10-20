@@ -1,3 +1,8 @@
+## Academic Performance Insights verified Assignment identity - 2026-10-20
+
+- Comparison-only normalization recognizes `CA_PARTICIPATION_ASSIGNMENT` as `CA_PARTICIPATION_OUTPUT_ASSIGNMENT` only at detail level beneath `CA / CA_PARTICIPATION_OUTPUT`, after owning-period prefix normalization. Supplied staging evidence confirms matching Assignment labels, Participation/Output parents, rules and one linked activity per period. This applies across eligible courses without production IDs.
+- Preserve all other identities, weights, effective scoring modes, computation/formula/transmutation rules, matched/finalized eligibility and privacy. Canonical sibling collisions remain incompatible. Bump the comparison policy to invalidate old report generations; stored codes, activity links, historical grades and official Gradebook calculations are unchanged.
+
 ## Academic Performance Insights acceptance corrections - 2026-10-19
 
 - Compare resolved scoring modes so INHERIT and an identical explicit RAW_BASE50/DIRECT_PERCENTAGE override do not falsely reject equivalent definitions. Keep semantic identities, weights, grading rules, matched students and privacy requirements. Return safe condition-specific rejection reasons and preserve the latest attempted pair's reason.

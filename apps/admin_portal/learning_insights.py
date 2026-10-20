@@ -35,7 +35,7 @@ MEANINGFUL_CHANGE = Decimal("3.00")
 INSUFFICIENT = "Insufficient Comparable Data"
 METRICS = ("quizzes", "quiz", "quiz_grade", "activities", "standing", "exam", "periodic")
 DISCLOSURE_POLICY_VERSION = "component-and-paired-populations-v1"
-COMPARABILITY_POLICY_VERSION = "period-component-effective-modes-and-comparison-v2"
+COMPARABILITY_POLICY_VERSION = "period-component-assignment-identity-v3"
 QUIZ_DISPLAY_POLICY_VERSION = "saved-gradebook-quiz-and-descriptive-points-v2-mixed-unavailable"
 
 
@@ -497,9 +497,9 @@ def scale_definitions(period):
 
 
 def comparable_component_signature(period):
-    """Ignore only the owning logical period's recognized code prefix.
+    """Normalize period prefixes and the verified Participation/Output Assignment alias.
 
-    Retain every semantic code suffix, weight, effective scoring mode, examination/
+    Retain other semantic code suffixes, weights, effective scoring modes, examination/
     attendance flag and nested computation rule from the shared signature. That
     shared signature and stored template codes remain unchanged for other reports.
     """
@@ -516,18 +516,23 @@ def comparable_component_signature(period):
                 return code[len(marker):]
         return code
 
-    def normalize(rows, inherited_mode=None):
+    def normalize(rows, inherited_mode=None, parents=()):
         nonlocal ambiguous
         result = []
         for row in rows:
             values = list(row)
             values[0] = identity(row[0])
+            # Verified legacy Assignment spelling within this exact detail hierarchy.
+            # Never rewrite stored codes or conflate OUTPUT elsewhere; sibling
+            # collisions still fail closed after canonicalization below.
+            if parents == ("CA", "CA_PARTICIPATION_OUTPUT") and values[0] == "CA_PARTICIPATION_ASSIGNMENT":
+                values[0] = "CA_PARTICIPATION_OUTPUT_ASSIGNMENT"
             # INHERIT and an explicit identical override resolve to the same
             # Gradebook calculation. Unknown modes remain distinct/fail closed.
             if values[2] == "INHERIT" and inherited_mode in {"RAW_BASE50", "DIRECT_PERCENTAGE"}:
                 values[2] = inherited_mode
             if isinstance(row[-1], tuple):
-                values[-1] = normalize(row[-1], values[2])
+                values[-1] = normalize(row[-1], values[2], parents + (values[0],))
             result.append(tuple(values))
         if len({row[0] for row in result}) != len(result):
             ambiguous = True
