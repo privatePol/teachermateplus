@@ -30,12 +30,12 @@ from django.utils.crypto import salted_hmac
 
 
 PERIODS = (("PRELIM", "Prelim"), ("MIDTERM", "Midterm"), ("PREFINAL", "Pre-Final"), ("FINAL", "Final"))
-PATTERNS = ("Moved Together", "Moved Opposite", "Mixed / Stable")
+PATTERNS = ("Moved Together", "Moved Opposite", "Mixed Results", "Stable Performance")
 MEANINGFUL_CHANGE = Decimal("3.00")
 INSUFFICIENT = "Insufficient Comparable Data"
 METRICS = ("quizzes", "quiz", "quiz_grade", "activities", "standing", "exam", "periodic")
 DISCLOSURE_POLICY_VERSION = "component-and-paired-populations-v1"
-COMPARABILITY_POLICY_VERSION = "period-component-assignment-identity-v3"
+COMPARABILITY_POLICY_VERSION = "four-category-patterns-v4"
 QUIZ_DISPLAY_POLICY_VERSION = "saved-gradebook-quiz-and-descriptive-points-v2-mixed-unavailable"
 
 
@@ -574,10 +574,10 @@ def period_comparison(history, classification):
                 ("quizzes", "Quiz Count"), ("quiz_grade", "Quiz Average (Gradebook points)"),
                 ("standing", "Class Standing"), ("exam", "Examination Average"), ("periodic", "Periodic Average"))],
             "raw": values("quiz", "Raw Quiz Percentage (%)"),
-            "note": ("Two concluded periods are required to show changes." if len(pair) < 2 else
-                     "Changes in grade averages are unavailable because grading configurations are incompatible." if not compatible else
-                     "Change is the later period average minus the earlier average, calculated before display rounding."),
-            "basis": "Descriptive period averages use each period's available class data. Pattern classification separately requires matched students and uses raw quiz percentages."}
+            "note": ("Two completed grading periods are needed to show changes." if len(pair) < 2 else
+                     "Changes cannot be shown because grading rules differ between the periods." if not compatible else
+                     "Change is the later average minus the earlier average, calculated before rounding."),
+            "basis": "These averages use the available class results in each period. Patterns compare the same students in both periods and use quiz percentages before Gradebook conversion."}
 
 
 def classify(history, minimum_matched_students=1, disclosed_groups=None):
@@ -585,15 +585,15 @@ def classify(history, minimum_matched_students=1, disclosed_groups=None):
     metrics = ("quiz", "standing", "exam")
     usable = [r for r in history if r.get("eligible")]
     reasons = {
-        "concluded_periods": "Two concluded periods with valid finalized results are required.",
-        "finalized_records": "Insufficient finalized student records across concluded periods.",
-        "grading_configuration": "Grading configurations are incompatible across concluded periods.",
-        "unsupported_quiz": "Unsupported mixed quiz scoring configuration; quiz comparison is unavailable.",
-        "missing_measurements": "Required quiz, examination or class-standing measurements are unavailable.",
-        "matched_records": "Insufficient matched finalized student records with all required measurements.",
-        "privacy_minimum": "Comparison withheld under the applicable minimum-student privacy rule.",
-        "privacy_overlap": "Comparison withheld under privacy rules for overlapping or complementary student groups.",
-        "unsupported_scale": "Unsupported scoring configuration; comparable percentage-based component scales are unavailable.",
+        "concluded_periods": "Two completed grading periods with finalized grades are needed.",
+        "finalized_records": "Not enough finalized grades are available in both completed periods.",
+        "grading_configuration": "Grading rules differ between the completed periods, so the results cannot be fairly compared.",
+        "unsupported_quiz": "The quiz scoring setup does not provide a separate comparable quiz average.",
+        "missing_measurements": "Required quiz, examination or class-standing results are unavailable.",
+        "matched_records": "Not enough of the same students have complete finalized results in both periods.",
+        "privacy_minimum": "Too few students have comparable results to display this comparison safely.",
+        "privacy_overlap": "This comparison is hidden because combining it with other results could reveal a student's grade.",
+        "unsupported_scale": "These scores do not use a supported common scale for comparing changes.",
     }
     failure = None
     def reject(code):
@@ -658,8 +658,10 @@ def classify(history, minimum_matched_students=1, disclosed_groups=None):
                 direction = "Improved together" if directions[0] == "IMPROVING" else "Declined together"
             elif directions[0] == directions[1] and {directions[0], directions[2]} == {"IMPROVING", "DECLINING"}:
                 category, direction = PATTERNS[1], "Quiz and class standing moved opposite to examination results"
+            elif all(direction == "STABLE" for direction in directions):
+                category, direction = PATTERNS[3], f"All three results changed by less than {MEANINGFUL_CHANGE} points; stable does not necessarily mean satisfactory performance"
             else:
-                category, direction = PATTERNS[2], "Mixed directions or stable results"
+                category, direction = PATTERNS[2], "Mixed results: some meaningful changes did not follow a common pattern"
             return {"category": category, "detail": direction, "from": previous["period"], "to": current["period"],
                     "changes": changes, "quiz_count_change": current["quizzes"] - previous["quizzes"],
                     "activity_count_change": current["activities"] - previous["activities"],
@@ -989,7 +991,7 @@ def build_report(selection, filters, now=None):
                              if compatible or metric in ("quizzes", "activities") else None)
             entry[metric + "_sections"] = len(values) if entry[metric] is not None else 0
         if not compatible:
-            entry["reason"] = "Choose one compatible course group for score averages. Counts and within-section patterns remain available."
+            entry["reason"] = "Select one course with comparable grading rules to see score averages. Class counts and patterns remain available."
         entry["cohort_basis"] = frozenset((o.id, tuple(sorted(r["cohort"]))) for o in chosen for r in histories[o.id] if r["code"] == code and r["eligible"])
         entry["quiz_grade_basis"] = frozenset(o.id for o in chosen for r in histories[o.id]
                                              if r["code"] == code and r["eligible"] and r["quiz_grade"] is not None)
@@ -999,7 +1001,7 @@ def build_report(selection, filters, now=None):
     selected_course = bool(filters.get("course_code"))
     table = histories.get(selected_id, []) if selected_id else overall
     comparison = period_comparison(table, classifications[0]) if selected_id and classifications else None
-    line, line_note = [], "Choose one course and compatible grading definitions for matched progression."
+    line, line_note = [], "Select a course with comparable grading rules to see how results changed."
     line_mode = "matched"
     if selected_id:
         line_rows = [r for r in table if r["eligible"]]
@@ -1022,11 +1024,11 @@ def build_report(selection, filters, now=None):
                 item = by_code.get(row["code"])
                 if item:
                     row["matched_students"] = len(paired)
-            line_note = f"Progression uses the same {len(paired)} students with valid records in every displayed period; activity counts remain class-level."
+            line_note = f"Connected points use the same {len(paired)} students with valid results in every displayed period. Activity counts cover the class."
         else:
-            line_note = ("Progression is withheld because matched students or their excluded complements do not meet aggregate privacy rules."
+            line_note = ("The results cannot be connected because doing so could reveal a student's grade."
                          if paired and frozenset(paired) not in disclosed_groups and selected_id not in leadership_ids else
-                         "Progression is unavailable because concluded periods do not share enough students with valid comparable records or compatible grading definitions.")
+                         "The results cannot be connected because there are not enough of the same students with comparable grades across completed periods.")
             for row in table:
                 if row["eligible"]:
                     row["matched_students"] = None
@@ -1037,12 +1039,12 @@ def build_report(selection, filters, now=None):
         if consistent_basis and consistent_signature:
             line = [{"period": r["period"], **{metric: r[metric] if metric == "quiz" or r["scales"].get(metric) else None
                     for metric in ("quiz", "standing", "exam", "periodic")}} for r in line_rows]
-            line_note = "Period averages appear only when authorized sections share compatible grading definitions and cohort coverage."
+            line_note = "Connected period averages use the same classes and students under comparable grading rules."
             for item, row in zip(line, line_rows):
                 item["quiz_grade"] = row["quiz_grade"]
             if len({r["quiz_grade_basis"] for r in line_rows}) > 1:
                 line_mode = "descriptive"
-                line_note = "Descriptive period averages: the converted quiz values have different contributing sections; points are not connected into a matched trend."
+                line_note = "Different classes contributed to the quiz averages in these periods, so the points are shown separately."
 
     # Descriptive points repeat only already-disclosable class/period aggregates.
     # They introduce no new matched population and never imply a valid trend.
@@ -1054,10 +1056,10 @@ def build_report(selection, filters, now=None):
                     for metric in ("quiz", "quiz_grade", "standing", "exam", "periodic"))]
         line_mode = "descriptive"
         if line:
-            line_note = "Descriptive concluded-period class averages only; points are not connected because matched progression is unavailable. " + line_note
+            line_note = "Separate points show available completed-period averages only. " + line_note
     if selected_id and classifications and classifications[0]["category"] == INSUFFICIENT and line:
         line_mode = "descriptive"
-        line_note += " Formal classification unavailable: " + classifications[0]["detail"]
+        line_note += " A pattern cannot be determined: " + classifications[0]["detail"]
     line = [point for point in line if any(point.get(metric) is not None
             for metric in ("quiz_grade", "standing", "exam", "periodic"))]
 
@@ -1075,7 +1077,7 @@ def build_report(selection, filters, now=None):
         compatible = bool(available) and len({r["signature"] for r in available}) == 1 and all(
             all(r["scales"].get(metric) for metric in ("standing", "exam")) for r in available
         )
-        comparison_note = ("Section score averages are withheld from direct comparison because grading arrangements or percentage scales differ."
+        comparison_note = ("Section averages cannot be directly compared because their grading rules or score scales differ."
                            if available and not compatible else
                            "No selected section has finalized results for a concluded period." if not available else "")
         for offering in course_offerings:

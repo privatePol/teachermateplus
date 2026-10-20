@@ -2,6 +2,7 @@
   <div><h2 class="h4 mb-1">{{ view }}</h2>{% if class_label %}<p class="text-muted mb-0">{{ class_label }}</p>{% endif %}</div>
   <span class="small text-muted">Selection includes all authorized sections; finalized result availability is reported separately.</span>
 </div>
+{% if view == "Overall Academic Performance" %}<p class="small text-muted">See how quiz, class-standing and examination results changed across eligible classes. Identify performance patterns that may need attention.</p>{% endif %}
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-4"><div class="card card-body h-100"><span class="text-muted">Authorized sections available</span><strong class="h3 mb-0">{{ sections }}</strong></div></div>
   <div class="col-6 col-lg-4"><div class="card card-body h-100"><span class="text-muted">Sections analyzed for patterns</span><strong class="h3 mb-0">{{ analyzed }}</strong></div></div>
@@ -9,23 +10,34 @@
 </div>
 <div class="card card-body mb-4">
   <h3 class="h5">Performance Progression</h3>
-  <p class="small text-muted">{{ line_note }} The quiz series shows saved Gradebook points; raw attainment percentages appear in tooltips and details. Patterns retain raw quiz percentages for the ±3-point rule. Descriptive points do not establish a matched trend. Gaps are unavailable, never zero.</p>
-  {% if charts.line %}<div class="learning-chart"><canvas id="learning-line" role="img" aria-label="Performance progression; equivalent measurements appear in the results table below."></canvas></div>{% else %}<p class="text-muted">{{ line_note }}</p>{% endif %}
+  <p class="small text-muted">See how class performance changed across completed grading periods. Select a course to compare results.</p>
+  <details class="small text-muted mb-2"><summary>How to read this chart</summary><p class="mt-2">Connected points show results that can be fairly compared using the same students. Separate points show available averages without suggesting a confirmed trend. Missing results are not treated as zero.</p><p>{{ line_note }}</p></details>
+  {% if charts.line %}<div class="learning-chart"><canvas id="learning-line" role="img" aria-label="Class results across completed grading periods. Connected points compare the same students; separate points show available averages. Values are listed in the results table."></canvas></div>{% else %}<p class="text-muted">{{ line_note }}</p>{% endif %}
 </div>
 <div class="row g-4 mb-4">
   <div class="col-lg-7"><div class="card card-body h-100">
     <h3 class="h5">Section Comparison{% if charts.bar_period %} — {{ charts.bar_period }}{% endif %}</h3>
-    <p class="small text-muted">One course and compatible grading definitions only. Quiz counts appear in tooltips and the text below, separately from scores. Common examination difficulty cannot be inferred from matching grading definitions.</p>
+    <p class="small text-muted">Compare quiz, class-standing and examination averages across sections of the same course.</p>
+    <details class="small text-muted mb-2"><summary>About this comparison</summary><p class="mt-2">Sections may use the same grading system even when their examinations differ in difficulty. The chart shows the period named above and may include other sections of your selected course. Quiz counts are shown separately from scores.</p></details>
     {% if comparison_note %}<p class="small text-muted">{{ comparison_note }}</p>{% endif %}
     {% if bars %}<div class="learning-chart"><canvas id="learning-bars" role="img" aria-label="Quiz, class-standing, and examination section comparison; equivalent values are listed below."></canvas></div>
     <details class="mt-2"><summary>Section comparison values</summary><ul class="small mt-2 mb-0">
-    {% for bar in bars %}<li>{{ bar.section }}: class-level quizzes {{ bar.quizzes|default_if_none:'Not Available' }}; Gradebook quiz average {{ bar.quiz_grade|default_if_none:'Not Available' }} points (raw attainment {{ bar.quiz|default_if_none:'Not Available' }}%); class-standing average {{ bar.standing|default_if_none:'Not Available' }}; exam average {{ bar.exam|default_if_none:'Not Available' }}.</li>{% endfor %}
+    {% for bar in bars %}<li>{{ bar.section }}: class-level quizzes {{ bar.quizzes|default_if_none:'Not Available' }}; Gradebook quiz average {{ bar.quiz_grade|default_if_none:'Not Available' }} points (original quiz percentage {{ bar.quiz|default_if_none:'Not Available' }}%); class-standing average {{ bar.standing|default_if_none:'Not Available' }}; exam average {{ bar.exam|default_if_none:'Not Available' }}.</li>{% endfor %}
     </ul></details>{% else %}<p class="text-muted my-auto py-5">{% if comparison_note %}{{ comparison_note }}{% else %}Select a course with comparable concluded results to compare sections.{% endif %}</p>{% endif %}
   </div></div>
   <div class="col-lg-5"><div class="card card-body h-100">
     <h3 class="h5">Pattern Distribution for This Scope</h3>
-    <p class="small text-muted">Each classifiable section counts once. The two most recent comparable concluded periods are used. Meaningful change is at least {{ threshold }} percentage points on verified percentage-based component scales; smaller changes are stable. Quiz directions use unrounded raw attainment percentages; converted Gradebook quiz points are for display. Other directions use unrounded official component averages; chart and table values are rounded for display.</p>
-    {% if analyzed %}<div class="learning-chart"><canvas id="learning-patterns" role="img" aria-label="Pattern distribution; all counts and percentages are listed below."></canvas></div>{% endif %}
+    <p class="small text-muted">Each eligible class is counted once. A change of 3 points or more is considered a meaningful improvement or decline. Smaller changes are considered stable.</p>
+    <details class="small text-muted mb-2"><summary>What the four patterns mean</summary>
+      <p class="mt-2">Patterns compare the same students in the two most recent completed periods with comparable results.</p>
+      <ul>
+        <li><strong>Moved Together:</strong> Quiz, class-standing and examination results all improved or all declined. Example: +5, +4, +6; or −5, −4, −6.</li>
+        <li><strong>Moved Opposite:</strong> Quizzes and class standing moved in one direction, while examination results moved in the other. Example: +5, +4, −6; or −5, −4, +6.</li>
+        <li><strong>Mixed Results:</strong> Some results changed noticeably, but they did not follow either of the two patterns above. Example: +5, 0, +4; or −5, 0, 0. Mixed does not require both increases and decreases.</li>
+        <li><strong>Stable Performance:</strong> Quiz, class-standing and examination results changed very little. Example: +1, −2, +1. Stable does not automatically mean satisfactory performance; consistently low grades can also be stable.</li>
+      </ul><p>Examples list Quiz / Class Standing / Examination changes in that order. Percentages use only classes with a valid pattern; classes with insufficient comparable data are reported separately.</p>
+    </details>
+    {% if analyzed %}<div class="learning-chart"><canvas id="learning-patterns" role="img" aria-label="Class pattern distribution: Moved Together, Moved Opposite, Mixed Results and Stable Performance. All four counts and percentages are listed below."></canvas></div>{% endif %}
     <ul class="list-unstyled small mt-3 mb-0">{% for pattern in patterns %}<li class="d-flex justify-content-between gap-2 py-1"><span>{{ pattern.label }}</span><strong>{{ pattern.count }}{% if pattern.percentage != None %} ({{ pattern.percentage }}%){% endif %}</strong></li>{% endfor %}</ul>
     {% if not analyzed %}<div class="border rounded bg-light p-4 mt-3" role="status" aria-label="Pattern distribution unavailable">
       <p class="h6">No patterns available yet</p>
@@ -35,10 +47,10 @@
   </div></div>
 </div>
 {% if comparison_rows %}<div class="card mb-4"><div class="card-body"><h3 class="h5">Section Results{% if charts.bar_period %} — {{ charts.bar_period }}{% endif %}</h3>
-  <p class="small text-muted mb-0">All authorized sections for the selected course are listed, including sections without concluded finalized results. Counts are class-level. Score values are compared only when grading arrangements and percentage scales are compatible.</p></div>
+  <p class="small text-muted mb-0">Review available results for sections of the selected course. Sections without finalized grades are also listed. Scores are compared only when their grading rules and scales agree.</p></div>
   <div class="table-responsive"><table class="table table-sm align-middle mb-0"><caption>Section measures and availability; quiz count is a subset of class-standing activity count.</caption>
     <thead><tr><th>Section</th><th>Status / pattern</th><th>Quiz count</th><th>Quiz average (Gradebook points)</th><th>Class-standing activities</th><th>Class-standing average</th><th>Exam average</th><th>Periodic average</th></tr></thead>
-    <tbody>{% for item in comparison_rows %}<tr><th scope="row">{{ item.section }}</th><td>{{ item.status }}<div class="small">{{ item.pattern }}</div></td><td>{{ item.quizzes|default_if_none:'Not Available' }}</td><td>{{ item.quiz_grade|default_if_none:'Not Available' }}<details class="small text-muted"><summary>Raw attainment</summary>{{ item.quiz|default_if_none:'Not Available' }}%</details></td><td>{{ item.activities|default_if_none:'Not Available' }}</td><td>{{ item.standing|default_if_none:'Not Available' }}</td><td>{{ item.exam|default_if_none:'Not Available' }}</td><td>{{ item.periodic|default_if_none:'Not Available' }}</td></tr>{% endfor %}</tbody>
+    <tbody>{% for item in comparison_rows %}<tr><th scope="row">{{ item.section }}</th><td>{{ item.status }}<div class="small">{{ item.pattern }}</div></td><td>{{ item.quizzes|default_if_none:'Not Available' }}</td><td>{{ item.quiz_grade|default_if_none:'Not Available' }}<details class="small text-muted"><summary>Original quiz percentage</summary>{{ item.quiz|default_if_none:'Not Available' }}%</details></td><td>{{ item.activities|default_if_none:'Not Available' }}</td><td>{{ item.standing|default_if_none:'Not Available' }}</td><td>{{ item.exam|default_if_none:'Not Available' }}</td><td>{{ item.periodic|default_if_none:'Not Available' }}</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>{% endif %}
 {% if period_comparison %}
@@ -50,22 +62,23 @@
     <thead><tr><th scope="col">Indicator</th><th scope="col" class="text-end">{{ period_comparison.previous }}</th><th scope="col" class="text-end">{{ period_comparison.current }}</th><th scope="col" class="text-end">Change</th></tr></thead>
     <tbody>{% for item in period_comparison.rows %}<tr><th scope="row">{{ item.indicator }}</th><td class="text-end">{{ item.previous|default_if_none:'Not Available' }}</td><td class="text-end">{{ item.current|default_if_none:'Not Available' }}</td><td class="text-end">{{ item.change|default_if_none:'Not Available' }}</td></tr>{% endfor %}</tbody>
   </table></div>
-  <details class="small text-muted"><summary>Raw quiz percentage — supporting detail</summary>
+  <details class="small text-muted"><summary>Original quiz percentage — supporting detail</summary>
     <p class="mt-2 mb-0">{{ period_comparison.previous }}: {{ period_comparison.raw.previous|default_if_none:'Not Available' }};
       {{ period_comparison.current }}: {{ period_comparison.raw.current|default_if_none:'Not Available' }};
-      change: {{ period_comparison.raw.change|default_if_none:'Not Available' }} percentage points. These raw percentages are separate from Gradebook quiz points.</p>
+      change: {{ period_comparison.raw.change|default_if_none:'Not Available' }} percentage points. These original percentages are shown before Gradebook conversion.</p>
   </details>
 </div></div>
 <details class="mb-4"><summary>All period details, activity counts and availability</summary>
 {% endif %}
 <div class="card mb-4"><div class="card-body"><h3 class="h5">{% if period_comparison %}Additional Period Details{% elif class_label %}Class Period Results{% else %}Average Results per Section{% endif %}</h3>
-  <p class="small text-muted mb-0">Class-standing activity counts include quizzes; the quiz count is a subset and must not be added again. Exam activities and attendance sessions are excluded. Score averages use equally weighted sections and their valid observations. Gradebook quiz points use saved converted scores with the official rounding and configured quiz rollup; raw attainment remains separate. Class standing and examination values retain their original grade points. Period averages describe each period’s valid class data. Matched progression and patterns compare the same students with valid comparable records; descriptive points repeat disclosable period values without implying a matched trend.</p></div>
+  <p class="small text-muted mb-2">Review the number of quizzes, recorded class activities and available grade averages for each section.</p>
+  <details class="small text-muted"><summary>About counts and averages</summary><p class="mt-2">Quizzes are already included in class-standing activity counts. Quiz averages follow the Gradebook's scoring rules. When several section averages are combined, each section contributes equally.</p><p>Examination activities and attendance sessions are excluded from activity counts. Period averages use the available class results in each period. Patterns compare the same students in both periods. Class-standing and examination averages keep their official grade values.</p></details></div>
   <div class="table-responsive"><table class="table table-sm align-middle mb-0">
     <caption class="px-3">Unavailable measurements have no contribution to averages or patterns. Counts and quiz averages require valid saved, non-excused evidence.</caption>
-    <thead><tr><th>Period</th><th>Class-level quiz count</th><th>Quiz Avg (Gradebook points)</th><th>Class-level standing activity count</th><th>Class Standing Avg (points)</th><th>Exam Avg (points)</th><th>Periodic Avg (grade)</th>{% if class_label %}<th>Matched students</th>{% endif %}</tr></thead>
+    <thead><tr><th>Period</th><th>Class-level quiz count</th><th>Quiz Avg (Gradebook points)</th><th>Class-level standing activity count</th><th>Class Standing Avg (points)</th><th>Exam Avg (points)</th><th>Periodic Avg (grade)</th>{% if class_label %}<th>Students compared</th>{% endif %}</tr></thead>
     <tbody>{% for row in rows %}<tr><th scope="row">{{ row.period }}{% if row.sections != None %}<div class="small text-muted">{{ row.sections }} sections with available finalized results</div>{% endif %}</th>
       <td>{{ row.quizzes|default_if_none:'Not Available' }}{% if row.quizzes_sections != None %}<small class="d-block text-muted">{{ row.quizzes_sections }} sections</small>{% endif %}</td>
-      <td>{{ row.quiz_grade|default_if_none:'Not Available' }}<details class="small text-muted"><summary>Raw attainment</summary>{{ row.quiz|default_if_none:'Not Available' }}%{% if row.quiz_sections != None %} ({{ row.quiz_sections }} sections){% endif %}</details>{% if row.quiz_grade_sections != None %}<small class="d-block text-muted">{{ row.quiz_grade_sections }} sections</small>{% endif %}</td>
+      <td>{{ row.quiz_grade|default_if_none:'Not Available' }}<details class="small text-muted"><summary>Original quiz percentage</summary>{{ row.quiz|default_if_none:'Not Available' }}%{% if row.quiz_sections != None %} ({{ row.quiz_sections }} sections){% endif %}</details>{% if row.quiz_grade_sections != None %}<small class="d-block text-muted">{{ row.quiz_grade_sections }} sections</small>{% endif %}</td>
       <td>{{ row.activities|default_if_none:'Not Available' }}{% if row.activities_sections != None %}<small class="d-block text-muted">{{ row.activities_sections }} sections</small>{% endif %}</td>
       <td>{{ row.standing|default_if_none:'Not Available' }}{% if row.standing_sections != None %}<small class="d-block text-muted">{{ row.standing_sections }} sections</small>{% endif %}</td>
       <td>{{ row.exam|default_if_none:'Not Available' }}{% if row.exam_sections != None %}<small class="d-block text-muted">{{ row.exam_sections }} sections</small>{% endif %}</td>
@@ -75,12 +88,14 @@
   </table></div>
 </div>
 {% if period_comparison %}</details>{% endif %}
-<details class="card card-body"><summary>How section results moved</summary>
-  <p class="small text-muted mt-2">Improving means a rise of at least {{ threshold }} percentage points; declining means a fall of at least {{ threshold }} percentage points. All smaller changes, including zero, are stable. Quiz classification uses raw attainment percentages, separately from the displayed converted Gradebook quiz points. Moved Together means raw quiz attainment, class standing, and examination averages all improve meaningfully or all decline meaningfully. Moved Opposite means quiz and class standing improve meaningfully while examinations decline meaningfully, or the reverse. Other valid combinations are Mixed / Stable. Unsupported component units are Insufficient Comparable Data and excluded from pattern percentages. Quiz/activity counts are supporting indicators with no minimum-count threshold; these patterns do not establish causation.</p>
-  <p class="small text-muted">Component averages and matched student counts are withheld when small or overlapping student groups could reveal individual grades.</p>
-  {% for item in classifications %}{% if item.matched_students != None %}<p class="small mb-1">{{ item.course }} / {{ item.section }}: {{ item.matched_students }} matched students in the paired comparison.</p>{% endif %}{% endfor %}
+<details class="card card-body"><summary>How section results moved<span class="d-block small text-muted mt-1">See whether quiz, class-standing and examination performance improved, declined or changed very little.</span></summary>
+  <ul class="small text-muted"><li>Improving: increased by at least 3 points.</li><li>Declining: decreased by at least 3 points.</li><li>Stable: changed by less than 3 points in either direction.</li><li>Mixed: some meaningful changes did not follow a common pattern.</li></ul>
+  <p class="small text-muted">Quiz trends use original quiz percentages before Gradebook conversion. Displayed quiz averages follow the Gradebook. Class-standing and examination trends use their official comparable scores. Comparisons are calculated before rounding.</p>
+  <p class="small text-muted">Quiz and activity counts provide context; they do not decide the pattern. Results can guide further review, but do not show that activities caused examination outcomes or measure faculty effectiveness.</p>
+  {% for item in classifications %}{% if item.matched_students != None %}<p class="small mb-1">{{ item.course }} / {{ item.section }}: the same {{ item.matched_students }} students were compared in both periods.</p>{% endif %}{% endfor %}
   <ul class="list-unstyled small mb-0">{% for item in classifications %}<li class="border-top py-2"><strong>{{ item.course }} / {{ item.section }} — {{ item.campus }}: {{ item.category }}</strong><div>{{ item.detail }}{% if item.from %} ({{ item.from }} → {{ item.to }}). Quiz: {{ item.changes.quiz|title }}; class standing: {{ item.changes.standing|title }}; exam: {{ item.changes.exam|title }}. Quiz count change: {{ item.quiz_count_change }}; class-standing activity count change: {{ item.activity_count_change }}.{% endif %}</div></li>{% empty %}<li>No authorized sections match this selection.</li>{% endfor %}</ul>
 </details>
+<p class="small text-muted mt-3">Some results cannot be compared or displayed because required grades are unavailable or student privacy must be protected.</p>
 {% if page.paginator.num_pages > 1 %}<nav class="d-flex align-items-center gap-3 mt-3" aria-label="Section comparison pages">
 {% if page.has_previous %}<button type="button" class="btn btn-sm btn-outline-success" data-learning-page="{{ page.previous_page_number }}">Previous sections</button>{% endif %}
 <span class="small">Section page {{ page.number }} of {{ page.paginator.num_pages }}</span>

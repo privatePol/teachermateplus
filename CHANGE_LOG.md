@@ -1,3 +1,9 @@
+## Academic Performance Insights four patterns and clearer explanations - 2026-10-20
+
+- Split Mixed / Stable into Mixed Results (at least one meaningful change outside Together/Opposite) and Stable Performance (all three changes strictly between -3 and +3). Preserve Together/Opposite meanings, unrounded inclusive +/-3 thresholds, original quiz percentages for direction, Gradebook quiz points for display and all existing eligibility/privacy checks. Each eligible section still counts once; insufficient data remains separate.
+- Display nonzero doughnut slices in fixed four-category order with neutral, distinct colors, white borders and textual counts/percentages for all four categories. Keep the zero-data explanation. Update the comparison policy so old three-category caches and signed tokens cannot supply stale classifications.
+- Replace technical preview explanations with short descriptions and expandable examples covering trends, same-course comparisons, counts, Gradebook values and privacy. Stable can include consistently low grades; patterns guide review without proving causes or faculty effectiveness. No changes to official grading, the verified Assignment alias, original dashboard, protected reports, filtering, pagination or CSV contracts.
+
 ## Academic Performance Insights verified Assignment identity - 2026-10-20
 
 - Comparison-only normalization recognizes `CA_PARTICIPATION_ASSIGNMENT` as `CA_PARTICIPATION_OUTPUT_ASSIGNMENT` only at detail level beneath `CA / CA_PARTICIPATION_OUTPUT`, after owning-period prefix normalization. Supplied staging evidence confirms matching Assignment labels, Participation/Output parents, rules and one linked activity per period. This applies across eligible courses without production IDs.

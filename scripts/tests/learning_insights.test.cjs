@@ -84,13 +84,14 @@ test('only three charts render; missing is null and saved zero remains zero', as
   assert.match(tooltip, /4/); // Count is textual context, never a score dataset.
 });
 
-test('threshold explanations and Mixed / Stable legend preserve actual historical values', async () => {
+test('four-category chart omits zero slices without shifting colors or altering historical values', async () => {
   const h = harness(); const pending = h.submit(); const data = report();
   data.charts.line = [{period: 'Prelim', quiz: '80.00', quiz_grade: '90.00', standing: '85.00', exam: '75.00', periodic: '82.00'},
     {period: 'Midterm', quiz: '82.99', quiz_grade: '91.50', standing: '87.99', exam: '77.01', periodic: '83.01'}];
   data.charts.bars = [{section: 'A', quizzes: 1, quiz: '82.99', quiz_grade: '91.50', standing: '87.99', exam: '77.01'}];
-  data.charts.patterns = [{label: 'Moved Together', count: 1, percentage: '50.00'},
-    {label: 'Moved Opposite', count: 0, percentage: '0.00'}, {label: 'Mixed / Stable', count: 1, percentage: '50.00'}];
+  data.charts.patterns = [{label: 'Moved Together', count: 2, percentage: '50.00'},
+    {label: 'Moved Opposite', count: 0, percentage: '0.00'}, {label: 'Mixed Results', count: 1, percentage: '25.00'},
+    {label: 'Stable Performance', count: 1, percentage: '25.00'}];
   h.respond(0, data); await pending;
   assert.equal(h.drawn.length, 3);
   assert.deepEqual(Array.from(h.drawn[0].config.data.datasets[0].data), [90, 91.5]);
@@ -98,11 +99,27 @@ test('threshold explanations and Mixed / Stable legend preserve actual historica
   assert.equal(h.drawn[1].config.data.datasets[0].data[0], 91.5);
   assert.equal(h.drawn[1].config.data.datasets[1].data[0], 87.99);
   assert.equal(h.drawn[1].config.data.datasets[2].data[0], 77.01);
-  assert.deepEqual(Array.from(h.drawn[2].config.data.labels), ['Moved Together', 'Moved Opposite', 'Mixed / Stable']);
-  assert.deepEqual(Array.from(h.drawn[2].config.data.datasets[0].data), [1, 0, 1]);
+  assert.deepEqual(Array.from(h.drawn[2].config.data.labels), ['Moved Together', 'Mixed Results', 'Stable Performance']);
+  assert.deepEqual(Array.from(h.drawn[2].config.data.datasets[0].data), [2, 1, 1]);
+  assert.deepEqual(Array.from(h.drawn[2].config.data.datasets[0].backgroundColor), ['#0072b2', '#b56b00', '#596773']);
   for (const chart of h.drawn) assert.match(chart.config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]), /at least 3\.00 percentage points/);
   assert.match(h.drawn[2].config.options.plugins.title.text, /3\.00 percentage points/);
-  assert.match(h.drawn[2].config.options.plugins.tooltip.callbacks.label({label: 'Mixed / Stable', dataIndex: 2}), /1 sections \(50\.00%\)/);
+  assert.match(h.drawn[2].config.options.plugins.tooltip.callbacks.label({label: 'Stable Performance', dataIndex: 2}), /1 section \(25\.00%\)/);
+  assert.match(h.drawn[2].config.options.plugins.tooltip.callbacks.afterBody(), /before Gradebook conversion/);
+});
+
+test('four nonzero patterns render in fixed order with distinct colors and accurate tooltips', async () => {
+  const h = harness(); const pending = h.submit(); const data = report();
+  const labels = ['Moved Together', 'Moved Opposite', 'Mixed Results', 'Stable Performance'];
+  data.charts.patterns = labels.map(label => ({label, count: 1, percentage: '25.00'}));
+  h.respond(0, data); await pending;
+  const chart = h.drawn.find(item => item.config.type === 'doughnut');
+  assert.deepEqual(Array.from(chart.config.data.labels), labels);
+  assert.deepEqual(Array.from(chart.config.data.datasets[0].data), [1, 1, 1, 1]);
+  assert.equal(new Set(chart.config.data.datasets[0].backgroundColor).size, 4);
+  labels.forEach((label, dataIndex) => {
+    assert.equal(chart.config.options.plugins.tooltip.callbacks.label({label, dataIndex}), `${label}: 1 section (25.00%)`);
+  });
 });
 
 test('Gradebook series and raw context stay distinct; descriptive points are not connected', async () => {
@@ -143,7 +160,7 @@ test('unsupported mixed quiz rollup leaves gaps and preserves other component se
   assert.equal(h.drawn[0].config.data.datasets[1].data[0], 85);
   assert.equal(h.drawn[1].config.data.datasets[2].data[0], 75);
   for (const chart of h.drawn) {
-    assert.match(chart.config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]), /Raw quiz attainment: Not Available/);
+    assert.match(chart.config.options.plugins.tooltip.callbacks.afterBody([{dataIndex: 0}]), /Original quiz percentage: Not Available/);
     assert.equal(chart.config.data.datasets.some(series => series.data.includes(42.5)), false);
   }
   assert.equal(h.drawn.length, 2);
@@ -152,7 +169,7 @@ test('unsupported mixed quiz rollup leaves gaps and preserves other component se
 test('zero eligible sections keep the empty state without drawing fabricated pie slices', async () => {
   const h = harness(); const pending = h.submit(); const data = report();
   data.html = '<div role="status">No patterns available yet. Required measurements are unavailable.</div>';
-  data.charts.patterns = ['Moved Together', 'Moved Opposite', 'Mixed / Stable'].map(label => ({label, count: 0, percentage: null}));
+  data.charts.patterns = ['Moved Together', 'Moved Opposite', 'Mixed Results', 'Stable Performance'].map(label => ({label, count: 0, percentage: null}));
   h.respond(0, data); await pending;
   assert.deepEqual(h.drawn.map(chart => chart.config.type), ['line', 'bar']);
   assert.match(h.elements['learning-results'].innerHTML, /No patterns available yet/);
