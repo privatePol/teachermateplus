@@ -1,3 +1,15 @@
+## Assessment Alignment two-blocker remediation - 2026-10-21
+
+- Count every active examination bucket before scoring-mode validation. Multiple or unsupported exam buckets remain unavailable with an explicit reason; legitimate single-bucket saved/manual examination grades are retained.
+- Fingerprint the same offering-linked examination policy and equivalency dependencies used by eligibility, including conflicting out-of-term or cross-tenant references. Relevant changes invalidate signed generations; unlinked policy records do not. Policy version advanced to invalidate older cached eligibility. No Gradebook, original Insights, model or migration changes.
+
+## Template-aware formative and examination preview - 2026-10-21
+
+- Add the separately authorized `/admin-portal/grading/assessment-alignment/preview/` using existing analytics feature/RBAC, filters, signed generations, freshness checks, caching and the admin shell. Existing four-category Insights, navigation and exports retain their outputs.
+- Resolve effective template/profile/base and explicit Quiz, Participation/Output and Examination definitions. Reuse saved Gradebook values and official detail/average rounding; never substitute periodic/final grades for an examination. Unsupported or ambiguous structures remain unavailable.
+- Scope NCBA's Midterm-to-Midterm and Pre-Final-to-Final mappings to tenant code NCBA. Read cycle/course/offering snapshots and explicit equivalency compatibility; Included Departmental/Standardized qualify, Exempt is excluded, legacy Midterm is labeled descriptive, Prelim is Regular. Other schools use unambiguous same-period definitions without requiring NCBA cycles.
+- Compare all six measures for matched students before four-category classification on verified saved Gradebook scales, with inclusive +/-3 boundaries. Extend full-scope contributor/overlap/complement protection to new aggregates. Add separate chart/table explanations and regression coverage; no academic writes, model changes or migrations.
+
 ## Academic Performance Insights four patterns and clearer explanations - 2026-10-20
 
 - Split Mixed / Stable into Mixed Results (at least one meaningful change outside Together/Opposite) and Stable Performance (all three changes strictly between -3 and +3). Preserve Together/Opposite meanings, unrounded inclusive +/-3 thresholds, original quiz percentages for direction, Gradebook quiz points for display and all existing eligibility/privacy checks. Each eligible section still counts once; insufficient data remains separate.

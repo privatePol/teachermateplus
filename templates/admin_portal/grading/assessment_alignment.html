@@ -1,0 +1,53 @@
+{% extends "admin_portal/base.html" %}
+{% load static %}
+{% block title %}Formative–Summative Alignment | TeacherMate+{% endblock %}
+{% block admin_content %}
+<link rel="stylesheet" href="{% static 'admin_portal/learning_insights.css' %}">
+<div class="learning-insights">
+  <header class="learning-header mb-4">
+    <span class="badge text-bg-light border mb-2">Authorized preview</span>
+    <h1 class="h3 mb-2">Formative–Summative Alignment</h1>
+    <p class="text-muted mb-3"><em>Compare independent quizzes and participation/output with examination results.</em></p>
+    <div class="d-flex flex-wrap gap-2"><a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:learning_performance_insights_preview' %}">Academic Performance Progression</a>
+      <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:midterm_exam_performance' %}">Midterm Exam Performance</a>
+      <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:academic_activity_consistency' %}">Activity Consistency</a>
+      <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+    </div>
+  </header>
+  <form id="learning-filters" class="card card-body mb-3" method="post">
+    {% csrf_token %}
+    <div class="row g-3 align-items-end">
+      {% for name, values in options.items %}
+      <div class="col-sm-6 col-lg"><label class="form-label" for="learning-{{ name }}" data-learning-label="{{ name }}"></label>
+        <select id="learning-{{ name }}" name="{{ name }}" class="form-select" {% if name == 'academic_year_id' or name == 'term_id' %}required{% endif %}>
+          <option value="">Select / All authorized</option>
+          {% for option in values %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+      <button id="learning-view" class="btn btn-success" type="submit">View Performance</button>
+      <button id="learning-retry" class="btn btn-outline-success" type="button" hidden>Retry Selections</button>
+      <button id="learning-overall" class="btn btn-outline-secondary" type="button" hidden>Return to Overall Analysis</button>
+      <a class="btn btn-outline-secondary" href="{{ request.path }}">Clear</a>
+    </div>
+  </form>
+  {{ filters|json_script:"learning-selected" }}
+  <div id="learning-progress" class="card card-body mb-3" role="status" aria-live="polite" hidden>
+    <span class="mb-2">Loading learning performance…</span>
+    <div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated w-100" role="progressbar" aria-label="Loading learning performance"></div></div>
+  </div>
+  <div id="learning-message" class="alert alert-info" role="status" aria-live="polite">Select your filters and click View Performance.</div>
+  <div id="learning-results" aria-busy="false"></div>
+  <div id="learning-csv-controls" class="card card-body mt-3" hidden>
+    <label class="form-label" for="learning-csv-period">CSV grading period</label>
+    <select id="learning-csv-period" class="form-select learning-csv-period"><option value="">Select a concluded period</option></select>
+    <p class="small text-muted mb-0 mt-2">CSV downloads use the existing reports and their access rules. They run independently for this course and CSV period; the preview's section selection does not filter either CSV.</p>
+  </div>
+  <p class="small text-muted mt-3">Patterns describe associations, not causes or faculty effectiveness. This preview uses separate Quiz, Participation/Output and Examination indicators. All displayed measures use saved Gradebook points (0–100). Recorded activity counts show saved grading evidence, not proof that an activity was conducted.</p>
+  <noscript><p>Enable JavaScript, select your filters, and click View Performance to load this preview.</p></noscript>
+</div>
+<script src="{% static 'vendor/chartjs/4.5.1/chart.umd.js' %}" defer></script>
+<script src="{% static 'admin_portal/assessment_alignment.js' %}" defer></script>
+{% endblock %}

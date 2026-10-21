@@ -758,7 +758,7 @@ def privacy_history_row(finalized, scales, signature, period_authorized, activit
             "student_values": {sid for sid, values in finalized.items() if sid in quiz_cohort and len(values) == 3}}
 
 
-def build_report(selection, filters, now=None):
+def build_report(selection, filters, now=None, *, assessment_collector=None):
     now = now or timezone.now()
     # Membership disclosure is planned across the authorized year/term before optional filters.
     universe = selection.matching({k: filters[k] for k in ("academic_year_id", "term_id")})
@@ -894,6 +894,9 @@ def build_report(selection, filters, now=None):
                     reason = "No valid finalized student results are available for this concluded period."
                 elif any(sid not in finalized or len(finalized[sid]) < 3 for sid in active_enrolled[o.id]):
                     reason = "Partial finalized component results; missing values are excluded and remain unavailable."
+            if assessment_collector is not None:
+                assessment_collector.collect(o, p, context, base_value, components, structure,
+                    finalized, period_authorized, reason, activities[pair], scores, grade_scores)
             if o.id not in numeric_ids:
                 history.append(privacy_history_row(
                     finalized, scales, signature, period_authorized, activities[pair], scores,
@@ -947,6 +950,8 @@ def build_report(selection, filters, now=None):
             history.append(row)
         histories[o.id] = sorted(history, key=lambda r: r["sequence"]) if o.id in numeric_ids else history
     leadership_ids = {pk for pk, offering in offerings.items() if selection.allows_aggregates(offering)}
+    if assessment_collector is not None:
+        return assessment_collector.finish(selection, filters, histories, active_enrolled, leadership_ids)
     disclosed_groups = disclosed_populations(histories, active_enrolled, leadership_ids)
     for pk, history in histories.items():
         if pk in leadership_ids or pk not in numeric_ids:
