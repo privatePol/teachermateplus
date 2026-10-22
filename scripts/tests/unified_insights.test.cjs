@@ -7,8 +7,10 @@ const path = require('node:path');
 function harness({offering = '', chartFailure = false, reducedMotion = false} = {}) {
   const calls = [], handlers = {}, formHandlers = {}, windowHandlers = {}, drawn = [];
   class Element {
-    constructor() { this.hidden = true; this.value = ''; this.dataset = {}; this.attributes = {}; this.options = [{textContent: ''}]; }
-    replaceChildren(...children) { this.innerHTML = ''; this.children = children; this.options = children; this.value = ''; }
+    constructor() { this.hidden = true; this.value = ''; this.dataset = {}; this.attributes = {}; this.options = [{textContent: ''}]; this.childNodes = []; }
+    set innerHTML(html) { this.childNodes = html ? [{html}] : []; }
+    get innerHTML() { return this.childNodes.map(node => node.html || '').join(''); }
+    replaceChildren(...children) { this.childNodes = children; this.children = children; this.options = children; this.value = ''; }
     add(option) { this.options.push(option); }
     addEventListener(event, callback) { this[event] = callback; }
     setAttribute(name, value) { this.attributes[name] = value; }
@@ -29,6 +31,7 @@ function harness({offering = '', chartFailure = false, reducedMotion = false} = 
   class Chart {
     constructor(canvas, config) { if (chartFailure) throw new Error('drawing failed'); this.config = config; this.canvas = canvas; drawn.push(this); }
     destroy() { this.destroyed = true; }
+    resize() { this.resized = true; }
   }
   const tabs = ['overview','exams','alignment'].map(name => Object.assign(new Element(), {dataset: {unifiedTab: name}}));
   const context = {URLSearchParams, FormData: Data, Option: function(text, value) { this.textContent = text; this.value = value; }, AbortController,
@@ -46,7 +49,7 @@ function harness({offering = '', chartFailure = false, reducedMotion = false} = 
 }
 
 function report(tab = 'overview', token = 'generation') {
-  return {token, tab, html: '<p>Accessible academic results</p>', export_periods: tab === 'overview' ? [['MIDTERM','Midterm']] : [],
+  return {token, tab, generation: tab === 'overview' ? 'overview-generation' : 'assessment-generation', html: '<p>Accessible academic results</p>', export_periods: tab === 'overview' ? [['MIDTERM','Midterm']] : [],
     charts: {threshold: '3.00', line: [], line_mode: 'descriptive',
       bars: [{section: 'A',quiz_grade: '0.00',standing: null,exam:'80.00'}],
       patterns: [{label:'Moved Together',count:1,percentage:'100.00'}],
@@ -73,7 +76,8 @@ test('exam and alignment reuse one engine token while overview loads separately'
   assert.equal(h.calls[2].options.body.get('token'),'assessment-token');
   h.respond(2,report('alignment','assessment-token')); await pending;
   pending=h.tabs[0].click(); assert.equal(h.calls[3].options.body.get('token'),'generation');
-  h.respond(3,report()); await pending;
+  assert.equal(h.calls[3].options.body.get('action'),'verify');
+  h.respond(3,{...report(),valid:true}); await pending;
   assert.equal(h.elements['learning-results'].attributes['aria-labelledby'],'tab-overview');
 });
 
@@ -214,4 +218,142 @@ test('course drilldown validates shared selections before generating details', a
   h.respond(1,{filters:{},options:{}}); await h.tick();
   assert.equal(h.calls[2].options.body.get('action'),'report');
   h.respond(2,report()); await pending;
+});
+
+test('return tab stays hidden until verification then restores identical nodes and charts', async () => {
+  const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+  const nodes=[...h.elements['learning-results'].childNodes], charts=[...h.drawn];
+  pending=h.tabs[1].click(); h.respond(1,report('exams')); await pending;
+  const count=h.drawn.length;
+  pending=h.tabs[0].click();
+  assert.equal(h.calls[2].options.body.get('action'),'verify');
+  assert.equal(h.elements['learning-results'].hidden,true);
+  assert.equal(h.elements['learning-results'].innerHTML,'');
+  assert.ok(charts.every(chart=>!chart.destroyed));
+  h.respond(2,{...report(),valid:true}); await pending;
+  assert.equal(h.elements['learning-results'].hidden,false);
+  assert.equal(h.elements['learning-results'].childNodes[0],nodes[0]);
+  assert.equal(h.drawn.length,count);
+  assert.ok(charts.every(chart=>chart.resized && !chart.destroyed));
+});
+
+test('return preserves selected section and last page while pagination replaces only its tab', async () => {
+  const h=harness({offering:'17'}); let pending=h.submit(); h.respond(0,report()); await pending;
+  const firstCharts=[...h.drawn];
+  pending=h.click('page',2); h.respond(1,{...report(),html:'page two'}); await pending;
+  assert.ok(firstCharts.every(chart=>chart.destroyed));
+  pending=h.tabs[1].click(); h.respond(2,report('exams')); await pending;
+  pending=h.tabs[0].click();
+  assert.equal(h.calls[3].options.body.get('page'),2);
+  assert.equal(h.calls[3].options.body.get('offering_id'),'17');
+  assert.equal(h.calls[3].options.body.get('course_code'),'IT');
+  h.respond(3,{...report(),valid:true}); await pending;
+  assert.equal(h.elements['learning-results'].innerHTML,'page two');
+});
+
+test('403 and 409 verification purge every presentation and allow a fresh retry', async () => {
+  for (const code of [403,409]) {
+    const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+    pending=h.tabs[1].click(); h.respond(1,report('exams')); await pending;
+    pending=h.tabs[0].click(); h.respond(2,{error:'Access or records changed'},code); await pending;
+    assert.equal(h.elements['learning-results'].hidden,true);
+    assert.equal(h.elements['learning-results'].innerHTML,'');
+    assert.ok(h.drawn.every(chart=>chart.destroyed));
+    assert.equal(h.elements['learning-retry'].hidden,false);
+    assert.equal(h.elements['learning-view'].disabled,false);
+    pending=h.elements['learning-retry'].click();
+    assert.equal(h.calls[3].options.body.get('action'),'report');
+    assert.equal(h.calls[3].options.body.get('token'),undefined);
+    h.respond(3,report()); await pending;
+    assert.equal(h.elements['learning-results'].hidden,false);
+  }
+});
+
+test('failed or interrupted return verification keeps data hidden and retry revalidates', async () => {
+  for (const failure of ['abort','network','server']) {
+    const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+    pending=h.tabs[1].click(); h.respond(1,report('exams')); await pending;
+    const count=h.drawn.length;
+    pending=h.tabs[0].click();
+    if(failure==='server') h.respond(2,{error:'Unavailable'},503);
+    else h.calls[2].reject(Object.assign(new Error('Interrupted'),{name:failure==='abort'?'AbortError':'TypeError'}));
+    await pending;
+    assert.equal(h.elements['learning-results'].hidden,true);
+    assert.equal(h.elements['learning-retry'].hidden,false);
+    assert.equal(h.elements['learning-progress'].hidden,true);
+    pending=h.elements['learning-retry'].click();
+    assert.equal(h.calls[3].options.body.get('action'),'verify');
+    h.respond(3,{...report(),valid:true}); await pending;
+    assert.equal(h.drawn.length,count);
+    assert.equal(h.elements['learning-results'].hidden,false);
+  }
+});
+
+test('rapid switches across engines serialize requests and restore only the final tab', async () => {
+  const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+  const first=h.tabs[1].click(); await h.tabs[2].click(); await h.tabs[0].click();
+  assert.equal(h.calls.length,2);
+  assert.equal(h.calls[1].options.signal.aborted,false);
+  h.respond(1,report('exams')); await h.tick();
+  assert.equal(h.calls.length,3);
+  assert.equal(h.calls[2].options.body.get('action'),'verify');
+  assert.equal(h.calls[2].options.body.get('tab'),'overview');
+  assert.equal(h.elements['learning-results'].hidden,true);
+  h.respond(2,{...report(),valid:true}); await first;
+  assert.equal(h.elements['learning-results'].hidden,false);
+  assert.equal(h.drawn.length,3);
+});
+
+test('late return verification cannot restore cached grades after a section change', async () => {
+  const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+  pending=h.tabs[1].click(); h.respond(1,report('exams')); await pending;
+  const old=h.tabs[0].click();
+  h.selects.find(s=>s.name==='offering_id').value='99';
+  const changed=h.formHandlers.change();
+  h.respond(2,{...report(),valid:true}); await old;
+  assert.equal(h.elements['learning-results'].innerHTML,'');
+  assert.equal(h.elements['learning-view'].disabled,true);
+  h.respond(3,{filters:{offering_id:'99'},options:{}}); await changed;
+  assert.equal(h.elements['learning-results'].hidden,true);
+  pending=h.submit(); assert.equal(h.calls[4].options.body.get('action'),'report');
+  h.respond(4,report()); await pending;
+});
+
+test('verification generation mismatch and expired-session HTML never restore cached grades', async () => {
+  for (const failure of ['generation','session']) {
+    const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+    pending=h.tabs[1].click(); h.respond(1,report('exams')); await pending;
+    pending=h.tabs[0].click();
+    if(failure==='generation') h.respond(2,{...report(),valid:true,generation:'changed'});
+    else h.respond(2,'Login',200,'text/html');
+    await pending;
+    assert.equal(h.elements['learning-results'].hidden,true);
+    assert.ok(h.drawn.every(chart=>chart.destroyed));
+    assert.equal(h.elements['learning-retry'].hidden,false);
+    assert.equal(h.elements['learning-view'].disabled,false);
+  }
+});
+
+test('explicit View Performance and pagehide discard retained presentations', async () => {
+  const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+  const old=[...h.drawn]; pending=h.submit();
+  assert.equal(h.calls[1].options.body.get('action'),'report');
+  assert.ok(old.every(chart=>chart.destroyed));
+  h.respond(1,report()); await pending;
+  h.windowHandlers.pagehide();
+  assert.ok(h.drawn.every(chart=>chart.destroyed));
+  assert.equal(h.elements['learning-results'].hidden,true);
+});
+
+test('late prior verification cannot enable refresh during a newer report request', async () => {
+  const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+  pending=h.tabs[1].click(); h.respond(1,report('exams')); await pending;
+  const old=h.tabs[0].click();
+  const changed=h.formHandlers.change(); h.respond(3,{filters:{},options:{}}); await changed;
+  const current=h.submit();
+  h.respond(2,{...report(),valid:true}); await old;
+  assert.equal(h.elements['learning-view'].disabled,true);
+  await h.submit(); assert.equal(h.calls.length,5);
+  h.respond(4,report()); await current;
+  assert.equal(h.elements['learning-view'].disabled,false);
 });

@@ -344,6 +344,13 @@ def portal_menu(request):
                     if node["item"].code != "ACADEMIC_PERFORMANCE_INSIGHTS"
                 ]
             menu = [group for group in menu if group["items"]]
+        else:
+            # Resolve existing authorized menu records without reseeding or
+            # changing the legacy route used by reports and CSV exports.
+            for group in menu:
+                for node in group["items"]:
+                    if node["item"].code == "ACADEMIC_PERFORMANCE_INSIGHTS":
+                        node["url"] = reverse("admin_portal:unified_academic_insights_preview")
         if not FeatureSettingsService.is_student_academic_intervention_tracking_enabled(
             tenant_id=scope.get("tenant_id"), default=False
         ):

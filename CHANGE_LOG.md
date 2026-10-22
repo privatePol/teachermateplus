@@ -1,3 +1,8 @@
+## Unified dashboard tab reuse and sidebar correction - 2026-10-22
+
+- Retain each tab's last rendered page and chart instances in memory. Returning tabs remain hidden until signed-generation authorization and freshness verification succeeds; verification performs no report build, HTML rendering or result-cache access. Filter changes, explicit refresh, denied/stale access and page departure invalidate retained results. Failed/interrupted checks expose Retry Results; rapid tab requests are serialized.
+- Direct the existing authorized Academic Performance Insights sidebar item to the unified preview through the menu context. Existing stored menu rows, visibility/feature rules, legacy routes and CSV destinations are preserved. No schema or academic-calculation changes.
+
 ## Unified preview filter recovery and separate period availability - 2026-10-22
 
 - Preserve shared filter verification during tab changes. A current interrupted verification exposes Retry Selections; stale responses cannot restore controls or overwrite a newer selection. Report generation remains disabled until the current selection is verified.

@@ -813,7 +813,7 @@ ADMIN_HELP_SECTIONS = [
                     ),
                     (
                         "The new Academic Performance Insights preview is available at "
-                        "/admin-portal/grading/learning-performance-insights/preview/. The existing menu still opens the existing Academic Performance Insights dashboard. "
+                        "/admin-portal/grading/learning-performance-insights/preview/. The Academic Performance Insights menu opens the unified dashboard; the earlier dashboard and preview URLs remain available. "
                         "Select campus, academic year and term for Overall Academic Performance (all authorized courses/sections), "
                         "select one course for Course Performance Comparison (all authorized sections), or select a section for Individual Section Progression; then click View Performance. "
                         "Accepted authorized offerings remain selectable when finalized results are unavailable; their status is shown separately. "
@@ -867,10 +867,12 @@ ADMIN_HELP_SECTIONS = [
                         "The unified Academic Performance Insights preview at /admin-portal/grading/academic-performance-insights/unified-preview/ "
                         "offers Performance Overview, Exam Comparison and Formative–Summative Alignment with one set of filters. "
                         "Select a course for section comparisons, then a section for matched details. All Courses shows compact course summaries. "
-                        "Tabs load on demand. Exam lines use valid matched comparisons; separate points are descriptive averages. "
+                        "Tabs load on demand. Returning to a loaded tab checks current access and records, then restores its results and page without rebuilding charts. "
+                        "Exam lines use valid matched comparisons; separate points are descriptive averages. "
                         "Assessment availability reports Midterm and Final separately: eligible, excluded, pending, unsupported or privacy withheld. "
                         "Each period counts authorized sections once; do not add period totals as unique sections. "
-                        "Changing tabs preserves pending filter verification. Use Retry Selections if verification fails or is interrupted. "
+                        "Changing filters clears saved tab results. Changing tabs preserves pending filter verification. "
+                        "Use Retry Selections for filter checks or Retry Results for interrupted result checks. "
                         "Use View Performance after record changes. Existing CSV exports become available through Performance Overview. "
                     ),
                     (

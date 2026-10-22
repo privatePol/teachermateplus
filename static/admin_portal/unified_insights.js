@@ -24,10 +24,16 @@
   document.querySelectorAll("[data-learning-label]").forEach(label => { label.textContent = labels[label.dataset.learningLabel]; });
   let epoch = 0, token = null, verified = true, generated = false, activeTab = "overview";
   const tokens = new Map();
+  const generations = new Map(), presentations = new Map(), pages = new Map();
+  let retryResults = false;
   const tabButtons = [...document.querySelectorAll("[data-unified-tab]")];
-  const engine = () => activeTab === "overview" ? "overview" : "assessment";
+  const engineFor = tab => tab === "overview" ? "overview" : "assessment";
+  const engine = () => engineFor(activeTab);
+  const selectionKey = () => JSON.stringify(Object.keys(labels).map(name => field(name).value));
+  const presentationKey = (tab, page) => JSON.stringify([selectionKey(), tab, generations.get(engineFor(tab)), String(page)]);
   const pending = new Map();
-  const charts = [];
+  const resultPending = () => ["report", "page", "verify"].some(action => pending.has(action));
+  let charts = [];
   function status(text, error = false) {
     message.textContent = text;
     message.className = error ? "alert alert-danger" : "alert alert-info";
@@ -46,14 +52,27 @@
     });
   }
   function destroyCharts() { charts.splice(0).forEach(chart => chart.destroy()); }
+  function hideResults() {
+    results.hidden = true;
+    results.replaceChildren();
+    // Detached nodes and their Chart instances belong to their presentation.
+    charts = [];
+  }
+  function offerRetry() {
+    retryResults = true; retry.hidden = false; retry.disabled = false;
+    retry.textContent = "Retry Results";
+  }
   function clearResults() {
     epoch += 1;
     pending.forEach(controller => controller.abort()); pending.clear();
-    destroyCharts(); results.replaceChildren(); results.setAttribute("aria-busy", "false");
+    hideResults(); results.setAttribute("aria-busy", "false");
     token = null; progress.hidden = true;
   }
   function clear() {
     clearResults(); tokens.clear(); generated = false; csvControls.hidden = true;
+    presentations.forEach(entry => entry.charts.forEach(chart => chart.destroy()));
+    presentations.clear(); generations.clear(); pages.clear();
+    retryResults = false; retry.hidden = true; retry.disabled = true;
     csvPeriod.replaceChildren(new Option("Select a concluded period", ""));
     overall.hidden = !field("offering_id").value;
     exports(); status("Select your filters and click View Performance.");
@@ -70,18 +89,23 @@
     try {
       const response = await fetch(location.pathname, {method: "POST", body, credentials: "same-origin", signal: controller.signal, headers: {Accept: "application/json"}});
       if (version !== epoch || pending.get(action) !== controller) return;
-      if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("Your session may have expired. Reload the page and try again.");
+      if (response.status === 403 && action !== "options") {
+        clear(); offerRetry(); status("Access changed or the request was denied. Retry Results to check access again.", true); return;
+      }
+      if (!response.headers.get("content-type")?.includes("application/json")) {
+        if (action !== "options") { clear(); offerRetry(); }
+        status("Your session may have expired. Reload the page and try again.", true); return null;
+      }
       const data = await response.json();
       if (version !== epoch || pending.get(action) !== controller) return;
       if (response.status === 409 && action !== "options") {
-        clear(); status(data.error || "Academic records changed. Click View Performance again.", true); return;
+        clear(); offerRetry(); status(data.error || "Academic records changed. Click View Performance again.", true); return;
       }
       if (!response.ok) throw new Error(data.error || "Unable to load learning performance.");
       return data;
     } catch (error) {
       if (version !== epoch || pending.get(action) !== controller) return;
-      if (error.name === "AbortError" && action !== "options") return;
-      status(error.name === "AbortError" ? "Selection verification was interrupted. Use Retry Selections." : error.message, true);
+      status(error.name === "AbortError" ? "Verification was interrupted. Please retry." : error.message, true);
       return null;
     } finally {
       if (pending.get(action) === controller) {
@@ -91,6 +115,7 @@
     }
   }
   async function verify() {
+    retryResults = false; retry.textContent = "Retry Selections";
     verified = false; view.disabled = true; retry.hidden = true; retry.disabled = true; exports();
     const version = epoch;
     const data = await request("options");
@@ -138,7 +163,7 @@
     if (visiblePatterns.length) add("learning-patterns", {type: "doughnut", data: {labels: visiblePatterns.map(r => r.label), datasets: [{data: visiblePatterns.map(r => r.count), backgroundColor: visiblePatterns.map(r => r.color), borderColor: "#fff", borderWidth: 2}]}, options: {...common, cutout: "64%", plugins: {...common.plugins, title: {display: true, text: `Meaningful change: at least ${data.threshold} percentage points`}, tooltip: {callbacks: {label: item => `${item.label}: ${visiblePatterns[item.dataIndex].count} section${Number(visiblePatterns[item.dataIndex].count) === 1 ? "" : "s"} (${visiblePatterns[item.dataIndex].percentage}%)`, afterBody: () => patternRule}}}}});
   }
   function render(data) {
-    token = data.token; tokens.set(engine(), token); results.innerHTML = data.html;
+    token = data.token; tokens.set(engine(), token); results.hidden = false; results.innerHTML = data.html;
     if (activeTab === "overview") {
     const previous = csvPeriod.value;
     csvPeriod.replaceChildren(new Option("Select a concluded period", ""));
@@ -150,30 +175,55 @@
     try { renderCharts(data.charts); } catch (_) { destroyCharts(); status("Results are ready. Charts could not be drawn; equivalent values are shown below.", true); }
   }
   form.addEventListener("change", () => { clear(); return verify(); });
-  retry.addEventListener("click", () => { if (!retry.disabled && !verified) return verify(); });
+  retry.addEventListener("click", () => {
+    if (retry.disabled) return;
+    if (!verified) return verify();
+    if (retryResults) return load();
+  });
   overall.addEventListener("click", () => { field("offering_id").value = ""; clear(); return verify(); });
-  async function load(page = 1) {
+  async function load(page = pages.get(activeTab) || 1) {
     if (!verified || view.disabled || !form.reportValidity()) return;
+    const tab = activeTab, reportEngine = engine();
+    const key = presentationKey(tab, page), cached = presentations.get(key);
     clearResults(); token = tokens.get(engine()) || null;
+    if (cached) token = cached.token;
+    retryResults = false; retry.hidden = true; retry.disabled = true;
     view.disabled = true;
     const version = epoch;
-    const data = await request(token ? "page" : "report", {page});
-    if (version !== epoch) { if (verified) view.disabled = false; return; }
+    const data = await request(cached ? "verify" : token ? "page" : "report", {page});
+    if (version !== epoch) { if (verified && !resultPending()) view.disabled = false; return; }
     view.disabled = false;
     if (data) {
       generated = true;
-      tokens.set(data.tab === "overview" ? "overview" : "assessment", data.token);
-      // A rapid switch within the assessment engine waits for the first build,
-      // then requests the other presentation from that completed generation.
-      if (data.tab !== activeTab) return load();
-      render(data);
-    }
+      if (cached && (!data.valid || data.generation !== cached.generation)) {
+        clear(); offerRetry(); status("Academic records changed. Retry Results to refresh.", true); return;
+      }
+      tokens.set(reportEngine, data.token); generations.set(reportEngine, data.generation);
+      // Serialize tab requests, including across engines. Never attach an old
+      // response while another tab is selected; reuse its engine token instead.
+      if (tab !== activeTab) return load();
+      if (cached) {
+        cached.token = data.token;
+        results.replaceChildren(...cached.nodes); charts = cached.charts;
+        results.hidden = false;
+        charts.forEach(chart => chart.resize());
+        exports(); status("Concluded-period results are ready.");
+      } else {
+        // Keep one page per tab; returning restores that page, without an
+        // unbounded history of detached academic results and Chart instances.
+        presentations.forEach((entry, oldKey) => {
+          if (entry.tab === tab) { entry.charts.forEach(chart => chart.destroy()); presentations.delete(oldKey); }
+        });
+        render(data);
+        presentations.set(presentationKey(tab, page), {tab, generation: data.generation,
+          token: data.token, nodes: [...results.childNodes], charts});
+        pages.set(tab, page);
+      }
+    } else if (data === null) offerRetry();
   }
   async function selectTab(name) {
     if (!tabButtons.some(button => button.dataset.unifiedTab === name)) return;
     if (name === activeTab) return;
-    const sameEnginePending = (name === "overview" ? "overview" : "assessment") === engine()
-      && (pending.has("report") || pending.has("page"));
     activeTab = name;
     results.setAttribute("aria-labelledby", `tab-${name}`);
     tabButtons.forEach(button => {
@@ -185,7 +235,7 @@
     // Filter validation belongs to the shared selection, not to a tab. Keep
     // its controller/epoch alive so the current response can restore controls.
     if (pending.has("options")) return;
-    if (sameEnginePending) { destroyCharts(); results.replaceChildren(); return; }
+    if (resultPending()) { hideResults(); return; }
     clearResults(); view.disabled = !verified;
     if (generated) await load();
   }
@@ -199,7 +249,11 @@
       event.preventDefault(); tabButtons[target].focus(); selectTab(tabButtons[target].dataset.unifiedTab);
     });
   });
-  form.addEventListener("submit", event => { event.preventDefault(); return load(); });
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    if (!verified || view.disabled) return;
+    clear(); return load(1);
+  });
   csvPeriod.addEventListener("change", exports);
   document.addEventListener("click", async event => {
     const link = event.target.closest("[data-learning-export]");

@@ -285,3 +285,129 @@ class UnifiedTests(TestCase):
         with patch.object(assessment_alignment, "build_report", wraps=assessment_alignment.build_report) as build:
             self.report(tab="alignment")
             self.assertEqual(build.call_count, 1)
+
+    def test_return_verification_skips_build_render_and_result_cache_with_fewer_queries(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from apps.admin_portal import unified_insights_views as view
+        for tab in ('overview', 'exams', 'alignment'):
+            with self.subTest(tab=tab):
+                first = self.report(tab=tab)
+                with CaptureQueriesContext(connection) as full:
+                    page = self.post('page', tab=tab, token=first['token'])
+                cache.clear()  # An evicted server result must not force a rebuild.
+                with patch.object(learning_insights, 'build_report', side_effect=AssertionError('report rebuilt')), \
+                     patch.object(assessment_alignment, 'build_report', side_effect=AssertionError('report rebuilt')), \
+                     patch.object(view, 'present', side_effect=AssertionError('presentation rebuilt')), \
+                     patch.object(view, 'render_to_string', side_effect=AssertionError('HTML rebuilt')), \
+                     patch.object(view.cache, 'set', wraps=view.cache.set) as writes, \
+                     patch.object(view.cache, 'get', wraps=view.cache.get) as reads, \
+                     CaptureQueriesContext(connection) as verification:
+                    response = self.post('verify', tab=tab, token=first['token'])
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(set(response.json()), {'token', 'tab', 'generation', 'valid'})
+                self.assertTrue(response.json()['valid'])
+                self.assertEqual(response.json()['generation'], first['generation'])
+                self.assertIn('private', response['Cache-Control'])
+                self.assertIn('no-store', response['Cache-Control'])
+                self.assertFalse(any('-result:' in str(call.args[0]) for call in reads.call_args_list + writes.call_args_list))
+                self.assertLess(len(verification), len(full))
+                self.assertLess(len(response.content), len(page.content))
+                print(f'Unified {tab}: full page {len(full)} queries; verify {len(verification)} queries; zero builds/renders/result-cache operations')
+
+    def test_return_verification_rejects_missing_expired_engine_and_filter_tokens(self):
+        from apps.admin_portal.unified_insights_views import TOKEN_SALT
+        from django.core import signing
+        data = self.report(tab='exams')
+        for token in ('', 'tampered'):
+            self.assertEqual(self.post('verify', tab='exams', token=token).status_code, 409)
+        state = signing.loads(data['token'], salt=TOKEN_SALT)
+        with patch('django.core.signing.time.time', return_value=1):
+            expired = signing.dumps(state, salt=TOKEN_SALT, compress=True)
+        self.assertEqual(self.post('verify', tab='exams', token=expired).status_code, 409)
+        self.assertEqual(self.post('verify', tab='overview', token=data['token']).status_code, 409)
+        self.assertEqual(self.post('verify', tab='exams', token=data['token'], offering_id='').status_code, 409)
+        self.assertEqual(self.post('verify', tab='exams', token=data['token'], campus_id=999999).status_code, 409)
+
+    def test_return_verification_rejects_changed_grades(self):
+        data = self.report(tab='overview')
+        StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm).update(exam_grade=81)
+        self.assertEqual(self.post('verify', tab='overview', token=data['token']).status_code, 409)
+
+    def test_return_verification_rejects_changed_examination_policy(self):
+        from apps.departmental_exams.models import CycleCourse, _classification_service_scope
+        data = self.report(tab='alignment')
+        with _classification_service_scope():
+            CycleCourse.objects.filter(pk=self.cycles['FINAL'].pk).update(exam_classification='EXEMPT')
+        self.assertEqual(self.post('verify', tab='alignment', token=data['token']).status_code, 409)
+
+    def test_return_verification_reauthorizes_monitor_and_analytics_direct_deny(self):
+        data = self.report(tab='alignment')
+        UserPermission.objects.create(user=self.area_chair, permission=self.permission, tenant=self.tenant,
+            campus=self.campus, grant_type='DENY')
+        self.assertEqual(self.post('verify', tab='alignment', token=data['token']).status_code, 409)
+        analytics = Permission.objects.get(code='grading_analytics.read')
+        UserPermission.objects.create(user=self.area_chair, permission=analytics, tenant=self.tenant,
+            campus=self.campus, grant_type='DENY')
+        self.assertEqual(self.post('verify', tab='alignment', token=data['token']).status_code, 403)
+
+    def test_return_verification_keeps_closing_freshness_guard(self):
+        data = self.report(tab='overview')
+        original = learning_insights.learning_fingerprint
+        calls = 0
+        def change(selection, filters):
+            nonlocal calls
+            calls += 1
+            value = original(selection, filters)
+            if calls == 1:
+                StudentPeriodGrade.objects.filter(offering=self.offering_a, template_period=self.midterm).update(exam_grade=81)
+            return value
+        with patch.object(learning_insights, 'learning_fingerprint', side_effect=change):
+            self.assertEqual(self.post('verify', tab='overview', token=data['token']).status_code, 409)
+        self.assertEqual(calls, 2)
+
+    def _legacy_menu(self):
+        from apps.navigation.models import MenuGroup, MenuItem, MenuItemPermission
+        group = MenuGroup.objects.create(portal='ADMIN', code='UX_GRADING', label='Grading')
+        item, _ = MenuItem.objects.get_or_create(portal='ADMIN', code='ACADEMIC_PERFORMANCE_INSIGHTS',
+            defaults={'menu_group': group, 'label': 'Academic Performance Insights',
+                'route_name': 'admin_portal:academic_performance_insights'})
+        MenuItemPermission.objects.get_or_create(menu_item=item, permission=Permission.objects.get(code='grading_analytics.read'))
+        MenuItem.objects.create(menu_group=group, portal='ADMIN', code='UX_OTHER', label='Other', route_name='admin_portal:dashboard')
+        return item
+
+    def test_existing_sidebar_record_opens_unified_without_reseed_or_legacy_export_changes(self):
+        item = self._legacy_menu()
+        response = self.client.get(self.url)
+        nodes = [node for group in response.context['portal_menu'] for node in group['items']]
+        matches = [node for node in nodes if node['item'].code == item.code]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]['url'], self.url)
+        self.assertEqual(next(node['url'] for node in nodes if node['item'].code == 'UX_OTHER'), reverse('admin_portal:dashboard'))
+        item.refresh_from_db()
+        self.assertEqual(item.route_name, 'admin_portal:academic_performance_insights')
+        legacy = reverse('admin_portal:academic_performance_insights')
+        self.assertEqual(legacy, '/admin-portal/grading/performance-insights/')
+        self.assertContains(response, legacy + '?export=sections')
+        self.assertContains(response, legacy + '?export=students')
+        self.assertEqual(self.client.get(legacy).status_code, 200)
+        for kind in ('sections', 'students'):
+            exported = self.client.get(legacy, {**self.filters, 'period_code': 'MIDTERM', 'export': kind})
+            self.assertEqual(exported.status_code, 200, exported.content[:200])
+            self.assertIn('text/csv', exported['Content-Type'])
+
+    def test_sidebar_override_preserves_denied_and_feature_disabled_visibility(self):
+        from apps.core.context_processors import portal_menu
+        from apps.core.services.features import FeatureSettingsService
+        from apps.core.services.settings import SystemSettingService
+        item = self._legacy_menu()
+        request = self.client.get(self.url).wsgi_request
+        SystemSettingService.set(FeatureSettingsService.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY,
+            False, tenant_id=self.tenant.pk, value_type='BOOL', is_active=True)
+        self.assertFalse(any(node['item'].code == item.code for group in portal_menu(request)['portal_menu'] for node in group['items']))
+        self._enable_feature()
+        UserPermission.objects.create(user=self.area_chair, permission=Permission.objects.get(code='grading_analytics.read'),
+            tenant=self.tenant, campus=self.campus, grant_type='DENY')
+        request = self.client.get(reverse('admin_portal:dashboard')).wsgi_request
+        self.assertFalse(any(node['item'].code == item.code for group in portal_menu(request)['portal_menu'] for node in group['items']))
+        self.assertEqual(self.client.get(self.url).status_code, 403)

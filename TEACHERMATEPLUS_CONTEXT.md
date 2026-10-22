@@ -1,3 +1,9 @@
+## Unified dashboard UX correction (2026-10-22)
+
+The existing authorized Academic Performance Insights sidebar item now resolves to `/admin-portal/grading/academic-performance-insights/unified-preview/` through an ADMIN-only menu-context override. No menu records are changed or reseeded. Existing RBAC, tenant/campus and feature visibility filters still apply; legacy routes and CSV exports remain available.
+
+Unified tabs retain one rendered page per tab in memory, keyed by academic selection, tab, generation and page. Detached DOM nodes and Chart instances stay hidden until the new `verify` POST succeeds under the same signed token, current scope, effective permissions and opening/closing record fingerprints. Verification does not read/write the result cache, build reports or render HTML. It does not remove the necessary live authorization/freshness queries. First loads/pagination use the full presentation path; View Performance explicitly refreshes. Filters, stale/denied responses and page departure discard retained presentations. Transient/interrupted checks offer Retry Results. Tab requests serialize; stale responses cannot replace newer filters or the active tab.
+
 ## Unified preview two-blocker corrections (2026-10-22)
 
 Tab changes preserve a pending options-verification request and its selection epoch. View Performance stays disabled until that current request succeeds. A current failed/aborted request exposes Retry Selections; superseded requests cannot overwrite newer options, controls or failure state. The existing server-side filter validation and signed-report safeguards remain authoritative.

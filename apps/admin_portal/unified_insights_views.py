@@ -38,7 +38,7 @@ def unified_insights_view(request):
             {"filters": normalized, "options": options}))
     elif data.get("action") == "options":
         response = JsonResponse({"filters": normalized, "options": options})
-    elif data.get("action") in {"report", "page"}:
+    elif data.get("action") in {"report", "page", "verify"}:
         tab = data.get("tab", "overview")
         if tab not in TABS:
             return JsonResponse({"error": "Select a valid analysis tab."}, status=400)
@@ -47,7 +47,7 @@ def unified_insights_view(request):
         fingerprint = learning_insights.learning_fingerprint if tab == "overview" else assessment_alignment.assessment_fingerprint
         state = None
         scope = authority(selection)
-        if data["action"] == "page":
+        if data["action"] in {"page", "verify"}:
             try:
                 state = signing.loads(data.get("token", ""), salt=TOKEN_SALT, max_age=300)
             except signing.BadSignature:
@@ -65,21 +65,28 @@ def unified_insights_view(request):
         # Identical to the existing endpoints' public-result cache keys. Exam
         # Comparison and Alignment share one engine/result; no duplicate build.
         result_key = engine + "-result:" + hashlib.sha256(encoded([scope, generation, filters])).hexdigest()
-        result = cache.get(result_key)
-        if result is None:
-            selection.refresh_offerings()
-            result = backend.build_report(selection, filters)
-        context, charts = present(result, selection, filters, tab, data.get("page"))
         if not state:
             state = {"scope": scope, "generation": generation, "filters": filters,
                 "engine": engine, "nonce": secrets.token_urlsafe(32)}
         payload = {"token": signing.dumps(state, salt=TOKEN_SALT, compress=True), "tab": tab,
-            "charts": charts, "export_periods": result["export_periods"],
-            "html": render_to_string("admin_portal/grading/_unified_insights_results.html", context, request=request)}
+            "generation": result_key}
+        if data["action"] == "verify":
+            # Reauthorize an in-memory presentation without reading/building a
+            # report, rendering HTML, or extending a server result-cache entry.
+            payload["valid"] = True
+        else:
+            result = cache.get(result_key)
+            if result is None:
+                selection.refresh_offerings()
+                result = backend.build_report(selection, filters)
+            context, charts = present(result, selection, filters, tab, data.get("page"))
+            payload.update({"charts": charts, "export_periods": result["export_periods"],
+                "html": render_to_string("admin_portal/grading/_unified_insights_results.html", context, request=request)})
         closing = learning_insights.LearningSelection(request)
         if authority(closing) != scope or fingerprint(closing, filters) != generation:
             raise RecordsChanged
-        cache.set(result_key, result, timeout=300)
+        if data["action"] != "verify":
+            cache.set(result_key, result, timeout=300)
         response = JsonResponse(payload)
     else:
         return JsonResponse({"error": "Unknown report action."}, status=400)
