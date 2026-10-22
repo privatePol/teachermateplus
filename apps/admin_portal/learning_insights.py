@@ -5,7 +5,7 @@ from fractions import Fraction
 from itertools import combinations
 
 from django.core.exceptions import ValidationError
-from django.db.models import F, Q
+from django.db.models import F, Q, prefetch_related_objects
 from django.utils import timezone
 
 from apps.academics.models import ActiveGradingPeriodSetting, CourseOffering, FacultyAssignment, TenantTermGradingPeriod
@@ -37,6 +37,7 @@ METRICS = ("quizzes", "quiz", "quiz_grade", "activities", "standing", "exam", "p
 DISCLOSURE_POLICY_VERSION = "component-and-paired-populations-v1"
 COMPARABILITY_POLICY_VERSION = "four-category-patterns-v4"
 QUIZ_DISPLAY_POLICY_VERSION = "saved-gradebook-quiz-and-descriptive-points-v2-mixed-unavailable"
+ASSESSMENT_TABLE_POLICY_VERSION = "period-gradebook-measures-v2-historical-definitions"
 
 
 def key(period):
@@ -112,16 +113,28 @@ class LearningSelection(Selection):
             superadmin = any(row.role.code == "SUPER_ADMIN" and row.campus_id in (None, campus.id)
                              for row in self.monitoring_roles)
             explicit = request.user.is_superuser or superadmin
-            permitted = (all(self.assigned_permission(request, code, campus.id)
-                             for code in ("admin_portal.access", "grading_analytics.read"))
-                         if explicit else campus_allowed(request, campus.id))
+            # One fresh batch per campus/selection. A closing selection makes
+            # independent reads; nothing is cached on the request or across HTTP.
+            scope = (Q(tenant_id=tenant_id) | Q(tenant__isnull=True)) & (
+                Q(campus_id=campus.id) | Q(campus__isnull=True))
+            grants = list(UserPermission.objects.filter(scope, user=request.user,
+                permission__is_active=True).values_list("permission__code", "grant_type"))
+            denied = {code for code, grant in grants if grant == "DENY"}
+            if explicit:
+                codes = {code for code, grant in grants if grant == "ALLOW"}
+                codes.update(UserRole.objects.filter(scope, user=request.user, is_active=True,
+                    role__is_active=True, role__role_permissions__permission__is_active=True
+                ).values_list("role__role_permissions__permission__code", flat=True))
+            else:
+                codes = PermissionService.get_effective_permission_codes(request.user,
+                    tenant_id=tenant_id, campus_id=campus.id)
+            permitted = {"admin_portal.access", "grading_analytics.read"} <= (codes - denied)
             if not permitted:
                 continue
             campuses.append(campus)
             if superadmin:
                 self.institution_campuses.add(campus.id)
-            if (self.assigned_permission(request, LEADERSHIP_PERMISSION, campus.id) if explicit
-                    else leadership_access(request, campus.id)):
+            if LEADERSHIP_PERMISSION in codes - denied:
                 leadership.add(campus.id)
         return {"can_compare_campuses": compare}, campuses, leadership
 
@@ -325,7 +338,8 @@ def learning_fingerprint(selection, filters, now=None):
     tenant_id = selection.request.scope["tenant_id"]
     # Reject pre-threshold cached reports/tokens even when academic records are unchanged.
     payload = [fingerprint(selection, filters), "percentage-point-patterns-v2", str(MEANINGFUL_CHANGE),
-               DISCLOSURE_POLICY_VERSION, COMPARABILITY_POLICY_VERSION, QUIZ_DISPLAY_POLICY_VERSION]
+               DISCLOSURE_POLICY_VERSION, COMPARABILITY_POLICY_VERSION, QUIZ_DISPLAY_POLICY_VERSION,
+               ASSESSMENT_TABLE_POLICY_VERSION]
     # Saved records can outlive enrollment links. Their students' eligibility must
     # invalidate snapshots too, even when the shared enrollment digest omits them.
     payload.append(list(Student.objects.filter(pk__in=StudentPeriodGrade.objects.filter(
@@ -334,14 +348,15 @@ def learning_fingerprint(selection, filters, now=None):
     for qs in (
         ActiveGradingPeriodSetting.objects.filter(tenant_id=tenant_id, term_id=filters["term_id"]),
         TenantTermGradingPeriod.objects.filter(tenant_id=tenant_id, term_id=filters["term_id"]),
-        GradeSubmissionReopenRequest.objects.filter(offering_id__in=ids),
-        GradeCorrectionUnlockWindow.objects.filter(offering_id__in=ids),
     ):
         payload.append([qs.model._meta.label_lower, list(qs.order_by("pk").values())])
-    windows = GradeCorrectionUnlockWindow.objects.filter(offering_id__in=ids).select_related("correction_request")
-    payload.append([(w.pk, w.start_at <= now <= w.end_at, w.correction_request.status) for w in windows.order_by("pk")])
-    reopens = GradeSubmissionReopenRequest.objects.filter(offering_id__in=ids, status="APPROVED").order_by("pk")
-    payload.append([(r.pk, GradingGovernanceService.is_reopen_request_window_active(r, at=now)) for r in reopens])
+    reopens = list(GradeSubmissionReopenRequest.objects.filter(offering_id__in=ids).order_by("pk"))
+    windows = list(GradeCorrectionUnlockWindow.objects.filter(offering_id__in=ids).select_related("correction_request").order_by("pk"))
+    for model, rows in ((GradeSubmissionReopenRequest, reopens), (GradeCorrectionUnlockWindow, windows)):
+        payload.append([model._meta.label_lower, [
+            {field.attname: getattr(row, field.attname) for field in model._meta.concrete_fields} for row in rows]])
+    payload.append([(w.pk, w.start_at <= now <= w.end_at, w.correction_request.status) for w in windows])
+    payload.append([(r.pk, GradingGovernanceService.is_reopen_request_window_active(r, at=now)) for r in reopens if r.status == "APPROVED"])
     locks = GradingPeriodLock.objects.filter(tenant_id=tenant_id, term_id=filters["term_id"], is_active=True).order_by("pk")
     payload.append([(row.pk, bool(row.deadline_at and now > row.deadline_at)) for row in locks])
     return salted_hmac("learning-insights-generation-v1", encoded(payload), algorithm="sha256").hexdigest()
@@ -482,7 +497,10 @@ def scale_definitions(period):
     Multiple buckets are stored as sums by the official calculator. Keep those
     original grade points; do not invent weighting or percentage normalization.
     """
-    components = list(period.components.filter(is_active=True).prefetch_related("subcomponents__details"))
+    # Retired definitions remain necessary evidence for historical table guards.
+    # Keep the calculator's active-only input and the existing three-query load.
+    prefetch_related_objects([period], "components__subcomponents__details")
+    components = [c for c in period.components.all() if c.is_active]
     exam = [c for c in components if c.is_exam_component]
     standing = [c for c in components if not c.is_exam_component]
     modes = {"RAW_BASE50", "DIRECT_PERCENTAGE"}
@@ -673,7 +691,7 @@ def classify(history, minimum_matched_students=1, disclosed_groups=None):
     return {"category": INSUFFICIENT, "detail": reasons[failure], "reason_code": failure, "matched_students": None}
 
 
-def disclosed_populations(histories, active_enrolled, leadership_ids):
+def disclosed_populations(histories, active_enrolled, leadership_ids, extra_populations=None):
     """Plan all component and potential paired releases before optional filters.
 
     Membership atoms protect intersections and excluded complements, including
@@ -690,6 +708,8 @@ def disclosed_populations(histories, active_enrolled, leadership_ids):
 
     for pk, history in histories.items():
         include(pk, active_enrolled[pk])
+        for population in (extra_populations or {}).get(pk, []):
+            include(pk, population)
         rows = [row for row in history if row["eligible"]]
         for row in rows:
             include(pk, row["cohort"])
@@ -759,6 +779,7 @@ def privacy_history_row(finalized, scales, signature, period_authorized, activit
 
 
 def build_report(selection, filters, now=None, *, assessment_collector=None):
+    from apps.admin_portal import assessment_table
     now = now or timezone.now()
     # Membership disclosure is planned across the authorized year/term before optional filters.
     universe = selection.matching({k: filters[k] for k in ("academic_year_id", "term_id")})
@@ -852,13 +873,12 @@ def build_report(selection, filters, now=None, *, assessment_collector=None):
             # unknown modes, invalid raw evidence and invalid grades stay absent.
             if value is not None and s.computed_score is not None and s.computed_score.is_finite() and 0 <= s.computed_score <= 100:
                 grade_scores[a.id][s.student_id] = s.computed_score
-    histories, structures = {}, {}
+    histories, structures, assessment_periods = {}, {}, defaultdict(list)
     for o in universe:
         history = []
         counts = Counter(key(p) for p in selection.periods(o))
         for p in selection.periods(o):
-            if key(p) not in dict(PERIODS):
-                continue
+            canonical = key(p) in dict(PERIODS)
             pair = (o.id, p.id)
             lock_key = GradingGovernanceService._normalize_period_key(p.code or p.name)
             lock = locks.get((o.campus_id, lock_key, o.id)) or locks.get((o.campus_id, lock_key, None))
@@ -871,8 +891,8 @@ def build_report(selection, filters, now=None, *, assessment_collector=None):
             period_authorized = not reason
             if p.id not in structures:
                 scales, components = scale_definitions(p)
-                structures[p.id] = (scales, components, comparable_component_signature(p))
-            scales, components, structure = structures[p.id]
+                structures[p.id] = (scales, components, comparable_component_signature(p), list(p.components.all()))
+            scales, components, structure, historical_components = structures[p.id]
             context, base_value = selection.grading_context(o, p)
             signature = (o.course_id, context["template_id"], context["profile_id"], context["formula_mode"],
                          tuple(context["signature"][3]), base_value, structure)
@@ -894,6 +914,12 @@ def build_report(selection, filters, now=None, *, assessment_collector=None):
                     reason = "No valid finalized student results are available for this concluded period."
                 elif any(sid not in finalized or len(finalized[sid]) < 3 for sid in active_enrolled[o.id]):
                     reason = "Partial finalized component results; missing values are excluded and remain unavailable."
+            assessment_periods[o.id].append(assessment_table.period_measures(
+                o, p, context, signature, components, submissions.get(pair),
+                period_authorized, reason, finalized, active_enrolled[o.id], activities[pair], scores, grade_scores,
+                eligible_roster=enrolled[o.id], historical_components=historical_components))
+            if not canonical:
+                continue
             if assessment_collector is not None:
                 assessment_collector.collect(o, p, context, base_value, components, structure,
                     finalized, period_authorized, reason, activities[pair], scores, grade_scores)
@@ -950,9 +976,11 @@ def build_report(selection, filters, now=None, *, assessment_collector=None):
             history.append(row)
         histories[o.id] = sorted(history, key=lambda r: r["sequence"]) if o.id in numeric_ids else history
     leadership_ids = {pk for pk, offering in offerings.items() if selection.allows_aggregates(offering)}
+    extra_populations = assessment_table.populations(assessment_periods)
     if assessment_collector is not None:
-        return assessment_collector.finish(selection, filters, histories, active_enrolled, leadership_ids)
-    disclosed_groups = disclosed_populations(histories, active_enrolled, leadership_ids)
+        return assessment_collector.finish(selection, filters, histories, active_enrolled, leadership_ids, extra_populations)
+    disclosed_groups = disclosed_populations(histories, active_enrolled, leadership_ids, extra_populations)
+    assessment_rows = assessment_table.released(assessment_periods, chosen, disclosed_groups, leadership_ids)
     for pk, history in histories.items():
         if pk in leadership_ids or pk not in numeric_ids:
             continue
@@ -1109,6 +1137,7 @@ def build_report(selection, filters, now=None, *, assessment_collector=None):
         "cohort", "signature", "sequence", "cohort_basis", "quiz_grade_basis", "comparison_values", "student_values", "pattern_values", "contributors", "quiz_unsupported", "privacy_withheld",
     }} for r in table]
     return {"rows": public_table, "patterns": patterns, "classifications": classifications,
+            "assessment_period_rows": assessment_rows,
             "period_comparison": comparison, "pattern_reasons": pattern_reasons,
             "comparison_rows": comparison_rows, "comparison_note": comparison_note,
             "analyzed": denominator, "insufficient": len(chosen) - denominator, "sections": len(chosen),

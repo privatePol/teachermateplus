@@ -46,6 +46,7 @@
     <div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated w-100" role="progressbar" aria-label="Loading learning performance"></div></div>
   </div>
   <div id="learning-message" class="alert alert-info" role="status" aria-live="polite">Select your filters and click View Performance.</div>
+  <div id="learning-verification" class="text-muted small py-3" role="status" aria-live="polite" hidden>Verifying latest results…</div>
   <div id="learning-results" role="tabpanel" aria-labelledby="tab-overview" aria-busy="false"></div>
   <div id="learning-csv-controls" class="card card-body mt-3" hidden>
     <label class="form-label" for="learning-csv-period">CSV grading period</label>
@@ -56,5 +57,5 @@
   <noscript><p>Enable JavaScript, select your filters, and click View Performance to load this preview.</p></noscript>
 </div>
 <script src="{% static 'vendor/chartjs/4.5.1/chart.umd.js' %}" defer></script>
-<script src="{% static 'admin_portal/unified_insights.js' %}" defer></script>
+<script src="{% static 'admin_portal/unified_insights.js' %}?v=assessment-periods-20261022-1" defer></script>
 {% endblock %}

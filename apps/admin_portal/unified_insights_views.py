@@ -32,7 +32,10 @@ def unified_insights_view(request):
         filters = parsed(data)
     except ValueError:
         return JsonResponse({"error": "Select valid academic filters."}, status=400)
-    normalized, options = selection.options(filters)
+    verifying = request.method == "POST" and data.get("action") == "verify"
+    # A verify request must match its signed, previously normalized filters,
+    # current authority and two fresh record digests. It needs no dropdowns.
+    normalized, options = (filters, None) if verifying else selection.options(filters)
     if request.method == "GET":
         response = render(request, "admin_portal/grading/unified_insights.html", page_context(request,
             {"filters": normalized, "options": options}))

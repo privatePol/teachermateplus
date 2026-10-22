@@ -711,10 +711,10 @@ class LearningInsightsTests(TestCase):
         self.deny_aggregate_access()
         projections = []
         original = learning.disclosed_populations
-        def observe(histories, enrolled, leadership):
-            projections.append({pk: [(row["contributors"], set(row["student_values"]),
-                set(row["pattern_values"])) for row in rows] for pk, rows in histories.items()})
-            return original(histories, enrolled, leadership)
+        def observe(histories, enrolled, leadership, extra_populations=None):
+            projections.append(({pk: [(row["contributors"], set(row["student_values"]),
+                set(row["pattern_values"])) for row in rows] for pk, rows in histories.items()}, extra_populations))
+            return original(histories, enrolled, leadership, extra_populations)
         with patch.object(learning, "disclosed_populations", side_effect=observe):
             self.raw()
             self.raw(course_code="")
@@ -888,11 +888,11 @@ class LearningInsightsTests(TestCase):
         StudentActivityScore.objects.filter(pk=score.pk).update(is_excused=True)
         projections = []
         original = learning.disclosed_populations
-        def observe(histories, enrolled, leadership):
-            projections.append({pk: [(row["eligible"], row["cohort"], row["contributors"], row["signature"],
+        def observe(histories, enrolled, leadership, extra_populations=None):
+            projections.append(({pk: [(row["eligible"], row["cohort"], row["contributors"], row["signature"],
                 {metric: row["scales"][metric] for metric in ("standing", "exam")},
-                set(row["student_values"]), set(row["pattern_values"])) for row in rows] for pk, rows in histories.items()})
-            return original(histories, enrolled, leadership)
+                set(row["student_values"]), set(row["pattern_values"])) for row in rows] for pk, rows in histories.items()}, extra_populations))
+            return original(histories, enrolled, leadership, extra_populations)
         with patch.object(learning, "disclosed_populations", side_effect=observe):
             self.raw()
             self.raw(course_code="")

@@ -1,4 +1,24 @@
 <div class="d-flex justify-content-between align-items-start gap-2 mb-3"><h2 class="h4">{{ heading }}</h2><span class="badge text-bg-light">{{ sections }} authorized section{{ sections|pluralize }}</span></div>
+{% if tab == 'overview' %}
+<section class="card card-body mb-3" data-assessment-period-table>
+  <h3 class="h5">Class Assessment Performance by Period</h3>
+  <p class="small text-muted">Gradebook Points use saved converted scores and official grades, without another conversion. Counts are distinct recorded assessments, not student submissions or independently verified classroom activity.</p>
+  {% if level == 'all' %}<p class="small">Each row is one course, period and compatible grading group. Counts are total recorded assessments across available sections; section-based grade averages give each disclosed section equal weight. Sections in a period are not additional unique sections.</p>{% else %}<p class="small">Each component uses its own eligible period contributors, not a matched Alignment pair. Missing grades remain unavailable. Supporting contributor counts are shown only for released values.</p>{% endif %}
+  <div class="table-responsive">
+  {% if level == 'section' %}
+  <table class="table table-sm align-middle"><thead><tr><th scope="col">Indicator</th>{% for period in assessment_periods %}<th scope="col" class="text-end">{{ period }}</th>{% endfor %}</tr></thead><tbody>
+  {% for row in assessment_matrix %}<tr><th scope="row">{{ row.label }}</th>{% for cell in row.cells %}<td class="text-end">{{ cell.text }}{% if cell.contributors != None %}<small class="d-block text-muted">{{ cell.contributors }} contributors</small>{% endif %}</td>{% endfor %}</tr>{% empty %}<tr><td>No applicable grading periods are available.</td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}
+  <table class="table table-sm align-middle"><thead><tr><th scope="col">{% if level == 'all' %}Course / grading group{% else %}Section{% endif %}</th><th scope="col">Period</th>{% if level == 'all' %}<th scope="col">Sections in group</th>{% endif %}{% for header in assessment_headers %}<th scope="col">{{ header.label }}{% if level == 'all' and 'Count' in header.label %} (total recorded assessments){% endif %}</th>{% endfor %}</tr></thead><tbody>
+  {% for row in assessment_rows %}<tr><th scope="row">{{ row.label }}{% if level == 'all' %}<small class="d-block">Grading group {{ row.group }}</small>{% endif %}</th><td>{{ row.period }}</td>{% if level == 'all' %}<td>{{ row.sections }}</td>{% endif %}{% for cell in row.cells %}<td>{{ cell.text }}{% if cell.contributors != None %}<small class="d-block text-muted">{{ cell.contributors }} {% if level == 'all' %}contributing sections{% else %}contributors{% endif %}</small>{% endif %}</td>{% endfor %}</tr>{% empty %}<tr><td>No authorized period results match this selection.</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+  </div>
+  {% if assessment_page.paginator.num_pages > 1 %}<nav class="d-flex gap-3" aria-label="Assessment summary pages">{% if assessment_page.has_previous %}<button type="button" class="btn btn-outline-success" data-unified-page="{{ assessment_page.previous_page_number }}">Previous assessments</button>{% endif %}<span>Assessment page {{ assessment_page.number }} of {{ assessment_page.paginator.num_pages }}</span>{% if assessment_page.has_next %}<button type="button" class="btn btn-outline-success" data-unified-page="{{ assessment_page.next_page_number }}">Next assessments</button>{% endif %}</nav>{% endif %}
+  <p class="small text-muted mb-0">Not applicable means the template has no such component. Pending periods, missing/incomplete evidence, privacy-withheld results and unsupported historical definitions remain distinct. Existing period changes below use unrounded means and compatible grading rules.</p>
+</section>
+{% endif %}
 {% if overview %}
   {% include 'admin_portal/grading/_learning_insights_results.html' %}
 {% else %}

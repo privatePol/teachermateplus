@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from django.core.paginator import Paginator
 
 from apps.admin_portal import learning_insights as learning
+from apps.admin_portal import assessment_table
 
 AVAILABILITY = {
     "eligible": "Eligible exam configuration", "excluded": "Excluded by exam policy",
@@ -52,6 +53,57 @@ def pair_bars(entries):
         "standing": learning.average([r["participation"] for r in rows]),
         "exam": learning.average([r["exam"] for r in rows]), "sections": len(rows)}
         for index, ((course, source, destination, kind, _), rows) in enumerate(groups.items(), 1)]
+
+
+def assessment_presentation(result, level, visible_ids, page_number):
+    source = result.get("assessment_period_rows", [])
+    if level != "all":
+        source = [row for row in source if row["id"] in visible_ids]
+    codes = {}
+    for row in source:
+        for measure in row["measures"]:
+            codes.setdefault(measure["code"], (measure["label"], measure["kind"]))
+    if any(code.startswith("output_") and code not in {"output_count", "output_grade"} for code in codes):
+        codes.pop("output_count", None)
+        codes.pop("output_grade", None)
+
+    def cell(measure=None):
+        measure = measure or {"value": None, "state": assessment_table.NA}
+        value = measure["value"]
+        return {"text": (str(int(value)) if measure.get("kind") == "count" else f"{value:.2f}") if value is not None else measure["state"],
+                "state": measure["state"], "contributors": measure.get("contributors")}
+
+    if level == "section":
+        periods = sorted(source, key=lambda row: (row["sequence"], row["period_id"]))
+        return {"assessment_matrix": [{"label": label, "cells": [cell(next((m for m in row["measures"] if m["code"] == code), None))
+                    for row in periods]} for code, (label, kind) in codes.items()],
+                "assessment_periods": [row["period"] for row in periods]}
+    headers = [{"code": code, "label": label} for code, (label, kind) in codes.items()]
+    if level == "all":
+        groups = defaultdict(list)
+        for row in source:
+            groups[(row["course"], row["period_code"], row["group"])].append(row)
+        rows = []
+        for index, ((course, period, group), members) in enumerate(sorted(groups.items()), 1):
+            measures = []
+            for code, (label, kind) in codes.items():
+                candidates = [m for member in members for m in member["measures"] if m["code"] == code]
+                values = [m["value"] for m in candidates if m["value"] is not None]
+                value = (sum(values) if kind == "count" else learning.average(values)) if values else None
+                state = assessment_table.AVAILABLE if values else next((status for status in (
+                    assessment_table.WITHHELD, assessment_table.HISTORICAL_CHANGED,
+                    assessment_table.HISTORICAL, assessment_table.PENDING, assessment_table.MISSING)
+                    if any(m["state"] == status for m in candidates)), assessment_table.NA)
+                measures.append(cell({"value": value, "kind": kind, "state": state, "contributors": len(values) if values else None}))
+            rows.append({"label": course, "period": members[0]["period"], "group": index,
+                         "sections": len({r["id"] for r in members}), "cells": measures})
+        page = Paginator(rows, 20).get_page(page_number)
+        return {"assessment_headers": headers, "assessment_rows": list(page.object_list), "assessment_page": page}
+    rows = []
+    for row in sorted(source, key=lambda r: (r["section"], r["campus"], r["sequence"])):
+        rows.append({"label": f"{row['section']} / {row['campus']}", "period": row["period"],
+            "cells": [cell(next((m for m in row["measures"] if m["code"] == code), None)) for code in codes]})
+    return {"assessment_headers": headers, "assessment_rows": rows}
 
 
 def present(result, selection, filters, tab, page_number):
@@ -119,6 +171,8 @@ def present(result, selection, filters, tab, page_number):
             context["bars"] = bars
             context["comparison_rows"] = [r for r in result.get("comparison_rows", []) if r["section"] == selected_label]
         context["bars_table"] = charts["bars"]
+        context.update(assessment_presentation(result, level,
+            {e["id"] for e in entries} if section else {row.get("id") for row in page.object_list}, page_number))
     elif tab == "exams":
         # Broad view offers course drilldown, without averaging unrelated exams.
         if course:

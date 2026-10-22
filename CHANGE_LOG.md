@@ -1,3 +1,13 @@
+## Historical assessment-definition integrity - 2026-10-22
+
+- Validate relevant active and retired definitions against the actual saved submission timestamp for each independent table average. A post-submission change withholds only dependent reconstructed averages as `Unavailable — Historical Definition Changed`; pre-submission retirement follows actual applicability. Counts retain active evidenced-assessment rules. Saved Examination, Class Standing and Periodic grades are unchanged. Historical table policy v2 invalidates earlier cached results/tokens; no schema changes.
+
+## Unified assessment periods and quiet tab verification - 2026-10-22
+
+- Add Class Assessment Performance by Period before Overview charts: converted Quiz and separate configured Participation/Output grades/counts, saved Examination/Class Standing/Periodic grades, actual template periods, component contributors and explicit unavailable states. Preserve the earlier comparison and unrounded changes. Course/period/compatible-group summaries are bounded and use disclosed section means; recorded counts are assessment totals, not student counts.
+- Plan new component populations across the full authorized scope, including overlapping/complement groups and related Alignment releases. Read saved converted values without conversion or Gradebook writes; reject known post-submission definition drift and incompatible snapshot identity for historical component rollups. Invalidate old report generations.
+- Use a stable, accessible quiet verification state for retained tabs, without the animated report loader. Batch selection permission reads afresh for each opening/closing phase, reuse loaded correction-window facts within each fingerprint, and skip dropdown reconstruction for signed return verification. Retain live scope, direct DENY, two freshness checks, retry/race handling and the approved sidebar link. Version the changed JavaScript URL without changing global caching.
+
 ## Unified dashboard tab reuse and sidebar correction - 2026-10-22
 
 - Retain each tab's last rendered page and chart instances in memory. Returning tabs remain hidden until signed-generation authorization and freshness verification succeeds; verification performs no report build, HTML rendering or result-cache access. Filter changes, explicit refresh, denied/stale access and page departure invalidate retained results. Failed/interrupted checks expose Retry Results; rapid tab requests are serialized.

@@ -5,6 +5,7 @@
   if (!form) return;
   const results = document.getElementById("learning-results");
   const progress = document.getElementById("learning-progress");
+  const verification = document.getElementById("learning-verification");
   const message = document.getElementById("learning-message");
   const view = document.getElementById("learning-view");
   const retry = document.getElementById("learning-retry");
@@ -67,6 +68,7 @@
     pending.forEach(controller => controller.abort()); pending.clear();
     hideResults(); results.setAttribute("aria-busy", "false");
     token = null; progress.hidden = true;
+    verification.hidden = true;
   }
   function clear() {
     clearResults(); tokens.clear(); generated = false; csvControls.hidden = true;
@@ -81,7 +83,9 @@
     const version = epoch;
     const controller = new AbortController();
     pending.get(action)?.abort(); pending.set(action, controller);
-    progress.hidden = false; results.setAttribute("aria-busy", "true");
+    progress.hidden = action === "verify";
+    verification.hidden = action !== "verify";
+    results.setAttribute("aria-busy", "true");
     const body = new FormData(form);
     body.set("action", action); body.set("tab", activeTab);
     if (token) body.set("token", token);
@@ -109,7 +113,9 @@
       return null;
     } finally {
       if (pending.get(action) === controller) {
-        pending.delete(action); progress.hidden = pending.size === 0;
+        pending.delete(action);
+        progress.hidden = ![...pending.keys()].some(name => name !== "verify");
+        verification.hidden = !pending.has("verify");
         results.setAttribute("aria-busy", String(pending.size !== 0));
       }
     }
@@ -186,7 +192,10 @@
     const tab = activeTab, reportEngine = engine();
     const key = presentationKey(tab, page), cached = presentations.get(key);
     clearResults(); token = tokens.get(engine()) || null;
-    if (cached) token = cached.token;
+    if (cached) {
+      token = cached.token;
+      verification.style.minHeight = `${Math.max(cached.height || 0, 180)}px`;
+    }
     retryResults = false; retry.hidden = true; retry.disabled = true;
     view.disabled = true;
     const version = epoch;
@@ -216,7 +225,8 @@
         });
         render(data);
         presentations.set(presentationKey(tab, page), {tab, generation: data.generation,
-          token: data.token, nodes: [...results.childNodes], charts});
+          token: data.token, nodes: [...results.childNodes], charts,
+          height: results.getBoundingClientRect?.().height || 0});
         pages.set(tab, page);
       }
     } else if (data === null) offerRetry();

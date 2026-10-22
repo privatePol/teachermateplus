@@ -366,6 +366,49 @@ class UnifiedTests(TestCase):
             self.assertEqual(self.post('verify', tab='overview', token=data['token']).status_code, 409)
         self.assertEqual(calls, 2)
 
+    def test_verify_skips_dropdowns_and_reduces_queries_without_caching_authority(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        for tab, budget in (("overview", 148), ("exams", 154), ("alignment", 154)):
+            data = self.report(tab=tab)
+            with patch.object(learning_insights.LearningSelection, 'options', side_effect=AssertionError('dropdowns rebuilt')), \
+                 CaptureQueriesContext(connection) as queries:
+                response = self.post('verify', tab=tab, token=data['token'])
+            self.assertEqual(response.status_code, 200)
+            self.assertLessEqual(len(queries), budget)
+        # The closing authorization must independently observe a newly denied
+        # grant even though this request has already made its opening batch.
+        original = learning_insights.learning_fingerprint
+        first = self.report(tab='overview')
+        calls = 0
+        def revoke(selection, filters):
+            nonlocal calls
+            calls += 1
+            result = original(selection, filters)
+            if calls == 1:
+                UserPermission.objects.create(user=self.area_chair, permission=self.permission,
+                    tenant=self.tenant, campus=self.campus, grant_type='DENY')
+            return result
+        with patch.object(learning_insights, 'learning_fingerprint', side_effect=revoke):
+            self.assertEqual(self.post('verify', tab='overview', token=first['token']).status_code, 409)
+
+    def test_unified_assets_are_versioned_and_quiet_state_is_accessible(self):
+        html = self.client.get(self.url).content.decode()
+        self.assertIn('unified_insights.js?v=assessment-periods-', html)
+        self.assertIn('id="learning-verification"', html)
+        self.assertIn('Verifying latest results', html)
+
+    def test_return_verification_rejects_another_authorized_user_and_forgery(self):
+        from apps.rbac.models import UserRole
+        data = self.report(tab='overview')
+        self.assertEqual(self.post('verify', tab='overview', token='forged-signature').status_code, 409)
+        other = self._user('other-academic-leader', self.campus, self.department)
+        UserRole.objects.create(user=other, role=self.area_role, tenant=self.tenant,
+            campus=self.campus, department=self.department)
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+        self.assertEqual(self.post('verify', tab='overview', token=data['token']).status_code, 409)
+
     def _legacy_menu(self):
         from apps.navigation.models import MenuGroup, MenuItem, MenuItemPermission
         group = MenuGroup.objects.create(portal='ADMIN', code='UX_GRADING', label='Grading')

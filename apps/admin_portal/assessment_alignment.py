@@ -227,7 +227,7 @@ class AlignmentCollector:
             "template": context["template_label"], "profile": context["profile_label"], "base": base,
         }
 
-    def finish(self, selection, filters, histories, active_enrolled, leadership_ids):
+    def finish(self, selection, filters, histories, active_enrolled, leadership_ids, extra_populations=None):
         plans, groups = {}, defaultdict(list)
         # Build every possible release before campus/course/section display filters.
         for oid, rows in self.rows.items():
@@ -268,7 +268,7 @@ class AlignmentCollector:
             histories[oid].append({"eligible": True, "cohort": set(),
                 "contributors": dict(enumerate(groups[oid])), "signature": ("alignment-populations", oid),
                 "scales": {}, "pattern_values": {}, "student_values": {}})
-        disclosed = learning.disclosed_populations(histories, active_enrolled, leadership_ids)
+        disclosed = learning.disclosed_populations(histories, active_enrolled, leadership_ids, extra_populations)
 
         def permitted(oid, population):
             return bool(population) and (oid in leadership_ids or frozenset(population) in disclosed)

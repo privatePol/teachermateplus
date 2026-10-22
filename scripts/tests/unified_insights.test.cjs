@@ -7,7 +7,7 @@ const path = require('node:path');
 function harness({offering = '', chartFailure = false, reducedMotion = false} = {}) {
   const calls = [], handlers = {}, formHandlers = {}, windowHandlers = {}, drawn = [];
   class Element {
-    constructor() { this.hidden = true; this.value = ''; this.dataset = {}; this.attributes = {}; this.options = [{textContent: ''}]; this.childNodes = []; }
+    constructor() { this.hidden = true; this.value = ''; this.style = {}; this.dataset = {}; this.attributes = {}; this.options = [{textContent: ''}]; this.childNodes = []; }
     set innerHTML(html) { this.childNodes = html ? [{html}] : []; }
     get innerHTML() { return this.childNodes.map(node => node.html || '').join(''); }
     replaceChildren(...children) { this.childNodes = children; this.children = children; this.options = children; this.value = ''; }
@@ -17,7 +17,7 @@ function harness({offering = '', chartFailure = false, reducedMotion = false} = 
     getAttribute(name) { return this.attributes[name]; }
     focus() { this.focused = true; }
   }
-  const elements = {'unified-exams': new Element()};
+  const elements = {'unified-exams': new Element(), 'learning-verification': new Element()};
   for (const id of ['learning-filters', 'learning-results', 'learning-progress', 'learning-message', 'learning-view', 'learning-retry', 'learning-overall', 'learning-csv-controls', 'learning-csv-period', 'learning-selected', 'learning-line', 'learning-bars', 'learning-patterns']) elements[id] = new Element();
   const selects = ['campus_id', 'academic_year_id', 'term_id', 'course_code', 'offering_id'].map(name => Object.assign(new Element(), {name}));
   const form = elements['learning-filters'];
@@ -229,12 +229,31 @@ test('return tab stays hidden until verification then restores identical nodes a
   assert.equal(h.calls[2].options.body.get('action'),'verify');
   assert.equal(h.elements['learning-results'].hidden,true);
   assert.equal(h.elements['learning-results'].innerHTML,'');
+  assert.equal(h.elements['learning-progress'].hidden,true);
+  assert.equal(h.elements['learning-verification'].hidden,false);
   assert.ok(charts.every(chart=>!chart.destroyed));
   h.respond(2,{...report(),valid:true}); await pending;
   assert.equal(h.elements['learning-results'].hidden,false);
   assert.equal(h.elements['learning-results'].childNodes[0],nodes[0]);
   assert.equal(h.drawn.length,count);
   assert.ok(charts.every(chart=>chart.resized && !chart.destroyed));
+  assert.equal(h.elements['learning-verification'].hidden,true);
+});
+
+test('first load uses progress while cached return reserves the prior layout quietly', async () => {
+  const h=harness(); h.elements['learning-results'].getBoundingClientRect=()=>({height:640});
+  let pending=h.submit();
+  assert.equal(h.elements['learning-progress'].hidden,false);
+  assert.equal(h.elements['learning-verification'].hidden,true);
+  h.respond(0,report()); await pending;
+  pending=h.tabs[1].click(); h.respond(1,report('exams')); await pending;
+  pending=h.tabs[0].click();
+  assert.equal(h.elements['learning-verification'].style.minHeight,'640px');
+  assert.equal(h.elements['learning-verification'].hidden,false);
+  assert.equal(h.elements['learning-progress'].hidden,true);
+  assert.equal(h.elements['learning-results'].hidden,true);
+  h.respond(2,{...report(),valid:true}); await pending;
+  assert.equal(h.elements['learning-results'].hidden,false);
 });
 
 test('return preserves selected section and last page while pagination replaces only its tab', async () => {
