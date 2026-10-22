@@ -863,7 +863,15 @@ ADMIN_HELP_SECTIONS = [
                         "refresh with View Performance to obtain current eligibility. "
                         "This preview does not change the existing Academic Performance Progression, Gradebook, CSV reports or navigation. "
                         "Use Academic Performance Progression to access the existing exports. Exam difficulty and coverage may differ; "
-                        "patterns do not establish causes or faculty effectiveness."
+                        "patterns do not establish causes or faculty effectiveness. "
+                        "The unified Academic Performance Insights preview at /admin-portal/grading/academic-performance-insights/unified-preview/ "
+                        "offers Performance Overview, Exam Comparison and Formative–Summative Alignment with one set of filters. "
+                        "Select a course for section comparisons, then a section for matched details. All Courses shows compact course summaries. "
+                        "Tabs load on demand. Exam lines use valid matched comparisons; separate points are descriptive averages. "
+                        "Assessment availability reports Midterm and Final separately: eligible, excluded, pending, unsupported or privacy withheld. "
+                        "Each period counts authorized sections once; do not add period totals as unique sections. "
+                        "Changing tabs preserves pending filter verification. Use Retry Selections if verification fails or is interrupted. "
+                        "Use View Performance after record changes. Existing CSV exports become available through Performance Overview. "
                     ),
                     (
                         "For Midterm Exam Performance, select the Midterm examination cycle, then use Load more "

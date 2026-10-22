@@ -17,7 +17,7 @@ from apps.departmental_exams.models import (
 from apps.departmental_exams.exam_units import _compatibility_errors, configuration_compatibility_key
 from apps.tenants.models import Tenant
 
-POLICY_VERSION = "template-formative-summative-v2"
+POLICY_VERSION = "template-formative-summative-v4"
 METRICS = ("quiz", "participation", "exam")
 MODES = {"RAW_BASE50", "DIRECT_PERCENTAGE"}
 
@@ -221,6 +221,8 @@ class AlignmentCollector:
         self.rows[offering.id][learning.key(period)] = {
             "code": learning.key(period), "label": period.name, "sequence": period.sequence_no,
             "mapping": mapping, "values": values, "reason": reason if not authorized else "",
+            "pending": reason in {"Ongoing or future period; not concluded.",
+                "Concluded-period submission is not finalized.", "Reopen or correction window is active."},
             "policy": self.policy.resolve(offering, learning.key(period)),
             "template": context["template_label"], "profile": context["profile_label"], "base": base,
         }
@@ -251,6 +253,7 @@ class AlignmentCollector:
                 reason = reason or (policy["reason"] if not policy["official"] else "")
                 pairs.append({"destination": code, "source": source_code, "type": policy["label"],
                     "official": policy["official"], "reason": reason, "measures": measures,
+                    "pending": destination["pending"] or bool(source and source["pending"]),
                     "common": common, "signatures": signatures, "sequence": destination["sequence"]})
                 groups[oid].append(common)
             for row in rows.values():
@@ -294,11 +297,16 @@ class AlignmentCollector:
                     "type": pair["type"], "official": pair["official"], "count": len(pair["common"]) if allowed and descriptive else None,
                     "quiz": learning.displayed(values["quiz"]), "participation": learning.displayed(values["participation"]),
                     "exam": learning.displayed(values["exam"]),
+                    "group": salted_hmac(POLICY_VERSION, encoded([offering.course_id, pair["source"],
+                        pair["destination"], pair["type"], pair["signatures"]]), algorithm="sha256").hexdigest(),
                     "reason": pair["reason"] or ("" if allowed else "Results withheld by aggregate privacy rules.")})
             for row in exams:
                 population = set(row["values"]["exam"])
                 allowed = permitted(oid, population)
                 entry["exams"].append({"period": row["label"], "type": row["policy"]["label"],
+                    "code": row["code"],
+                    "group": salted_hmac(POLICY_VERSION, encoded([offering.course_id,
+                        row["mapping"]["signatures"].get("exam")]), algorithm="sha256").hexdigest(),
                     "average": learning.average(list(row["values"]["exam"].values())) if allowed else None,
                     "count": len(population) if allowed else None,
                     "reason": row["reason"] or row["policy"]["reason"]
@@ -312,6 +320,7 @@ class AlignmentCollector:
                 a = learning.exact_average([first["values"]["exam"][sid] for sid in population]) if allowed else None
                 b = learning.exact_average([second["values"]["exam"][sid] for sid in population]) if allowed else None
                 entry["exam_comparisons"].append({"from": first["label"], "to": second["label"],
+                    "from_code": first["code"], "to_code": second["code"],
                     "previous": learning.displayed(a), "current": learning.displayed(b), "count": len(population) if allowed else None,
                     "difference": learning.displayed(b-a) if allowed and compatible else None,
                     "reason": "" if allowed and compatible else "Difference unavailable: incompatible scales, incomplete results or privacy protection."})
@@ -333,6 +342,44 @@ class AlignmentCollector:
                     entry["changes"] = [{"indicator": m.title(), "previous": learning.displayed(a[m]),
                         "current": learning.displayed(b[m]), "difference": learning.displayed(b[m]-a[m]),
                         "direction": learning.performance_change(a[m], b[m])} for m in METRICS]
+            # Each examination period has its own policy, completion and safe
+            # contributor population. Do not let another period's exemption or
+            # cross-period movement eligibility overwrite this period's status.
+            entry["period_availability"] = {}
+            for code in ("MIDTERM", "FINAL"):
+                pair = next((p for p in pairs if p["destination"] == code), None)
+                if pair is None:
+                    status = "unavailable"
+                elif pair["type"] == "Exempt":
+                    status = "excluded"
+                elif pair["pending"]:
+                    status = "pending"
+                elif pair["reason"] or not pair["official"]:
+                    status = "unavailable"
+                elif not permitted(oid, pair["common"]):
+                    status = "withheld"
+                else:
+                    status = "eligible"
+                entry["period_availability"][code] = status
+            # Retain the existing internal whole-section field for compatibility
+            # with earlier source consumers. Unified presentation uses only the
+            # separate period statuses above, never this combined label.
+            # Presentation-only, mutually exclusive section availability. The
+            # existing calculations, classification and disclosure decisions above
+            # remain authoritative. No individual population is serialized.
+            if any(p["type"] == "Exempt" for p in pairs):
+                entry["availability"] = "excluded"
+            elif any(p["pending"] for p in pairs):
+                entry["availability"] = "pending"
+            elif (not pairs or any(p["reason"] or not p["official"] for p in pairs)
+                  or (len(pairs) >= 2 and (pairs[-2]["signatures"] != pairs[-1]["signatures"]
+                      or not pairs[-2]["common"] & pairs[-1]["common"]))):
+                entry["availability"] = "unavailable"
+            elif any(not permitted(oid, p["common"]) for p in pairs) or (len(pairs) >= 2
+                    and not permitted(oid, pairs[-2]["common"] & pairs[-1]["common"])):
+                entry["availability"] = "withheld"
+            else:
+                entry["availability"] = "eligible"
             results.append(entry)
         counts = Counter(r["category"] for r in results if r["category"] in learning.PATTERNS)
         total = sum(counts.values())

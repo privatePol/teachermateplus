@@ -1,6 +1,7 @@
 from django.urls import path
 from .learning_insights_views import learning_performance_insights_view
 from .assessment_alignment_views import assessment_alignment_view
+from .unified_insights_views import unified_insights_view
 from .insights_views import (
     academic_performance_insights_view,
     academic_performance_section_detail_view,
@@ -192,6 +193,8 @@ from .views import (
 app_name = "admin_portal"
 
 urlpatterns = [
+    path("admin-portal/grading/academic-performance-insights/unified-preview/", unified_insights_view,
+         name="unified_academic_insights_preview"),
     path("admin-portal", admin_portal_root_view, name="root"),
     path("admin-portal/", admin_portal_root_view, name="root_slash"),
     path("api/v1/sis/periodic-grades/", sis_periodic_grades_api_view, name="sis_periodic_grades_api"),

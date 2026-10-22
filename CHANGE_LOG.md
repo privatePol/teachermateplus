@@ -1,3 +1,14 @@
+## Unified preview filter recovery and separate period availability - 2026-10-22
+
+- Preserve shared filter verification during tab changes. A current interrupted verification exposes Retry Selections; stale responses cannot restore controls or overwrite a newer selection. Report generation remains disabled until the current selection is verified.
+- Show Midterm and Final availability independently in compact summaries and section drilldown. Each period reconciles eligible, excluded, pending, unsupported/missing and privacy-withheld counts against its authorized section population; period totals are never added as unique sections. Other-period exemptions no longer overwrite an eligible period's label. Source policy v4 invalidates earlier cached availability metadata. Grading, movement classification, saved scores and privacy decisions are unchanged.
+
+## Unified Academic Performance Insights preview - 2026-10-22
+
+- Add isolated `/admin-portal/grading/academic-performance-insights/unified-preview/` with Performance Overview, Exam Comparison and Formative–Summative Alignment tabs sharing one authorized filter form. Tabs reuse existing report engines and public-result caches on demand; the two assessment tabs share one generation.
+- All Courses shows bounded course summaries and safe movement counts. Course view shows compact section comparisons; Section view loads detailed period/matched results. Compatible assessment groups alone contribute equal-section bar averages; unrelated grading rules are never combined. Exam points are descriptive; connecting segments repeat existing valid matched comparisons, with unavailable values kept as gaps.
+- Add mutually exclusive assessment availability labels and accessible chart tables, drilldowns, retry, keyboard tabs, signed-token freshness and existing CSV controls. Preserve all three original routes, navigation, Gradebook calculations, thresholds, classification, supervision and privacy. Assessment policy version v3 invalidates caches for added presentation metadata; no models or migrations changed.
+
 ## Assessment Alignment two-blocker remediation - 2026-10-21
 
 - Count every active examination bucket before scoring-mode validation. Multiple or unsupported exam buckets remain unavailable with an explicit reason; legitimate single-bucket saved/manual examination grades are retained.
