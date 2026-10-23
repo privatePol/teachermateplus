@@ -3,7 +3,8 @@
 {% block title %}Academic Performance Insights | TeacherMate+{% endblock %}
 {% block admin_content %}
 <link rel="stylesheet" href="{% static 'admin_portal/learning_insights.css' %}">
-<div class="learning-insights">
+<link rel="stylesheet" href="{% static 'admin_portal/unified_insights.css' %}?v=presentation-20261022-1">
+<div class="learning-insights unified-insights">
   <header class="learning-header mb-4">
     <span class="badge text-bg-light border mb-2">Unified preview</span>
     <h1 class="h3 mb-2">Academic Performance Insights</h1>
@@ -46,8 +47,10 @@
     <div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated w-100" role="progressbar" aria-label="Loading learning performance"></div></div>
   </div>
   <div id="learning-message" class="alert alert-info" role="status" aria-live="polite">Select your filters and click View Performance.</div>
-  <div id="learning-verification" class="text-muted small py-3" role="status" aria-live="polite" hidden>Verifying latest results…</div>
-  <div id="learning-results" role="tabpanel" aria-labelledby="tab-overview" aria-busy="false"></div>
+  <div id="learning-result-shell">
+    <div id="learning-verification" class="text-muted small py-2" role="status" aria-live="polite" hidden>Verifying latest results…</div>
+    <div id="learning-results" role="tabpanel" aria-labelledby="tab-overview" aria-busy="false"></div>
+  </div>
   <div id="learning-csv-controls" class="card card-body mt-3" hidden>
     <label class="form-label" for="learning-csv-period">CSV grading period</label>
     <select id="learning-csv-period" class="form-select learning-csv-period"><option value="">Select a concluded period</option></select>
@@ -57,5 +60,5 @@
   <noscript><p>Enable JavaScript, select your filters, and click View Performance to load this preview.</p></noscript>
 </div>
 <script src="{% static 'vendor/chartjs/4.5.1/chart.umd.js' %}" defer></script>
-<script src="{% static 'admin_portal/unified_insights.js' %}?v=assessment-periods-20261022-1" defer></script>
+<script src="{% static 'admin_portal/unified_insights.js' %}?v=assessment-periods-20261022-2" defer></script>
 {% endblock %}

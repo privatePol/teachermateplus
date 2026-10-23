@@ -1,0 +1,37 @@
+<section class="card card-body mb-3" data-assessment-period-table>
+  <h3 class="h5">Class Assessment Performance by Period</h3>
+  <p class="small text-muted">Averages use official Gradebook points. Counts are distinct recorded assessments, not student submissions. Separate Participation and Output components stay separate.</p>
+  {% if level == 'all' %}
+  <p class="small text-muted">Each row summarizes one course, period and compatible grading group. Counts are total recorded assessments; grade averages give each disclosed section equal weight. Different grading groups are not combined.</p>
+  {% for block in assessment_blocks %}
+  <div class="table-responsive" tabindex="0" role="region" aria-label="Course assessment summaries {{ forloop.counter }}">
+    <table class="table table-striped align-middle assessment-table">
+      <thead><tr><th scope="col">Course / group</th><th scope="col">Period</th><th scope="col" class="text-end">Sections</th>{% for h in block.headers %}<th scope="col" class="text-end">{{ h.label }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for row in block.rows %}<tr><th scope="row">{{ row.label }}<small class="d-block">Group {{ row.group }}</small></th><td>{{ row.period }}</td><td class="text-end">{{ row.sections }}</td>{% for cell in row.cells %}<td class="text-end">{% include 'admin_portal/grading/_assessment_cell.html' %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  {% empty %}<p>No authorized period results match this selection.</p>{% endfor %}
+  {% if assessment_page.paginator.num_pages > 1 %}<nav class="d-flex gap-3" aria-label="Assessment summary pages">{% if assessment_page.has_previous %}<button type="button" class="btn btn-outline-success" data-unified-page="{{ assessment_page.previous_page_number }}">Previous assessments</button>{% endif %}<span>Assessment page {{ assessment_page.number }} of {{ assessment_page.paginator.num_pages }}</span>{% if assessment_page.has_next %}<button type="button" class="btn btn-outline-success" data-unified-page="{{ assessment_page.next_page_number }}">Next assessments</button>{% endif %}</nav>{% endif %}
+  {% elif level == 'course' %}
+  {% for section in assessment_sections %}
+  <section class="assessment-section" data-assessment-section><h4 class="h6">{{ section.heading }}</h4>
+    <div class="table-responsive" tabindex="0" role="region" aria-label="Assessment periods for {{ section.heading }}">
+      <table class="table table-striped align-middle assessment-table">
+        <thead><tr><th scope="col">Period</th>{% for h in section.headers %}<th scope="col" class="text-end">{{ h.label }}</th>{% endfor %}</tr></thead>
+        <tbody>{% for row in section.rows %}<tr><th scope="row">{{ row.period }}</th>{% for cell in row.cells %}<td class="text-end">{% include 'admin_portal/grading/_assessment_cell.html' %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </section>
+  {% empty %}<p>No authorized period results match this selection.</p>{% endfor %}
+  <p class="small text-muted">Section blocks follow the section-summary pagination below.</p>
+  {% else %}
+  <h4 class="h6">{{ assessment_heading }}</h4>
+  <div class="table-responsive" tabindex="0" role="region" aria-label="Assessment indicators by period for {{ assessment_heading }}">
+    <table class="table table-striped align-middle assessment-table">
+      <thead><tr><th scope="col">Assessment Indicator</th>{% for period in assessment_periods %}<th scope="col" class="text-end">{{ period }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for row in assessment_matrix %}<tr><th scope="row">{{ row.label }}</th>{% for cell in row.cells %}<td class="text-end">{% include 'admin_portal/grading/_assessment_cell.html' %}</td>{% endfor %}</tr>{% empty %}<tr><td>No applicable grading periods are available.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  {% endif %}
+  <details class="small text-muted mt-2"><summary>Availability and contributors</summary><p>Each component uses its own eligible period contributors. Not applicable means the template has no such component. Pending, missing/incomplete, privacy-withheld and changed historical definitions remain explicitly unavailable. Existing period comparisons and Class Standing/Periodic grades remain in the other reports and charts.</p></details>
+</section>

@@ -13,12 +13,15 @@ function harness({offering = '', chartFailure = false, reducedMotion = false} = 
     replaceChildren(...children) { this.childNodes = children; this.children = children; this.options = children; this.value = ''; }
     add(option) { this.options.push(option); }
     addEventListener(event, callback) { this[event] = callback; }
+    appendChild(child) { this.childNodes.push(child); child.parentElement = this; }
+    getBoundingClientRect() { return {left:0,top:0,width:220,height:100}; }
     setAttribute(name, value) { this.attributes[name] = value; }
     getAttribute(name) { return this.attributes[name]; }
     focus() { this.focused = true; }
   }
-  const elements = {'unified-exams': new Element(), 'learning-verification': new Element()};
+  const elements = {'unified-exams': new Element(), 'learning-verification': new Element(), 'learning-result-shell': new Element()};
   for (const id of ['learning-filters', 'learning-results', 'learning-progress', 'learning-message', 'learning-view', 'learning-retry', 'learning-overall', 'learning-csv-controls', 'learning-csv-period', 'learning-selected', 'learning-line', 'learning-bars', 'learning-patterns']) elements[id] = new Element();
+  elements['learning-bars'].parentElement = new Element();
   const selects = ['campus_id', 'academic_year_id', 'term_id', 'course_code', 'offering_id'].map(name => Object.assign(new Element(), {name}));
   const form = elements['learning-filters'];
   form.elements = {namedItem: name => selects.find(s => s.name === name)};
@@ -29,14 +32,17 @@ function harness({offering = '', chartFailure = false, reducedMotion = false} = 
   const links = ['sections', 'students'].map(kind => Object.assign(new Element(), {href: `/admin-portal/grading/performance-insights/?export=${kind}`, dataset: {learningExport: kind}}));
   class Data extends Map { constructor() { super(selects.map(s => [s.name, s.value])); this.set('csrfmiddlewaretoken', 'csrf-value'); } }
   class Chart {
-    constructor(canvas, config) { if (chartFailure) throw new Error('drawing failed'); this.config = config; this.canvas = canvas; drawn.push(this); }
+    constructor(canvas, config) { if (chartFailure) throw new Error('drawing failed'); this.config = config; this.data=config.data; this.canvas = canvas; this.width=600; this.height=290; this.tooltip={setActiveElements:(active,point)=>{this.tooltipActive=active;this.point=point;}}; drawn.push(this); }
     destroy() { this.destroyed = true; }
     resize() { this.resized = true; }
+    setActiveElements(active) { this.active=active; }
+    getDatasetMeta() { return {data:this.data.labels.map(()=>({getCenterPoint:()=>({x:100,y:100})}))}; }
+    update(mode) { this.updateMode=mode; }
   }
   const tabs = ['overview','exams','alignment'].map(name => Object.assign(new Element(), {dataset: {unifiedTab: name}}));
   const context = {URLSearchParams, FormData: Data, Option: function(text, value) { this.textContent = text; this.value = value; }, AbortController,
     location: {pathname: '/admin-portal/grading/academic-performance-insights/unified-preview/'},
-    document: {getElementById: id => elements[id], querySelectorAll: selector => selector === '[data-learning-export]' ? links : selector === '[data-unified-tab]' ? tabs : [], addEventListener: (event, callback) => handlers[event] = callback},
+    document: {getElementById: id => elements[id], createElement:()=>new Element(), querySelectorAll: selector => selector === '[data-learning-export]' ? links : selector === '[data-unified-tab]' ? tabs : [], addEventListener: (event, callback) => handlers[event] = callback},
     window: {Chart, matchMedia: () => ({matches: reducedMotion}), addEventListener: (event, callback) => windowHandlers[event] = callback},
     fetch: (url, options) => new Promise((resolve, reject) => calls.push({url, options, resolve, reject})),
   };
@@ -45,12 +51,12 @@ function harness({offering = '', chartFailure = false, reducedMotion = false} = 
   const submit = () => formHandlers.submit({preventDefault() {}});
   const tick = () => new Promise(resolve => setImmediate(resolve));
   const click = (kind, value) => handlers.click({preventDefault() { if (kind === 'export') links[0].prevented = true; }, target: {closest: selector => selector === '[data-learning-export]' && kind === 'export' ? links[0] : selector === '[data-unified-page], [data-learning-page]' && kind === 'page' ? {dataset: {unifiedPage: value}} : selector === '[data-unified-course]' && kind === 'course' ? {dataset: {unifiedCourse: value}} : selector === '[data-unified-section]' && kind === 'section' ? {dataset: {unifiedSection: value}} : null}});
-  return {tabs, calls, elements, selects, links, drawn, respond, submit, tick, click, formHandlers, windowHandlers};
+  return {tabs, calls, elements, selects, links, drawn, respond, submit, tick, click, formHandlers, windowHandlers, handlers};
 }
 
 function report(tab = 'overview', token = 'generation') {
   return {token, tab, generation: tab === 'overview' ? 'overview-generation' : 'assessment-generation', html: '<p>Accessible academic results</p>', export_periods: tab === 'overview' ? [['MIDTERM','Midterm']] : [],
-    charts: {threshold: '3.00', line: [], line_mode: 'descriptive',
+    charts: {threshold: '3.00', bar_period:'Midterm', line: [], line_mode: 'descriptive',
       bars: [{section: 'A',quiz_grade: '0.00',standing: null,exam:'80.00'}],
       patterns: [{label:'Moved Together',count:1,percentage:'100.00'}],
       exams: {labels:['Prelim','Midterm','Final'],datasets:[
@@ -248,12 +254,61 @@ test('first load uses progress while cached return reserves the prior layout qui
   h.respond(0,report()); await pending;
   pending=h.tabs[1].click(); h.respond(1,report('exams')); await pending;
   pending=h.tabs[0].click();
-  assert.equal(h.elements['learning-verification'].style.minHeight,'640px');
+  assert.equal(h.elements['learning-result-shell'].style.minHeight,'640px');
+  assert.equal(h.elements['learning-verification'].style.minHeight,undefined);
   assert.equal(h.elements['learning-verification'].hidden,false);
   assert.equal(h.elements['learning-progress'].hidden,true);
   assert.equal(h.elements['learning-results'].hidden,true);
   h.respond(2,{...report(),valid:true}); await pending;
   assert.equal(h.elements['learning-results'].hidden,false);
+  assert.equal(h.elements['learning-result-shell'].style.minHeight,'');
+});
+
+test('bar hover uses a bounded light tooltip with exact section, period and three values', async () => {
+  const h=harness(); const pending=h.submit(); const data=report();
+  data.charts.bars[0]={section:'A very long section <script>text remains text</script>',quiz_grade:'92.03',standing:'94.35',exam:'68.48'};
+  h.respond(0,data); await pending;
+  const chart=h.drawn.find(c=>c.config.type==='bar'); const options=chart.config.options.plugins.tooltip;
+  assert.equal(options.enabled,false); assert.equal(options.callbacks,undefined);
+  options.external({chart,tooltip:{opacity:1,dataPoints:[{dataIndex:0}],caretX:595,caretY:285}});
+  const tip=chart.academicTooltip;
+  assert.equal(tip.className,'academic-chart-tooltip');
+  assert.match(tip.childNodes[0].textContent,/Midterm/);
+  assert.match(tip.childNodes[0].textContent,/<script>text remains text<\/script>/);
+  assert.deepEqual(tip.childNodes[1].childNodes.map(n=>n.textContent),['Quiz: 92.03','Class Standing: 94.35','Examination: 68.48']);
+  assert.ok(parseFloat(tip.style.left)+220<=600); assert.ok(parseFloat(tip.style.top)+100<=290);
+  assert.equal(h.drawn.length,3);
+  options.external({chart,tooltip:{opacity:0}}); assert.equal(tip.hidden,true);
+  const css=fs.readFileSync(path.join(__dirname,'../../static/admin_portal/unified_insights.css'),'utf8');
+  assert.match(css,/max-inline-size: min\(240px, calc\(100% - 16px\)\)/);
+  assert.match(css,/background: #fff/);
+});
+
+test('keyboard and touch chart controls activate existing bars and Escape hides the tooltip', async () => {
+  const h=harness(); const pending=h.submit(); h.respond(0,report()); await pending;
+  const chart=h.drawn.find(c=>c.config.type==='bar'), count=h.drawn.length;
+  const button={dataset:{learningBarIndex:'0'}};
+  h.handlers.focusin({target:{closest:()=>button}});
+  assert.equal(chart.active.length,2); assert.equal(chart.updateMode,'none');
+  await h.handlers.click({target:{closest:()=>button}});
+  assert.equal(chart.active.length,2); assert.equal(h.drawn.length,count);
+  chart.academicTooltip={hidden:false}; h.handlers.keydown({key:'Escape'});
+  assert.equal(chart.academicTooltip.hidden,true); assert.equal(chart.active.length,0);
+  h.handlers.focusin({target:{closest:()=>({dataset:{learningBarIndex:'-1'}})}});
+  assert.equal(chart.active.length,0);
+});
+
+test('cached chart tooltip remains hidden throughout quiet return authorization', async () => {
+  const h=harness(); let pending=h.submit(); h.respond(0,report()); await pending;
+  const chart=h.drawn.find(c=>c.config.type==='bar');
+  chart.academicTooltip={hidden:false};
+  pending=h.tabs[1].click(); assert.equal(chart.academicTooltip.hidden,true);
+  h.respond(1,report('exams')); await pending;
+  const count=h.drawn.length;
+  pending=h.tabs[0].click(); assert.equal(h.elements['learning-results'].hidden,true);
+  assert.equal(h.elements['learning-progress'].hidden,true); assert.equal(chart.academicTooltip.hidden,true);
+  h.respond(2,{...report(),valid:true}); await pending;
+  assert.equal(h.drawn.length,count);
 });
 
 test('return preserves selected section and last page while pagination replaces only its tab', async () => {

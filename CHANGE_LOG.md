@@ -1,3 +1,15 @@
+## Historical observation integrity - 2026-10-23
+
+- Section Comparison observations now require the corresponding Assessment Performance Table Quiz and Examination measures to be Available and match the plotted values for one unambiguous section/campus and grading period. Missing, historical, withheld or otherwise unsupported measures cannot qualify solely because the chart contains a number. Unverifiable comparisons receive neutral text; valid sections and periods retain their observations.
+- Reuse existing released table decisions without another historical calculation engine. Preserve chart construction/values, formulas and saved grades. Advance the existing assessment-table policy to v3 so old cached generations and signed tokens cannot restore an invalid observation after deployment. No migrations.
+
+## Unified Insights presentation refinement - 2026-10-22
+
+- Focus the primary assessment table on Quiz/Participation-Output counts and official averages plus Examination. Retain genuinely separate configured components, with local column groups that avoid redundant unavailable columns. Course view groups periods beneath each section heading; Section retains its matrix; All Courses retains paginated compatible groups and existing denominators.
+- Add scoped green headers, zebra rows, readable spacing, explicit availability states and keyboard-accessible responsive regions. Preserve Class Standing/Periodic grades and historical comparison tables elsewhere.
+- Name the actual Section Chart Values period and Course Period Averages — Equal Section Weight. Replace oversized bar hovers with bounded light tooltips, keyboard/touch controls and existing chart instances. Generate at most two observations from released comparable values using the user-approved 3-point display cutoff; movement classifications remain unchanged.
+- Reserve return-tab space in a stable shell with a small inline verification message. Results and tooltip values remain hidden until current authorization/freshness succeeds. No grading, policy, persistence or schema changes.
+
 ## Historical assessment-definition integrity - 2026-10-22
 
 - Validate relevant active and retired definitions against the actual saved submission timestamp for each independent table average. A post-submission change withholds only dependent reconstructed averages as `Unavailable — Historical Definition Changed`; pre-submission retirement follows actual applicability. Counts retain active evidenced-assessment rules. Saved Examination, Class Standing and Periodic grades are unchanged. Historical table policy v2 invalidates earlier cached results/tokens; no schema changes.

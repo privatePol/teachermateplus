@@ -6,6 +6,7 @@
   const results = document.getElementById("learning-results");
   const progress = document.getElementById("learning-progress");
   const verification = document.getElementById("learning-verification");
+  const shell = document.getElementById("learning-result-shell");
   const message = document.getElementById("learning-message");
   const view = document.getElementById("learning-view");
   const retry = document.getElementById("learning-retry");
@@ -54,6 +55,7 @@
   }
   function destroyCharts() { charts.splice(0).forEach(chart => chart.destroy()); }
   function hideResults() {
+    charts.forEach(chart => { if (chart.academicTooltip) chart.academicTooltip.hidden = true; });
     results.hidden = true;
     results.replaceChildren();
     // Detached nodes and their Chart instances belong to their presentation.
@@ -69,6 +71,7 @@
     hideResults(); results.setAttribute("aria-busy", "false");
     token = null; progress.hidden = true;
     verification.hidden = true;
+    shell.style.minHeight = "";
   }
   function clear() {
     clearResults(); tokens.clear(); generated = false; csvControls.hidden = true;
@@ -150,6 +153,41 @@
       if (canvas) charts.push(new window.Chart(canvas, config));
     };
     const palette = ["#3884e9", "#239963", "#ed8545", "#8c65c6"];
+    const alignment = activeTab === "alignment";
+    const compactTooltip = ({chart, tooltip}) => {
+      if (!tooltip.opacity || !tooltip.dataPoints?.length) {
+        if (chart.academicTooltip) chart.academicTooltip.hidden = true;
+        return;
+      }
+      const row = data.bars[tooltip.dataPoints[0].dataIndex];
+      const parent = chart.canvas.parentElement;
+      if (!row || !parent) return;
+      let tip = chart.academicTooltip;
+      if (!tip) {
+        tip = document.createElement("div");
+        tip.className = "academic-chart-tooltip";
+        tip.id = "unified-bar-tooltip";
+        tip.setAttribute("role", "tooltip"); tip.setAttribute("aria-live", "polite");
+        parent.appendChild(tip); chart.academicTooltip = tip;
+      }
+      const title = document.createElement("strong");
+      title.textContent = row.section + (data.bar_period ? ` — ${data.bar_period}` : "");
+      const lines = document.createElement("div");
+      for (const [key, label] of [["quiz_grade", "Quiz"], ["standing", alignment ? "Participation/Output" : "Class Standing"], ["exam", "Examination"]]) {
+        const line = document.createElement("div");
+        const value = number(row[key]);
+        line.textContent = `${label}: ${value === null ? "Not Available" : value.toFixed(2)}`;
+        lines.appendChild(line);
+      }
+      tip.replaceChildren(title, lines); tip.hidden = false;
+      const box = tip.getBoundingClientRect(), bounds = parent.getBoundingClientRect();
+      const leftEdge = Math.max(8, 8 - bounds.left);
+      const rightEdge = Math.min(chart.width, (window.innerWidth || chart.width) - bounds.left) - 8;
+      tip.style.left = `${Math.max(leftEdge, Math.min(tooltip.caretX + 12, rightEdge - box.width))}px`;
+      const below = tooltip.caretY + 12;
+      tip.style.top = `${Math.max(8, below + box.height <= chart.height - 8 ? below : tooltip.caretY - box.height - 12)}px`;
+      chart.canvas.setAttribute("aria-describedby", tip.id);
+    };
     const overviewRule = `Meaningful change: at least ${data.threshold} percentage points. Quiz trends use original quiz percentages before Gradebook conversion. Displayed quiz averages follow the Gradebook. Class-standing and examination trends use their official comparable scores. Comparisons are calculated before rounding.`;
     if (activeTab === "exams") {
       add("unified-exams", {type: "line", data: {labels: data.exams.labels, datasets: data.exams.datasets.map((row, i) => ({
@@ -163,7 +201,7 @@
       [["quiz_grade", "Quiz average (Gradebook points)"], ["standing", "Class standing (grade points)"], ["exam", "Exam (grade points)"], ["periodic", "Periodic grade"]].map(([key, label], i) => ({label, data: data.line.map(r => number(r[key])), borderColor: palette[i], backgroundColor: palette[i], tension: .15, spanGaps: false, showLine: data.line_mode !== "descriptive"}))}, options: {...common, scales: {y: scoreScale}, plugins: {...common.plugins, tooltip: {callbacks: {afterBody: items => `Original quiz percentage: ${items.length ? data.line[items[0].dataIndex].quiz ?? "Not Available" : "Not Available"}%\n${patternRule}`}}}}});
     add("learning-bars", {type: "bar", data: {labels: data.bars.map(r => r.section.length > 32 ? r.section.slice(0, 30) + "…" : r.section), datasets:
       [["quiz_grade", "Quiz average (Gradebook points)"], ["standing", activeTab === "alignment" ? "Participation/Output" : "Class-standing average"], ["exam", "Exam average"]].map(([key, label], i) => ({label, data: data.bars.map(r => number(r[key])), backgroundColor: palette[i], borderRadius: 5}))},
-      options: {...common, scales: {y: scoreScale, x: {ticks: {autoSkip: true, maxTicksLimit: 8, maxRotation: 25}}}, plugins: {...common.plugins, tooltip: {callbacks: {title: items => items.length ? data.bars[items[0].dataIndex].section : "", afterBody: items => activeTab === "alignment" ? patternRule : items.length ? `Recorded quizzes: ${data.bars[items[0].dataIndex].quizzes ?? "Not Available"}\nOriginal quiz percentage: ${data.bars[items[0].dataIndex].quiz ?? "Not Available"}%\n${patternRule}` : ""}}}}});
+      options: {...common, scales: {y: scoreScale, x: {ticks: {autoSkip: true, maxTicksLimit: 8, maxRotation: 25}}}, plugins: {...common.plugins, tooltip: {enabled: false, external: compactTooltip}}}});
     const patternColors = ["#0072b2", "#8b509b", "#b56b00", "#596773"];
     const visiblePatterns = data.patterns.map((row, index) => ({...row, color: patternColors[index]})).filter(row => Number(row.count) > 0);
     if (visiblePatterns.length) add("learning-patterns", {type: "doughnut", data: {labels: visiblePatterns.map(r => r.label), datasets: [{data: visiblePatterns.map(r => r.count), backgroundColor: visiblePatterns.map(r => r.color), borderColor: "#fff", borderWidth: 2}]}, options: {...common, cutout: "64%", plugins: {...common.plugins, title: {display: true, text: `Meaningful change: at least ${data.threshold} percentage points`}, tooltip: {callbacks: {label: item => `${item.label}: ${visiblePatterns[item.dataIndex].count} section${Number(visiblePatterns[item.dataIndex].count) === 1 ? "" : "s"} (${visiblePatterns[item.dataIndex].percentage}%)`, afterBody: () => patternRule}}}}});
@@ -194,7 +232,7 @@
     clearResults(); token = tokens.get(engine()) || null;
     if (cached) {
       token = cached.token;
-      verification.style.minHeight = `${Math.max(cached.height || 0, 180)}px`;
+      shell.style.minHeight = `${Math.max(cached.height || 0, 180)}px`;
     }
     retryResults = false; retry.hidden = true; retry.disabled = true;
     view.disabled = true;
@@ -230,6 +268,7 @@
         pages.set(tab, page);
       }
     } else if (data === null) offerRetry();
+    if (!resultPending()) shell.style.minHeight = "";
   }
   async function selectTab(name) {
     if (!tabButtons.some(button => button.dataset.unifiedTab === name)) return;
@@ -265,7 +304,32 @@
     clear(); return load(1);
   });
   csvPeriod.addEventListener("change", exports);
+  function focusBar(button) {
+    const chart = charts.find(c => c.canvas === document.getElementById("learning-bars"));
+    const index = Number(button?.dataset.learningBarIndex);
+    if (!chart || !Number.isInteger(index) || index < 0 || index >= chart.data.labels.length) return;
+    const active = chart.data.datasets.flatMap((dataset, datasetIndex) =>
+      dataset.data[index] === null ? [] : [{datasetIndex, index}]);
+    if (!active.length) return;
+    const point = chart.getDatasetMeta(active[0].datasetIndex).data[index].getCenterPoint();
+    chart.setActiveElements(active); chart.tooltip.setActiveElements(active, point); chart.update("none");
+  }
+  document.addEventListener("focusin", event => {
+    const button = event.target.closest("[data-learning-bar-index]");
+    if (button) focusBar(button);
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    charts.forEach(chart => {
+      if (chart.academicTooltip) {
+        chart.academicTooltip.hidden = true;
+        chart.setActiveElements([]); chart.tooltip.setActiveElements([], {x: 0, y: 0}); chart.update("none");
+      }
+    });
+  });
   document.addEventListener("click", async event => {
+    const chartButton = event.target.closest("[data-learning-bar-index]");
+    if (chartButton) { focusBar(chartButton); return; }
     const link = event.target.closest("[data-learning-export]");
     if (link && link.getAttribute("aria-disabled") === "true") {
       event.preventDefault(); status("View performance, then select a CSV grading period before downloading.", true); return;

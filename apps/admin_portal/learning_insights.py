@@ -37,7 +37,7 @@ METRICS = ("quizzes", "quiz", "quiz_grade", "activities", "standing", "exam", "p
 DISCLOSURE_POLICY_VERSION = "component-and-paired-populations-v1"
 COMPARABILITY_POLICY_VERSION = "four-category-patterns-v4"
 QUIZ_DISPLAY_POLICY_VERSION = "saved-gradebook-quiz-and-descriptive-points-v2-mixed-unavailable"
-ASSESSMENT_TABLE_POLICY_VERSION = "period-gradebook-measures-v2-historical-definitions"
+ASSESSMENT_TABLE_POLICY_VERSION = "period-gradebook-measures-v3-historical-observations"
 
 
 def key(period):
