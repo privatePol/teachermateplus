@@ -1,0 +1,15 @@
+.learning-insights { max-width: 1440px; margin: 0 auto; }
+.learning-header { border-left: 4px solid #198754; padding-left: 1.2rem; }
+.learning-insights .card { border-color: #e1e7e4; border-radius: .85rem; box-shadow: 0 2px 9px #183a2912;
+}
+.learning-insights .card-body { padding: 1.35rem; }
+.learning-insights th { white-space: nowrap; }
+.learning-chart { position: relative; height: 290px; width: 100%; }
+.learning-csv-period { max-width: 320px; }
+.learning-insights a[aria-disabled="true"] { opacity: .55; }
+.learning-insights [hidden] { display: none !important; }
+@media (max-width: 575.98px) {
+  .learning-header { padding-left: .8rem; }
+  .learning-insights .card-body { padding: 1rem; }
+  .learning-chart { height: 250px; }
+}

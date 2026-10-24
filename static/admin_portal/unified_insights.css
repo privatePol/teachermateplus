@@ -1,0 +1,31 @@
+.unified-insights .assessment-table { min-width: 640px; font-variant-numeric: tabular-nums; }
+.unified-insights .assessment-table thead th {
+  --bs-table-bg: #146c43; background: #146c43; color: #fff;
+  padding: .8rem; white-space: normal; vertical-align: middle;
+}
+.unified-insights .assessment-table tbody > tr > * { padding: .75rem .8rem; vertical-align: middle; }
+.unified-insights .assessment-table tbody > tr:nth-child(even) > * { --bs-table-bg: #f1f7f3; }
+.unified-insights .assessment-table th { white-space: normal; overflow-wrap: anywhere; max-width: 22rem; }
+.unified-insights .assessment-table td { min-width: 6.5rem; max-width: 16rem; overflow-wrap: anywhere; }
+.unified-insights .assessment-section { border-top: 2px solid #c7d9ce; padding-top: 1rem; margin-top: 1rem; }
+.unified-insights .assessment-section h4 { overflow-wrap: anywhere; }
+.unified-insights .table-responsive:focus-visible,
+.unified-insights [data-learning-bar-index]:focus-visible { outline: 3px solid #146c43; outline-offset: 3px; }
+.unified-insights .assessment-value:not(.assessment-value-available) {
+  display: inline-block; padding-left: .5rem; border-left: 3px solid currentColor; text-align: start; font-size: .85rem;
+}
+.unified-insights .assessment-value-na { color: #53615a; border-left-style: dotted !important; }
+.unified-insights .assessment-value-pending { color: #795300; }
+.unified-insights .assessment-value-missing { color: #495057; }
+.unified-insights .assessment-value-withheld { color: #62408a; }
+.unified-insights .assessment-value-historical { color: #982c35; }
+.unified-insights .academic-chart-tooltip {
+  position: absolute; z-index: 5; pointer-events: none; inline-size: max-content;
+  max-inline-size: min(240px, calc(100% - 16px)); padding: .6rem .75rem;
+  color: #19392a; background: #fff; border: 1px solid #9cb9a8; border-radius: .4rem;
+  box-shadow: 0 2px 8px #183a2926; font-size: .8rem; line-height: 1.45; overflow-wrap: anywhere;
+}
+.unified-insights .academic-chart-tooltip strong {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: .3rem;
+}
+.unified-insights .section-observations { border-left: 3px solid #146c43; padding-left: .75rem; }

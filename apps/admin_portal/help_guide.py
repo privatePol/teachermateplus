@@ -1279,6 +1279,14 @@ ADMIN_HELP_SECTIONS = [
             },
         ],
     },
+    {
+        "code": "academic-performance-insights",
+        "title": "Academic Performance Insights",
+        "purpose": "Reviews authorized class performance, learning patterns, assessment alignment and Gradebook-converted assessment results.",
+        "how_to_open": ["Open Admin Portal > Grading > Academic Performance Insights."],
+        "check_first": ["Select the authorized academic year, term and class scope. Direct DENY and tenant/campus/supervised-faculty boundaries apply.", "Assessment tables use released Quiz and Examination measures converted through official Gradebook definitions. Historical, missing or mismatched definitions are not described as current results."],
+        "actions": [{"name": "Choose a dashboard tab and filters", "does": "Shows Performance Overview, Exam Comparison, or Formative-Summative Alignment for the selected authorized scope.", "when": "After selecting the class and period filters.", "avoid": "Do not compare incompatible templates or infer a value when an assessment measure is unavailable.", "result": "Tables, charts and neutral observations use the same authorized source measures; drilldowns recheck access.", "editable": "Read-only analytics; signed generation state is verified before use."}],
+    },
 ]
 
 

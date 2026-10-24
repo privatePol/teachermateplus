@@ -17,7 +17,7 @@ from apps.core.services.features import FeatureSettingsService
 from .access import require_access
 from .models import QuiTizzSession, QuiTizzParticipant
 from .services import QuiTizzService, StaleRevision
-from . import gameplay as game, realtime
+from . import gameplay as game, realtime, phase4
 
 POLICY = {"version": 1, "suspense_seconds": 5, "results_seconds": 7, "prepare_seconds": 5}
 
@@ -53,7 +53,7 @@ def phase_fields(session, phase, now, seconds=None):
 
 
 def duration(session, key):
-    return (session.automation_policy_snapshot or POLICY)[key]
+    return phase4.policy(session)[key]
 
 
 def after_command(session, changes, question, action, now):
@@ -64,7 +64,7 @@ def after_command(session, changes, question, action, now):
     elif action == "close_question":
         changes.update(phase_fields(session, "SUSPENSE", now, duration(session, "suspense_seconds")))
     elif action == "reveal":
-        changes.update(phase_fields(session, "RESULTS", now, duration(session, "results_seconds")))
+        changes.update(phase_fields(session, "RESULTS", now, phase4.screen_seconds(session)), results_screen="ANSWER")
     elif action in {"start", "next"}:
         changes.update(phase_fields(session, "NONE", now))
     elif action in {"complete", "cancel"}:
@@ -100,16 +100,17 @@ def complete_locked(session, question, now):
 
 
 def open_next_locked(session, now):
-    target = session.questions.filter(position=session.current_position + 1).first()
+    target = phase4.pending_question(session)
     if not target:
         raise ValidationError("There is no next question.")
     if target.opened_at:
         raise StaleRevision("This question has already opened.")
     game.write(target, opened_at=now, deadline_at=now + timedelta(seconds=target.timer_seconds), active_started_at=now, active_elapsed_us=0)
-    return {**phase_fields(session, "ANSWERING", now, target.timer_seconds), "status": "QUESTION_OPEN", "current_position": target.position}
+    return {**phase_fields(session, "ANSWERING", now, target.timer_seconds), "status": "QUESTION_OPEN", "current_position": target.position,
+            "upcoming_question_id": None, "results_screen": "ANSWER"}
 
 
-def host_control(session, question, action, now, *, mode=None, request=None):
+def host_control(session, question, action, now, *, mode=None, confirm_end=False, request=None):
     if action in {"reveal_now", "next_now"}:
         if session.paused_at:
             raise ValidationError("Resume the session before progressing.")
@@ -157,12 +158,13 @@ def host_control(session, question, action, now, *, mode=None, request=None):
                 changes["next_transition_at"] = question.deadline_at
             elif phase in {"SUSPENSE", "RESULTS", "PREPARING"}:
                 key = {"SUSPENSE": "suspense_seconds", "RESULTS": "results_seconds", "PREPARING": "prepare_seconds"}[phase]
-                changes.update(phase_started_at=now, next_transition_at=now + timedelta(seconds=duration(session, key)))
+                seconds = phase4.screen_seconds(session, session.results_screen) if phase == "RESULTS" else duration(session, key)
+                changes.update(phase_started_at=now, next_transition_at=now + timedelta(seconds=seconds))
     elif action == "reveal_now":
         if not question or not question.opened_at or session.status not in {"QUESTION_OPEN", "QUESTION_CLOSED"}:
             raise ValidationError("There is no unrevealed question.")
         game.write(question, closed_at=question.closed_at or min(now, question.deadline_at), revealed_at=now)
-        changes = {**phase_fields(session, "RESULTS", now, duration(session, "results_seconds")), "status": "ANSWER_REVEALED"}
+        changes = {**phase_fields(session, "RESULTS", now, phase4.screen_seconds(session)), "status": "ANSWER_REVEALED", "results_screen": "ANSWER"}
     elif action == "next_now":
         if session.status != "ANSWER_REVEALED":
             raise ValidationError("Reveal before advancing.")
@@ -172,11 +174,14 @@ def host_control(session, question, action, now, *, mode=None, request=None):
                 raise ValidationError("Shared gameplay protection is unavailable.")
             changes = open_next_locked(session, now)
         else:
-            target = session.questions.filter(position=session.current_position + 1, opened_at__isnull=True).first()
+            target = phase4.pending_question(session)
             if not target:
                 raise ValidationError("There is no next question.")
             changes = {**phase_fields(session, "NONE", now), "status": "QUESTION_CLOSED", "current_position": target.position}
     elif action == "end_challenge":
+        pending = session.questions.filter(opened_at__isnull=True).count()
+        if phase4.modern(session) and pending and not confirm_end:
+            raise ValidationError("Confirm early termination: pending questions will remain unplayed.")
         if session.status == "ANSWER_REVEALED":
             changes = complete_locked(session, question, now)
         else:
@@ -186,7 +191,8 @@ def host_control(session, question, action, now, *, mode=None, request=None):
     else:
         raise ValidationError("Unknown control.")
     game.write(session, **changes, state_version=session.state_version + 1)
-    QuiTizzService.audit("GAME_CONTROL", session, session.host, request, command=action, origin="host", state_version=session.state_version)
+    QuiTizzService.audit("GAME_CONTROL", session, session.host, request, command=action, origin="host", state_version=session.state_version,
+        early_end_confirmed=bool(confirm_end), pending_count=session.questions.filter(opened_at__isnull=True).count() if action == "end_challenge" else None)
     realtime.notify(session, "phase_changed")
     return session
 
@@ -212,9 +218,14 @@ def advance(session_id, *, version, phase, dispatch=None):
         changes = {**phase_fields(session, "SUSPENSE", now, duration(session, "suspense_seconds")), "status": "QUESTION_CLOSED"}
     elif phase == "SUSPENSE" and session.status == "QUESTION_CLOSED" and question and question.opened_at:
         game.write(question, revealed_at=now)
-        changes = {**phase_fields(session, "RESULTS", now, duration(session, "results_seconds")), "status": "ANSWER_REVEALED"}
+        changes = {**phase_fields(session, "RESULTS", now, phase4.screen_seconds(session)), "status": "ANSWER_REVEALED", "results_screen": "ANSWER"}
     elif phase == "RESULTS" and session.status == "ANSWER_REVEALED":
-        if session.questions.filter(position=session.current_position + 1).exists():
+        sequence = phase4.screens(session) if phase4.modern(session) else ["ANSWER"]
+        index = sequence.index(session.results_screen) if session.results_screen in sequence else 0
+        if index + 1 < len(sequence):
+            screen = sequence[index + 1]
+            changes = {**phase_fields(session, "RESULTS", now, phase4.screen_seconds(session, screen)), "results_screen": screen}
+        elif phase4.pending_question(session):
             changes = phase_fields(session, "PREPARING", now, duration(session, "prepare_seconds"))
         else:
             changes = complete_locked(session, question, now)

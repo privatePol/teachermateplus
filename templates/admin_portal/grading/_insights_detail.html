@@ -1,0 +1,17 @@
+<h2 class="h5">{{ row.course }} / {{ row.section }} Performance Details</h2>
+<p>{{ row.campus }}; {{ row.year }} / {{ row.term }}; {{ row.period }}; {{ row.faculty }}</p>
+<a class="btn btn-sm btn-outline-success mb-3" href="{{ activity_consistency_url }}">View Activity Consistency</a>
+<p class="small text-muted">Activity Consistency opens the supported course, faculty and period context. It has no section filter. Activity setup is context, not proof of the cause of a grade result.</p>
+{% if row.suppressed %}<div class="alert alert-info">Suppressed (privacy). {{ row.withholding_reason }}</div>{% else %}
+<p><strong>Average Grade:</strong> {{ row.average }}; <strong>Passing Grade:</strong> {{ row.threshold }}; <strong>Students Below Passing:</strong> {{ row.below }} ({{ row.below_rate }}%).</p>
+<p><strong>Grade state:</strong> {{ row.state }}. <strong>Template:</strong> {{ row.template }}; <strong>Formula:</strong> {{ row.formula }}.</p>
+<p><strong>What to Review:</strong> {{ row.concern }}. A student below passing does not mean the whole class is failing.</p>
+<h3 class="h6">Recorded Activity Evidence</h3><p>Quizzes: {{ metrics.quizzes }}; Other Activities: {{ metrics.other }}; Quiz Average: {{ metrics.quiz_average }}. {{ metrics.evidence }}</p>
+<p class="small text-muted">Quiz averages use valid comparable percentages with complete coverage of the disclosed graded cohort. Quiz scores may already contribute to periodic grades. Periodic examination comparisons are available separately through Midterm Exam Performance; no examination result is inferred here.</p>
+<h3 class="h6">Periodic Trends</h3>
+<table class="table table-sm"><thead><tr><th>Period</th><th>Average</th><th>Grade State</th><th>Trend</th></tr></thead><tbody>{% for period in trends %}<tr><td>{{ period.period }}</td><td>{{ period.average }}</td><td>{{ period.state }}</td><td>{{ period.trend }}</td></tr>{% endfor %}</tbody></table>
+<p class="small text-muted">A trend needs the same graded cohort, complete grades and matching component definitions in consecutive periods. A change of at least three points is labeled improving or declining. Missing or incompatible periods have no trend.</p>
+<h3 class="h6">Relative Grade Categories</h3>
+<table class="table table-sm"><thead><tr><th>Category</th><th>Range (lower inclusive, upper exclusive)</th></tr></thead><tbody>{% for band in row.bands %}<tr><td>{{ band.label }}</td><td>{{ band.lower|default_if_none:'Unbounded' }} to {{ band.upper|default_if_none:'Unbounded' }}</td></tr>{% endfor %}</tbody></table>
+{% if row.distribution %}<table class="table table-sm"><thead><tr><th>Category</th><th>Students</th><th>Percentage</th></tr></thead><tbody>{% for band in row.distribution %}<tr><td>{{ band.label }}</td><td>{{ band.count }}</td><td><meter min="0" max="100" value="{{ band.percentage }}" aria-label="{{ band.label }}: {{ band.percentage }} percent">{{ band.percentage }}%</meter> {{ band.percentage }}%</td></tr>{% endfor %}</tbody></table>{% else %}<p>Category counts withheld to protect small groups and complementary totals.</p>{% endif %}
+{% endif %}

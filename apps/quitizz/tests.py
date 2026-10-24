@@ -77,7 +77,11 @@ class QuiTizzFoundationTests(TestCase):
         return {**self.args(), "public_id": quiz.public_id, "revision": quiz.revision, **extra}
 
     def launch(self, quiz):
-        return QuiTizzService.launch(**self.mutate(quiz))
+        # Keep Phase 1-3 regression fixtures explicitly on their historical policy.
+        # Phase 4 tests launch through the real version-2 default separately.
+        from .automation import POLICY
+        with patch("apps.quitizz.phase4.launch_policy", return_value=dict(POLICY)):
+            return QuiTizzService.launch(**self.mutate(quiz))
 
     def url(self, name, quiz=None, question=None):
         kwargs = {"public_id": quiz.public_id} if quiz else {}

@@ -107,6 +107,15 @@
   .qt-player *, .qt-projector *, #qt-host * { scroll-behavior: auto; animation: none !important; transition: none !important; }
 }
 
+/* Phase 4 result graphs reuse the bounded, reduced-motion-aware presentation. */
+.qt-projector .qt-fastest, #qt-host .qt-fastest { padding: 0; list-style: none; }
+.qt-projector .qt-fastest li.qt-question-winner, #qt-host .qt-fastest li.qt-question-winner, .qt-projector .qt-secondary-award, #qt-host .qt-secondary-award { background: linear-gradient(135deg, #49335e, #251b40); color: #fff5d3; border: 3px solid #ffdc73; border-radius: 1rem; padding: 1rem; }
+.qt-question-winner .qt-icon { width: 2rem; height: 2rem; color: #ffdc73; }
+.qt-milliseconds { font-size: clamp(1.4rem, 4vmin, 3rem); color: #ffe297; }
+.qt-fastest .qt-score-bar { width: 100%; }
+#qt-navigator select { min-height: 48px; }
+.qt-wrap #qt-navigator :is(button,select):focus-visible { outline: 3px solid #352064; outline-offset: 4px; box-shadow: 0 0 0 4px #ffdc73; }
+#qt-review { border-left: 4px solid #6235ae; padding: 1rem; color: #241849; background: #f5f0ff; }
 /* Game-show palette and local decoration, scoped to QuiTizz surfaces. */
 .qt-player-body, .qt-projector-body { background: radial-gradient(ellipse at 10% 12%, #6423ac 0, transparent 48%), radial-gradient(ellipse at 95% 70%, #006579 0, transparent 48%), linear-gradient(135deg, #100d31, #29205d 60%, #411957); color: #fff; }
 .qt-player-body { min-height: 100vh; }

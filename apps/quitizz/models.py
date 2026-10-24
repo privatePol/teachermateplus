@@ -180,7 +180,10 @@ class QuiTizzSession(ImmutableModel):
     GAMEPLAY_FIELDS = frozenset({"status", "joining_open", "join_generation", "expires_at", "completed_at",
         "current_position", "state_version", "scoring_policy_snapshot", "updated_at",
         "playback_mode", "show_phase", "phase_started_at", "next_transition_at",
-        "paused_at", "pause_remaining_us", "pause_reason"})
+        "paused_at", "pause_remaining_us", "pause_reason", "upcoming_question_id", "results_screen"})
+
+    upcoming_question = models.ForeignKey("QuiTizzSessionQuestion", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    results_screen = models.CharField(max_length=16, default="ANSWER", choices=[("ANSWER", "Answer"), ("FASTEST_FIVE", "Fastest Five"), ("HIGHEST_SCORES", "Highest Scores")])
 
     playback_mode = models.CharField(max_length=16, choices=PlaybackMode.choices, default=PlaybackMode.MANUAL)
     show_phase = models.CharField(max_length=16, choices=ShowPhase.choices, default=ShowPhase.NONE)
@@ -212,6 +215,7 @@ class QuiTizzSession(ImmutableModel):
         indexes = [models.Index(fields=["tenant", "campus", "host", "status"], name="qts_host_scope_idx"),
             models.Index(fields=["playback_mode", "next_transition_at"], name="qts_auto_due_idx")]
         constraints = [
+            models.CheckConstraint(condition=models.Q(results_screen__in=["ANSWER", "FASTEST_FIVE", "HIGHEST_SCORES"]), name="qts_results_screen_valid"),
             models.CheckConstraint(condition=models.Q(playback_mode__in=["MANUAL", "AUTOMATIC"]), name="qts_playback_valid"),
             models.CheckConstraint(condition=models.Q(show_phase__in=["NONE", "ANSWERING", "SUSPENSE", "RESULTS", "PREPARING", "FINISHED"]), name="qts_phase_valid"),
             models.CheckConstraint(condition=(models.Q(paused_at__isnull=True, pause_remaining_us__isnull=True, pause_reason="") |
@@ -226,6 +230,8 @@ class QuiTizzSession(ImmutableModel):
     def clean(self):
         if self.source_id and (self.source.tenant_id != self.tenant_id or self.source.campus_id != self.campus_id or self.source.owner_id != self.host_id):
             raise ValidationError("Session source, host and scope must match.")
+        if self.upcoming_question_id and (self.upcoming_question.session_id != self.pk or self.upcoming_question.opened_at is not None):
+            raise ValidationError("Upcoming question must be a never-opened question in this session.")
 
 
 class QuiTizzSessionQuestion(QuestionContent, ImmutableModel):
@@ -287,6 +293,7 @@ class QuiTizzResponse(ValidatedModel):
     awarded_points = models.PositiveIntegerField()
 
     class Meta:
+        indexes = [models.Index(fields=["session_question", "is_correct", "elapsed_ms", "received_at"], name="qtr_fastest_idx")]
         constraints = [
             models.UniqueConstraint(fields=["participant", "session_question"], name="qtr_one_response"),
             models.CheckConstraint(condition=models.Q(selected_choice__in=["A", "B", "C", "D"]), name="qtr_choice_ad"),

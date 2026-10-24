@@ -1,0 +1,12 @@
+<div class="card mb-3"><div class="card-header"><h2 class="h6 mb-0">Class Activities and Performance</h2></div>
+<div class="card-body small">Counts identify distinct activities with saved, non-excused scores from eligible students. They do not prove an activity was conducted. No recording evidence is shown as Not Available. Quiz percentages may already contribute to periodic grades; activity counts do not establish causation, sufficient practice, or faculty effectiveness.</div>
+<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Campus / Class</th><th>Recorded Quizzes</th><th>Other Recorded Activities</th><th>Quiz Average (%)</th><th>Periodic Average</th><th>Students Below Passing</th><th>Concern</th><th>Action</th></tr></thead><tbody>
+{% for row in rows %}<tr><td>{{ row.campus }} / {{ row.course }} / {{ row.section }}<div class="small text-muted">{{ row.faculty }}; {{ row.period }}</div></td>
+{% if row.suppressed %}<td colspan="6">Suppressed (privacy)</td>{% else %}
+<td>{{ row.metrics.quizzes }}</td><td>{{ row.metrics.other }}</td><td>{{ row.metrics.quiz_average }}</td><td>{{ row.average }}<div class="small text-muted">{{ row.state }}</div></td><td>{{ row.below }} ({{ row.below_rate }}%)</td><td>{% if row.class_below %}<span class="badge text-bg-danger">Class average below passing</span>{% endif %} {{ row.concern }}</td>{% endif %}
+<td><button class="btn btn-sm btn-outline-success" type="button" data-detail="{{ row.id }}">View Details</button></td></tr>
+{% empty %}<tr><td colspan="8">No classes match the selection.</td></tr>{% endfor %}
+</tbody></table></div>
+<div class="card-footer">Page {{ page.number }} of {{ page.paginator.num_pages }}
+{% if page.has_previous %}<button class="btn btn-sm btn-outline-secondary" type="button" data-page="{{ page.previous_page_number }}">Previous</button>{% endif %}
+{% if page.has_next %}<button class="btn btn-sm btn-outline-secondary" type="button" data-page="{{ page.next_page_number }}">Next</button>{% endif %}</div></div>

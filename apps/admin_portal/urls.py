@@ -1,4 +1,11 @@
 from django.urls import path
+from .learning_insights_views import learning_performance_insights_view
+from .assessment_alignment_views import assessment_alignment_view
+from .unified_insights_views import unified_insights_view
+from .insights_views import (
+    academic_performance_insights_view,
+    academic_performance_section_detail_view,
+)
 
 from .api_views import sis_periodic_grades_api_view
 from .academic_data_reconciliation import (
@@ -17,8 +24,6 @@ from .import_views import (
 )
 from .views import (
     academic_activity_consistency_view,
-    academic_performance_insights_view,
-    academic_performance_section_detail_view,
     midterm_exam_performance_view,
     academic_intervention_monitor_view,
     academic_intervention_monitor_detail_view,
@@ -189,6 +194,8 @@ from .views import (
 app_name = "admin_portal"
 
 urlpatterns = [
+    path("admin-portal/grading/academic-performance-insights/unified-preview/", unified_insights_view,
+         name="unified_academic_insights_preview"),
     path("admin-portal", admin_portal_root_view, name="root"),
     path("admin-portal/", admin_portal_root_view, name="root_slash"),
     path("api/v1/sis/periodic-grades/", sis_periodic_grades_api_view, name="sis_periodic_grades_api"),
@@ -205,6 +212,13 @@ urlpatterns = [
         name="academic_data_reconciliation_roster",
     ),
     path("admin-portal/grading/analytics/", grading_analytics_view, name="grading_analytics"),
+    path("admin-portal/grading/assessment-alignment/preview/", assessment_alignment_view,
+         name="assessment_alignment_preview"),
+    path(
+        "admin-portal/grading/learning-performance-insights/preview/",
+        learning_performance_insights_view,
+        name="learning_performance_insights_preview",
+    ),
     path(
         "admin-portal/grading/performance-insights/",
         academic_performance_insights_view,

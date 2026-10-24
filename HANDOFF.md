@@ -6218,3 +6218,27 @@ Original-path closure-origin completion and current results are recorded below.
 ```
 
 - Pending/next: review the six-file session delta and correlation evidence; any release requires a separate authorized gate. After such a release, verify the actual October 1 earlier saved exception and October 10 original-path unassignment, final/history/manifest and DTR in the authenticated staging browser. SQLite is not InnoDB concurrency or staging/browser/mobile/PDF/printer proof; prior coverage-origin, older-baseline, contention and print limitations remain open. Unrelated admin CRUD/faculty grading flows were not repeated in this focused gate.
+
+
+## Combined Academic Insights + QuiTizz Phase 4 integration - 2026-10-24
+
+- Candidate: D:\codex-worktrees\TMP-Production-Release-Integration, branch integration/academic-insights-quitizz-release, baseline 7c91313875b1b2215e645c2aff23c0ac5719667d. Existing D:\teachermateplus checkout has unrelated dirty work; preserved. Academic source aae746e9290be8b2e5ba506da39ac3ac9bd05af4 and QuiTizz source e7abb02e18514678a9561d41f0ea281161ccec9f were verified.
+- Integrated scopes: Academic Insights feature delta from common ancestor 7eb2329531444b924e18a475628f394dc72a5a0e (50 paths, no deletions) and QuiTizz Phase 4 delta only. Production-only applications and modules are retained.
+- Academic Insights includes unified/learning dashboards, alignment, assessment tables, official Gradebook values/counts, signed generation, authorized filters/drilldowns, privacy-safe observations, historical-definition safeguards and frontend/tests. QuiTizz includes Fastest Five and result screens, immutable settings, awards, navigator, automatic sequencing, pending safeguards, accessibility, tests and migration 0006.
+- Validation status: implementation in progress; integrated regression tests, Django checks, complete migration plan and full diff review remain pending. No test result is claimed for this candidate.
+- Migration 0006 must follow existing QuiTizz 0001-0005; it is schema-only (selector/default/check, nullable PROTECT FK, response lookup index). No normal database migration is authorized or performed.
+- Protected production RBAC, Attendance/DTR, Grade Distribution, Departmental Exams and QuiTizz infrastructure/history must remain. No commit, push, deployment, restart or main promotion. Next: resolve and inspect shared files, apply the 30-path QuiTizz delta, validate disposable environment, inspect full diff and report exact status.
+
+
+- Integration validation still pending: run the Academic Insights and QuiTizz suites plus protected-production regressions using disposable settings; inspect the complete diff and exact migration plan before handoff. No commit, push, deployment, normal DB migration, service restart or main promotion.
+
+
+## Combined release integration validation update - 2026-10-24
+
+- Conflict state: all four shared files are resolved with production content retained. Academic Insights help was added once alongside existing Admin guidance. No unmerged entries remain. Exactly these four resolution paths are staged: CHANGE_LOG.md, HANDOFF.md, TEACHERMATEPLUS_CONTEXT.md, apps/admin_portal/help_guide.py. Feature integration files remain unstaged/untracked; no commit was created.
+- Fresh Django: `check` passed (0 issues); `makemigrations --check --dry-run` reported no changes. Disposable in-memory SQLite plan contains existing production migration graph plus `quitizz.0006_phase4_presentation_navigation`; Academic Insights requires no migration. This does not establish the actual production ledger. No normal DB was migrated.
+- Fresh integrated Django regression command covered `apps.quitizz`, Academic Insights suites, core permission tests, admin role-management tests and Grade Distribution monitor: **719 total, 714 passed, 4 expected MariaDB/InnoDB skips, 1 failure, 0 errors; 1120.683s**. Failure: unchanged `apps/admin_portal/tests_roles.py::RoleManagementTests.test_role_permissions_page_lists_only_current_departmental_exam_permissions` expects four existing Departmental Exam permission codes to be absent. Candidate changes do not touch that test, role view, permission definitions or Departmental Exam module; treat as an unresolved production-baseline compatibility failure, not a passing suite. Negative-path 400/403/404/409/413/429 log messages were expected test stimuli.
+- Fresh JavaScript: Academic Insights 64/64 PASS; QuiTizz frontend 94/94 PASS. Browser/device, MariaDB/InnoDB races, Redis/network and production acceptance remain unverified.
+- Preservation: no deletions in Faculty Attendance or Departmental Exams; their baseline migration files all remain. Production `apps/core/services/permissions.py` is unchanged and retains Q-based nullable-scope matching and DENY subtraction. Admin Portal 0001, Departmental Exams 0035/0036, Attendance 0020 and QuiTizz 0001-0005 remain. No dependency/requirements changes.
+- Exact candidate manifest and final status are recorded in the external integration audit artifact. Existing source worktrees and the dirty D:\teachermateplus checkout were not edited. No commit, push, main promotion, deployment, normal database migration, or service restart occurred.
+- Next steps: review the remaining uncommitted candidate diff; decide whether the unrelated role-permission expectation should be reconciled in a separately authorized scope; optionally run focused Attendance/DTR and Departmental Exam suites. Keep this candidate uncommitted.

@@ -1,156 +1,38 @@
 {% extends "admin_portal/base.html" %}
-
+{% load static %}
 {% block admin_content %}
-<style>
-  .insight-bar { height: 7px; min-width: 90px; overflow: hidden; background: #e6eee7; border-radius: 999px; margin-top: .35rem; }
-  .insight-bar span { display: block; height: 100%; border-radius: inherit; background: #26834e; }
-  .insight-bar.risk span { background: #bd4f56; }
-  .insight-bar.missing span { background: #7b8580; }
-  .insight-card { border-left: 4px solid #25814c !important; }
-  .insight-course { min-width: 160px; max-width: 220px; }
-  .insight-faculty { min-width: 130px; max-width: 180px; }
-  .insight-action { min-width: 110px; padding-right: 1.25rem !important; }
-</style>
-
 <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
   <div>
     <h1 class="h4 mb-1">Academic Performance Insights</h1>
-    <p class="text-muted mb-0">Compare course and section performance only within your authorized academic scope.</p>
+    <p class="text-muted mb-0">Review Faculty Gradebook periodic grades within your authorized academic area.</p>
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:midterm_exam_performance' %}">Midterm Exam Performance</a>
     <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:academic_activity_consistency' %}">Activity Consistency</a>
-    <a class="btn btn-sm btn-outline-success" href="?{{ export_query }}{% if export_query %}&amp;{% endif %}export=sections">Export Sections CSV</a>
-    <a class="btn btn-sm btn-outline-success" href="?{{ export_query }}{% if export_query %}&amp;{% endif %}export=students">Export Student Review CSV</a>
+    <a class="btn btn-sm btn-outline-success" data-export="sections" href="?export=sections">Export Sections CSV</a>
+    <a class="btn btn-sm btn-outline-success" data-export="students" href="?export=students">Export Student Review CSV</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
   </div>
 </div>
 
-{% include "admin_portal/grading/_academic_performance_filters.html" %}
-
-{% if not required_filters_present %}
-<div class="alert alert-info border">
-  Select an Academic Year, Term, and Grading Period to generate the report.
-</div>
-{% else %}
-  {% if limited %}
-  <div class="alert alert-warning border">The live report is limited to the first 100 authorized classes. Narrow the filters for a complete comparison.</div>
-  {% endif %}
-
-  <div class="row g-3 mb-3">
-    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Sections Compared</div><div class="h4 mb-0">{{ summary.sections }}</div></div></div></div>
-    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Overall Average</div><div class="h4 mb-0">{% if summary.overall_average is not None %}{{ summary.overall_average|floatformat:2 }}{% else %}-{% endif %}</div></div></div></div>
-    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Usable Computed Grades</div><div class="h4 mb-0">{{ summary.computed_grade_count }} <span class="small text-muted">/ {{ summary.active_enrollment_count }}</span></div></div></div></div>
-    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">No Usable Grade</div><div class="h4 mb-0">{{ summary.no_grade_count }}</div></div></div></div>
-  </div>
-
-  <div class="alert alert-light border border-success-subtle mb-3"><strong>Report Summary:</strong> {{ interpretation }}</div>
-
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white fw-semibold">Needs Attention</div>
-    <div class="card-body">
-      <p class="mb-2">{{ attention_panel.message }}</p>
-      {% for item in attention_panel.items %}
-      <div class="border-start border-3 {% if attention_panel.state == 'incomplete' %}border-secondary{% else %}border-warning{% endif %} ps-3 py-1 mb-2">
-        <div><strong>Section:</strong> {{ item.section }}</div>
-        <div><strong>Main Issue:</strong> {{ item.main_issue }}</div>
-        <div><strong>Suggested Check:</strong> {{ item.suggested_check }}</div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white fw-semibold">Course Performance by Section</div>
-    <div class="card-body py-2 small text-muted border-bottom">
-      Longer <span class="text-success fw-semibold">green</span> bar means a higher class average.
-      Longer <span class="text-danger fw-semibold">red</span> bar means more at-risk students.
-      Longer <span class="text-secondary fw-semibold">gray</span> bar means more missing outputs.
-    </div>
-    <div class="table-responsive">
-      <table class="table align-middle mb-0">
-        <thead class="table-light">
-          <tr>
-            <th>Campus</th><th>Course / Section</th><th>Faculty</th><th>Coverage</th><th>Grade Summary</th>
-            <th>Pass / Below Threshold</th><th>Threshold / Context</th><th>Readiness</th><th>Comparison</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in rows %}
-          <tr>
-            <td>{{ row.campus.code }}</td>
-            <td class="insight-course"><strong>{{ row.course_code }} / {{ row.section }}</strong><div class="small text-muted lh-sm">{{ row.course_title }}</div></td>
-            <td class="insight-faculty"><span class="small">{{ row.faculty_name }}</span></td>
-            <td>
-              {{ row.coverage.computed_grade_count }} / {{ row.coverage.active_enrollment_count }} usable
-              <div class="small text-muted">{{ row.coverage.coverage_rate }}% coverage; {{ row.coverage.no_grade_count }} no usable grade</div>
-            </td>
-            <td>
-              Avg {% firstof row.coverage.average "-" %}; median {% firstof row.coverage.median "-" %}
-              <div class="small text-muted">High {% firstof row.coverage.highest "-" %}; low {% firstof row.coverage.lowest "-" %}</div>
-              <div class="small text-muted">Trends: {{ row.trend_summary.improving }} improving, {{ row.trend_summary.stable }} stable, {{ row.trend_summary.declining }} declining, {{ row.trend_summary.insufficient }} insufficient{% if row.coverage.is_provisional %} (current period provisional){% endif %}</div>
-            </td>
-            <td>{{ row.coverage.passing_count }} / {{ row.coverage.computed_grade_count }} ({{ row.coverage.passing_rate }}%)<div class="small text-muted">Below: {{ row.coverage.below_threshold_count }} / {{ row.coverage.computed_grade_count }} ({{ row.coverage.below_threshold_rate }}%)</div></td>
-            <td>{{ row.coverage.passing_threshold|floatformat:2 }}<div class="small text-muted">{{ row.period.name }}; {{ row.grading_context.template_label }}</div></td>
-            <td><span class="badge {% if row.coverage.is_provisional %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ row.coverage.state }}</span></td>
-            <td><span class="badge {% if row.comparison_status == 'Comparable' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ row.comparison_status }}</span><div class="small text-muted">{{ row.comparison_detail }}</div></td>
-            </td>
-            <td class="insight-action"><a class="btn btn-sm btn-outline-success text-nowrap" href="{% url 'admin_portal:academic_performance_section_detail' row.offering.id row.period.code %}?{% if request.GET %}{{ request.GET.urlencode }}&amp;{% endif %}next={{ request.get_full_path|urlencode }}">View Details</a></td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="10" class="text-center text-muted py-4">No performance data is available for the selected scope.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% if page_obj.paginator.num_pages > 1 %}
-    <div class="card-footer bg-white d-flex justify-content-between">
-      <span class="small text-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-      <div class="btn-group btn-group-sm">
-        {% if page_obj.has_previous %}<a class="btn btn-outline-secondary" href="?{{ page_query }}&page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
-        {% if page_obj.has_next %}<a class="btn btn-outline-secondary" href="?{{ page_query }}&page={{ page_obj.next_page_number }}">Next</a>{% endif %}
-      </div>
-    </div>
-    {% endif %}
-  </div>
-
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white fw-semibold">Students for Faculty Review</div>
-    <div class="card-body py-2 small text-muted">Advisory only. An academic concern does not require or create an intervention case.</div>
-    <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead class="table-light"><tr><th>Course / Section</th><th>Student</th><th>Current Grade</th><th>Threshold</th><th>Indicators</th></tr></thead><tbody>
-      {% for row in student_review %}<tr><td>{{ row.course_code }} / {{ row.section }}<div class="small text-muted">{{ row.period.name }}</div></td><td>Protected student record</td><td>{% if row.current_grade is not None %}{{ row.current_grade }}{% else %}No usable grade{% endif %}</td><td>{{ row.passing_threshold }}</td><td><span class="badge text-bg-secondary">{{ row.advisory_label }}</span><div class="small mt-1">{{ row.indicators|join:"; " }}</div></td></tr>{% empty %}<tr><td colspan="5" class="text-center text-muted py-3">No advisory student-review rows for this scope.</td></tr>{% endfor %}
-    </tbody></table></div>
-  </div>
-
-  {% if filter_options.role_scope.can_compare_campuses %}
-  <div class="card border-0 shadow-sm">
-    <div class="card-header bg-white fw-semibold">Authorized Campus Summary</div>
-    <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0">
-        <thead class="table-light"><tr><th>Campus</th><th>Department</th><th>Courses</th><th>Sections</th><th>Overall Average</th><th>At-Risk Students</th><th>Missing Outputs</th><th>Courses Needing Attention</th><th>Common Weak Component</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-          {% for row in campus_rows %}
-          <tr>
-            <td>{{ row.campus_code }} - {{ row.campus_name }}</td>
-            <td>{{ row.department_code }} - {{ row.department_name }}</td>
-            <td>{{ row.course_count }}</td><td>{{ row.section_count }}</td>
-            <td>{% if row.overall_average is not None %}{{ row.overall_average|floatformat:2 }}{% else %}-{% endif %}</td>
-            <td>{{ row.at_risk_count }}</td><td>{{ row.missing_output_count }}</td>
-            <td>{{ row.courses_needing_attention }}</td>
-            <td>{{ row.dominant_weakest_component|default:"-" }}</td>
-            <td>
-              {% if row.status == "Normal" %}<span class="badge text-bg-success">{{ row.status }}</span>
-              {% elif row.status == "Needs Attention" %}<span class="badge text-bg-warning">{{ row.status }}</span>
-              {% elif row.status == "High Risk" %}<span class="badge text-bg-danger">{{ row.status }}</span>
-              {% else %}<span class="badge text-bg-secondary">{{ row.status }}</span>{% endif %}
-            </td>
-            <td><a class="btn btn-sm btn-outline-success" href="?academic_year_id={{ filters.academic_year_id }}&term_id={{ filters.term_id }}&period_code={{ filters.period_code }}&campus_id={{ row.campus_id|default:'' }}&department_id={{ row.department_id }}">Drill Down</a></td>
-          </tr>
-          {% empty %}<tr><td colspan="11" class="text-center text-muted py-3">No campus summary is available.</td></tr>{% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% endif %}
-{% endif %}
+<form id="insights-filters" class="card card-body mb-3" method="post">
+{% csrf_token %}
+<div class="row g-3 align-items-end">
+{% for key, values in options.items %}
+<div class="col-md-3"><label class="form-label" for="insight-{{ key }}" data-label="{{ key }}"></label>
+<select class="form-select" name="{{ key }}" id="insight-{{ key }}" {% if key == 'academic_year_id' or key == 'term_id' or key == 'period_code' %}required{% endif %}>
+<option value="">Select / All authorized</option>
+{% for option in values %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}
+</select></div>
+{% endfor %}
+<div class="col-md-3"><button id="insights-view" class="btn btn-success" type="submit">View Performance</button> <button id="insights-retry-selections" class="btn btn-outline-success" type="button" hidden>Retry Selections</button> <a class="btn btn-outline-secondary" href="{{ request.path }}">Clear</a></div>
+</div></form>
+{{ filters|json_script:"insights-selected" }}
+<div id="insights-progress" hidden class="mb-3" role="status" aria-live="polite">
+<span>Loading academic information?</span><div class="progress"><div class="progress-bar progress-bar-striped progress-bar-animated w-100" role="progressbar" aria-label="Loading"></div></div></div>
+<div id="insights-message" class="alert alert-info" role="status">Select your filters and click View Performance.</div>
+<div id="insights-summary"></div><div id="insights-classes"></div>
+<dialog id="insights-dialog" class="rounded border p-4" style="width:min(1000px,95vw);max-height:90vh;overflow:auto"><button type="button" class="btn btn-sm btn-outline-secondary float-end" id="insights-close">Close</button><div id="insights-detail"></div></dialog>
+<noscript><p>Enable JavaScript to load performance information. CSV downloads remain explicitly available with valid URL filters.</p></noscript>
+<script src="{% static 'admin_portal/academic_insights.js' %}" defer></script>
 {% endblock %}

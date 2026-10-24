@@ -1910,3 +1910,16 @@ For every merged change:
 - Fixed readiness losing a saved October 1 lateness exception after an October 10 unassignment. Pass existing current result/revision evidence into the shared ownership check; preserve scoped, dated history without changing snapshots or coverage boundaries.
 - An earlier 90-minute class with 15 minutes late remains 1.25 hours. Existing final records, result history and frozen manifests remain unchanged; later classes, conflicting ownership, pending review and foreign scope stay protected.
 - Focused disposable validation: 18/18 passed, with nine new cases; previous overlapping runs are not added. No schema migration, approval workflow or permission expansion. Staging/browser/InnoDB acceptance remains pending.
+
+
+## Combined release integration candidate - 2026-10-24 (uncommitted)
+
+- Integrates approved Academic Performance Insights commit aae746e9290be8b2e5ba506da39ac3ac9bd05af4 from its production common ancestor. Includes unified insights, learning patterns, assessment alignment/tables, authorized drilldowns, signed generation, privacy-safe observations, historical-definition safeguards, UI assets and regression tests.
+- Integrates approved QuiTizz Phase 4 commit e7abb02e18514678a9561d41f0ea281161ccec9f: Fastest Five, separate result screens, navigator, manual awards, automatic sequencing, pending-question safeguards, accessibility, tests and migration 0006. Existing scoring and infrastructure remain.
+- Candidate remains uncommitted. Disposable regression validation and migration-plan review are pending; no persistent database was migrated.
+
+## QuiTizz Phase 4 integration - 2026-10-24
+
+- Adds reveal-gated Fastest Five and distinct Answer, Fastest Five and Highest Scores screens; launch-snapshotted version-2 presentation settings; manual awarding and existing scheduler-driven automatic sequencing.
+- Adds host question navigation, isolated read-only review, never-opened/pending safeguards and explicitly confirmed/audited early termination. Retains original scoring, overall champion rules, session history, scope/RBAC/direct DENY, CSRF, row locking, feature flags and notification-only realtime transport.
+- Includes the approved Phase 4 tests, host/projector templates, static assets and guide. Migration `quitizz.0006_phase4_presentation_navigation` adds results selector/default/check, nullable `PROTECT` upcoming-question FK and response lookup index. Existing migrations 0001-0005 are preserved; no persistent database has been migrated.

@@ -40,7 +40,7 @@
     use.setAttribute("href", `${window.QuiTizzIcons || "/static/quitizz/icons.svg"}#${name}`); svg.append(use); return svg;
   }
   function create(root, {projector = false, qrUrl} = {}) {
-    let lastKey = "", deadline = 0, offset = 0, status = "", phase = "", paused = false, remaining = 0, finaleKey = "", revealKey = "", effectPhase = "";
+    let lastKey = "", deadline = 0, offset = 0, status = "", phase = "", paused = false, remaining = 0, finaleKey = "", revealKey = "", winnerKey = "", effectPhase = "";
     const timer = make("strong", "0", "qt-timer"); timer.setAttribute("role", "timer"); timer.setAttribute("aria-live", "off");
     function render(state) {
       status = state.status;
@@ -49,7 +49,7 @@
       const key = JSON.stringify(state, (key, value) => key === "server_now" ? undefined : value);
       if (key === lastKey) return;
       lastKey = key;
-      const phaseKey = `${state.question?.id || state.position}:${phase}:${status}:${paused}`;
+      const phaseKey = `${state.question?.id || state.position}:${phase}:${status}:${paused}:${state.results_screen || "legacy"}`;
       if (phaseKey !== effectPhase) { cleanup(); effectPhase = phaseKey; }
       root.replaceChildren(); root.dataset.phase = paused ? "PAUSED" : phase === "NONE" ? status : phase;
       if (paused) { root.append(make("h2", "Challenge paused", "qt-section-title"), make("p", "Waiting for an authorized resume."), timer); tick(); return; }
@@ -79,6 +79,13 @@
           champion.append(icon("trophy"), make("h2", state.leaderboard[0].nickname), make("strong", `${state.leaderboard[0].score} points`)); root.append(champion);
         }
         root.append(podium);
+        if (state.fastest_correct_award) {
+          const award = state.fastest_correct_award, section = make("section", undefined, "qt-secondary-award");
+          section.append(icon("spark"), make("h2", "Fastest Correct Award"), make("h3", award.nickname),
+            make("strong", `${award.average_ms} ms average correct-answer time`),
+            make("p", `${award.correct_count} correct of ${award.question_count} saved questions. Average of recorded whole-ms times. Separate recognition; points and overall ranks are unchanged.`));
+          root.append(section);
+        }
         if (!podium.children.length) root.append(make("p", "No participants. Thanks for playing!"));
         if (state.leaderboard?.length && finaleKey !== String(state.version)) { finaleKey = String(state.version); celebrate(root, true); }
         return;
@@ -87,6 +94,30 @@
         root.append(icon(phase === "SUSPENSE" ? "spark" : "rocket"),
           make("h2", phase === "SUSPENSE" ? "AND THE CORRECT ANSWER IS..." : "BE READY FOR THE NEXT CHALLENGE!", "qt-section-title"), timer);
         tick(); return;
+      }
+      if (state.reveal && state.results_screen === "FASTEST_FIVE") {
+        root.append(make("h2", "Fastest Five", "qt-section-title"), make("p", "Correct responses only · Server-observed active time, including network latency."));
+        const rows = state.fastest_five || [], list = make("ol", undefined, "qt-fastest qt-leaderboard");
+        const maximum = Math.max(1, ...rows.map((row) => row.elapsed_ms));
+        rows.forEach((row, index) => {
+          const item = make("li", undefined, index === 0 ? "qt-question-winner" : "");
+          item.append(make("span", `${row.rank}. ${row.nickname}`), make("strong", `${row.elapsed_ms} ms`, "qt-milliseconds"));
+          if (index === 0) item.append(icon("spark"), make("span", "\u26a1 Question Winner"));
+          const bar = make("div", undefined, "qt-bar qt-score-bar"); bar.style.setProperty("--percent", `${row.elapsed_ms / maximum * 100}%`); bar.setAttribute("aria-hidden", "true"); item.append(bar); list.append(item);
+        });
+        root.append(list, make("p", rows.length ? "Time taken: shorter is faster. Equal displayed milliseconds are recorded ties; server receipt time, then response ID breaks ties." : "No correct responses. No Question Winner."));
+        const current = String(state.question?.id || state.position);
+        if (rows.length && winnerKey !== current) { winnerKey = current; celebrate(root); }
+        return;
+      }
+      if (state.reveal && state.results_screen === "HIGHEST_SCORES") {
+        root.append(make("h2", "Highest Scores · Overall Top 5", "qt-section-title"));
+        const list = make("ol", undefined, "qt-leaderboard"), maximum = Math.max(1, ...(state.leaderboard || []).map((row) => row.score));
+        (state.leaderboard || []).forEach((row) => {
+          const item = make("li"); item.append(make("span", `${row.rank}. ${row.nickname}`), make("strong", `${row.score} points`));
+          const bar = make("div", undefined, "qt-bar qt-score-bar"); bar.style.setProperty("--percent", `${row.score / maximum * 100}%`); bar.setAttribute("aria-hidden", "true"); item.append(bar); list.append(item);
+        });
+        root.append(list); if (!list.children.length) root.append(make("p", "No participants.")); return;
       }
       if (!state.question) { root.append(make("h2", "Get ready for the next question.")); return; }
       root.append(make("h2", state.question.prompt, "qt-presentation-prompt"));
@@ -112,6 +143,7 @@
         });
         if (!total) distribution.append(make("p", "No responses received."));
         root.append(distribution);
+        if (!state.results_screen) {
         const leaderboard = make("section", undefined, "qt-leaderboard"); leaderboard.append(make("h3", "Top 5"));
         const list = make("ol");
         const maximum = Math.max(1, ...(state.leaderboard || []).map((player) => player.score));
@@ -119,6 +151,7 @@
           const item = make("li"); item.append(make("span", `${player.rank}. ${player.nickname}`), make("strong", `${player.score} points`));
           const bar = make("div", undefined, "qt-bar qt-score-bar"); bar.style.setProperty("--percent", `${player.score / maximum * 100}%`); bar.setAttribute("aria-hidden", "true"); item.append(bar); list.append(item);
         }); leaderboard.append(list); root.append(leaderboard);
+        }
       }
       if (projector) root.setAttribute("aria-label", "QuiTizz presentation");
     }

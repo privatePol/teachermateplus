@@ -195,6 +195,9 @@ class RealtimeTests(TestCase):
         socket = self.socket(role)
         with patch.object(consumer, "accept", accept):
             self.assertTrue((await socket.connect(timeout=20))[0])
+            # Transport acceptance precedes completion of the deliberately
+            # delayed DB mutation. Await admission, not a 100ms timing guess.
+            await asyncio.wait_for(asyncio.shield(instances[0].admission_task), timeout=20)
             self.assertTrue(await socket.receive_nothing())
         instance = instances[0]
         self.assertTrue(instance.admitted)  # harmless admission TOCTOU permitted

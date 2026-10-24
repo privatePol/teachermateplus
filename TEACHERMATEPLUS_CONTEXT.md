@@ -2045,3 +2045,18 @@ Migration `0005_automatic_game_show` adds phase/mode/timing/pause and active seg
 ## QuiTizz presentation-polish remediation - 2026-10-11 (uncommitted)
 
 Staging feedback prompted CSS-first strengthening of projector/player backgrounds, panels, colorful answer tiles, final-result/podium accents and host command buttons. Local fireworks use larger responsive geometry, glow and finite rings while keeping the existing 12/36 particle limits, cleanup timers and reduced motion. The only JavaScript changes are visual effect sizing and a finale styling marker. Presentation asset tokens are `20261011-phase3-polish`; game-state authority, security, network and sound behavior are unchanged. Focused frontend 70/70 and disposable configuration/migration checks passed. No new migration or persistent-local migration application; actual staging/browser/mobile visual acceptance remains pending. Current HANDOFF records the exact files and validation limits.
+
+
+## Combined production release candidate - Academic Insights and QuiTizz Phase 4
+
+Academic Performance Insights adds unified performance, learning-pattern and formative/summative alignment views; assessment tables use official Gradebook conversions and counts. Filters, drilldowns and signed-generation results remain permission-scoped. Historical assessment-definition mismatches, unavailable data and unsafe observations fail closed or remain neutral. Privacy-safe observations do not expose suppressed class values.
+
+QuiTizz Phase 4 adds post-reveal Fastest Five, separate Answer/Fastest Five/Highest Scores presentations, manual Question Winner awarding, optional final recognition, automatic server-scheduled screen sequencing and host question navigation/review. Existing scoring, history, RBAC, feature gates, Redis/Channels/ASGI/scheduler transport remain authoritative. Migration 0006 adds only results-screen state/constraint, a nullable protected upcoming-question FK and a response lookup index; apply only after separate approval.
+
+This is an uncommitted integration candidate based on production main 7c91313875b1b2215e645c2aff23c0ac5719667d. Production Attendance/DTR, Grade Distribution, Departmental Exams and RBAC remain protected. Runtime/deployment and actual database migration state are separate acceptance gates.
+
+## QuiTizz Phase 4 integration - 2026-10-24
+
+- Adds reveal-gated Fastest Five and distinct Answer, Fastest Five and Highest Scores screens; launch-snapshotted version-2 presentation settings; manual awarding and existing scheduler-driven automatic sequencing.
+- Adds host question navigation, isolated read-only review, never-opened/pending safeguards and explicitly confirmed/audited early termination. Retains original scoring, overall champion rules, session history, scope/RBAC/direct DENY, CSRF, row locking, feature flags and notification-only realtime transport.
+- Includes the approved Phase 4 tests, host/projector templates, static assets and guide. Migration `quitizz.0006_phase4_presentation_navigation` adds results selector/default/check, nullable `PROTECT` upcoming-question FK and response lookup index. Existing migrations 0001-0005 are preserved; no persistent database has been migrated.

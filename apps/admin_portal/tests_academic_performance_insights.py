@@ -166,7 +166,7 @@ class AcademicPerformanceInsightsTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Select an Academic Year, Term, and Grading Period")
+        self.assertContains(response, "Select your filters and click View Performance.")
         self.assertNotContains(response, self.student_a1.last_name)
 
     def test_user_without_grading_analytics_permission_is_denied(self):
@@ -192,90 +192,53 @@ class AcademicPerformanceInsightsTests(TestCase):
 
     def test_course_report_reuses_official_faculty_performance_service(self):
         self.client.force_login(self.area_chair)
-        original = FacultyPerformanceService.get_class_performance_snapshot
-        with patch.object(
-            FacultyPerformanceService,
-            "get_class_performance_snapshot",
-            wraps=original,
-        ) as official_snapshot:
-            response = self.client.get(self.url, self.filters)
-
+        with patch.object(FacultyPerformanceService, "get_class_performance_snapshot", wraps=FacultyPerformanceService.get_class_performance_snapshot) as official_snapshot:
+            response = self.client.post(self.url, {**self.filters, "action": "report"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(official_snapshot.call_count, 2)
-        self.assertContains(response, "ITAPPS")
-        self.assertContains(response, "BSIS-1A")
-        self.assertContains(response, "BSIS-1B")
-        self.assertEqual(
-            response.content.decode("utf-8").count('class="card shadow-sm h-100 insight-card"'),
-            4,
-        )
-        self.assertNotContains(response, "Student Ranking")
-        self.assertNotContains(response, "Class Ranking")
+        self.assertEqual(response.json()["summary"]["classes"], 2)
+        self.assertEqual(response.json()["summary"]["suppressed"], 2)
+        self.assertEqual(response.json()["html"].count('class="col-md-3"'), 4)
 
-    def test_main_report_shows_attention_panel_and_css_bar_legend(self):
+    def test_main_report_withholds_small_group_attention_results(self):
         self.client.force_login(self.area_chair)
-
-        response = self.client.get(self.url, self.filters)
-
+        response = self.client.post(self.url, {**self.filters, "action": "report"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Needs Attention")
-        self.assertContains(response, "Main Issue")
-        self.assertContains(response, "Suggested Check")
-        self.assertContains(response, "means a higher class average")
-        self.assertContains(response, "means more at-risk students")
-        self.assertContains(response, "means more missing outputs")
+        self.assertIn("Classes to Review", response.json()["html"])
+        self.assertIn("No disclosed class concerns", response.json()["html"])
 
-    def test_main_report_shows_normal_attention_message_when_all_sections_are_normal(self):
-        StudentActivityScore.objects.update(
-            raw_score=Decimal("90"),
-            computed_score=Decimal("95"),
-        )
+    def test_main_report_does_not_label_suppressed_classes_normal(self):
+        StudentActivityScore.objects.update(raw_score=90, computed_score=95)
         self.client.force_login(self.area_chair)
+        response = self.client.post(self.url, {**self.filters, "action": "report"})
+        self.assertEqual(response.json()["summary"]["suppressed"], 2)
+        self.assertNotIn("All compared sections are within normal range.", response.json()["html"])
 
-        response = self.client.get(self.url, self.filters)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "All compared sections are within normal range.")
-
-    def test_main_report_shows_incomplete_attention_message(self):
+    def test_main_report_withholds_unusable_grade_groups(self):
         GradeActivity.objects.update(is_active=False)
         self.client.force_login(self.area_chair)
-
-        response = self.client.get(self.url, self.filters)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response,
-            "Some sections have incomplete data. Review grade encoding or activity setup first.",
-        )
+        response = self.client.post(self.url, {**self.filters, "action": "report"})
+        self.assertEqual(response.json()["summary"]["disclosed"], 0)
+        self.assertEqual(response.json()["summary"]["average"], "Not Available")
 
     def test_course_filter_excludes_other_course_codes(self):
-        other_course = Course.objects.create(
-            tenant=self.tenant,
-            code="OTHER101",
-            title="Other Course",
-        )
+        other_course = Course.objects.create(tenant=self.tenant, code="OTHER101", title="Other Course")
         self.offering_b.course = other_course
         self.offering_b.save(update_fields=["course", "updated_at"])
         self.client.force_login(self.area_chair)
-
-        response = self.client.get(self.url, {**self.filters, "course_code": "ITAPPS"})
-
+        response = self.client.post(self.url, {**self.filters, "course_code": "ITAPPS", "action": "report"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "BSIS-1A")
-        self.assertNotContains(response, "BSIS-1B")
+        classes = self.client.post(self.url, {"action": "classes", "token": response.json()["token"]})
+        self.assertIn("BSIS-1A", classes.json()["html"])
+        self.assertNotIn("BSIS-1B", classes.json()["html"])
 
     def test_encoded_zero_is_not_missing_and_student_identity_is_not_exposed(self):
+        summary = AcademicPerformanceInsightService.get_section_performance_summary(self.offering_a, self.period)
+        self.assertEqual(summary["missing_output_count"], 0)
         self.client.force_login(self.area_chair)
-
-        response = self.client.get(self.url, self.filters)
-
-        self.assertEqual(response.status_code, 200)
-        target = next(row for row in response.context["rows"] if row["offering"].id == self.offering_a.id)
-        self.assertEqual(target["missing_output_count"], 0)
-        self.assertNotContains(response, self.student_a1.student_no)
-        self.assertNotContains(response, self.student_a1.last_name)
-        self.assertNotContains(response, self.student_a2.last_name)
+        response = self.client.post(self.url, {**self.filters, "action": "report"})
+        self.assertNotIn(self.student_a1.student_no, response.content.decode())
+        self.assertNotIn(self.student_a1.last_name, response.content.decode())
 
     def test_area_chair_cannot_see_other_campus(self):
         other_campus = Campus.objects.create(tenant=self.tenant, code="CUB", name="Cubao")
@@ -319,9 +282,7 @@ class AcademicPerformanceInsightsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "BSIS-CUB-1A")
         self.assertNotContains(response, "Cubao")
-        visible_campus_ids = {
-            campus.id for campus in response.context["filter_options"]["role_scope"]["campuses"]
-        }
+        visible_campus_ids = {campus["value"] for campus in response.context["options"]["campus_id"]}
         self.assertEqual(visible_campus_ids, {self.campus.id})
 
     def test_college_dean_can_compare_authorized_campuses_through_area_chairs(self):
@@ -375,12 +336,12 @@ class AcademicPerformanceInsightsTests(TestCase):
             )
         self.client.force_login(dean)
 
-        response = self.client.get(self.url, {**self.filters, "campus_id": "all"})
-
+        response = self.client.post(self.url, {**self.filters, "campus_id": "all", "action": "report"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "BSIS-1A")
-        self.assertContains(response, "BSIS-CUB-1A")
-        self.assertContains(response, "Authorized Campus Summary")
+        classes = self.client.post(self.url, {"action": "classes", "token": response.json()["token"]})
+        self.assertIn("BSIS-1A", classes.json()["html"])
+        self.assertIn("BSIS-CUB-1A", classes.json()["html"])
+        self.assertNotIn("Department Ranking", classes.json()["html"])
 
     def test_activity_consistency_labels_minor_difference_and_incomplete_setup(self):
         second_activity = self._activity(self.offering_b, "Q2", 50)
@@ -441,61 +402,28 @@ class AcademicPerformanceInsightsTests(TestCase):
 
     def test_section_detail_shows_no_student_data(self):
         self.client.force_login(self.area_chair)
-        url = reverse(
-            "admin_portal:academic_performance_section_detail",
-            args=[self.offering_a.id, self.period.code],
-        )
-
-        response = self.client.get(url)
-
+        response = self.client.get(reverse("admin_portal:academic_performance_section_detail", args=[self.offering_a.id, self.period.code]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Component Breakdown")
-        self.assertContains(response, "Activity Setup")
-        self.assertContains(response, "What to Review")
-        self.assertContains(response, "Comparison Context")
-        self.assertContains(response, "Ready for Comparison")
-        self.assertContains(response, "Activity Setup Status")
+        self.assertContains(response, "Suppressed (privacy)")
         self.assertContains(response, "View Activity Consistency")
         self.assertNotContains(response, self.student_a1.student_no)
         self.assertNotContains(response, self.student_a1.last_name)
-        self.assertNotContains(response, "Student Ranking")
-        self.assertNotContains(response, "Faculty Ranking")
 
-    def test_section_detail_sorts_activities_and_preserves_report_return_state(self):
+    def test_section_detail_withholds_small_group_technical_results(self):
         self._activity(self.offering_a, "Z Activity", 20)
         self._activity(self.offering_a, "A Activity", 20)
         self.client.force_login(self.area_chair)
-        report_url = f"{self.url}?academic_year_id={self.academic_year.id}&term_id={self.term.id}&period_code=PRELIM&course_code=ITAPPS&page=2"
-        detail_url = reverse(
-            "admin_portal:academic_performance_section_detail",
-            args=[self.offering_a.id, self.period.code],
-        )
-
-        report_response = self.client.get(report_url)
-        self.assertContains(report_response, "next=")
-
-        response = self.client.get(detail_url, {"next": report_url})
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["back_url"], report_url)
-        content = response.content.decode("utf-8")
-        self.assertLess(content.index("A Activity"), content.index("Q1"))
-        self.assertLess(content.index("Q1"), content.index("Z Activity"))
+        response = self.client.get(reverse("admin_portal:academic_performance_section_detail", args=[self.offering_a.id, self.period.code]))
+        self.assertContains(response, "Suppressed (privacy)")
+        self.assertNotContains(response, "Average Grade:")
 
     def test_section_detail_rejects_external_return_url(self):
         self.client.force_login(self.area_chair)
-        detail_url = reverse(
-            "admin_portal:academic_performance_section_detail",
-            args=[self.offering_a.id, self.period.code],
-        )
-
-        response = self.client.get(detail_url, {"next": "https://example.com/unsafe"})
-
+        response = self.client.get(reverse("admin_portal:academic_performance_section_detail", args=[self.offering_a.id, self.period.code]), {"next": "https://example.com/unsafe"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.context["back_url"],
-            reverse("admin_portal:academic_performance_insights"),
-        )
+        self.assertEqual(response.context["back_url"], self.url)
+        self.assertNotContains(response, 'href="https://example.com/unsafe"')
+        self.assertContains(response, f'href="{self.url}"')
 
     def test_reports_do_not_create_or_update_grade_records(self):
         before_scores = list(
@@ -509,7 +437,7 @@ class AcademicPerformanceInsightsTests(TestCase):
         before_period_grades = StudentPeriodGrade.objects.count()
         self.client.force_login(self.area_chair)
 
-        self.client.get(self.url, self.filters)
+        self.client.post(self.url, {**self.filters, "action": "report"})
         self.client.get(reverse("admin_portal:academic_activity_consistency"), self.filters)
         self.client.get(
             reverse(
@@ -556,8 +484,8 @@ class AcademicPerformanceInsightsTests(TestCase):
         self.client.force_login(self.area_chair)
 
         for unsafe_prefix in ("=", "+", "-", "@"):
-            self.faculty.first_name = f"{unsafe_prefix}Faculty"
-            self.faculty.save(update_fields=["first_name", "updated_at"])
+            self.faculty.last_name = f"{unsafe_prefix}Faculty"
+            self.faculty.save(update_fields=["last_name", "updated_at"])
             response = self.client.get(self.url, {**self.filters, "export": "sections"})
 
             self.assertEqual(response.status_code, 200)
@@ -566,34 +494,21 @@ class AcademicPerformanceInsightsTests(TestCase):
                 for item in csv.DictReader(io.StringIO(response.content.decode()))
                 if item["Section"] == "BSIS-1A"
             )
-            self.assertEqual(row["Average"], "0.00")
-            self.assertEqual(row["Highest"], "0.00")
-            self.assertEqual(row["Lowest"], "0.00")
-            self.assertEqual(row["Faculty"], f"'{unsafe_prefix}Faculty User")
+            self.assertEqual(row["Average"], "Suppressed (privacy)")
+            self.assertEqual(row["Highest"], "Suppressed (privacy)")
+            self.assertEqual(row["Lowest"], "Suppressed (privacy)")
+            self.assertEqual(row["Faculty"], f"'{unsafe_prefix}Faculty, faculty-one")
 
-    def test_student_review_csv_masks_without_identity_permission_and_unmasks_with_it(self):
+    def test_student_review_csv_withholds_small_groups_even_with_identity_permission(self):
         self.client.force_login(self.area_chair)
-
-        masked_response = self.client.get(self.url, {**self.filters, "export": "students"})
-
-        self.assertEqual(masked_response.status_code, 200)
-        masked_content = masked_response.content.decode()
-        self.assertNotIn("Test Beta", masked_content)
-        self.assertNotIn(self.student_a2.student_no, masked_content)
-        self.assertIn("T**t B**a", masked_content)
-        self.assertIn("20*5-*02", masked_content)
-
-        permission, _ = Permission.objects.get_or_create(
-            code="gradebook.view_student_identity",
-            defaults={"module": "gradebook", "action": "view_student_identity"},
-        )
-        RolePermission.objects.get_or_create(role=self.area_role, permission=permission)
-
-        visible_response = self.client.get(self.url, {**self.filters, "export": "students"})
-
-        self.assertEqual(visible_response.status_code, 200)
-        self.assertIn("Test Beta", visible_response.content.decode())
-        self.assertIn(self.student_a2.student_no, visible_response.content.decode())
+        permission, _ = Permission.objects.get_or_create(code="gradebook.view_student_identity", defaults={"module": "gradebook", "action": "view_student_identity"})
+        for allowed in (False, True):
+            if allowed:
+                RolePermission.objects.get_or_create(role=self.area_role, permission=permission)
+            response = self.client.get(self.url, {**self.filters, "export": "students"})
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn(self.student_a2.student_no, response.content.decode())
+            self.assertEqual(list(csv.DictReader(io.StringIO(response.content.decode()))), [])
 
     def test_incomplete_student_is_not_counted_as_at_risk_or_declining(self):
         second_activity = self._activity(self.offering_a, "Q2", 100)
@@ -729,7 +644,7 @@ class AcademicPerformanceInsightsTests(TestCase):
         self.client.force_login(self.area_chair)
         before = AcademicInterventionCase.objects.count()
 
-        self.client.get(self.url, self.filters)
+        self.client.post(self.url, {**self.filters, "action": "report"})
         self.client.get(reverse("admin_portal:academic_activity_consistency"), self.filters)
 
         self.assertEqual(AcademicInterventionCase.objects.count(), before)
