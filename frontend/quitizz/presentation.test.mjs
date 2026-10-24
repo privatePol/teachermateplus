@@ -40,6 +40,42 @@ const state = (extra = {}) => ({status: "LOBBY", title: "Spark night", version: 
 const question = () => ({position: 1, prompt: "What sparks?", choices: {A: "Alpha", B: "Beta", C: "Gamma", D: "Delta"}, deadline: new Date(Date.now() + 60000).toISOString()});
 const leaders = (count) => Array.from({length: count}, (_, i) => ({rank: i + 1, nickname: `Player ${i + 1}`, score: 0}));
 
+for (const count of [0, 1, 4, 5]) test(`Fastest Five renders ${count} authoritative rows with recorded milliseconds`, () => {
+  const h = harness(), root = h.add("fastest"), view = h.window.QuiTizzPresentation.create(root, {projector: true});
+  const fastest = Array.from({length: count}, (_, i) => ({rank: i + 1, nickname: `Fast ${i}`, elapsed_ms: i < 2 ? 1234 : 2000 + i}));
+  view.render(state({status: "ANSWER_REVEALED", show_phase: "RESULTS", results_screen: "FASTEST_FIVE", question: question(), reveal: {correct_choice: "B", distribution: {B: count}}, fastest_five: fastest, leaderboard: leaders(3)}));
+  assert.match(root.textContent, /Fastest Five/); assert.doesNotMatch(root.textContent, /points|Alpha|Correct answer:/);
+  if (count) { assert.match(root.textContent, /1234 ms/); assert.match(root.textContent, /Question Winner/); assert.match(root.textContent, /recorded ties/); }
+  else { assert.match(root.textContent, /No correct responses/); assert.doesNotMatch(root.textContent, /Fast 0/); }
+});
+test("Manual fastest screen holds across ticks and duplicate recovery without replaying effects", () => {
+  const h = harness(), root = h.add("hold"), view = h.window.QuiTizzPresentation.create(root);
+  const value = state({status: "ANSWER_REVEALED", playback_mode: "MANUAL", results_screen: "FASTEST_FIVE", question: {...question(), id: "same"}, reveal: {correct_choice: "B"}, fastest_five: [{rank: 1, nickname: "Winner", elapsed_ms: 0}]});
+  view.render(value); const text = root.textContent; const timers = h.timers.size;
+  for (let i = 0; i < 100; i++) [...h.intervals.values()].forEach((fn) => fn());
+  assert.equal(root.textContent, text); view.render({...value, server_now: new Date().toISOString()}); assert.equal(h.timers.size, timers);
+  const reconnect = h.window.QuiTizzPresentation.create(h.add("reconnect")); reconnect.render(value);
+  assert.match(h.elements.get("reconnect").textContent, /0 ms/);
+});
+test("Phase 4 Answer and Highest Scores are distinct and never sort authoritative ranks", () => {
+  const h = harness(), root = h.add("screens"), view = h.window.QuiTizzPresentation.create(root);
+  const value = state({status: "ANSWER_REVEALED", question: question(), reveal: {correct_choice: "B", distribution: {B: 1}}, leaderboard: [{rank: 4, nickname: "Authoritative", score: 2}]});
+  view.render({...value, results_screen: "ANSWER"}); assert.match(root.textContent, /Correct answer: B/); assert.doesNotMatch(root.textContent, /Authoritative/);
+  view.render({...value, results_screen: "HIGHEST_SCORES"}); assert.match(root.textContent, /4. Authoritative/); assert.doesNotMatch(root.textContent, /Alpha/);
+});
+test("Fastest payload cannot render before reveal and reduced motion stays static", () => {
+  const h = harness(true), root = h.add("private"), view = h.window.QuiTizzPresentation.create(root);
+  const value = state({status: "QUESTION_OPEN", results_screen: "FASTEST_FIVE", question: question(), fastest_five: [{rank: 1, nickname: "Protected", elapsed_ms: 50}]});
+  view.render(value); assert.doesNotMatch(root.textContent, /Protected|50 ms/);
+  view.render({...value, status: "ANSWER_REVEALED", reveal: {correct_choice: "B"}});
+  assert.match(root.textContent, /50 ms/); assert.equal(h.timers.size, 0);
+});
+test("Secondary finale award never replaces the points champion or claims prize delivery", () => {
+  const h = harness(), root = h.add("award"), view = h.window.QuiTizzPresentation.create(root);
+  view.render(state({status: "COMPLETED", leaderboard: [{rank: 1, nickname: "Points champion", score: 5000}], fastest_correct_award: {nickname: "Fast champion", average_ms: "1234.50", correct_count: 2, question_count: 3}}));
+  assert.match(root.textContent, /Points champion/); assert.match(root.textContent, /Fast champion/); assert.match(root.textContent, /1234.50 ms/); assert.doesNotMatch(root.textContent, /prize delivered/i);
+});
+
 test("welcome and lobby show title, authoritative count and QR only while joining is open", () => {
   const h = harness(); const root = h.add("stage"); const view = h.window.QuiTizzPresentation.create(root, {qrUrl: "/qr/"});
   view.render(state({participant_count: 7})); assert.match(root.textContent, /7 joined/); assert.match(root.textContent, /Spark night/);

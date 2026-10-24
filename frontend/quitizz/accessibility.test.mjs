@@ -201,3 +201,18 @@ test("host focus override stays inside command controls", () => {
     assert.equal(h.winner(h.document.querySelector("#other-module button"), "outline").value, "0");
   } finally { h.close(); }
 });
+
+test("navigator buttons and select retain a scoped contrasting keyboard focus cue", () => {
+  const raw = read("templates/quitizz/host.html").match(/<section id="qt-navigator"[\s\S]*?<\/section>/)[0];
+  const h = fixture(`<div class="qt-wrap"><section id="qt-host">${raw.replace(/{%[\s\S]*?%}|{{[\s\S]*?}}/g, "")}</section></div>`, [css, bootstrap]);
+  try {
+    for (const control of h.document.querySelectorAll("#qt-navigator button, #qt-navigator select")) {
+      control.dataset.keyboardFocus = "true";
+      assert.equal(h.winner(control, "outline").selector, ".qt-wrap #qt-navigator :is(button,select):focus-visible");
+      assert.equal(h.winner(control, "outline").value, "3px solid #352064");
+      assert.equal(h.winner(control, "box-shadow").value, "0 0 0 4px #ffdc73");
+      assert.ok(contrast(rgb("#352064"), rgb("#fff")) >= 3);
+      assert.ok(contrast(rgb("#352064"), rgb("#ffdc73")) >= 3);
+    }
+  } finally { h.close(); }
+});

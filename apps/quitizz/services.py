@@ -122,9 +122,9 @@ class QuiTizzService:
 
     @classmethod
     @transaction.atomic
-    def launch(cls, *, public_id, user, tenant_id, campus_id, revision, playback_mode="MANUAL", request=None):
+    def launch(cls, *, public_id, user, tenant_id, campus_id, revision, playback_mode="MANUAL", presentation=None, request=None):
         obj = cls.locked(public_id, user, tenant_id, campus_id, revision, capability="host")
-        from .automation import POLICY
+        from .phase4 import launch_policy
         from apps.core.services.features import FeatureSettingsService
         if playback_mode not in {"MANUAL", "AUTOMATIC"}:
             raise ValidationError("Select a valid playback mode.")
@@ -137,7 +137,7 @@ class QuiTizzService:
             question.full_clean()
         session = QuiTizzSession.objects.create(source=obj, tenant_id=tenant_id, campus_id=campus_id, host=user,
             title_snapshot=obj.title, source_revision=obj.revision, scoring_policy_snapshot={},
-            playback_mode=playback_mode, automation_policy_snapshot=dict(POLICY))
+            playback_mode=playback_mode, automation_policy_snapshot=launch_policy(presentation))
         with snapshot_creation(session.pk):
             QuiTizzSessionQuestion.objects.bulk_create([QuiTizzSessionQuestion(session=session, position=q.position,
                 **{name: getattr(q, name) for name in CONTENT_FIELDS}) for q in questions])

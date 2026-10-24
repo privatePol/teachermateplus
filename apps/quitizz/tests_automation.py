@@ -220,7 +220,8 @@ class AutomationTests(TestCase):
         self.automatic(False)
         with self.assertRaises(ValidationError): QuiTizzService.launch(**self.mutate(source), playback_mode="AUTOMATIC")
         self.automatic(); launched = QuiTizzService.launch(**self.mutate(source), playback_mode="AUTOMATIC")
-        self.assertEqual(launched.automation_policy_snapshot, auto.POLICY)
+        from .phase4 import launch_policy
+        self.assertEqual(launched.automation_policy_snapshot, launch_policy())
 
     def test_policy_snapshot_is_immutable(self):
         with self.assertRaises(ValidationError): game.write(self.session, automation_policy_snapshot={})

@@ -25,7 +25,7 @@ from apps.core.services.features import FeatureSettingsService
 from .access import require_access
 from .models import QuiTizzParticipant, QuiTizzResponse, QuiTizzSession, gameplay_write
 from .services import QuiTizzService, StaleRevision
-from . import realtime
+from . import realtime, phase4
 
 
 HOURS = 8
@@ -201,7 +201,7 @@ def ranked_participants(session):
 
 
 @transaction.atomic
-def command(*, public_id, user, tenant_id, campus_id, version, action, participant_id=None, mode=None, request=None):
+def command(*, public_id, user, tenant_id, campus_id, version, action, participant_id=None, mode=None, question_id=None, screen=None, confirm_end=False, request=None):
     require_access(user, tenant_id, campus_id, "host")
     session = get_object_or_404(QuiTizzSession.objects.select_for_update(), public_id=public_id,
         tenant_id=tenant_id, campus_id=campus_id, host=user)
@@ -221,14 +221,35 @@ def command(*, public_id, user, tenant_id, campus_id, version, action, participa
     if action in {"pause", "resume", "set_mode", "reveal_now", "next_now", "end_challenge"}:
         if session.playback_mode == "AUTOMATIC" and action in {"reveal_now", "next_now"}:
             automation.authorize(session)
-        return automation.host_control(session, question, action, now, mode=mode, request=request)
-    if session.paused_at and action not in {"remove", "open_joining", "close_joining", "complete", "cancel"}:
+        return automation.host_control(session, question, action, now, mode=mode, confirm_end=confirm_end, request=request)
+    if session.paused_at and action not in {"select_question", "remove", "open_joining", "close_joining", "complete", "cancel"}:
         raise ValidationError("Resume the session before progressing.")
     if session.playback_mode == "AUTOMATIC" and action in {"open_question", "close_question", "reveal", "next"}:
         automation.authorize(session)
         if not automation.throttle_healthy():
             raise ValidationError("Shared gameplay protection is unavailable.")
-    if action in {"open_joining", "close_joining"}:
+    if action == "select_question":
+        target = session.questions.filter(public_id=question_id, opened_at__isnull=True).first() if question_id else None
+        if not target:
+            raise ValidationError("Select a never-opened question in this session.")
+        changes["upcoming_question_id"] = target.pk
+    elif action == "show_screen":
+        if session.status != "ANSWER_REVEALED" or not question or not question.revealed_at:
+            raise ValidationError("Reveal the correct answer before selecting a results screen.")
+        if session.playback_mode != "MANUAL" or not phase4.modern(session) or screen not in phase4.screens(session):
+            raise ValidationError("Select an enabled results screen in Manual mode.")
+        changes.update(results_screen=screen, next_transition_at=None)
+    elif action == "open_selected":
+        if session.playback_mode != "MANUAL" or session.status not in {"LOBBY", "ANSWER_REVEALED", "QUESTION_CLOSED"} or (session.status == "QUESTION_CLOSED" and question and question.opened_at):
+            raise ValidationError("Finish and reveal the current question before opening another.")
+        target = session.questions.filter(public_id=question_id, opened_at__isnull=True).first() if question_id else phase4.pending_question(session)
+        if not target:
+            raise ValidationError("No pending question remains.")
+        write(target, opened_at=now, deadline_at=now + timedelta(seconds=target.timer_seconds))
+        changes.update(status="QUESTION_OPEN", current_position=target.position, upcoming_question_id=None,
+            joining_open=False, scoring_policy_snapshot=session.scoring_policy_snapshot or dict(POLICY), results_screen="ANSWER")
+        automation.after_command(session, changes, target, "open_question", now)
+    elif action in {"open_joining", "close_joining"}:
         opening = action == "open_joining"
         if session.joining_open == opening:
             raise StaleRevision("Joining already changed. Reload the session.")
@@ -248,16 +269,19 @@ def command(*, public_id, user, tenant_id, campus_id, version, action, participa
         if action == "start":
             if session.status != "LOBBY":
                 raise ValidationError("Open the lobby before starting.")
-            position = 1
+            target = phase4.pending_question(session)
+            position = target.position if target else 1
             changes.update(joining_open=False, scoring_policy_snapshot=dict(POLICY))
         elif action == "next":
             if session.status != "ANSWER_REVEALED":
                 raise ValidationError("Reveal the current answer before advancing.")
-            position = session.current_position + 1
+            target = phase4.pending_question(session)
+            position = target.position if target else 0
         else:
             if session.status != "QUESTION_CLOSED" or not question or question.opened_at:
                 raise ValidationError("The current question cannot be reopened.")
-            position = session.current_position
+            target = phase4.pending_question(session) if session.upcoming_question_id else question
+            position = target.position
         target = session.questions.filter(position=position).first()
         if not target:
             raise ValidationError("There is no next question. Complete the session.")
@@ -265,7 +289,7 @@ def command(*, public_id, user, tenant_id, campus_id, version, action, participa
             raise StaleRevision("This question has already opened.")
         if action == "open_question":
             write(target, opened_at=now, deadline_at=now + timedelta(seconds=target.timer_seconds))
-            changes.update(status="QUESTION_OPEN", current_position=position)
+            changes.update(status="QUESTION_OPEN", current_position=position, upcoming_question_id=None, results_screen="ANSWER")
         else:
             changes.update(status="QUESTION_CLOSED", current_position=position)
     elif action == "close_question":
@@ -281,6 +305,8 @@ def command(*, public_id, user, tenant_id, campus_id, version, action, participa
     elif action in {"complete", "cancel"}:
         if action == "complete" and session.status != "ANSWER_REVEALED":
             raise ValidationError("Reveal the current answer before completing, or cancel the session.")
+        if phase4.modern(session) and session.questions.filter(opened_at__isnull=True).exists() and (action == "complete" or not confirm_end):
+            raise ValidationError("Pending questions remain. Play them or explicitly confirm early termination.")
         # Cancellation freezes a currently open question without revealing its key.
         if question and question.opened_at and not question.closed_at:
             write(question, closed_at=now)
@@ -295,11 +321,13 @@ def command(*, public_id, user, tenant_id, campus_id, version, action, participa
     automation.after_command(session, changes, target if action == "open_question" else question, action, now)
     write(session, **changes)
     QuiTizzService.audit("GAME_CONTROL", session, user, request, command=action, state_version=session.state_version,
-        participant=str(participant_id) if action == "remove" else None)
+        participant=str(participant_id) if action == "remove" else None,
+        question=str(question_id) if question_id else None, screen=screen, early_end_confirmed=bool(confirm_end),
+        pending_count=session.questions.filter(opened_at__isnull=True).count() if action in {"complete", "cancel"} else None)
     events = {"open_joining": "joining_opened", "close_joining": "joining_closed", "remove": "participant_removed",
               "start": "session_started", "next": "question_prepared", "open_question": "question_opened",
               "close_question": "question_closed", "reveal": "answer_revealed", "complete": "session_completed",
-              "cancel": "session_cancelled"}
+              "cancel": "session_cancelled", "select_question": "phase_changed", "show_screen": "phase_changed", "open_selected": "question_opened"}
     realtime.notify(session, events[action])
     if action == "remove":
         realtime.removed(session, participant)
@@ -389,6 +417,8 @@ def _presentation_state(session, question=None, *, counts=None):
         "server_now": timezone.now().isoformat(), "joining_open": session.joining_open,
         "position": session.current_position}
     result.update(phase_state(session))
+    if phase4.modern(session):
+        result.update(results_screen=session.results_screen, presentation_options=phase4.policy(session)["presentation"])
     result.update(counts if counts is not None else {"question_count": session.questions.count(),
         "participant_count": session.participants.filter(removed_at__isnull=True).count(),
         "answered_count": question.responses.count() if question else 0})
@@ -404,6 +434,16 @@ def _presentation_state(session, question=None, *, counts=None):
         players = ranked_participants(session) if session.status != "COMPLETED" else session.participants.filter(removed_at__isnull=True).order_by("final_rank")
         result["leaderboard"] = [{"rank": player.final_rank if session.status == "COMPLETED" else rank, "nickname": player.nickname, "score": player.total_score}
             for rank, player in enumerate(players[:5], 1)]
+        if phase4.modern(session):
+            options = phase4.policy(session)["presentation"]
+            if options["show_fastest"]:
+                result["fastest_five"] = phase4.fastest(question)
+            if not options["show_scores"] and session.status != "COMPLETED":
+                result.pop("leaderboard", None)
+    if session.status == "COMPLETED" and phase4.modern(session):
+        award = phase4.final_award(session)
+        if award:
+            result["fastest_correct_award"] = award
     return result
 
 
@@ -417,7 +457,8 @@ def _host_state(session):
         "position": session.current_position, "participant_count": len(participants), "participants": participants,
         "question_id": str(question.public_id) if question else None,
         "question_opened": bool(question and question.opened_at),
-        "automatic_available": FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=session.tenant_id)}
+        "automatic_available": FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=session.tenant_id),
+        **phase4.navigator(session)}
 
 
 def phase_state(session):

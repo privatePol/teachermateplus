@@ -9,8 +9,17 @@
   let joiningOpen = false;
   let latest = 0, pending = false, available = false;
   let requested = 0, rendered = 0, unavailable = false;
+  let liveState, reviewRequest = 0;
   function lockControls() {
     root.querySelectorAll("button").forEach((button) => { button.disabled = pending || !available; });
+    const select = byId("qt-next-question"), state = liveState;
+    if (select && state) {
+      select.disabled = pending || !available;
+      const row = state.navigator?.find((row) => row.id === select.value), terminal = ["COMPLETED", "CANCELLED"].includes(state.status);
+      byId("qt-select-next").disabled = pending || !available || terminal || !row?.can_select;
+      byId("qt-open-selected").disabled = pending || !available || terminal || !row?.can_select || state.playback_mode !== "MANUAL" || state.paused || !["LOBBY", "ANSWER_REVEALED", "QUESTION_CLOSED"].includes(state.status) || (state.status === "QUESTION_CLOSED" && state.question_opened);
+      byId("qt-review-question").disabled = pending || !available || !row?.can_review;
+    }
   }
   lockControls();
   function render(state, sequence) {
@@ -19,9 +28,17 @@
     // lifecycle versions reset them. Socket signals never supply a count.
     rendered = sequence;
     latest = state.version;
-    const changed = String(state.version) !== root.dataset.version;
+    liveState = state;
+    const changed = !available || String(state.version) !== root.dataset.version;
     root.dataset.version = String(state.version);
     presentation?.render(state);
+    const select = byId("qt-next-question");
+    if (select && state.navigator) {
+      const previous = select.value; select.replaceChildren();
+      state.navigator.forEach((row) => { const option = document.createElement("option"); option.value = row.id; option.textContent = `${row.position}. ${row.preview} · ${row.status}`; select.append(option); });
+      select.value = state.navigator.some((row) => row.id === previous) ? previous : state.upcoming_question || state.navigator.find((row) => row.can_select)?.id || state.navigator[0]?.id || "";
+      byId("qt-navigation-summary").textContent = `${state.completed_count} completed · ${state.pending_count} pending. Original question numbers remain unchanged.`;
+    }
     joiningOpen = Boolean(state.joining_open);
     const mode = byId("qt-playback-mode");
     if (mode) { mode.value = state.playback_mode || "MANUAL"; const auto = mode.querySelector('[value="AUTOMATIC"]'); if (auto) auto.disabled = !state.automatic_available; }
@@ -45,15 +62,21 @@
           if (state.status === "QUESTION_CLOSED") add(state.question_opened ? "reveal" : "open_question", state.question_opened ? "Reveal answer" : "Open Question");
           if (state.status === "QUESTION_OPEN") add("close_question", "Close Question");
           if (state.status === "ANSWER_REVEALED") {
-            if (state.position < state.question_count) add("next", "Next Question");
-            add("complete", "End / Complete");
+            if (!state.results_screen && (state.pending_count ?? state.question_count - state.position) > 0) add("next", "Next Question");
+            if (!state.results_screen || state.pending_count === 0) add("complete", "End / Complete");
+            if (state.results_screen) {
+              for (const [screen, label] of [["ANSWER", "Show Answer"], ["FASTEST_FIVE", "Show Fastest Five"], ["HIGHEST_SCORES", "Show Highest Scores"]]) {
+                if (state.playback_mode !== "MANUAL" || (screen === "FASTEST_FIVE" && !state.presentation_options.show_fastest) || (screen === "HIGHEST_SCORES" && !state.presentation_options.show_scores)) continue;
+                add("show_screen", label); commands.lastChild.dataset.screen = screen;
+              }
+            }
           }
         }
         if (state.paused) add("resume", "Resume");
         else if (state.playback_mode === "AUTOMATIC" && state.show_phase !== "NONE") add("pause", "Pause");
         if (state.playback_mode === "AUTOMATIC" && !state.paused) {
           if (["QUESTION_OPEN", "QUESTION_CLOSED"].includes(state.status) && state.question_opened) add("reveal_now", "Reveal Now");
-          if (state.status === "ANSWER_REVEALED" && state.position < state.question_count) add("next_now", "Next Now");
+          if (state.status === "ANSWER_REVEALED" && (state.pending_count ?? state.question_count - state.position) > 0) add("next_now", "Next Now");
         }
         add("set_mode", "Apply playback mode");
         add("end_challenge", "End Challenge");
@@ -104,7 +127,7 @@
       if (!response.ok || !response.headers.get("Content-Type")?.includes("application/json")) {
         if ([401, 403, 404].includes(response.status) || response.redirected || response.ok) {
           unavailable = true; available = false; lockControls();
-          root.querySelectorAll("#qt-joining, #qt-participants, #qt-presentation, details").forEach((element) => { element.hidden = true; });
+          root.querySelectorAll("#qt-joining, #qt-participants, #qt-presentation, #qt-navigator, details").forEach((element) => { element.hidden = true; });
           presentation?.clear(); audio?.clear();
           transport.stop(); byId("qt-connection").textContent = "Session unavailable.";
         }
@@ -114,6 +137,24 @@
     } catch (_) { /* Transport will recover. */ }
   }
   root.addEventListener("click", async (event) => {
+    if (event.target.id === "qt-review-question") {
+      const select = byId("qt-next-question"), id = select.value, sequence = ++reviewRequest, panel = byId("qt-review");
+      if (!available || !liveState.navigator?.some((row) => row.id === id && row.can_review)) return;
+      panel.hidden = false; panel.textContent = "Loading historical review…";
+      try {
+        const target = root.dataset.reviewUrl.replace(/review\/[^/]+\/$/, `review/${encodeURIComponent(id)}/`);
+        const response = await fetch(target, {credentials: "same-origin", cache: "no-store"});
+        if (!response.ok) throw new Error();
+        const review = await response.json();
+        if (unavailable || sequence !== reviewRequest || select.value !== id) return;
+        panel.replaceChildren();
+        const title = document.createElement("h3"); title.textContent = `Historical review only · Question ${review.question.position}`; panel.append(title);
+        const content = document.createElement("p"); content.textContent = review.question.prompt; panel.append(content);
+        Object.entries(review.question.choices).forEach(([letter, choice]) => { const p = document.createElement("p"); p.textContent = `${letter}. ${choice}`; panel.append(p); });
+        const result = document.createElement("p"); result.textContent = `Correct: ${review.correct_choice} · ${review.fastest_five.map((row) => `${row.rank}. ${row.nickname}: ${row.elapsed_ms} ms`).join(" · ") || "No correct responses"}`; panel.append(result);
+      } catch (_) { if (!unavailable && sequence === reviewRequest && select.value === id) panel.textContent = "Historical review unavailable. Recover the live session before retrying."; }
+      return;
+    }
     if (event.target.id !== "qt-copy-link" || !available || !joiningOpen) return;
     const version = latest, status = byId("qt-copy-status");
     try {
@@ -135,12 +176,14 @@
     } catch (_) { if (status) status.textContent = "Join link unavailable. Recover the current joining state."; }
   });
   const transport = window.QuiTizzRealtime({url: root.dataset.socketUrl, recover: refresh, indicator: byId("qt-connection")});
+  root.addEventListener("change", (event) => { if (event.target.id === "qt-next-question") { reviewRequest++; byId("qt-review").hidden = true; lockControls(); } });
   root.addEventListener("submit", async (event) => {
     const form = event.target;
     if (!form.matches("form") || !event.submitter) return;
     event.preventDefault();
     if (pending || !available) return;
     const data = new FormData(form, event.submitter);
+    if (event.submitter.dataset?.screen) data.append("screen", event.submitter.dataset.screen);
     pending = true; root.querySelectorAll("button").forEach((button) => { button.disabled = true; });
     try {
       const response = await fetch(form.getAttribute("action"), {method: "POST", credentials: "same-origin", body: data});

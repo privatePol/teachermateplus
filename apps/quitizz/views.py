@@ -13,7 +13,7 @@ from reportlab.graphics.shapes import Drawing
 
 from . import gameplay
 from .access import require_access
-from .forms import QuestionForm, QuiTizzForm
+from .forms import QuestionForm, QuiTizzForm, LaunchPresentationForm
 from .models import QuiTizzSession
 from .services import CONTENT_FIELDS, QuiTizzService, StaleRevision
 from apps.core.services.features import FeatureSettingsService
@@ -114,10 +114,15 @@ def archive(request, public_id):
 @access("host")
 def launch(request, public_id):
     obj = owned(request, public_id)
+    options = LaunchPresentationForm(request.POST if request.method == "POST" and request.POST.get("presentation_options") == "1" else None)
     if request.method == "POST":
-        session = QuiTizzService.launch(**mutation_args(request, public_id), playback_mode=request.POST.get("playback_mode", "MANUAL"))
+        if options.is_bound and not options.is_valid():
+            return render(request, "quitizz/launch.html", {"quiz": obj, "questions": obj.questions.all(), "presentation_form": options,
+                "automatic_available": FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=request.quitizz_scope["tenant_id"])}, status=400)
+        session = QuiTizzService.launch(**mutation_args(request, public_id), playback_mode=request.POST.get("playback_mode", "MANUAL"),
+            presentation=options.cleaned_data if options.is_bound else None)
         return redirect("quitizz:host", public_id=session.public_id)
-    return render(request, "quitizz/launch.html", {"quiz": obj, "questions": obj.questions.all(),
+    return render(request, "quitizz/launch.html", {"quiz": obj, "questions": obj.questions.all(), "presentation_form": options,
         "automatic_available": FeatureSettingsService.is_quitizz_automatic_enabled(tenant_id=request.quitizz_scope["tenant_id"])})
 
 
@@ -134,7 +139,7 @@ def host(request, public_id):
     state = gameplay.host_state(session)
     return render(request, "quitizz/host.html", {"session": session, "questions": session.questions.all(),
         "participants": state["participants"], "participant_count": state["participant_count"],
-        "answered_count": state["answered_count"], "automatic_available": state["automatic_available"]})
+        "answered_count": state["answered_count"], "automatic_available": state["automatic_available"], "pending_count": state["pending_count"]})
 
 
 @never_cache
@@ -142,7 +147,8 @@ def host(request, public_id):
 @access("host")
 def host_command(request, public_id):
     gameplay.command(**request.quitizz_scope, public_id=public_id, version=request.POST.get("version"),
-        action=request.POST.get("action"), participant_id=request.POST.get("participant"), mode=request.POST.get("playback_mode"), request=request)
+        action=request.POST.get("action"), participant_id=request.POST.get("participant"), mode=request.POST.get("playback_mode"),
+        question_id=request.POST.get("question"), screen=request.POST.get("screen"), confirm_end=request.POST.get("confirm_end") == "1", request=request)
     return redirect("quitizz:host", public_id=public_id)
 
 
@@ -164,6 +170,21 @@ def host_state(request, public_id):
 def projector(request, public_id):
     session = owned_session(request, public_id)
     return render(request, "quitizz/projector.html", {"session": session})
+
+
+@never_cache
+@require_http_methods(["GET"])
+@access("host")
+def host_review(request, public_id, question_id):
+    from .phase4 import fastest
+    session = owned_session(request, public_id)
+    gameplay.available(session)
+    question = get_object_or_404(session.questions, public_id=question_id, revealed_at__isnull=False)
+    counts = dict(question.responses.values("selected_choice").annotate(total=Count("pk")).values_list("selected_choice", "total"))
+    return JsonResponse({"historical": True, "question": {"position": question.position, "prompt": question.prompt,
+        "choices": {letter: getattr(question, f"choice_{letter.lower()}") for letter in "ABCD"}},
+        "correct_choice": question.correct_choice, "distribution": {letter: counts.get(letter, 0) for letter in "ABCD"},
+        "fastest_five": fastest(question)})
 
 
 @never_cache

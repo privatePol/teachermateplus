@@ -611,5 +611,10 @@ class GameplayMigrationTests(TransactionTestCase):
             self.assertIsNone(preserved.next_transition_at); self.assertIsNone(preserved.paused_at)
             for row in latest_apps.get_model("quitizz", "QuiTizzSessionQuestion").objects.filter(session_id=session.pk):
                 self.assertEqual(row.active_elapsed_us, 0); self.assertIsNone(row.active_started_at)
+            phase4 = [("quitizz", "0006_phase4_presentation_navigation")]
+            executor = MigrationExecutor(connection); executor.migrate(phase4)
+            current = executor.loader.project_state(phase4).apps.get_model("quitizz", "QuiTizzSession").objects.get(pk=session.pk)
+            self.assertEqual((current.results_screen, current.upcoming_question_id, current.automation_policy_snapshot), ("ANSWER", None, {}))
+            self.assertEqual(current.current_position, 0)
         finally:
-            MigrationExecutor(connection).migrate([("quitizz", "0005_automatic_game_show")])
+            MigrationExecutor(connection).migrate([("quitizz", "0006_phase4_presentation_navigation")])

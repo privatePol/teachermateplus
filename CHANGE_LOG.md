@@ -1,3 +1,10 @@
+## QuiTizz Phase 4 - 2026-10-24 (implementation; uncommitted)
+
+- Added post-reveal Fastest Five from persisted active milliseconds, configurable immutable version-2 presentation defaults and optional exact-average Fastest Correct recognition without changing scoring or the overall champion.
+- Manual result screens persist for awarding; Automatic sequences enabled Answer/Fastest Five/Highest Scores through the existing database scheduler. Legacy sessions retain 7-second results.
+- Host Question Navigator selects never-opened questions without reordering snapshots, opens explicitly in Manual, and reviews completed results separately. Pending questions remain playable; early termination requires confirmation and audit evidence.
+- Additive migration `0006_phase4_presentation_navigation` supplies nullable upcoming reference, results selector/constraint and response lookup index; persistent databases were not migrated. Validation and unresolved MariaDB/Redis/browser gates are recorded in HANDOFF and `docs/QUITIZZ_PHASE4_REVIEW.md`.
+
 ## QuiTizz CSS accessibility remediation - 2026-10-11 (uncommitted)
 
 - Corrected player connection-status ID targeting and the important Bootstrap muted-color cascade; strengthened host command keyboard focus with a winning scoped selector and gold outline/dark keyline, including gold pause buttons.
