@@ -1,5 +1,10 @@
 # TEACHERMATEPLUS_CONTEXT.md
 
+## Final Grade Summary integrity (2026-10-25)
+- Submitted summary GETs use saved final grades and skip draft period refreshes, including during correction access. Draft final previews calculate in memory from stored period grades; score saving still updates saved grades immediately.
+- `recompute_final_grades_for_students(is_submitted=None)` protects existing submitted rows. Explicit lifecycle states remain supported for submission/correction and draft writes; authorized reopening clears flags through governance.
+- No formulas, templates, permissions, or schema changed. No migrations are required. Historical data is not repaired by this change.
+
 ## 1. What TeacherMate+ Is
 TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance platform designed to centralize class grading workflows and reduce operational risk from disconnected grade files.
 

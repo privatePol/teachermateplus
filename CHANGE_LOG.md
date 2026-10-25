@@ -1,5 +1,10 @@
 # CHANGE_LOG.md
 
+## 2026-10-25 — Final Grade Summary integrity
+- Submitted faculty summaries display saved official final grades without recalculating or resetting submission state. Submitted summaries also skip draft refreshes during correction access.
+- Draft final previews calculate without saving final rows; ordinary score saves, submission, corrections, and reopening retain their explicit writes.
+- Final recomputation with no lifecycle-state argument preserves existing submitted results. No migrations are required.
+
 All notable changes to **TeacherMate+ V1** should be documented in this file.
 
 This project follows a practical changelog format inspired by Keep a Changelog.

@@ -189,7 +189,7 @@ FACULTY_HELP_SECTIONS = [
             {
                 "code": "summary",
                 "title": "Summary of Periodic Grades",
-                "purpose": "Shows activity scores, category averages, component totals, and the computed period grade.",
+                "purpose": "Shows activity scores, category averages, component totals, and the computed period grade. Submitted summaries display saved official grades without changing them; draft final previews do not save final grades.",
                 "how_to_open": ["Click My Classes.", "Open the accepted class.", "Choose the grading period.", "Click Summary.", "Review Period Snapshot first, then review the grade table before submission."],
                 "screenshot": "faculty_helpguide/3_summary.png",
                 "check_first": ["Check the highest possible score row.", "Look for blanks, unexpected zeros, and wrong student statuses.", "Confirm all expected activities appear."],
