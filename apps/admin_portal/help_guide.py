@@ -890,6 +890,7 @@ ADMIN_HELP_SECTIONS = [
                 ),
                 "steps": [
                     "Open the report or monitor that answers the operational question.",
+                    "Faculty Final Clearance generates a Faculty Grades Completion Report in the Faculty Portal. It supports the official Faculty Clearance Form and does not approve clearance. Verify its existing Reference No. and Verification Code in the authorized campus scope. The PDF uses a manual Name and Signature line; stored-signature options for other documents are unchanged.",
                     (
                         "For Grading Analytics and Grade Distribution Monitor, TeacherMate+ starts with the "
                         "faculty members you supervise, then includes their accepted teaching assignments. "

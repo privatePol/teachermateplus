@@ -1,3 +1,10 @@
+## 2026-10-25 - Faculty Grades Completion Report presentation
+
+- The Faculty Final Clearance PDF is now titled Faculty Grades Completion Report and explicitly serves as a supporting attachment to the official Faculty Clearance Form, without granting clearance approval.
+- Simplified the faculty overview and completion explanation, centered the generated timestamp, displayed COMPLETE/INCOMPLETE without changing stored statuses, and retained four wrapped course/status columns. Eligible counts and notes remain in saved snapshots and diagnostic pages.
+- Replaced the stored-signature section with a compact manual Name and Signature line. This report no longer decrypts stored signatures or logs signature embedding. Stored credentials, feature settings and other documents' signature behavior remain unchanged.
+- Retained all report identifiers, verification destinations, QR payloads, completion rules and access controls. Verification and the manual signing area paginate together. No new migration is required.
+
 ## 2026-10-25 - Final Grade Summary integrity staging integration
 
 - Integrated the approved grade-integrity correction from `56a370bea4eda9250f0dd55b8e058d208182a6e1` onto staging baseline `37a05e3438394200fb6a09ee87d26d6a29844217`.

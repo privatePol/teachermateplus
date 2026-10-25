@@ -52,7 +52,7 @@ from apps.grading.explanations import GradeExplanationService
 from apps.notifications.models import FacultyMemo, FacultyReminder, SubmissionNonComplianceNotice
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
-from apps.rbac.models import Permission, Role, RolePermission, UserRole
+from apps.rbac.models import Permission, Role, RolePermission, UserPermission, UserRole
 from apps.students.models import Student
 from apps.grading.services import (
     FacultyGradingService,
@@ -5824,6 +5824,48 @@ class FacultyAssignmentAcceptanceTests(TestCase):
                 campus=self.campus,
             ).exists()
         )
+
+    def test_completion_report_generation_requires_authentication(self):
+        response = self.client.post(reverse(
+            "faculty_portal:period_final_clearance",
+            kwargs={"offering_id": self.offering.id, "period_id": self.final.id},
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(FacultyFinalClearanceReport.objects.exists())
+
+    def test_completion_report_generation_respects_direct_deny(self):
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.save(update_fields=["response_status", "accepted_at", "updated_at"])
+        self._complete_final_clearance_for_offering()
+        self.client.force_login(self.faculty_user)
+        for tenant, campus in ((self.tenant, self.campus), (self.tenant, None), (None, None)):
+            with self.subTest(tenant=tenant, campus=campus):
+                deny = UserPermission.objects.create(
+                    user=self.faculty_user, permission=Permission.objects.get(code="faculty_portal.access"),
+                    tenant=tenant, campus=campus, grant_type=UserPermission.GrantType.DENY,
+                )
+                response = self.client.post(reverse(
+                    "faculty_portal:period_final_clearance",
+                    kwargs={"offering_id": self.offering.id, "period_id": self.final.id},
+                ))
+                self.assertEqual(response.status_code, 403)
+                self.assertFalse(FacultyFinalClearanceReport.objects.exists())
+                deny.delete()
+
+    def test_completion_report_generation_rejects_another_facultys_assignment(self):
+        other_faculty = User.objects.create_user(username="completion_other_faculty", email="completion_other@example.test")
+        self.assignment.faculty_user = other_faculty
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.save(update_fields=["faculty_user", "response_status", "accepted_at", "updated_at"])
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(reverse(
+            "faculty_portal:period_final_clearance",
+            kwargs={"offering_id": self.offering.id, "period_id": self.final.id},
+        ))
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(FacultyFinalClearanceReport.objects.exists())
 
     def test_period_submit_redirects_to_periods_overview_after_success(self):
         student = Student.objects.create(

@@ -5506,7 +5506,7 @@ class FacultyFinalClearanceQrTests(TestCase):
         self.assertIn("Reference No: FCR-TEST-001", value)
         self.assertIn("Verification Code: ABCDEF1234567890", value)
 
-    def test_final_clearance_pdf_logs_signature_usage_when_enabled(self):
+    def test_completion_pdf_keeps_stored_signature_unused_even_when_enabled(self):
         SystemSettingService.set(
             FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
             True,
@@ -5521,13 +5521,15 @@ class FacultyFinalClearanceQrTests(TestCase):
         )
         buffer = BytesIO()
         Image.new("RGBA", (180, 60), (40, 80, 140, 255)).save(buffer, format="PNG")
-        UserSignatureService.store_signature(
+        credential = UserSignatureService.store_signature(
             user=self.user,
             uploaded_file=SimpleUploadedFile("clearance-signature.png", buffer.getvalue(), content_type="image/png"),
             actor=self.user,
         )
 
-        pdf_bytes = FacultyFinalClearanceReportService.build_pdf_bytes(report_obj=self.report_obj)
+        with patch.object(UserSignatureService, "decrypt_signature_bytes") as decrypt_signature:
+            pdf_bytes = FacultyFinalClearanceReportService.build_pdf_bytes(report_obj=self.report_obj)
+        decrypt_signature.assert_not_called()
 
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertEqual(
@@ -5535,8 +5537,13 @@ class FacultyFinalClearanceQrTests(TestCase):
                 document_type=UserSignatureUsageLog.DocumentType.FINAL_CLEARANCE,
                 document_reference="FCR-TEST-001",
             ).count(),
-            1,
+            0,
         )
+        credential.refresh_from_db()
+        self.assertTrue(credential.has_signature)
+        self.assertIsNone(credential.last_used_at)
+        self.assertTrue(FeatureSettingsService.is_user_signatures_enabled(tenant_id=self.tenant.id))
+        self.assertTrue(FeatureSettingsService.is_user_signature_final_clearance_enabled(tenant_id=self.tenant.id))
 
 
 class CompletionGraceWindowTests(TestCase):

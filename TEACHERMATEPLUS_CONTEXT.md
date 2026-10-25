@@ -1,3 +1,11 @@
+## Faculty Grades Completion Report (2026-10-25)
+
+The existing Faculty Final Clearance route now prints a Faculty Grades Completion Report: a supporting attachment to the official Faculty Clearance Form, not clearance approval. The PDF shows a headerless Faculty Overview, display-only Overall Completion (COMPLETE/INCOMPLETE), and Course / Section / Final Submission / Completion Status columns. Eligible counts and diagnostic notes remain in stored snapshots and previews. Existing UI route names and internal CLEARED/NOT_CLEARED values are retained.
+
+The PDF always provides a manual Name and Signature line. It does not embed or decrypt a stored signature, update its last-used timestamp, or log signature embedding. Existing signature credentials, global/per-document settings and other reports are preserved; the legacy Final Clearance signature setting does not enable embedding in this supporting attachment. Faculty/Admin guides explain this exception.
+
+The generated timestamp is centered. Wrapped cells keep normal text sizes, the five-course layout targets one A4 portrait page, larger lists repeat table headers, and verification plus the manual signing area move together. Existing FCR references, verification codes, UUIDs, QR payloads/destinations, record creation/download audits, completion evaluator, eligibility, ownership, authorization and lifecycle behavior are unchanged. No schema change or normal-database migration is needed. Earlier entries describing this PDF as official clearance or as embedding a stored signature are superseded by this presentation contract.
+
 ## Final Grade Summary integrity staging integration (2026-10-25)
 
 - Staging integration baseline: `37a05e3438394200fb6a09ee87d26d6a29844217`; approved fix: `56a370bea4eda9250f0dd55b8e058d208182a6e1`.
