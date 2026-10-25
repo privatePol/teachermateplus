@@ -1,3 +1,10 @@
+## Final Grade Summary integrity staging integration (2026-10-25)
+
+- Staging integration baseline: `37a05e3438394200fb6a09ee87d26d6a29844217`; approved fix: `56a370bea4eda9250f0dd55b8e058d208182a6e1`.
+- Submitted summary GETs use saved official final grades and skip draft period refreshes, including during correction access. Draft final previews compute in memory from stored period grades using the existing strategy; draft score saving continues to update converted and calculated grades.
+- `recompute_final_grades_for_students(is_submitted=None)` preserves existing submitted results. Explicit lifecycle states remain supported for submission/correction and draft writes; authorized reopening clears flags through governance.
+- Existing calculation formulas, tenant/campus scope, RBAC, audits and lifecycle locks are retained. Academic Insights, Quiz iT Izz Phase 4, Faculty Attendance/DTR, Grade Distribution Monitor and Departmental Exam source remain in the staging baseline. No new migrations; historical data is not repaired.
+
 ## 2026-10-17 - Approved internal Grade Distribution monitoring policy
 
 This entry supersedes the monitor-specific suppression/frozen-release policy described in historical entries below. Authorized academic heads may view aggregate saved Gradebook analytics for all eligible supervised classes, including populations of 1–4 graded students and overlapping/status-selected cohorts. Custom inclusive Decimal ranges 0–100 (default 97–100) compute live saved Period Grade counts, graded denominator and half-up percentages. A zero qualifying count remains 0; no saved values is Unavailable. Global numeric sorting precedes stable pagination; all eligible saved physical-period classes remain visible.

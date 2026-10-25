@@ -2003,6 +2003,10 @@ class CorrectionWorkflowTests(TestCase):
     def test_final_approval_recomputes_average_activity_detail_mode(self):
         # This recomputation setup is deliberately editable; the locked
         # post-deadline fixture is enabled only for the correction request.
+        # This case tests the participation bucket alone, rather than averaging
+        # it with the fixture's existing 100%-weight quiz bucket.
+        self.quiz_subcomponent.is_active = False
+        self.quiz_subcomponent.save(update_fields=["is_active", "updated_at"])
         self.correction_lock.is_locked = False
         self.correction_lock.save(update_fields=["is_locked", "updated_at"])
         participation = GradingTemplateSubcomponent.objects.create(

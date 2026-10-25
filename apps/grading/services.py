@@ -7011,7 +7011,7 @@ class FacultyGradingService:
         audit_reason: str | None = "FINAL_GRADE_RECOMPUTE",
         audit_portal: str = "SYSTEM",
         audit_actor=None,
-        is_submitted: bool = False,
+        is_submitted: bool | None = None,
     ):
         template = template or cls.resolve_template_for_offering(offering)
         normalized_student_ids = None
@@ -7051,6 +7051,12 @@ class FacultyGradingService:
         actor = audit_actor or user
         for enrollment in enrollments:
             student_id = enrollment.student_id
+            final_row = existing_final_grade_map.get(student_id)
+            # An omitted lifecycle transition cannot rewrite a submitted result.
+            # Submission/correction and draft writes pass their state explicitly.
+            if is_submitted is None and final_row is not None and final_row.is_submitted:
+                continue
+            target_is_submitted = bool(is_submitted)
             if enrollment.enrollment_status in Enrollment.NON_ACTIVE_GRADING_STATUSES:
                 final_value = None
             else:
@@ -7061,11 +7067,10 @@ class FacultyGradingService:
                     period_values_by_period_id=student_period_values,
                     final_grade_strategy=final_grade_strategy,
                 )
-            final_row = existing_final_grade_map.get(student_id)
             before_snapshot = cls._final_grade_audit_snapshot(final_row)
             has_changed = final_row is None or (
                 final_row.final_grade != final_value
-                or final_row.is_submitted != is_submitted
+                or final_row.is_submitted != target_is_submitted
             )
             if has_changed:
                 final_row, _created = StudentFinalGrade.objects.update_or_create(
@@ -7076,7 +7081,7 @@ class FacultyGradingService:
                         "campus_id": offering.campus_id,
                         "final_grade": final_value,
                         "computed_by_user": user,
-                        "is_submitted": is_submitted,
+                        "is_submitted": target_is_submitted,
                     },
                 )
                 existing_final_grade_map[student_id] = final_row
@@ -7132,7 +7137,7 @@ class FacultyGradingService:
         audit_portal: str = "SYSTEM",
         audit_actor=None,
         period_is_finalized: bool = False,
-        final_is_submitted: bool = False,
+        final_is_submitted: bool | None = False,
     ):
         return cls.recompute_period_summary(
             user=user,
@@ -7159,7 +7164,7 @@ class FacultyGradingService:
         audit_portal: str = "SYSTEM",
         audit_actor=None,
         period_is_finalized: bool = False,
-        final_is_submitted: bool = False,
+        final_is_submitted: bool | None = False,
     ):
         GradingGovernanceService.assert_summary_compute_allowed(
             offering=offering,

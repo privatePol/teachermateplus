@@ -1,3 +1,9 @@
+## 2026-10-25 - Final Grade Summary integrity staging integration
+
+- Integrated the approved grade-integrity correction from `56a370bea4eda9250f0dd55b8e058d208182a6e1` onto staging baseline `37a05e3438394200fb6a09ee87d26d6a29844217`.
+- Submitted faculty summaries display saved official final grades and skip draft refreshes, including during correction access. Viewing cannot reset submission state; draft final previews calculate without saving final rows.
+- Omitted final-recomputation lifecycle state preserves submitted results. Explicit score saves, submission, authorized corrections, reopening and resubmission retain their existing writes and formulas. No schema changes or historical-data repair.
+
 ## 2026-10-17 - Internal Grade Distribution numeric analytics
 
 - Applied the approved internal oversight policy only to Grade Distribution Monitor: authorized small classes, status subsets and custom inclusive decimal ranges now show live saved counts, denominators, percentages, averages, extrema and aggregate frequencies. Legitimate zero and unavailable source values are distinct.

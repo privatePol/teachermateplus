@@ -5692,7 +5692,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
         }
 
     stored_summary_payload = _stored_period_summary()
-    if state["is_editable"]:
+    if state["is_editable"] and not state["is_submitted"]:
         missing_student_ids = set(stored_summary_payload["missing_student_ids"])
         recompute_student_ids = set(missing_student_ids)
         if _period_uses_average_activity_details(period):
@@ -5706,6 +5706,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
                 template_period=period,
                 student_ids=recompute_student_ids,
                 audit_portal="FACULTY",
+                final_is_submitted=None,
             )
             AuditService.log_event(
                 action="COMPUTE",
@@ -5798,19 +5799,30 @@ def period_summary_view(request, offering_id: int, period_id: int):
                 deadline_countdown_label = f"Past due by {hours} hour{'s' if hours != 1 else ''}"
             else:
                 deadline_countdown_label = "Past due today"
-    if official_grade_release["is_final_period_view"] or official_grade_release["show_final_grade"]:
-        FacultyGradingService.recompute_final_grades_from_stored_periods(
-            user=request.user,
-            offering=offering,
-            template=template,
-        )
-
     period_grade_header_label = _tabulation_period_grade_column_label(period)
 
     final_grade_map = {
         row.student_id: row.final_grade
         for row in StudentFinalGrade.objects.filter(offering_id=offering.id)
     }
+    if official_grade_release["is_final_period_view"] and not state["is_submitted"]:
+        # Draft previews use the current formula without writing official grades.
+        draft_period_values = defaultdict(dict)
+        for grade in StudentPeriodGrade.objects.filter(offering_id=offering.id):
+            draft_period_values[grade.student_id][grade.template_period_id] = grade.period_grade
+        final_strategy = FacultyGradingService.resolve_final_grade_strategy(offering, template=template)
+        for row in summary["rows"]:
+            student_id = row["student"].id
+            final_grade_map[student_id] = (
+                None
+                if row["enrollment_status"] in Enrollment.NON_ACTIVE_GRADING_STATUSES
+                else FacultyGradingService.compute_final_grade_from_period_values(
+                    offering=offering,
+                    template=template,
+                    period_values_by_period_id=draft_period_values.get(student_id, {}),
+                    final_grade_strategy=final_strategy,
+                )
+            )
     prior_period_headers = []
     prior_period_grade_map = {}
     if official_grade_release["is_final_period_view"]:
