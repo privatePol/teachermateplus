@@ -1,3 +1,9 @@
+## QuiTizz Thursday readiness integration (2026-10-28)
+
+Approved hotfix dc4bc7747a038dcbc46e6aa84a5e3c2401fe7898 is integrated locally onto production-compatible baseline 283106b789977315528c8fe00e2e39995f329181. Player answer selection is confirmed only by the server or private recovery; post-commit WebSocket notifications remain bounded and notification-only. Cancellation retains saved responses and audit history, and a new game requires a new session and rejoining.
+
+The projector displays the signed joining QR with black modules, opaque white background, four-module quiet zone and responsive sizing. Fastest Five retains authoritative per-question rank 1 as Question Winner, including repeated wins by the same participant; physical prizes remain a manual activity. No schema or migration change. Browser, camera, real Redis and MariaDB/InnoDB acceptance remain separate.
+
 ## Faculty Grades Completion Report (2026-10-25)
 
 The existing Faculty Final Clearance route now prints a Faculty Grades Completion Report: a supporting attachment to the official Faculty Clearance Form, not clearance approval. The PDF shows a headerless Faculty Overview, display-only Overall Completion (COMPLETE/INCOMPLETE), and Course / Section / Final Submission / Completion Status columns. Eligible counts and diagnostic notes remain in stored snapshots and previews. Existing UI route names and internal CLEARED/NOT_CLEARED values are retained.

@@ -27,7 +27,7 @@ function harness(reduced = false) {
     setInterval(fn) { const id = ++next; intervals.set(id, fn); return id; }, clearInterval(id) { intervals.delete(id); }};
   const requests = []; let transport;
   window.QuiTizzRealtime = (options) => { transport = {...options, refresh: options.recover, stop() { this.stopped = true; }}; return transport; };
-  const context = vm.createContext({window, document, Date, JSON, URLSearchParams, fetch: (url) => new Promise((resolve) => requests.push({url, resolve}))});
+  const context = vm.createContext({window, document, Date, JSON, URLSearchParams, fetch: (url, options) => new Promise((resolve, reject) => requests.push({url, options, resolve, reject}))});
   const load = (name) => vm.runInContext(source(name), context);
   load("quitizz_presentation");
   const add = (id, tag) => { const element = new Element(tag); elements.set(id, element); return element; };
@@ -165,19 +165,151 @@ test("projector retains HTTP answer-count ordering and resets on next lifecycle"
 });
 function player(reduced = false) {
   const h = harness(reduced);
-  for (const id of ["qt-play", "qt-message", "qt-error", "qt-join", "qt-question", "qt-answers", "qt-feedback", "qt-connection", "qt-prompt", "qt-countdown", "qt-timer-block", "qt-game-title", "qt-nickname", "qt-result", "qt-result-score"]) h.add(id);
+  for (const id of ["qt-play", "qt-message", "qt-error", "qt-join", "qt-question", "qt-answers", "qt-feedback", "qt-connection", "qt-prompt", "qt-countdown", "qt-timer-block", "qt-game-title", "qt-nickname", "qt-result", "qt-result-score", "qt-retry-answer"]) h.add(id);
   h.elements.get("qt-play").dataset = {stateUrl: "/state/", answerUrl: "/answer/"};
   h.elements.get("qt-question").hidden = true;
   h.load("quitizz_play");
   return h;
 }
+
+const answerOpen = (extra = {}) => state({status: "QUESTION_OPEN", nickname: "You", can_answer: true,
+  question: {...question(), id: "q1"}, ...extra});
+const ackB = {accepted: true, question: "q1", selected_choice: "B"};
+
+test("answer tap immediately marks only the chosen neutral option and announces pending", async () => {
+  const h = player(); h.reply(answerOpen()); await h.flush();
+  const buttons = h.elements.get("qt-answers").children, click = buttons[1].listeners.click();
+  assert.equal(h.elements.get("qt-message").textContent, "Submitting...");
+  assert.equal(buttons[1].attributes["aria-pressed"], "true");
+  assert.match(buttons[1].textContent, /B\. Beta ✓/); assert.match(buttons[1].className, /qt-selected-answer/);
+  assert.ok(buttons.every((button) => button.disabled));
+  await buttons[0].listeners.click(); assert.equal(h.requests.length, 1);
+  assert.doesNotMatch(h.elements.get("qt-message").textContent, /Correct|Incorrect|recorded/);
+  h.reply(ackB); await h.flush();
+  assert.equal(h.elements.get("qt-message").textContent, "Answer B recorded ✓");
+  h.reply(answerOpen({accepted: true, selected_choice: "B", can_answer: false})); await click;
+  assert.equal(h.elements.get("qt-feedback").hidden, true); assert.equal(h.timers.size, 0);
+});
+
+test("confirmed answer survives stale same-version GETs and refresh reconstructs its own choice", async () => {
+  const h = player(); h.reply(answerOpen()); await h.flush();
+  const buttons = h.elements.get("qt-answers").children, click = buttons[1].listeners.click();
+  h.reply(ackB); await h.flush(); h.reply(answerOpen({accepted: false})); await click;
+  assert.ok(buttons.every((button) => button.disabled));
+  assert.equal(h.elements.get("qt-message").textContent, "Answer B recorded ✓");
+  const fresh = player(); fresh.reply(answerOpen({accepted: true, selected_choice: "B", can_answer: false})); await fresh.flush();
+  assert.equal(fresh.elements.get("qt-answers").children[1].attributes["aria-pressed"], "true");
+  assert.equal(fresh.elements.get("qt-message").textContent, "Answer B recorded ✓");
+});
+
+for (const bad of [{}, {accepted: false}, {...ackB, question: "other"}, {...ackB, selected_choice: "A"}, {accepted: true}]) {
+  test(`malformed HTTP-200 acknowledgment cannot confirm selection: ${JSON.stringify(bad)}`, async () => {
+    const h = player(); h.reply(answerOpen()); await h.flush();
+    const click = h.elements.get("qt-answers").children[1].listeners.click();
+    h.reply(bad); await h.flush(); assert.doesNotMatch(h.elements.get("qt-message").textContent, /recorded/);
+    h.reply(answerOpen({accepted: false})); await click;
+    assert.match(h.elements.get("qt-message").textContent, /not confirmed/);
+    assert.equal(h.elements.get("qt-retry-answer").disabled, false);
+    assert.ok(h.elements.get("qt-answers").children.every((button) => button.disabled));
+  });
+}
+
+test("lost ACK recovers a committed answer without sending a duplicate", async () => {
+  const h = player(); h.reply(answerOpen()); await h.flush();
+  const click = h.elements.get("qt-answers").children[1].listeners.click();
+  h.requests.shift().reject(Error("network lost")); await h.flush();
+  assert.equal(h.requests[0].url, "/state/");
+  h.reply(answerOpen({accepted: true, selected_choice: "B", can_answer: false})); await click;
+  assert.equal(h.elements.get("qt-message").textContent, "Answer B recorded ✓");
+  assert.equal(h.requests.length, 0); assert.equal(h.elements.get("qt-retry-answer").hidden, true);
+});
+
+test("invalid JSON or a redirected HTTP-200 answer cannot claim acceptance", async () => {
+  for (const response of [{ok:true,json:async()=>{throw Error("HTML");}}, {ok:true,redirected:true,json:async()=>ackB}]) {
+    const h=player();h.reply(answerOpen());await h.flush();
+    const click=h.elements.get("qt-answers").children[1].listeners.click();
+    h.requests.shift().resolve(response);await h.flush();
+    assert.doesNotMatch(h.elements.get("qt-message").textContent,/recorded/);
+    h.reply(answerOpen({accepted:false}));await click;
+    assert.equal(h.elements.get("qt-retry-answer").disabled,false);
+  }
+});
+
+test("malformed recovery cannot remove a verified recorded choice", async () => {
+  const h=player();h.reply(answerOpen({accepted:true,selected_choice:"B",can_answer:false}));await h.flush();
+  const recover=h.transport.recover();h.reply({});await recover;
+  assert.equal(h.elements.get("qt-message").textContent,"Answer B recorded ✓");
+  assert.ok(h.elements.get("qt-answers").children.every((button)=>button.disabled));
+});
+
+test("timeout then failed recovery keeps choices locked until recovery permits a same-choice retry", async () => {
+  const h = player(); h.reply(answerOpen()); await h.flush();
+  const click = h.elements.get("qt-answers").children[1].listeners.click();
+  const original = h.requests.shift();
+  const [timerId, timer] = [...h.timers].find(([, timer]) => timer.delay === 10000); h.timers.delete(timerId); timer.fn(); await h.flush();
+  h.requests.shift().reject(Error("state unavailable")); await click;
+  assert.equal(h.elements.get("qt-retry-answer").disabled, true);
+  assert.ok(h.elements.get("qt-answers").children.every((button) => button.disabled));
+  const recover = h.transport.recover(); h.reply(answerOpen({accepted: false})); await recover;
+  const retry = h.elements.get("qt-retry-answer").listeners.click();
+  assert.equal(h.requests[0].options.body.get("choice"), "B");
+  assert.equal(h.requests[0].options.body.get("question"), "q1");
+  original.resolve({ok:true,json:async()=>ackB}); await h.flush(); // Abandoned request cannot unlock anything.
+  h.reply(ackB); await h.flush(); h.reply(answerOpen({accepted:true,selected_choice:"B",can_answer:false})); await retry;
+  assert.equal(h.elements.get("qt-message").textContent, "Answer B recorded ✓"); assert.equal(h.timers.size, 0);
+});
+
+test("closed question recovery offers no retry and no false success", async () => {
+  const h = player(); h.reply(answerOpen()); await h.flush();
+  const click = h.elements.get("qt-answers").children[1].listeners.click();
+  h.reply({error:"The question is closed."},400); await h.flush();
+  h.reply(answerOpen({status:"QUESTION_CLOSED",accepted:false,can_answer:false})); await click;
+  assert.match(h.elements.get("qt-message").textContent, /not confirmed|closed/);
+  assert.doesNotMatch(h.elements.get("qt-message").textContent, /recorded/);
+  assert.equal(h.elements.get("qt-retry-answer").disabled,true);
+});
+
+test("display cutoff disables an offered retry while the server remains the acceptance authority", async () => {
+  const h=player();h.reply(answerOpen());await h.flush();
+  const click=h.elements.get("qt-answers").children[1].listeners.click();
+  h.reply({accepted:false});await h.flush();h.reply(answerOpen({accepted:false}));await click;
+  assert.equal(h.elements.get("qt-retry-answer").disabled,false);
+  const realNow=Date.now;
+  try {
+    Date.now=()=>realNow()+120000;
+    [...h.intervals.values()].forEach((fn)=>fn());
+    assert.equal(h.elements.get("qt-retry-answer").disabled,true);
+    assert.equal(h.requests.length,0);
+  } finally {Date.now=realNow;}
+});
+
+test("new question, cancellation and revocation ignore a late previous-question ACK", async () => {
+  for (const next of [answerOpen({version:4,question:{...question(),id:"q2"}}), state({version:4,status:"CANCELLED"}), null]) {
+    const h = player(); h.reply(answerOpen()); await h.flush();
+    const click = h.elements.get("qt-answers").children[1].listeners.click(), late = h.requests.shift();
+    const recover = h.transport.recover(); h.reply(next || {error:"Unavailable"},next?200:404); await recover;
+    late.resolve({ok:true,json:async()=>ackB}); await click;
+    assert.doesNotMatch(h.elements.get("qt-message").textContent, /Answer B recorded/);
+    if (next?.question) assert.ok(h.elements.get("qt-answers").children.every((button)=>!button.disabled));
+    else assert.equal(h.elements.get("qt-question").hidden,true);
+  }
+});
+
+test("out-of-order same-version GETs cannot reverse recovered acceptance", async () => {
+  const h = player(); h.reply(answerOpen()); await h.flush();
+  const older = h.transport.recover(), newer = h.transport.recover();
+  h.reply(answerOpen({accepted:true,selected_choice:"B",can_answer:false}),200,1); await newer;
+  h.reply(answerOpen({accepted:false})); await older;
+  assert.equal(h.elements.get("qt-message").textContent,"Answer B recorded ✓");
+  assert.ok(h.elements.get("qt-answers").children.every((button)=>button.disabled));
+});
 test("player lobby/open/submitted/reveal/final states include text and private authorized rank", async () => {
   const h = player(); h.reply(state({nickname: "You"})); await h.flush(); assert.match(h.elements.get("qt-message").textContent, /Waiting for the host/);
   const open = {...state({nickname: "You", status: "QUESTION_OPEN", question: {...question(), id: "q1"}}), can_answer: true};
   const recover = h.transport.recover(); h.reply(open); await recover;
   assert.equal(h.elements.get("qt-question").hidden, false); const buttons = h.elements.get("qt-answers").children; assert.equal(buttons.length, 4); assert.equal(buttons[0].disabled, false);
   const locked = h.transport.recover(); h.reply({...open, accepted: true, can_answer: false}); await locked;
-  assert.match(h.elements.get("qt-message").textContent, /submitted and locked/); assert.ok(buttons.every((el) => el.disabled)); assert.equal(h.elements.get("qt-feedback").hidden, true);
+  assert.match(h.elements.get("qt-message").textContent, /recorded/); assert.ok(buttons.every((el) => el.disabled)); assert.equal(h.elements.get("qt-feedback").hidden, true);
   const reveal = h.transport.recover(); h.reply({...open, status: "ANSWER_REVEALED", can_answer: false, feedback: {answered: true, is_correct: true, correct_choice: "B", points: 930}}); await reveal;
   assert.equal(h.elements.get("qt-timer-block").hidden, true);
   assert.match(h.elements.get("qt-feedback").textContent, /Correct! Correct answer: B. \+930 points/); assert.equal(h.timers.size, 1);
@@ -189,7 +321,7 @@ test("answer click locks every button before HTTP and never reveals from acknowl
   const h = player(); const open = state({status: "QUESTION_OPEN", nickname: "You", can_answer: true, question: {...question(), id: "q1"}});
   h.reply(open); await h.flush(); const buttons = h.elements.get("qt-answers").children;
   const click = buttons[1].listeners.click(); assert.ok(buttons.every((el) => el.disabled)); assert.equal(h.requests[0].url, "/answer/");
-  h.reply({accepted: true}); await h.flush(); assert.equal(h.elements.get("qt-feedback").hidden, true); assert.match(h.elements.get("qt-message").textContent, /submitted and locked/);
+  h.reply({accepted: true, question: "q1", selected_choice: "B"}); await h.flush(); assert.equal(h.elements.get("qt-feedback").hidden, true); assert.match(h.elements.get("qt-message").textContent, /recorded/);
   h.reply({...open, accepted: true, can_answer: false}); await click; assert.ok(buttons.every((el) => el.disabled)); assert.equal(h.timers.size, 0);
 });
 test("new browser consumes QR fragment, focuses nickname and waits for joining HTTP", async () => {
@@ -252,7 +384,7 @@ test("manual closed question retains locked-answer feedback and has no automatic
   const h = player(); h.reply(state({nickname: "You", status: "QUESTION_CLOSED", playback_mode: "MANUAL", show_phase: "SUSPENSE",
     accepted: true, can_answer: false, question: {...question(), id: "q1"}})); await h.flush();
   assert.equal(h.elements.get("qt-timer-block").hidden, true); assert.equal(h.elements.get("qt-answers").hidden, false);
-  assert.match(h.elements.get("qt-message").textContent, /submitted and locked/);
+  assert.match(h.elements.get("qt-message").textContent, /recorded/);
 });
 test("phase exit cleans reveal celebration; score bars do not rerank", () => {
   const h = harness(); const root = h.add("stage"); const view = h.window.QuiTizzPresentation.create(root);

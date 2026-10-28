@@ -296,7 +296,8 @@ class GameplayTests(TestCase):
         first = self.answer(credential, question)
         self.command("close_question")
         self.assertEqual(self.answer(credential, question), first)
-        self.assertEqual(set(first), {"accepted", "question"})
+        self.assertEqual(set(first), {"accepted", "question", "selected_choice"})
+        self.assertEqual(first["selected_choice"], "B")
 
     def test_wrong_and_stale_question_rejected(self):
         _, credential = self.player(); question = self.open_question()

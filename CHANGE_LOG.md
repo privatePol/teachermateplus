@@ -1,3 +1,8 @@
+## 2026-10-28 - QuiTizz Thursday readiness integration
+
+- Integrated the approved answer confirmation, queued realtime notifications, cancellation and projector QR visibility changes onto the production-compatible baseline. Existing faculty guidance and unrelated production history are retained.
+- Fastest Five remains based on the authoritative per-question ordering; the same participant may be Question Winner in multiple questions. No scoring, schema or migration change.
+
 ## 2026-10-25 - Faculty Grades Completion Report presentation
 
 - The Faculty Final Clearance PDF is now titled Faculty Grades Completion Report and explicitly serves as a supporting attachment to the official Faculty Clearance Form, without granting clearance approval.

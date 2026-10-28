@@ -47,6 +47,9 @@ class RealtimeTests(TestCase):
     answer = phase2a.GameplayTests.answer
 
     def setUp(self):
+        # Socket security tests use deterministic publication; the queued
+        # production boundary is exercised separately by NotificationHotfixTests.
+        self.enterContext(patch("apps.quitizz.automation.notifier.enqueue", side_effect=lambda *args: realtime.send(*args)))
         caches["quitizz"].clear()
         self.enable()
         self.client.force_login(self.user)
@@ -826,7 +829,7 @@ class RealtimeConfigurationTests(SimpleTestCase):
         session = SimpleNamespace(pk=1, tenant_id=2)
         with patch("apps.quitizz.realtime.transaction.on_commit", side_effect=lambda callback: callback()), \
              patch("apps.quitizz.realtime.FeatureSettingsService.is_quitizz_enabled", return_value=True), \
-             patch("apps.quitizz.realtime.send") as send:
+             patch("apps.quitizz.automation.notifier.enqueue") as send:
             for name in realtime.HOST_EVENTS | realtime.PLAYER_EVENTS:
                 send.reset_mock(); realtime.notify(session, name)
                 expected = [realtime.group(1, "host")]

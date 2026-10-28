@@ -238,13 +238,14 @@ class HostControlFormData {
       .map((control) => [control.name, control.value]);
   }
   get(name) { return this.values.find(([key]) => key === name)?.[1] ?? null; }
+  append(name, value) { this.values.push([name, String(value)]); }
   getAll(name) { return this.values.filter(([key]) => key === name).map(([, value]) => value); }
   entries() { return this.values[Symbol.iterator](); }
 }
 function hostControlHarness({initialParticipant = null, clipboard = null} = {}) {
   const publicId = "11111111-1111-4111-8111-111111111111";
   const commandUrl = `/faculty/quitizz/sessions/${publicId}/command/`;
-  const elements = new Map(["qt-host", "qt-command", "qt-count", "qt-answered", "qt-session-status", "qt-joining", "qt-participants", "qt-connection", "qt-host-error"]
+  const elements = new Map(["qt-host", "qt-command", "qt-count", "qt-answered", "qt-session-status", "qt-joining", "qt-participants", "qt-connection", "qt-host-error", "qt-cancelled-next"]
     .map((id) => [id, new HostControlElement(id === "qt-command" ? "form" : "div")]));
   const root = elements.get("qt-host"), commands = elements.get("qt-command"), list = elements.get("qt-participants");
   root.dataset = {version: "1", stateUrl: `/faculty/quitizz/sessions/${publicId}/state/`, socketUrl: "/host/socket/", qrUrl: "/host/qr/", joinLinkUrl: "/host/join-link/"};
@@ -262,7 +263,7 @@ function hostControlHarness({initialParticipant = null, clipboard = null} = {}) 
   const requests = []; let callbacks;
   const find = (node, id) => node.id === id ? node : node.children.map((child) => find(child, id)).find(Boolean);
   const document = {getElementById: (id) => elements.get(id) || find(root, id) || null, createElement: (tag) => new HostControlElement(tag), activeElement: null};
-  const window = {location: {href: "https://example.test/host/", origin: "https://example.test"}, navigator: {clipboard},
+  const window = {confirm: () => true, location: {href: "https://example.test/host/", origin: "https://example.test"}, navigator: {clipboard},
     QuiTizzRealtime(options) { callbacks = options; return {refresh: options.recover, stop() {}}; }};
   vm.runInNewContext(read("quitizz_host"), {document, window, URL, FormData: HostControlFormData,
     fetch: (url, options) => new Promise((resolve) => requests.push({url: String(url), options, resolve,
@@ -281,8 +282,8 @@ function hostControlHarness({initialParticipant = null, clipboard = null} = {}) 
     const pending = root.listeners.submit({target: form, submitter, preventDefault() { prevented = true; }});
     assert.equal(prevented, true); return pending;
   }
-  async function finish(pending, value, status = 200) { reply({}, status); await flush(); assert.equal(requests[0]?.url, root.dataset.stateUrl); reply(value); await pending; }
-  return {root, commands, list, requests, commandUrl, state, recover, submit, finish, reply, document, error: elements.get("qt-host-error")};
+  async function finish(pending, value, status = 200, body = {}) { reply(body, status); await flush(); assert.equal(requests[0]?.url, root.dataset.stateUrl); reply(value); await pending; }
+  return {root, commands, list, requests, commandUrl, state, recover, submit, finish, reply, document, window, error: elements.get("qt-host-error")};
 }
 
 test("copy join link retains the exact fragment, uses uncached HTTP and confirms only clipboard success", async () => {
@@ -348,7 +349,7 @@ function assertHostCommand(h, action, version, participant = null) {
   assert.equal(options.body.get("csrfmiddlewaretoken"), "csrf-host-token");
   assert.equal(options.body.get("participant"), participant);
   assert.equal(options.body.submitterDisabledAtCapture, false); assert.equal(allButtonsDisabled, true);
-  assert.equal([...options.body.entries()].length, participant ? 4 : 3);
+  assert.equal([...options.body.entries()].length, participant || action === "cancel" ? 4 : 3);
 }
 const hostCommandStates = {
   open_joining: {status: "READY"}, close_joining: {status: "LOBBY", joining_open: true},
@@ -385,12 +386,41 @@ test("host stale-version rejection recovers current controls and subsequent comm
   const first = h.submit(h.commands, "open_joining"); assertHostCommand(h, "open_joining", 1);
   const recovered = h.state({version: 2, status: "LOBBY", joining_open: true});
   await h.finish(first, recovered, 409);
-  assert.equal(h.error.hidden, false); assert.match(h.error.textContent, /current session has been recovered/);
+  assert.equal(h.error.hidden, false); assert.match(h.error.textContent, /Recovering current controls/);
   assert.ok(!h.commands.querySelectorAll("button").includes(oldButton));
   assert.deepEqual(h.commands.querySelectorAll("button").map((control) => control.value), ["close_joining", "start", "set_mode", "end_challenge", "cancel"]);
   const second = h.submit(h.commands, "start"); assertHostCommand(h, "start", 2);
   await h.finish(second, h.state({version: 3, status: "QUESTION_CLOSED", question_opened: false, position: 1}));
   assert.equal(h.error.hidden, true); assert.equal(h.commands.querySelector("[name=version]").value, "3");
+});
+
+test("cancel dismissal never posts or changes current controls", async () => {
+  const h = hostControlHarness(); await h.recover(h.state({status:"QUESTION_OPEN",version:4}));
+  let prompt; h.window.confirm = (text) => { prompt = text; return false; };
+  await h.submit(h.commands,"cancel");
+  assert.equal(h.requests.length,0); assert.match(prompt,/Saved answers and audit history will be kept/);
+  assert.ok(h.commands.querySelectorAll("button").every((button)=>!button.disabled));
+});
+
+for (const phase of ["ANSWERING","SUSPENSE","RESULTS","PREPARING","PAUSED"]) test(`confirmed cancellation posts current version and ends the ${phase} UI`, async () => {
+  const h=hostControlHarness(), value=h.state({status:phase==="ANSWERING"?"QUESTION_OPEN":"ANSWER_REVEALED",version:7,
+    playback_mode:"AUTOMATIC",show_phase:phase,paused:phase==="PAUSED"});
+  await h.recover(value);
+  const pending=h.submit(h.commands,"cancel");
+  assert.equal(h.requests[0].options.body.get("confirm_end"),"1");
+  assert.equal(h.requests[0].options.body.get("version"),"7");
+  assert.equal(h.requests[0].options.headers.Accept,"application/json");
+  await h.finish(pending,h.state({version:8,status:"CANCELLED",playback_mode:"AUTOMATIC",participants:[]}));
+  assert.equal(h.commands.hidden,true); assert.equal(h.document.getElementById("qt-cancelled-next").hidden,false);
+});
+
+test("cancel rejection displays the server explanation and recovers the authoritative version", async () => {
+  const h=hostControlHarness();await h.recover(h.state({status:"QUESTION_OPEN",version:4}));
+  const pending=h.submit(h.commands,"cancel");
+  await h.finish(pending,h.state({status:"QUESTION_CLOSED",version:5,question_opened:true}),409,{error:"Session changed. Reload before using this control."});
+  assert.match(h.error.textContent,/Session changed/);assert.equal(h.error.hidden,false);
+  const retry=h.submit(h.commands,"cancel");assert.equal(h.requests[0].options.body.get("version"),"5");
+  await h.finish(retry,h.state({status:"CANCELLED",version:6}));
 });
 
 function playerHarness(realTransport = false) {
@@ -401,8 +431,9 @@ function playerHarness(realTransport = false) {
     replaceChildren() { buttons.length = 0; }, append(button) { buttons.push(button); }}]));
   elements.get("qt-play").dataset = {stateUrl: "/state/", socketUrl: "/socket/", socketIdentityUrl: "/bridge/"};
   const requests = []; let callbacks, stopped = 0;
-  const document = {getElementById: (id) => elements.get(id), createElement: () => ({addEventListener() {}, disabled: false})};
-  const window = {location: {hash: "", pathname: "/play/"}, history: {replaceState() {}}, setInterval() {}};
+  elements.forEach((element) => { element.setAttribute = () => {}; });
+  const document = {getElementById: (id) => elements.get(id), createElement: () => ({dataset: {}, setAttribute() {}, addEventListener() {}, disabled: false})};
+  const window = {location: {hash: "", pathname: "/play/"}, history: {replaceState() {}}, setInterval() {}, setTimeout() {}, clearTimeout() {}};
   const realtime = realTransport ? uiTransport(window, document) : null;
   window.QuiTizzRealtime = (options) => { callbacks = options;
     return realtime ? realtime.factory(options) : {refresh: options.recover, stop() { stopped++; }}; };

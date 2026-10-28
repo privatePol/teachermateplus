@@ -45,6 +45,8 @@
     byId("qt-count").textContent = String(state.participant_count);
     byId("qt-answered").textContent = String(state.answered_count);
     byId("qt-session-status").textContent = `${state.status.replaceAll("_", " ")} · Current question: ${state.position}`;
+    const cancelledNext = byId("qt-cancelled-next");
+    if (cancelledNext) cancelledNext.hidden = state.status !== "CANCELLED";
     const commands = byId("qt-command");
     if (commands && changed) {
       commands.querySelectorAll("button").forEach((button) => button.remove());
@@ -182,13 +184,20 @@
     if (!form.matches("form") || !event.submitter) return;
     event.preventDefault();
     if (pending || !available) return;
+    const cancelling = event.submitter.value === "cancel";
+    if (cancelling && !window.confirm("Cancel this session and stop gameplay? Saved answers and audit history will be kept. A new session requires players to rejoin using its new QR/link.")) return;
     const data = new FormData(form, event.submitter);
+    if (cancelling) data.append("confirm_end", "1");
     if (event.submitter.dataset?.screen) data.append("screen", event.submitter.dataset.screen);
     pending = true; root.querySelectorAll("button").forEach((button) => { button.disabled = true; });
     try {
-      const response = await fetch(form.getAttribute("action"), {method: "POST", credentials: "same-origin", body: data});
+      const response = await fetch(form.getAttribute("action"), {method: "POST", credentials: "same-origin", headers: {Accept: "application/json"}, body: data});
       byId("qt-host-error").hidden = response.ok;
-      if (!response.ok) byId("qt-host-error").textContent = "Control could not be accepted. The current session has been recovered; try the available control again.";
+      if (!response.ok) {
+        let detail;
+        try { detail = (await response.json()).error; } catch (_) { /* Standard CSRF/auth responses may be HTML. */ }
+        byId("qt-host-error").textContent = typeof detail === "string" ? `${detail} Recovering current controls; review them before retrying.` : "Control could not be accepted. Recovering current controls; review them before retrying.";
+      }
     } catch (_) { byId("qt-host-error").hidden = false; byId("qt-host-error").textContent = "Connection interrupted. Recovering current session."; }
     finally { pending = false; lockControls(); }
     await transport.refresh();

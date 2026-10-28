@@ -61,18 +61,24 @@ FACULTY_HELP_SECTIONS = [
                                       'brief Wi-Fi interruptions. The connection indicator shows reconnecting '
                                       'and HTTP recovery if realtime is unavailable.',
                               'avoid': 'The first accepted answer is locked. Late answers fail. Browser '
-                                       'countdowns do not decide acceptance; the server does.',
+                                       'countdowns do not decide acceptance; the server does. Tapping marks the selected option with a neutral checkmark and Submitting...; Answer B recorded is shown only after server confirmation. If confirmation is lost, recover first and use Retry same answer when available. A checkmark alone never means correct.',
                               'result': 'Wrong answers score 0; correct answers score 700 plus a speed bonus '
                                         'of up to 300. Points appear after reveal, and final private rank '
                                         'appears after completion.',
                               'editable': 'Only the authorized host; stale controls require a reload. Live '
                                           'recovery blocks gameplay when access is revoked; every recovery '
                                           'requires current permission.'},
+                             {'name': 'Cancel session / Launch a new session',
+                              'does': 'Cancel session asks for explicit confirmation and stops the current game, including answering, results and paused states. Saved answers, scores and audit history are kept.',
+                              'when': 'Use only when the ongoing session must stop. Review recovered controls before retrying a stale command.',
+                              'avoid': 'Cancellation is not a restart. Players must rejoin a newly launched session using its new QR/link. Closing a browser tab does not cancel a game.',
+                              'result': 'The cancelled host screen offers Launch a new session from this quiz. No historical records are deleted.',
+                              'editable': 'Authorized session owner only; existing scope, direct-DENY, feature, CSRF and version checks still apply.'},
                              {'name': 'Open Projector / Results',
                               'does': 'Opens the authorized presentation in a separate tab. QuiTizz. Powered by '
                                       'TeacherMate+. Scan. Play. Spark. Win. Show the QR and lobby, questions, '
                                       'revealed A-D response counts, Top 5 and final Gold/Silver/Bronze Top 3.',
-                              'when': 'Use a 16:9 display while keeping private host controls on your laptop.',
+                              'when': 'Use a 16:9 display while keeping private host controls on your laptop. The lobby QR is black on solid white with SCAN TO JOIN instructions and a large responsive display. Use full-screen projection; smaller or zoomed windows may require vertical scrolling.',
                               'avoid': 'The projector still needs your host login and selected campus. It never '
                                        'shows private player responses or pre-reveal answer keys. Nicknames and '
                                        'scores become visible after reveal. Do not share your host login.',

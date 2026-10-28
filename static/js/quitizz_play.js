@@ -9,7 +9,9 @@
   const message = byId("qt-message"), error = byId("qt-error");
   const join = byId("qt-join"), question = byId("qt-question"), answers = byId("qt-answers");
   const feedback = byId("qt-feedback");
-  let current = null, terminal = false, pending = false, canAnswer = false, transport = null, latest = 0, unavailable = false;
+  let current = null, terminal = false, canAnswer = false, transport = null, latest = 0, unavailable = false;
+  let submission = null, requested = 0, rendered = 0;
+  const retry = byId("qt-retry-answer");
   let deadline = 0, serverOffset = 0, paused = false, frozenSeconds = 0;
   let celebrated = "";
   let finaleCelebrated = false;
@@ -25,14 +27,64 @@
       options.headers["Content-Type"] = "application/x-www-form-urlencoded";
       options.body = new URLSearchParams(data);
     }
-    const response = await fetch(url, options);
-    let value;
-    try { value = await response.json(); } catch (_) { value = {error: "Request cannot be accepted. Refresh and try again."}; }
-    if (!response.ok) { const failure = new Error(value.error); failure.status = response.status; throw failure; }
-    return value;
+    const controller = window.AbortController ? new window.AbortController() : null;
+    if (controller) options.signal = controller.signal;
+    let timer;
+    try {
+      return await Promise.race([
+        (async () => {
+          const response = await fetch(url, options);
+          let value;
+          try { value = await response.json(); } catch (_) { value = null; }
+          if (!response.ok || response.redirected || !value || typeof value !== "object" || Array.isArray(value)) {
+            const failure = new Error(typeof value?.error === "string" ? value.error : "Could not confirm the request. Recover current state before retrying.");
+            failure.status = response.status; throw failure;
+          }
+          return value;
+        })(),
+        new Promise((_, reject) => {
+          timer = window.setTimeout(() => {
+            controller?.abort(); reject(new Error("Confirmation timed out. Recovering your answer; it may already have been recorded."));
+          }, 10000);
+        }),
+      ]);
+    } finally { window.clearTimeout(timer); }
   }
   function lockButtons() { answers.querySelectorAll("button").forEach((button) => { button.disabled = true; }); }
+  function showSubmission() {
+    answers.querySelectorAll("button").forEach((button) => {
+      const selected = Boolean(submission?.choice && submission.choice === button.dataset.choice);
+      button.className = `btn qt-answer${selected ? " qt-selected-answer" : ""}`;
+      button.setAttribute("aria-pressed", String(selected));
+      button.textContent = `${button.dataset.label}${selected ? " ✓" : ""}`;
+      button.disabled = !canAnswer || Boolean(submission);
+    });
+    question.setAttribute("aria-busy", String(submission?.status === "pending"));
+    if (retry) { retry.hidden = !submission || ["pending", "confirmed"].includes(submission.status); retry.disabled = !canAnswer || submission?.status !== "retry"; }
+    if (!submission) return;
+    if (submission.status === "confirmed") message.textContent = submission.choice ? `Answer ${submission.choice} recorded ✓` : "Answer recorded. Waiting for reveal.";
+    else if (submission.status === "pending") message.textContent = "Submitting...";
+    else if (submission.status === "retry") message.textContent = `Answer ${submission.choice} is not confirmed. Retry the same answer; other choices remain locked.`;
+    else message.textContent = paused ? "Answer not confirmed. Challenge paused; recover after resume." : "Answer not confirmed. Recovering current state; answering may be closed.";
+  }
+  async function submitAnswer(attempt) {
+    if (unavailable || terminal || current !== attempt.question || submission !== attempt || attempt.status === "pending") return;
+    attempt.status = "pending"; showSubmission();
+    try {
+      const ack = await request(root.dataset.answerUrl, {question: attempt.question, choice: attempt.choice});
+      if (ack.accepted !== true || ack.question !== attempt.question || ack.selected_choice !== attempt.choice) throw new Error("Invalid answer confirmation. Recovering the recorded answer.");
+      if (unavailable || terminal || current !== attempt.question || submission !== attempt) return;
+      attempt.status = "confirmed";
+    } catch (failure) {
+      if (unavailable || terminal || current !== attempt.question || submission !== attempt) return;
+      // A failed/lost ACK does not prove rejection. Only HTTP recovery may offer
+      // a same-choice retry; a conflicting choice is never offered here.
+      attempt.status = "recovering"; canAnswer = false; showError(failure.message);
+    }
+    if (submission === attempt && !unavailable && !terminal) { showSubmission(); await refresh(); }
+  }
   function render(state) {
+    if (!Number.isSafeInteger(state.version) || !["READY", "LOBBY", "QUESTION_OPEN", "QUESTION_CLOSED", "ANSWER_REVEALED", "COMPLETED", "CANCELLED"].includes(state.status)) throw new Error("Invalid recovery response. Keeping the last verified state; reconnect to recover.");
     if (unavailable || state.version < latest) return;
     latest = state.version;
     error.hidden = true;
@@ -53,44 +105,43 @@
     else if (state.show_phase === "PREPARING" && state.playback_mode === "AUTOMATIC") message.textContent = "BE READY FOR THE NEXT CHALLENGE!";
     feedback.hidden = true;
     hasQuestion = Boolean(state.question);
-    if (!state.question) { question.hidden = true; current = null; canAnswer = false; lockButtons(); return; }
+    if (!state.question) { question.hidden = true; current = null; submission = null; canAnswer = false; if (retry) retry.hidden = true; lockButtons(); return; }
     question.hidden = false;
     const q = state.question;
     byId("qt-prompt").textContent = `${q.position}. ${q.prompt}`;
     serverOffset = Date.parse(state.server_now) - Date.now();
     deadline = Date.parse(state.phase_deadline || q.deadline);
     answers.hidden = paused || interlude;
-    if (paused || interlude) {
-      byId("qt-prompt").textContent = paused ? "Challenge paused" : message.textContent;
-      byId("qt-countdown").textContent = String(paused ? Math.ceil(frozenSeconds) : Math.max(0, Math.ceil((deadline - Date.now() - serverOffset) / 1000)));
-      canAnswer = false; lockButtons(); return;
-    }
     if (current !== q.id) {
       current = q.id;
+      submission = null;
       answers.replaceChildren();
       Object.entries(q.choices).forEach(([letter, text]) => {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "btn qt-answer";
+        button.dataset.choice = letter; button.dataset.label = `${letter}. ${text}`;
         button.textContent = `${letter}. ${text}`;
         button.addEventListener("click", async () => {
-          if (pending || !canAnswer) return;
-          pending = true; lockButtons();
-          try {
-            await request(root.dataset.answerUrl, {question: q.id, choice: letter});
-            canAnswer = false;
-            message.textContent = "Answer submitted and locked. Waiting for reveal.";
-          } catch (failure) { showError(failure.message); }
-          finally { pending = false; }
-          if (transport) await transport.refresh(); else await refresh();
+          if (submission || !canAnswer) return;
+          submission = {question: q.id, choice: letter, status: "new"};
+          await submitAnswer(submission);
         });
         answers.append(button);
       });
     }
-    canAnswer = state.can_answer && !paused && !pending;
-    answers.querySelectorAll("button").forEach((button) => { button.disabled = !canAnswer; });
-    if (state.accepted && !state.feedback && !paused && !interlude) message.textContent = "Answer submitted and locked. Waiting for reveal.";
-    if (!paused && !state.can_answer && !state.accepted && state.status === "QUESTION_OPEN") message.textContent = "Time ended. Waiting for the host to reveal.";
+    if (paused || interlude) {
+      byId("qt-prompt").textContent = paused ? "Challenge paused" : message.textContent;
+      byId("qt-countdown").textContent = String(paused ? Math.ceil(frozenSeconds) : Math.max(0, Math.ceil((deadline - Date.now() - serverOffset) / 1000)));
+      canAnswer = false; lockButtons(); if (retry) retry.hidden = true; return;
+    }
+    canAnswer = Boolean(state.can_answer && !paused && Date.now() + serverOffset <= deadline);
+    if (state.accepted === true) {
+      const choice = /^[ABCD]$/.test(state.selected_choice) ? state.selected_choice : submission?.status === "confirmed" ? submission.choice : null;
+      submission = {question: q.id, choice, status: "confirmed"};
+    } else if (submission && !["pending", "confirmed"].includes(submission.status)) submission.status = canAnswer ? "retry" : "recovering";
+    showSubmission();
+    if (!submission && !paused && !state.can_answer && !state.accepted && state.status === "QUESTION_OPEN") message.textContent = "Time ended. Waiting for the host to reveal.";
     if (state.feedback) {
       feedback.className = `qt-feedback mt-3 ${state.feedback.is_correct ? "qt-success" : "qt-neutral"}`;
       feedback.textContent = `${state.feedback.answered ? (state.feedback.is_correct ? "Correct!" : "Incorrect.") : "No accepted answer."} Correct answer: ${state.feedback.correct_choice}. +${state.feedback.points} points.`;
@@ -110,8 +161,11 @@
     }
   }
   async function refresh() {
+    const sequence = ++requested;
     try {
-      const state = await request(root.dataset.stateUrl); render(state);
+      const state = await request(root.dataset.stateUrl);
+      if (unavailable || state.version < latest || sequence < rendered) return;
+      rendered = sequence; render(state);
       if (terminal) window.clearInterval?.(countdownTimer);
       if (terminal && transport) { transport.stop(); byId("qt-connection").textContent = "Session ended."; }
       return state;
@@ -121,6 +175,7 @@
         unavailable = true; terminal = true; canAnswer = false; current = null; hasQuestion = false;
         window.clearInterval?.(countdownTimer);
         question.hidden = true; feedback.hidden = true; join.hidden = true; lockButtons();
+        submission = null; if (retry) retry.hidden = true;
         const result = byId("qt-result"); if (result) result.hidden = true;
         window.QuiTizzPresentation?.cleanup();
         message.textContent = "Session unavailable.";
@@ -130,6 +185,9 @@
       showError(failure.message);
     }
   }
+  retry?.addEventListener("click", async () => {
+    if (submission?.status === "retry" && canAnswer) await submitAnswer(submission);
+  });
   function schedule() {
     if (terminal || transport) return;
     transport = window.QuiTizzRealtime({url: root.dataset.socketUrl,
@@ -149,7 +207,7 @@
     if (!hasQuestion) return;
     const remaining = paused ? Math.ceil(frozenSeconds) : Math.max(0, Math.ceil((deadline - Date.now() - serverOffset) / 1000));
     byId("qt-countdown").textContent = String(remaining);
-    if (!remaining) lockButtons();
+    if (!remaining) { lockButtons(); if (retry) retry.disabled = true; }
   }, 250);
   window.addEventListener?.("pagehide", () => { window.clearInterval(countdownTimer); });
   (async () => {
