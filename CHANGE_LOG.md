@@ -1,3 +1,14 @@
+## 2026-10-28 - QuiTizz projector QR visibility (uncommitted)
+
+- The session QR now has explicit black modules on an opaque white SVG with a four-module quiet zone and crisp vector edges. The projector lobby uses a large, responsive white frame (440px image target at full-HD), readable SCAN TO JOIN instructions and a wide-screen two-column layout.
+- Signed payloads, joining controls, authorization and canonical joined counts are preserved. Six new frontend and four new Django QR regressions cover styling/geometry, payload identity and 65 participants. Physical projector/camera and actual browser acceptance remain pending; no migration is required.
+
+## 2026-10-27 - QuiTizz focused readiness hotfix (uncommitted)
+
+- Player selection now has a neutral checkmark and Submitting... feedback. A matching server ACK/recovered own response confirms the recorded letter; uncertain requests recover before offering a same-choice retry. Confirmed answers survive stale recovery and never reveal correctness before the official reveal.
+- Post-commit constant notifications use the existing bounded asynchronous queue so slow channel publication does not hold HTTP acknowledgments. Existing fallback cadence, rate limiting and server-authoritative timing/scoring remain intact; real production propagation latency still needs measurement.
+- Cancel session now asks for explicit confirmation, exposes useful validation/recovery errors and links the cancelled host to launching a new session. Saved records remain intact; participants rejoin with a new QR/link. No restart/round feature, schema change or Fastest Five rewrite.
+
 ## QuiTizz Phase 4 - 2026-10-24 (implementation; uncommitted)
 
 - Added post-reveal Fastest Five from persisted active milliseconds, configurable immutable version-2 presentation defaults and optional exact-average Fastest Correct recognition without changing scoring or the overall champion.

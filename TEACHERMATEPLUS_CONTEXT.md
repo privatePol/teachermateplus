@@ -1,3 +1,17 @@
+## QuiTizz projector QR correction - 2026-10-28 (local, uncommitted)
+
+The authorized host QR endpoint now renders a 440-unit opaque white SVG with explicit black modules, four-module border and crispEdges; the real signed session-fragment payload and all security/expiry checks remain unchanged. Presentation uses a padded white frame, SCAN TO JOIN caption, 440px full-HD target and width/height-responsive bounds. Wide lobbies use two columns and narrow lobbies stack; no QR inversion, opacity, gradient or blending is applied. Canonical counts update at the same session version for 60+ participants.
+
+All prior readiness hotfix changes remain present. No scoring, ranking, timing, permissions, schema or migration change. DOM/CSSOM, viewport models and SVG/raster checks are local evidence only; actual browser/projector optics/camera scanning and network attendance acceptance remain separate. No operational activation or Git publication occurred.
+
+## QuiTizz readiness hotfix - 2026-10-27 (local, uncommitted)
+
+Player answer confirmation is separate from correctness: selected neutral checkmark/Submitting..., then a validated accepted question/choice or private authoritative recovery. A bounded request timeout triggers recovery; only the same uncertain choice can be retried. Same-question successful confirmation cannot regress on stale HTTP state. Scoring, received-at timestamps, pause accounting and cutoffs are unchanged.
+
+Default lifecycle notifications enqueue only after commit using the existing one-worker, 256-group coalescing notifier; channel timeout/drop remains best effort and HTTP/database stay authoritative. Fallback polling and fail-closed shared throttling are unchanged. Fastest Five still belongs to existing authorized presentation surfaces and never enters participant state.
+
+Cancellation retains the existing owner/scope/RBAC/direct-DENY/feature/CSRF/version/lock rules; the UI now asks explicitly, supplies pending-question consent and offers a new-session launch after cancellation. No same-session restart is implemented. No migration is required. Never replace production with the older integration branch wholesale; integrate only the reviewed delta onto the exact current production baseline. Real InnoDB/Redis/browser/network acceptance and all operational actions remain separate gates.
+
 ## QuiTizz Phase 4 presentation and navigation - 2026-10-24 (uncommitted)
 
 New sessions save immutable automation policy version 2: Fastest Five and Highest Scores ON, final Fastest Correct Award OFF; Answer/Fastest/Scores durations 2/5/5 seconds, bounded 1 to 60. Legacy version-1 or empty snapshots retain prior suspense/results/preparation timing. Manual screens persist without a timer/pause until the host changes them, expiry or revocation. Automatic result substeps use persisted timestamps and the existing locked scheduler, with no browser advancement or extra Preview phase.

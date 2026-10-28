@@ -9,7 +9,8 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods, require_POST
 from reportlab.graphics import renderSVG
 from reportlab.graphics.barcode.qr import QrCodeWidget
-from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.shapes import Drawing, Rect
+from reportlab.lib import colors
 
 from . import gameplay
 from .access import require_access
@@ -29,7 +30,10 @@ def access(capability=None):
             try:
                 return view(request, *args, **kwargs)
             except ValidationError as exc:
-                return render(request, "quitizz/error.html", {"errors": exc.messages}, status=409 if isinstance(exc, StaleRevision) else 400)
+                status = 409 if isinstance(exc, StaleRevision) else 400
+                if "application/json" in request.headers.get("Accept", ""):
+                    return JsonResponse({"error": exc.messages[0]}, status=status)
+                return render(request, "quitizz/error.html", {"errors": exc.messages}, status=status)
         return wrapped
     return decorate
 
@@ -204,12 +208,16 @@ def projector_state(request, public_id):
 @access("host")
 def host_qr(request, public_id):
     session = owned_session(request, public_id)
-    qr = QrCodeWidget(join_url(request, session))
-    x1, y1, x2, y2 = qr.getBounds()
-    size = 320
-    drawing = Drawing(size, size, transform=[size / (x2 - x1), 0, 0, size / (y2 - y1), 0, 0])
+    size = 440
+    qr = QrCodeWidget(join_url(request, session), barWidth=size, barHeight=size,
+        barBorder=4, barFillColor=colors.black)
+    drawing = Drawing(size, size)
+    # The four-module border belongs to the QR itself; CSS padding is extra.
+    # An opaque SVG background keeps the quiet zone white on every surface.
+    drawing.add(Rect(0, 0, size, size, fillColor=colors.white, strokeColor=None))
     drawing.add(qr)
-    return HttpResponse(renderSVG.drawToString(drawing), content_type="image/svg+xml")
+    svg = renderSVG.drawToString(drawing).replace("<svg ", '<svg shape-rendering="crispEdges" ', 1)
+    return HttpResponse(svg, content_type="image/svg+xml")
 
 
 def join_url(request, session):

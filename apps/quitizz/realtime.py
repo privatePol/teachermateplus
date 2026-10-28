@@ -50,7 +50,13 @@ def notify(session, name, *, dispatch=None, **payload):
         raise ValueError("Unsafe QuiTizz event payload")
     session_id, tenant_id = session.pk, session.tenant_id
     event = {"type": "quitizz.event", "event": "sync_required"}
-    publish = dispatch or send
+    # Import lazily: automation also imports this module. One capped/coalescing
+    # notifier per process, started only on the first committed enqueue. Redis
+    # publication must not hold up an answer ACK or host control response.
+    if dispatch is None:
+        from .automation import notifier
+        dispatch = notifier.enqueue
+    publish = dispatch
 
     def committed():
         try:

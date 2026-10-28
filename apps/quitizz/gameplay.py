@@ -356,7 +356,7 @@ def submit(public_id, credential, question_id, selected_choice, *, received_at=N
     if previous:
         if previous.selected_choice != selected_choice:
             raise ValidationError("Your first accepted answer is locked.")
-        return {"accepted": True, "question": str(question.public_id)}
+        return {"accepted": True, "question": str(question.public_id), "selected_choice": previous.selected_choice}
     if (session.status != "QUESTION_OPEN" or session.paused_at or not question.opened_at or question.closed_at
             or received_at < (question.active_started_at or question.opened_at) or received_at > question.deadline_at):
         raise ValidationError("The question is closed. This answer cannot be accepted.")
@@ -373,14 +373,14 @@ def submit(public_id, credential, question_id, selected_choice, *, received_at=N
         previous = QuiTizzResponse.objects.filter(participant=participant, session_question=question).first()
         if not previous or previous.selected_choice != selected_choice:
             raise ValidationError("Your first accepted answer is locked.")
-        return {"accepted": True, "question": str(question.public_id)}
+        return {"accepted": True, "question": str(question.public_id), "selected_choice": previous.selected_choice}
     # Update only this player. Rankings are calculated once, on completion.
     session.participants.filter(pk=participant.pk).update(total_score=F("total_score") + points,
         correct_count=F("correct_count") + int(correct), cumulative_response_ms=F("cumulative_response_ms") + response.elapsed_ms,
         updated_at=timezone.now())
     # Retries above return before scheduling the host's constant sync signal.
     realtime.notify(session, "answer_received")
-    return {"accepted": True, "question": str(question.public_id)}
+    return {"accepted": True, "question": str(question.public_id), "selected_choice": selected_choice}
 
 
 @sensitive_variables("credential")
@@ -400,6 +400,9 @@ def _state(public_id, credential):
             "deadline": question.deadline_at.isoformat()}
         response = QuiTizzResponse.objects.filter(participant=participant, session_question=question).first()
         result["accepted"] = response is not None
+        if response:
+            # Only this authenticated participant's own choice, never its key or correctness.
+            result["selected_choice"] = response.selected_choice
         result["can_answer"] = session.status == "QUESTION_OPEN" and not session.paused_at and not response and now <= question.deadline_at
         if question.revealed_at and session.status in {"ANSWER_REVEALED", "COMPLETED"}:
             result["feedback"] = {"correct_choice": question.correct_choice, "is_correct": bool(response and response.is_correct),

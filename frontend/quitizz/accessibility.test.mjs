@@ -216,3 +216,16 @@ test("navigator buttons and select retain a scoped contrasting keyboard focus cu
     }
   } finally { h.close(); }
 });
+
+test("selected player answer keeps a neutral contrasting cue even while disabled", () => {
+  const h=fixture('<main class="qt-player"><button class="btn qt-answer qt-selected-answer" aria-pressed="true" disabled>B. Beta ✓</button></main>',[css,bootstrap]);
+  try {
+    const button=h.document.querySelector("button");
+    assert.equal(h.winner(button,"background").value,"#183b56");
+    assert.equal(h.winner(button,"color").value,"#ffffff");
+    assert.equal(h.winner(button,"opacity").value,"1");
+    assert.ok(contrast(rgb("#ffffff"),rgb("#183b56"))>=4.5);
+    assert.ok(contrast(rgb("#f4c64d"),rgb("#183b56"))>=3);
+    assert.equal(button.getAttribute("aria-pressed"),"true");
+  } finally {h.close();}
+});

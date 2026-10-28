@@ -55,12 +55,20 @@
       if (paused) { root.append(make("h2", "Challenge paused", "qt-section-title"), make("p", "Waiting for an authorized resume."), timer); tick(); return; }
       root.append(make("p", `${state.participant_count} joined · ${state.answered_count} answered · Question ${state.position} / ${state.question_count}`, "qt-metrics"));
       if (["READY", "LOBBY"].includes(status)) {
-        root.append(make("h2", state.title, "qt-welcome-title"), make("p", "Ready to spark? Waiting for the host.", "qt-waiting"));
+        const lobby = make("div", undefined, "qt-lobby"), intro = make("div", undefined, "qt-lobby-intro");
+        intro.append(make("h2", state.title, "qt-welcome-title"), make("p", "Ready to spark? Waiting for the host.", "qt-waiting"));
+        lobby.append(intro); root.append(lobby);
         if (state.joining_open && qrUrl) {
           const image = make("img", undefined, "qt-qr"); image.src = `${qrUrl}?v=${state.version}`;
-          image.alt = "Scan this QR code, enter your nickname and join QuiTizz"; root.append(image);
-          root.append(make("p", "Scan. Enter your nickname. Join the lobby."));
-        } else root.append(make("p", "Joining is closed."));
+          image.alt = "Scan this QR code, enter your nickname and join QuiTizz";
+          image.width = 440; image.height = 440;
+          const panel = make("figure", undefined, "qt-join-qr"), frame = make("div", undefined, "qt-qr-frame");
+          frame.append(image);
+          const caption = make("figcaption", "SCAN TO JOIN", "qt-qr-heading");
+          caption.append(make("p", "Open your camera, scan, then enter your nickname.", "qt-qr-help"));
+          panel.append(frame, caption);
+          lobby.append(panel);
+        } else intro.append(make("p", "Joining is closed."));
         return;
       }
       if (status === "CANCELLED") { root.append(make("h2", "Session cancelled.")); return; }

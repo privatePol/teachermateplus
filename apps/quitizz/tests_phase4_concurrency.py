@@ -68,3 +68,23 @@ class Phase4InnoDBTests(TransactionTestCase):
         self.session.refresh_from_db()
         self.assertEqual(self.session.state_version, version + 1)
         self.assertEqual(self.session.current_position, 1)
+
+    def test_confirmed_cancel_vs_scheduler_serializes_and_stops_future_answers(self):
+        from apps.core.services.features import FeatureSettingsService
+        from apps.core.services.settings import SystemSettingService
+        SystemSettingService.set(FeatureSettingsService.QUITIZZ_AUTOMATIC_ENABLED_KEY, True, tenant_id=self.tenant.pk, value_type="BOOL")
+        participant, token = self.player("Preserve")
+        question = self.open(); self.answer(token, question, received_at=question.opened_at)
+        self.command("set_mode", mode="AUTOMATIC"); self.session.refresh_from_db()
+        version, deadline = self.session.state_version, self.session.next_transition_at
+        saved = list(question.responses.values())
+        with patch("django.utils.timezone.now", return_value=deadline):
+            self.race(lambda: auto.advance(self.session.pk, version=version, phase="ANSWERING", dispatch=lambda *_: None),
+                lambda: game.command(**self.args(), public_id=self.session.public_id, version=version, action="cancel", confirm_end=True))
+        self.session.refresh_from_db()
+        if self.session.status != "CANCELLED": self.command("cancel", confirm_end=True)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.status, "CANCELLED"); self.assertIsNone(self.session.next_transition_at)
+        self.assertEqual(list(question.responses.values()), saved)
+        self.assertFalse(auto.advance(self.session.pk, version=version, phase="ANSWERING", dispatch=lambda *_: None))
+        with self.assertRaises(game.Unavailable): self.answer(token, question)
