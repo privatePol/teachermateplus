@@ -294,11 +294,12 @@ class FacultyDashboardUpdatesTests(TestCase):
     def test_dashboard_renders_when_no_previous_login_exists(self):
         response = self.client.get(reverse("faculty_portal:dashboard"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Updates Since Your Last Visit")
+        self.assertContains(response, "Class Updates")
+        self.assertContains(response, "Important changes since your previous successful login.")
 
-    def test_updates_help_popover_markup_is_present(self):
+    def test_updates_help_details_are_present(self):
         response = self.client.get(reverse("faculty_portal:dashboard"))
-        self.assertContains(response, 'data-updates-help-toggle')
+        self.assertContains(response, '<details class="dashboard-updates-help">')
         self.assertContains(response, 'id="updates-help-callout"')
         self.assertContains(response, "What appears here?")
         self.assertContains(
@@ -431,4 +432,6 @@ class FacultyDashboardUpdatesTests(TestCase):
         response = self.client.get(reverse("faculty_portal:dashboard"))
 
         self.assertContains(response, "Showing the latest 5 updates.")
-        self.assertEqual(response.content.decode().count('<div class="faculty-update-item">'), 5)
+        self.assertEqual(response.content.decode().count("data-dashboard-update"), 5)
+        self.assertContains(response, "Student5")
+        self.assertNotContains(response, "Student0")

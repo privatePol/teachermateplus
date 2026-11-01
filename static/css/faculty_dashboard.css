@@ -1,0 +1,75 @@
+.faculty-dashboard-shell { max-width: 1600px; margin: 0 auto; min-width: 0; color: #173d27; }
+.faculty-dashboard-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+.faculty-dashboard-header h1 { font-size: 1.45rem; font-weight: 750; margin: 0 0 .25rem; }
+.faculty-dashboard-header p { margin: 0; color: #52685a; }
+.faculty-dashboard-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.dashboard-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; margin-bottom: 1rem; }
+.dashboard-card { background: #fff; border: 1px solid #d4dfd1; border-radius: .75rem; min-width: 0; overflow-wrap: anywhere; }
+.dashboard-card h2 { font-size: 1rem; font-weight: 750; margin: 0; }
+.dashboard-card p { font-size: .85rem; color: #52685a; line-height: 1.45; margin: .35rem 0 0; }
+.dashboard-metric { padding: 1rem; border-top: 3px solid #37734a; }
+.dashboard-metric-yellow { border-top-color: #c6a02b; background: #fffdf4; }
+.dashboard-metric h2 { font-size: .88rem; }
+.dashboard-metric-value { font-size: 1.8rem; font-weight: 750; line-height: 1.2; margin-top: .5rem; }
+.dashboard-metric-date { font-size: 1.05rem; font-weight: 700; margin-top: .6rem; }
+.dashboard-work-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.dashboard-grade-status { grid-column: span 2; }
+.dashboard-updates { grid-column: 1 / -1; }
+.dashboard-card-head { padding: .9rem 1rem; border-bottom: 1px solid #e1e8de; display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: .6rem; }
+.dashboard-card-body { padding: .35rem 1rem .9rem; }
+.dashboard-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border-radius: 0 0 .75rem .75rem; }
+.dashboard-table-scroll:focus-visible { outline: 3px solid #b08c17; outline-offset: -3px; }
+.dashboard-grade-table { min-width: 720px; font-size: .85rem; }
+.dashboard-grade-table thead th { color: #3c5543; background: #f2f6ef; white-space: nowrap; font-size: .8rem; }
+.dashboard-grade-table th, .dashboard-grade-table td { padding: .8rem .7rem; vertical-align: middle; }
+.dashboard-class-label { min-width: 100px; max-width: 180px; font-weight: 600; }
+.dashboard-inline-actions { display: inline-flex; flex-wrap: nowrap; gap: .35rem; white-space: nowrap; }
+.dashboard-inline-actions .btn { font-size: .8rem; }
+.dashboard-action-compact { display: none; }
+.dashboard-list-item { display: flex; align-items: start; justify-content: space-between; gap: .75rem; padding: .8rem 0; border-bottom: 1px solid #e5ebe2; font-size: .88rem; }
+.dashboard-list-item:last-child { border-bottom: 0; }
+.dashboard-list-item > div { min-width: 0; }
+.dashboard-list-item > .btn { flex-shrink: 0; }
+.dashboard-update-time { flex-shrink: 0; color: #52685a; font-size: .78rem; }
+.dashboard-empty { padding: 1rem; font-size: .88rem; }
+.dashboard-card-body .dashboard-empty { padding: .7rem 0; }
+.dashboard-notices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.dashboard-notices > * { min-width: 0; }
+.dashboard-notices > :only-child { grid-column: 1 / -1; }
+.faculty-active-period-banner { border: 1px solid #c5d9ba; border-radius: .75rem; padding: 1rem; margin-bottom: 1rem; background: #f0f7e9; overflow-wrap: anywhere; }
+.faculty-active-period-eyebrow { font-size: .75rem; color: #52685a; margin-bottom: .3rem; }
+.faculty-active-period-scope { font-size: 1rem; line-height: 1.5; font-weight: 700; }
+.faculty-active-period-title, .faculty-active-period-note { font-size: .85rem; margin: .3rem 0; }
+.faculty-active-period-chip { display: inline-block; font-size: .85rem; font-weight: 700; background: #fff8d6; border: 1px solid #d5c578; border-radius: .4rem; padding: .25rem .5rem; margin-top: .25rem; }
+.faculty-active-period-chip-meta { font-size: .75rem; font-weight: 400; }
+.faculty-active-period-entry + .faculty-active-period-entry { margin-top: .75rem; }
+.dashboard-updates-help { margin-top: .6rem; font-size: .85rem; }
+.faculty-deadline-banner { border: 1px solid #d4dfd1; border-radius: .75rem; padding: 1rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: .75rem; background: #fffdf1; }
+.faculty-deadline-banner-copy { min-width: 0; overflow-wrap: anywhere; }
+.faculty-deadline-banner-danger { background: #fff4ef; border-color: #e3b4a3; }
+.faculty-deadline-banner-neutral { background: #f4f8f1; }
+.faculty-deadline-banner-eyebrow { font-size: .75rem; color: #52685a; margin-bottom: .3rem; }
+.faculty-deadline-banner-title { font-size: 1rem; font-weight: 750; margin-bottom: .3rem; }
+.faculty-deadline-banner-focus { font-size: 1.05rem; font-weight: 700; line-height: 1.5; margin: 0 0 .4rem; }
+.deadline-period { color: #624d06; }
+.deadline-date { color: #77362c; }
+.deadline-separator { margin: 0 .3rem; }
+.faculty-deadline-banner-note, .faculty-deadline-banner-helper { font-size: .85rem; color: #52685a; }
+.faculty-deadline-banner-helper { margin-top: .3rem; }
+.faculty-deadline-banner-action { display: flex; flex-wrap: wrap; gap: .4rem; }
+.faculty-deadline-guide-tag { font-size: .8rem; color: #1e5f38; align-self: center; }
+@media (max-width: 1199.98px) {
+  .dashboard-summary-grid, .dashboard-work-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-grade-status { grid-column: 1 / -1; }
+  .dashboard-updates { grid-column: auto; }
+}
+@media (max-width: 767.98px) {
+  .dashboard-summary-grid, .dashboard-work-grid, .dashboard-notices { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-grade-status, .dashboard-updates { grid-column: auto; }
+  .dashboard-action-full { display: none; }
+  .dashboard-action-compact { display: inline; }
+  .dashboard-grade-table { min-width: 620px; }
+  .dashboard-grade-table th, .dashboard-grade-table td { padding: .65rem .5rem; }
+  .dashboard-list-item { flex-wrap: wrap; }
+  .faculty-dashboard-header h1 { font-size: 1.3rem; }
+}

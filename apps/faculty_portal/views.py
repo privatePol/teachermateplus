@@ -31,6 +31,7 @@ from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
+from apps.faculty_portal.dashboard import DashboardActivity, DashboardData
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import ClassListChangeRequest, Enrollment
 from apps.enrollment.services import ClassListChangeRequestService, EnrollmentService
@@ -1729,6 +1730,7 @@ def dashboard_view(request):
     pending_correction_requests = 0
     classes_with_missing_grades = 0
     dashboard_now = timezone.now()
+    dashboard_data = DashboardData(active_offerings, now=dashboard_now)
 
     if active_offering_ids:
         enrollment_status_counts = Enrollment.objects.filter(
@@ -1783,8 +1785,7 @@ def dashboard_view(request):
 
         for offering in active_offerings:
             try:
-                template = FacultyGradingService.resolve_template_for_offering(offering)
-                periods = list(FacultyGradingService.get_template_periods(template))
+                template, periods = dashboard_data.template_periods(offering)
             except ValidationError:
                 classes_not_submitted += 1
                 continue
@@ -1793,7 +1794,7 @@ def dashboard_view(request):
             offering_has_missing_grades = False
             active_student_ids = active_enrollment_ids_by_offering.get(offering.id, [])
             for period in periods:
-                submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
+                submission = dashboard_data.submission(offering, period)
                 if submission and submission.status == GradeSubmission.Status.SUBMITTED:
                     submitted_periods += 1
                 else:
@@ -1816,49 +1817,22 @@ def dashboard_view(request):
     deadline_reminder, periods_near_deadline = _build_deadline_reminder_for_offerings(
         active_offerings,
         now=dashboard_now,
+        dashboard_data=dashboard_data,
     )
-    active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=dashboard_now)
+    active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=dashboard_now, dashboard_data=dashboard_data)
     updates_summary = FacultyDashboardUpdatesService.get_dashboard_updates(
         user=request.user,
         offerings=active_offerings,
         now=dashboard_now,
+        dashboard_data=dashboard_data,
     )
     grade_status_rows = []
     pending_grade_issues = []
     for offering in active_offerings:
         period = None
         try:
-            template = FacultyGradingService.resolve_template_for_offering(offering)
-            periods = list(FacultyGradingService.get_template_periods(template))
-            active_period_setting = AcademicGovernanceService.resolve_active_grading_period(
-                tenant_id=offering.tenant_id,
-                campus_id=offering.campus_id,
-                term_id=offering.term_id,
-                now=dashboard_now,
-            )
-            period = next(
-                (
-                    candidate
-                    for candidate in periods
-                    if AcademicGovernanceService.template_period_matches_active_period(
-                        template_period=candidate,
-                        active_period_setting=active_period_setting,
-                    )
-                ),
-                None,
-            )
-            if period is None:
-                period = next(
-                    (
-                        candidate
-                        for candidate in periods
-                        if not GradingGovernanceService.is_submitted(
-                            offering=offering,
-                            template_period=candidate,
-                        )
-                    ),
-                    periods[0] if periods else None,
-                )
+            template, periods = dashboard_data.template_periods(offering)
+            period = dashboard_data.current_period(offering)
         except ValidationError as exc:
             template = None
             periods = []
@@ -1875,21 +1849,17 @@ def dashboard_view(request):
         status_class = "danger"
         action_label = "Open Class"
         action_url = reverse("faculty_portal:offering_periods", args=[offering.id])
-        issue_count = 1 if not template else 0
+        issue_count = 1 if not template or not period else 0
+        if template and not period:
+            pending_grade_issues.append({
+                "class_label": f"{offering.course.code} / {offering.section.code}", "period_name": "",
+                "message": "No active grading periods are configured for this class template.", "url": action_url,
+            })
         if template and period:
-            readiness = GradingGovernanceService.evaluate_submission_readiness(
-                offering=offering,
-                template_period=period,
-            )
-            submission = GradingGovernanceService.get_submission(
-                offering=offering,
-                template_period=period,
-            )
-            lock = GradingGovernanceService.resolve_lock(
-                offering=offering,
-                template_period=period,
-            )
-            encoding_control = GradeEncodingAccessService.get_closed_control(offering=offering, template_period=period)
+            readiness = dashboard_data.readiness(offering, period)
+            submission = dashboard_data.submission(offering, period)
+            lock = dashboard_data.lock(offering, period)
+            encoding_control = dashboard_data.closed_control(offering, period)
             is_submitted = bool(submission and submission.status == GradeSubmission.Status.SUBMITTED)
             if encoding_control:
                 status, status_class = "Encoding Closed", "danger"
@@ -1974,6 +1944,7 @@ def dashboard_view(request):
                 "issue_count": issue_count,
                 "action_label": action_label,
                 "action_url": action_url,
+                "review_url": reverse("faculty_portal:period_summary", args=[offering.id, period.id]) if period else "",
                 "performance_url": (
                     reverse("faculty_portal:class_performance", args=[offering.id, period.id])
                     if period
@@ -2004,8 +1975,20 @@ def dashboard_view(request):
         "updates_summary": updates_summary,
         "grade_status_rows": grade_status_rows,
         "pending_grade_issues": pending_grade_issues,
+        "pending_issue_count": sum(row["issue_count"] for row in grade_status_rows),
+        "last_update": DashboardActivity.last_update(request.user, active_offerings),
+        "non_compliance": DashboardActivity.non_compliance(request.user, tenant_id=tenant_id, campus_id=campus_id),
     }
-    return render(request, "faculty_portal/dashboard.html", {"stats": stats})
+    visit_key, previous_visit, visit_state = DashboardActivity.visit_context(
+        request, tenant_id=tenant_id, campus_id=campus_id, now=dashboard_now,
+    )
+    stats["previous_visit"] = previous_visit
+    response = render(request, "faculty_portal/dashboard.html", {"stats": stats})
+    if response.status_code == 200 and request.method == "GET" and visit_state is not None:
+        DashboardActivity.record_visit(
+            request, key=visit_key, state=visit_state, tenant_id=tenant_id, campus_id=campus_id,
+        )
+    return response
 
 
 @portal_required("FACULTY")
@@ -2302,7 +2285,7 @@ def _format_code_list(values, *, limit=4):
     return f"{', '.join(normalized[:limit])} and {remaining} more"
 
 
-def _build_deadline_reminder_for_offerings(offerings, *, now=None):
+def _build_deadline_reminder_for_offerings(offerings, *, now=None, dashboard_data=None):
     now = now or timezone.now()
     deadline_candidates = []
     near_deadline_cutoff = now + timezone.timedelta(hours=48)
@@ -2311,23 +2294,30 @@ def _build_deadline_reminder_for_offerings(offerings, *, now=None):
 
     for offering in offerings:
         try:
-            template = FacultyGradingService.resolve_template_for_offering(offering)
-            periods = list(FacultyGradingService.get_template_periods(template))
+            if dashboard_data:
+                template, periods = dashboard_data.template_periods(offering)
+            else:
+                template = FacultyGradingService.resolve_template_for_offering(offering)
+                periods = list(FacultyGradingService.get_template_periods(template))
         except ValidationError:
             continue
 
         for period in periods:
-            GradingGovernanceService.auto_lock_expired_reopened_gradebook(
-                offering=offering,
-                template_period=period,
-                at=now,
-            )
+            if not dashboard_data or (dashboard_data.submission(offering, period) and
+                                      dashboard_data.submission(offering, period).status == GradeSubmission.Status.REOPENED):
+                changed = GradingGovernanceService.auto_lock_expired_reopened_gradebook(
+                    offering=offering, template_period=period, at=now,
+                )
+                if changed and dashboard_data:
+                    dashboard_data.locks = list(GradingPeriodLock.objects.filter(
+                        id__in=[lock.id for lock in dashboard_data.locks] + [changed["id"]], is_active=True,
+                    ).order_by("-updated_at"))
             if period.code:
                 offering_period_codes.add(period.code)
-            submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
+            submission = dashboard_data.submission(offering, period) if dashboard_data else GradingGovernanceService.get_submission(offering=offering, template_period=period)
             if submission and submission.status == GradeSubmission.Status.SUBMITTED:
                 continue
-            lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=period)
+            lock = dashboard_data.lock(offering, period) if dashboard_data else GradingGovernanceService.resolve_lock(offering=offering, template_period=period)
             if lock and lock.deadline_at:
                 deadline_candidates.append(
                     {
@@ -2408,7 +2398,19 @@ def _build_deadline_reminder_for_offerings(offerings, *, now=None):
             ),
         }
 
-    if not deadline_candidates and offerings:
+    all_submitted = bool(dashboard_data and offerings) and all(
+        dashboard_data.periods.get(getattr(dashboard_data.templates.get(offering.id), "id", None), [])
+        and all(dashboard_data.is_submitted(offering, period) for period in dashboard_data.periods[
+            dashboard_data.templates[offering.id].id
+        ]) for offering in offerings
+    )
+    if not deadline_candidates and all_submitted:
+        reminder.update({
+            "title": "All configured period grades submitted",
+            "note": "There are no unsubmitted period gradebooks in your active classes.",
+            "helper": "Submitted grades remain protected by the existing submission and correction policies.",
+        })
+    elif not deadline_candidates and offerings:
         offering_scopes = sorted(
             {
                 (
@@ -2594,7 +2596,7 @@ def _build_deadline_reminder_for_period_cards(offering, period_cards, *, now=Non
     return reminder
 
 
-def _build_active_grading_period_rows(offerings, *, now=None):
+def _build_active_grading_period_rows(offerings, *, now=None, dashboard_data=None):
     now = now or timezone.now()
     rows = []
     seen_scopes = set()
@@ -2603,7 +2605,7 @@ def _build_active_grading_period_rows(offerings, *, now=None):
         if scope_key in seen_scopes:
             continue
         seen_scopes.add(scope_key)
-        active_setting = AcademicGovernanceService.resolve_active_grading_period(
+        active_setting = dashboard_data.active_setting(offering) if dashboard_data else AcademicGovernanceService.resolve_active_grading_period(
             tenant_id=offering.tenant_id,
             campus_id=offering.campus_id,
             term_id=offering.term_id,

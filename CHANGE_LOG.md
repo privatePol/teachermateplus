@@ -1,3 +1,23 @@
+## 2026-11-01 - Faculty Dashboard metadata remediation round 2 (local, uncommitted)
+
+- Activity edit/archive now lock and reload the scoped persisted activity before comparison. Activity edits compare database-effective values; stale caller instances cannot hide changes or invent no-op timestamps. Repeated archives retain their dependent operations without advancing the marker again.
+- Attendance-session saves compare the locked persisted session using the existing unique offering/period/date identity, including concurrent first-insert recovery. Creation, reactivation and genuine edits advance the faculty marker transactionally; no-op saves do not. Added deterministic regressions for all five review failures, interleavings, rollback and scope, plus three MariaDB-only concurrency gates. No schema, dashboard read, grading policy or UI change in this round.
+
+## 2026-11-01 - Faculty Dashboard independent-review remediation (local, uncommitted)
+
+- Score and attendance-record writes now lock their existing activity/session parent and read each persisted record under a row lock before comparing changes. First creation, clearing and reactivation share the same transaction as their faculty modification marker; no-op saves do not advance it. This removes the pre-lock snapshot race without changing grading permissions or submission policies.
+- Expected database failures in informational visit tracking now leave a valid dashboard response available, emit a sanitized warning and leave the visit session cache unchanged for retry. Unrelated dashboard/rendering errors still propagate.
+- Added compact database-backed visit state with a unique HMAC identity for browser session, faculty and authorized scope. Unique insertion and row locking coalesce simultaneous requests into one recorded visit per 30-minute window with the same previous-visit value. A pending claim is not a recorded visit; the audit and recorded timestamp commit together only after successful rendering. Normal cached refreshes avoid tracking reads/writes.
+- Amended the existing unapplied `faculty_portal.0002_facultygradebookmodification` to create the additional visit-state table alongside gradebook modification state. No data backfill or non-test migration application. Responsive layout, sidebar, inline actions and non-compliance behavior are unchanged.
+
+## 2026-11-01 - Faculty Dashboard responsive redesign (local, uncommitted)
+
+- Added compact green/yellow summary and work cards, a wider Grade Encoding Status table with one horizontal row per class on every viewport, unique Review Grades/Performance links and retained conditional encoding actions. Tablet cards use two columns; phone cards stack and table scrolling stays inside the card. Existing class updates, academic scope, deadline and issue information remain server-rendered.
+- Faculty mobile navigation now defaults closed in a bounded scrolling drawer with Close/backdrop/Escape handling, focus containment/restoration, background scroll lock and viewport transitions. Desktop collapse preferences remain separate and storage errors are tolerated; Admin navigation is untouched.
+- Your Last Visit uses successful dashboard visit audits with a 30-minute refresh window, independent of login history. Last Update uses new transactional faculty/offering/period state for explicit activity, score and attendance edits, including clear/archive and approved corrections routed through those services; derived computations and no-op data saves do not advance it. There is no uncertain history backfill.
+- Term non-compliance totals explicitly show Not available: the existing issuer lacks a unique issuance-cycle ledger and historical completeness guarantee. A scoped count of actual notice rows, including resolved notices and excluding email retries, is explanatory only. No issuance policy or schema changed.
+- Batched dashboard templates, periods, submission/lock/control and readiness reads; bounded login/update-feed queries. Submitted active periods no longer produce an upcoming unsubmitted-deadline update, and all-submitted classes receive an accurate neutral deadline card. Additive migration `faculty_portal.0002_facultygradebookmodification` is required before runtime activation; application is not authorized outside disposable test databases.
+
 ## 2026-10-28 - QuiTizz Thursday readiness integration
 
 - Integrated the approved answer confirmation, queued realtime notifications, cancellation and projector QR visibility changes onto the production-compatible baseline. Existing faculty guidance and unrelated production history are retained.

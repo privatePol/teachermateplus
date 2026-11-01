@@ -69,6 +69,7 @@
   }
   .faculty-sidebar {
     width: 280px;
+    flex-shrink: 0;
     transition: width 0.2s ease;
     border-right: 1px solid var(--fp-sidebar-border);
     background: linear-gradient(180deg, #f7fbf6 0%, #eff5ee 100%);
@@ -418,13 +419,38 @@
       display: block;
     }
     .faculty-sidebar {
-      width: 100%;
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 1080;
+      width: min(320px, calc(100vw - 3rem));
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
       border-right: 0;
-      border-bottom: 1px solid var(--fp-sidebar-border);
+      visibility: hidden;
+      transform: translateX(-100%);
+      transition: transform .2s ease, visibility .2s;
     }
     .faculty-layout.sidebar-collapsed .faculty-sidebar {
-      width: 100%;
-      display: none;
+      width: min(320px, calc(100vw - 3rem));
+    }
+    .faculty-layout.mobile-drawer-open .faculty-sidebar {
+      visibility: visible;
+      transform: translateX(0);
+    }
+    .faculty-sidebar-inner {
+      flex: 1;
+      min-height: 0;
+      height: auto;
+      overscroll-behavior-y: contain;
+    }
+    .faculty-sidebar-drawer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: .85rem 1rem;
+      border-bottom: 1px solid var(--fp-sidebar-border);
     }
     .faculty-main {
       padding: 1rem;
@@ -474,6 +500,9 @@
     }
   }
   @media (max-width: 575.98px) {
+    .faculty-topbar > .container-fluid { flex-wrap: wrap; gap: .5rem; }
+    .faculty-topbar > .container-fluid > .flex-column { flex: 1 1 12rem; min-width: 0; }
+    .faculty-logo { height: 48px; }
     .faculty-brand-title {
       font-size: 1.2rem;
     }
@@ -499,6 +528,25 @@
   [data-import-overlay][hidden] {
     display: none !important;
   }
+  .faculty-sidebar-drawer-head { display: none; }
+  .faculty-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1070;
+    border: 0;
+    border-radius: 0;
+    background: rgba(8, 32, 18, .5);
+  }
+  .faculty-sidebar-backdrop[hidden] { display: none; }
+  body.faculty-drawer-open { overflow: hidden; }
+  @media (max-width: 991.98px) {
+    .faculty-sidebar-drawer-head { display: flex; }
+    .faculty-topbar > .container-fluid { min-width: 0; }
+    .faculty-topbar .faculty-user { overflow-wrap: anywhere; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .faculty-sidebar { transition: none; }
+  }
   @media print {
     .faculty-utility-stack {
       display: none !important;
@@ -512,7 +560,7 @@
   <nav class="navbar faculty-topbar px-2 px-md-3" data-tour-id="faculty-header">
     <div class="container-fluid">
       <div class="d-flex align-items-center gap-2">
-        <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" data-tour-id="sidebar-toggle"{% if privacy_consent_pending or password_change_required %} disabled aria-disabled="true"{% endif %}>&#9776;</button>
+        <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" aria-controls="faculty-sidebar" aria-expanded="false" data-tour-id="sidebar-toggle"{% if privacy_consent_pending or password_change_required %} disabled aria-disabled="true"{% endif %}>&#9776;</button>
         <span class="d-inline-flex align-items-center">
           <img src="{% get_media_prefix %}logos/teachermate_logo_official.png" alt="TeacherMate+" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/teachermate_logo_text_official.png';">
         </span>
@@ -544,7 +592,9 @@
     </div>
   </nav>
   <div class="faculty-layout{% if privacy_consent_pending or password_change_required %} sidebar-collapsed navigation-lock{% endif %}" id="faculty-layout"{% if privacy_consent_pending or password_change_required %} data-navigation-lock="1"{% endif %}>
-    <aside class="faculty-sidebar"{% if privacy_consent_pending %} aria-label="Navigation unavailable until privacy consent is accepted"{% elif password_change_required %} aria-label="Navigation unavailable until the required password change is completed"{% endif %}>
+    <button type="button" id="faculty-sidebar-backdrop" class="faculty-sidebar-backdrop" aria-label="Close navigation" tabindex="-1" hidden></button>
+    <aside class="faculty-sidebar" id="faculty-sidebar" tabindex="-1" aria-label="Faculty navigation">
+      <div class="faculty-sidebar-drawer-head"><strong>Faculty navigation</strong><button class="btn-close" id="faculty-sidebar-close" type="button" aria-label="Close navigation"></button></div>
       <div class="faculty-sidebar-inner">
         {% if privacy_consent_pending %}
           <div class="faculty-nav-lock-message" aria-live="polite">
@@ -796,6 +846,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/faculty_sidebar.js' %}"></script>
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const sourceNext = window.location.pathname + window.location.search;
@@ -814,24 +865,6 @@
       targetUrl.searchParams.set("next", sourceNext);
       link.setAttribute("href", targetUrl.pathname + targetUrl.search);
     });
-
-    const layout = document.getElementById("faculty-layout");
-    const toggleBtn = document.getElementById("faculty-sidebar-toggle");
-    const storageKey = "TeacherMate+_faculty_sidebar_collapsed";
-    const navigationLocked = layout && layout.dataset.navigationLock === "1";
-    if (layout && toggleBtn) {
-      const savedCollapsed = navigationLocked || localStorage.getItem(storageKey) === "1";
-      if (savedCollapsed) {
-        layout.classList.add("sidebar-collapsed");
-      }
-      toggleBtn.addEventListener("click", function () {
-        if (navigationLocked) {
-          return;
-        }
-        layout.classList.toggle("sidebar-collapsed");
-        localStorage.setItem(storageKey, layout.classList.contains("sidebar-collapsed") ? "1" : "0");
-      });
-    }
 
     const utilityStack = document.querySelector(".faculty-utility-stack");
     const utilityToggle = document.querySelector(".faculty-utility-toggle");

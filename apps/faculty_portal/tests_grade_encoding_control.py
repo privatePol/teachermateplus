@@ -191,7 +191,9 @@ class FacultyGradeEncodingControlNoticeTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Encoding Closed")
-        self.assertContains(response, "View Class")
+        self.assertContains(response, "Review Grades")
+        self.assertEqual(response.context["stats"]["grade_status_rows"][0]["review_url"],
+                         reverse("faculty_portal:period_summary", args=[self.offering.pk, self.period.pk]))
         self.assertNotContains(response, "Grade encoding is temporarily disabled")
         self.assertNotContains(response, "Enrollment cleanup")
         self.assertNotContains(response, "Please wait for the final class list.")

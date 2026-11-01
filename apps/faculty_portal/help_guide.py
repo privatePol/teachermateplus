@@ -250,17 +250,17 @@ FACULTY_HELP_SECTIONS = [
             {
                 "code": "dashboard",
                 "title": "Dashboard and Grade Encoding Status",
-                "purpose": "Shows your accepted classes, current-period encoding status, and gradebook blockers without displaying student names. Detailed update, encoding-status, issue, analytics, performance-trend, and activity-history panels are intentionally hidden on phone-width screens.",
-                "how_to_open": ["From the left navigation bar, click Dashboard."],
+                "purpose": "Shows your accepted classes, current-period encoding status, gradebook blockers and scoped class updates in compact cards. On phones the cards stack, and Grade Encoding Status keeps one horizontal row per class with scrolling inside the table.",
+                "how_to_open": ["From the left navigation bar, click Dashboard.", "On phones and tablets, open the hamburger menu; close the drawer with Close, the backdrop, or Escape."],
                 "screenshot": "faculty_helpguide/1_dashboard.png",
-                "check_first": ["Confirm the academic scope.", "Check each class period and status.", "Open Pending Grade Issues before a deadline."],
+                "check_first": ["Confirm the academic scope.", "Check each class period and status. Review Grades and View Performance remain available for each configured period; on phones they read Grades and Performance.", "Open Pending Grade Issues before a deadline.", "Your Last Visit is a previous dashboard visit, not a login. Refreshes within 30 minutes belong to one visit. Times use Asia/Manila.", "Last Update tracks your committed activity, score and attendance edits in active classes from this release onward; computed grades do not advance it.", "A verified term non-compliance total is Not available because historical issuance is not guaranteed complete or duplicate-free. Recorded notice rows include resolved notices and exclude email retry counts."],
                 "actions": [
                     {"name": "Open My Classes", "does": "Opens your accepted teaching assignments.", "when": "Use it to enter a class or grading period.", "avoid": "Do not use another faculty member's account to open a class.", "result": "Your assigned class cards are displayed.", "editable": "No records change."},
                     {"name": "Continue Encoding", "does": "Opens the selected period's activity workspace.", "when": "Use it for Not Started or In Progress gradebooks.", "avoid": "Do not encode until the class list and grading setup are correct.", "result": "You can continue creating activities or entering scores while policy permits.", "editable": "The gradebook remains editable only while open."},
                     {"name": "Review / Submit Grades", "does": "Opens the Summary when required records appear complete.", "when": "Use it after checking activities, scores, and attendance.", "avoid": "Do not submit without reviewing the Summary.", "result": "The current computed gradebook is displayed for review. On phones, the grade table shows wrapped student names, the current official periodic grade, and Explain.", "editable": "Submission locks normal editing."},
                     {"name": "View Performance", "does": "Opens the selected class snapshot and students requiring attention.", "when": "Use it after scores are encoded.", "avoid": "Do not present a partial snapshot as a final submitted grade.", "result": "Class average, risk count, missing outputs, weakest component, and attention rows are displayed.", "editable": "No grade records change."},
                 ],
-                "avoid": "The dashboard intentionally does not show student names or student-level alerts. Open a selected class to review those records privately.",
+                "avoid": "Class status and issue cards do not list individual students or grades. Class Updates can describe scoped enrollment changes. Open a selected class to review student grade records privately; a timestamp or reminder count does not change submission or clearance policy.",
                 "next_step": "Resolve Pending Grade Issues or open View Performance for one class.",
             },
             {

@@ -261,8 +261,8 @@ class FacultyFeedbackSubmissionTests(TestCase):
         self.assertNotContains(public_response, "faculty-feedback-open")
         self.assertNotIn(b"faculty-feedback-open", admin_response.content)
 
-    def test_faculty_feedback_migration_directory_contains_only_expected_source_files(self):
+    def test_faculty_portal_migration_directory_contains_only_expected_source_files(self):
         migration_dir = Path(__file__).resolve().parent / "migrations"
         entries = sorted(path.name for path in migration_dir.glob("*.py"))
 
-        self.assertEqual(entries, ["0001_initial.py", "__init__.py"])
+        self.assertEqual(entries, ["0001_initial.py", "0002_facultygradebookmodification.py", "__init__.py"])

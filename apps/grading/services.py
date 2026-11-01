@@ -21,6 +21,7 @@ from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
 from apps.core.services.audit import AuditService
 from apps.enrollment.models import Enrollment
+from apps.faculty_portal.activity_tracking import record_gradebook_modification
 from apps.grading.access import GradingTemplateAccessService
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
@@ -6657,6 +6658,7 @@ class FacultyGradingService:
             template_period=template_period,
             reason="ACTIVITY_CHANGE",
         )
+        record_gradebook_modification(user=user, offering=offering, template_period=template_period)
         return activity
 
     @classmethod
@@ -6674,6 +6676,12 @@ class FacultyGradingService:
         total_score: Decimal,
         activity_date,
     ):
+        # The caller may predate another committed edit. Lock the scoped parent
+        # before comparing metadata, in the same order as score writes/archive.
+        activity = GradeActivity.objects.select_for_update().get(
+            pk=activity.pk, offering_id=activity.offering_id,
+            tenant_id=activity.tenant_id, campus_id=activity.campus_id,
+        )
         cls._validate_activity_structure(
             template_period=template_period,
             template_component=template_component,
@@ -6690,6 +6698,10 @@ class FacultyGradingService:
             template_detail=template_detail,
         )
 
+        previous_definition = (
+            activity.template_component_id, activity.template_subcomponent_id, activity.template_detail_id,
+            activity.title, activity.total_score, activity.activity_date,
+        )
         activity.template_component = template_component
         activity.template_subcomponent = template_subcomponent
         activity.template_detail = template_detail
@@ -6707,6 +6719,12 @@ class FacultyGradingService:
                 "updated_at",
             ]
         )
+        # Compare database-effective values (including date/decimal conversion),
+        # not the input's Python representation. The row lock is still held.
+        activity.refresh_from_db(fields=[
+            "template_component", "template_subcomponent", "template_detail",
+            "title", "total_score", "activity_date",
+        ])
 
         recomputed_score_count = 0
         active_scores = list(activity.student_scores.filter(is_active=True))
@@ -6729,6 +6747,11 @@ class FacultyGradingService:
             offering=activity.offering,
             template_period=template_period,
         )
+        if previous_definition != (
+            activity.template_component_id, activity.template_subcomponent_id, activity.template_detail_id,
+            activity.title, activity.total_score, activity.activity_date,
+        ):
+            record_gradebook_modification(user=user, offering=activity.offering, template_period=template_period)
         return activity, recomputed_score_count
 
     @classmethod
@@ -6743,6 +6766,13 @@ class FacultyGradingService:
         audit_reason: str | None = "SCORE_WRITE",
         audit_portal: str = "FACULTY",
     ):
+        # Serialize absent-row creation/clear as well as existing score writes.
+        # Lock before reading values; a snapshot taken before update_or_create's
+        # internal lock can miss a writer that committed while we were waiting.
+        activity = GradeActivity.objects.select_for_update().get(
+            pk=activity.pk, offering_id=activity.offering_id,
+            tenant_id=activity.tenant_id, campus_id=activity.campus_id,
+        )
         template = cls.resolve_template_for_offering(activity.offering)
         base_value = cls.resolve_base_value(activity.offering, template)
         score_input_mode = cls.resolve_score_input_mode(
@@ -6754,6 +6784,7 @@ class FacultyGradingService:
             cls.get_active_enrollments(activity.offering).values_list("student_id", flat=True)
         )
 
+        changed = False
         saved = 0
         affected_student_ids = set()
         for row in score_payload:
@@ -6769,11 +6800,13 @@ class FacultyGradingService:
                 requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
             )
             if row.get("clear"):
-                StudentActivityScore.objects.filter(
-                    activity=activity,
-                    student_id=student_id,
-                    is_active=True,
-                ).update(is_active=False)
+                try:
+                    score = StudentActivityScore.objects.select_for_update().get(activity=activity, student_id=student_id)
+                except StudentActivityScore.DoesNotExist:
+                    continue
+                if score.is_active:
+                    StudentActivityScore.objects.filter(pk=score.pk).update(is_active=False)
+                    changed = True
                 continue
             raw = Decimal(str(row.get("raw_score", "0") or "0"))
             remarks = row.get("remarks") or ""
@@ -6783,17 +6816,21 @@ class FacultyGradingService:
                 base_value=base_value,
                 score_input_mode=score_input_mode,
             )
-            StudentActivityScore.objects.update_or_create(
+            defaults = {
+                "raw_score": raw, "computed_score": computed, "encoded_by_user": user,
+                "remarks": remarks[:255] if remarks else None, "is_active": True,
+            }
+            score, created = StudentActivityScore.objects.select_for_update().get_or_create(
                 activity=activity,
                 student_id=student_id,
-                defaults={
-                    "raw_score": raw,
-                    "computed_score": computed,
-                    "encoded_by_user": user,
-                    "remarks": remarks[:255] if remarks else None,
-                    "is_active": True,
-                },
+                defaults=defaults,
             )
+            if created or (score.raw_score, score.remarks or "", score.is_active) != (raw, remarks[:255], True):
+                changed = True
+            if not created:
+                for field, value in defaults.items():
+                    setattr(score, field, value)
+                score.save(update_fields=[*defaults, "updated_at"])
             saved += 1
         if recompute and affected_student_ids:
             cls.recompute_period_summary_for_students(
@@ -6809,6 +6846,8 @@ class FacultyGradingService:
             template_period=activity.template_period,
             reason="SCORE_CHANGE",
         )
+        if changed:
+            record_gradebook_modification(user=user, offering=activity.offering, template_period=activity.template_period)
         return saved
 
     @classmethod
@@ -6829,33 +6868,51 @@ class FacultyGradingService:
                 raise ValidationError("Invalid session date.")
             session_date = parsed
 
-        session, created = AttendanceSession.objects.update_or_create(
+        defaults = {
+            "tenant_id": offering.tenant_id,
+            "campus_id": offering.campus_id,
+            "title": (title or "").strip() or None,
+            "created_by_user": user,
+            "is_active": True,
+        }
+        # Lock existing sessions before comparing. The unique offering/period/
+        # date constraint arbitrates first creation; get_or_create's collision
+        # retry retains SELECT FOR UPDATE, including on MariaDB.
+        session, created = AttendanceSession.objects.select_for_update().get_or_create(
             offering=offering,
             template_period=template_period,
             session_date=session_date,
-            defaults={
-                "tenant_id": offering.tenant_id,
-                "campus_id": offering.campus_id,
-                "title": (title or "").strip() or None,
-                "created_by_user": user,
-                "is_active": True,
-            },
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
+            defaults=defaults,
         )
+        changed = created or (session.title, session.is_active) != (defaults["title"], True)
+        if not created:
+            for field, value in defaults.items():
+                setattr(session, field, value)
+            session.save(update_fields=[*defaults, "updated_at"])
         cls._mark_prediction_dirty(
             offering=offering,
             template_period=template_period,
             reason="ATTENDANCE_CHANGE",
         )
+        if changed:
+            record_gradebook_modification(user=user, offering=offering, template_period=template_period)
         return session, created
 
     @classmethod
     @transaction.atomic
     def archive_activity(cls, *, user, activity: GradeActivity):
+        activity = GradeActivity.objects.select_for_update().get(
+            pk=activity.pk, offering_id=activity.offering_id,
+            tenant_id=activity.tenant_id, campus_id=activity.campus_id,
+        )
         GradingGovernanceService.assert_encoding_allowed(
             offering=activity.offering,
             template_period=activity.template_period,
         )
 
+        was_active = activity.is_active
         activity.is_active = False
         activity.save(update_fields=["is_active", "updated_at"])
         activity.student_scores.filter(is_active=True).update(is_active=False, updated_at=timezone.now())
@@ -6870,14 +6927,21 @@ class FacultyGradingService:
             template_period=activity.template_period,
             reason="ACTIVITY_CHANGE",
         )
+        if was_active:
+            record_gradebook_modification(user=user, offering=activity.offering, template_period=activity.template_period)
         return activity
 
     @classmethod
     @transaction.atomic
     def upsert_attendance_records(cls, *, user, session: AttendanceSession, status_payload: list[dict]):
+        session = AttendanceSession.objects.select_for_update().get(
+            pk=session.pk, offering_id=session.offering_id,
+            tenant_id=session.tenant_id, campus_id=session.campus_id,
+        )
         enrolled_student_ids = set(
             cls.get_active_enrollments(session.offering).values_list("student_id", flat=True)
         )
+        changed = False
         saved = 0
         affected_student_ids = set()
         for row in status_payload:
@@ -6895,18 +6959,22 @@ class FacultyGradingService:
             if status_code not in cls.ATTENDANCE_SCORE_MAP:
                 status_code = AttendanceRecord.Status.PRESENT
             remarks = (row.get("remarks") or "").strip()
-            AttendanceRecord.objects.update_or_create(
+            defaults = {
+                "tenant_id": session.tenant_id, "campus_id": session.campus_id,
+                "status_code": status_code, "recorded_by_user": user,
+                "remarks": remarks[:255] if remarks else None, "is_active": True,
+            }
+            record, created = AttendanceRecord.objects.select_for_update().get_or_create(
                 session=session,
                 student_id=student_id,
-                defaults={
-                    "tenant_id": session.tenant_id,
-                    "campus_id": session.campus_id,
-                    "status_code": status_code,
-                    "recorded_by_user": user,
-                    "remarks": remarks[:255] if remarks else None,
-                    "is_active": True,
-                },
+                defaults=defaults,
             )
+            if created or (record.status_code, record.remarks or "", record.is_active) != (status_code, remarks[:255], True):
+                changed = True
+            if not created:
+                for field, value in defaults.items():
+                    setattr(record, field, value)
+                record.save(update_fields=[*defaults, "updated_at"])
             saved += 1
         if affected_student_ids:
             cls.recompute_period_summary_for_students(
@@ -6922,6 +6990,8 @@ class FacultyGradingService:
             template_period=session.template_period,
             reason="ATTENDANCE_CHANGE",
         )
+        if changed:
+            record_gradebook_modification(user=user, offering=session.offering, template_period=session.template_period)
         return saved
 
     @classmethod

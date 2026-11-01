@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Count, Q
+from django.db.models import Case, Count, Q, When
 from django.urls import reverse
 from django.utils import timezone
 
@@ -86,6 +86,7 @@ class FacultyDashboardService:
 
 class FacultyDashboardUpdatesService(FacultyDashboardService):
     DEFAULT_LIMIT = 5
+    SOURCE_LIMIT = 6
     DEADLINE_LOOKAHEAD_HOURS = 48
 
     @staticmethod
@@ -107,6 +108,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
             )
             .order_by("-created_at", "-id")
             .only("created_at", "id")
+            [:2]
         )
         if len(login_rows) < 2:
             current_login_at = login_rows[0].created_at if login_rows else None
@@ -142,11 +144,14 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
         items = []
         offering_ids = {offering.id for offering in offerings}
         queryset = (
-            FacultyAssignment.objects.filter(faculty_user=user, offering_id__in=offering_ids)
+            FacultyAssignment.objects.filter(faculty_user=user, offering_id__in=offering_ids).filter(
+                Q(responded_at__gt=since_at) | Q(assigned_at__gt=since_at)
+            )
             .select_related("offering", "offering__course", "offering__section")
-            .order_by("-updated_at", "-id")
+            .annotate(dashboard_event_at=Case(When(responded_at__gt=since_at, then="responded_at"), default="assigned_at"))
+            .order_by("-dashboard_event_at", "-id")
         )
-        for assignment in queryset:
+        for assignment in queryset[:cls.SOURCE_LIMIT]:
             offering = assignment.offering
             label = cls._offering_label(offering)
             event_at = None
@@ -189,7 +194,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
             .select_related("student", "course_offering", "course_offering__course", "course_offering__section")
             .order_by("-created_at", "-id")
         )
-        for enrollment in queryset:
+        for enrollment in queryset[:cls.SOURCE_LIMIT]:
             offering = enrollment.course_offering
             label = cls._offering_label(offering)
             student_name = cls._student_name(enrollment.student)
@@ -230,7 +235,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
             )
             .order_by("-processed_at", "-id")
         )
-        for row in queryset:
+        for row in queryset[:cls.SOURCE_LIMIT]:
             source_label = cls._offering_label(row.source_offering)
             destination_label = cls._offering_label(row.destination_offering)
             student_name = cls._student_name(row.student)
@@ -260,7 +265,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
             .select_related("offering", "offering__course", "offering__section", "template_period")
             .order_by("-reopened_at", "-id")
         )
-        for submission in queryset:
+        for submission in queryset[:cls.SOURCE_LIMIT]:
             label = cls._offering_label(submission.offering)
             period_name = submission.template_period.name or submission.template_period.code
             cls._append_item(
@@ -291,7 +296,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
             .select_related("offering", "offering__course", "offering__section", "template_period")
             .order_by("-reviewed_at", "-id")
         )
-        for request_obj in queryset:
+        for request_obj in queryset[:cls.SOURCE_LIMIT]:
             label = cls._offering_label(request_obj.offering)
             period_name = request_obj.template_period.name or request_obj.template_period.code
             action_word = "approved" if request_obj.status == GradeCorrectionRequest.Status.APPROVED else "rejected"
@@ -321,7 +326,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
             .select_related("offering", "offering__course", "offering__section")
             .order_by("-created_at", "-id")
         )
-        for reminder in queryset:
+        for reminder in queryset[:cls.SOURCE_LIMIT]:
             label = cls._offering_label(reminder.offering)
             cls._append_item(
                 items,
@@ -348,7 +353,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
             .select_related("offering", "offering__course", "offering__section", "template_period")
             .order_by("-issued_at", "-id")
         )
-        for notice in queryset:
+        for notice in queryset[:cls.SOURCE_LIMIT]:
             label = cls._offering_label(notice.offering)
             period_name = notice.template_period.name or notice.template_period.code
             item = {
@@ -366,20 +371,23 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
         return items
 
     @classmethod
-    def _deadline_items(cls, *, offerings, since_at, now):
+    def _deadline_items(cls, *, offerings, since_at, now, dashboard_data=None):
         items = []
         if not offerings:
             return items
         near_deadline_cutoff = now + timedelta(hours=cls.DEADLINE_LOOKAHEAD_HOURS)
         for offering in offerings:
             try:
-                template = FacultyGradingService.resolve_template_for_offering(offering)
-                periods = list(FacultyGradingService.get_template_periods(template))
+                if dashboard_data:
+                    template, periods = dashboard_data.template_periods(offering)
+                else:
+                    template = FacultyGradingService.resolve_template_for_offering(offering)
+                    periods = list(FacultyGradingService.get_template_periods(template))
             except Exception:
                 continue
             if not periods:
                 continue
-            active_setting = AcademicGovernanceService.resolve_active_grading_period(
+            active_setting = dashboard_data.active_setting(offering) if dashboard_data else AcademicGovernanceService.resolve_active_grading_period(
                 tenant_id=offering.tenant_id,
                 campus_id=offering.campus_id,
                 term_id=offering.term_id,
@@ -401,19 +409,26 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
                     (
                         candidate
                         for candidate in periods
-                        if not GradingGovernanceService.is_submitted(
+                        if not (dashboard_data.is_submitted(offering, candidate) if dashboard_data else GradingGovernanceService.is_submitted(
                             offering=offering,
                             template_period=candidate,
-                        )
+                        ))
                     ),
                     None,
                 )
             if current_period is None:
                 continue
-            deadline = GradingGovernanceService.resolve_submission_deadline(
-                offering=offering,
-                template_period=current_period,
-            )
+            if dashboard_data and dashboard_data.is_submitted(offering, current_period):
+                continue
+            if not dashboard_data and GradingGovernanceService.is_submitted(offering=offering, template_period=current_period):
+                continue
+            if dashboard_data:
+                lock = dashboard_data.lock(offering, current_period)
+                deadline = lock.deadline_at if lock else None
+            else:
+                deadline = GradingGovernanceService.resolve_submission_deadline(
+                    offering=offering, template_period=current_period,
+                )
             if not deadline or deadline < since_at or not (now <= deadline <= near_deadline_cutoff):
                 continue
             label = cls._offering_label(offering)
@@ -431,7 +446,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
         return items
 
     @classmethod
-    def get_dashboard_updates(cls, *, user, offerings, now=None, limit: int | None = None):
+    def get_dashboard_updates(cls, *, user, offerings, now=None, limit: int | None = None, dashboard_data=None):
         now = now or timezone.now()
         limit = limit or cls.DEFAULT_LIMIT
         offerings = list(offerings or [])
@@ -455,7 +470,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
         items.extend(cls._correction_items(offerings=offerings, since_at=since_at))
         items.extend(cls._faculty_reminder_items(user=user, offerings=offerings, since_at=since_at))
         items.extend(cls._submission_notice_items(user=user, offerings=offerings, since_at=since_at))
-        items.extend(cls._deadline_items(offerings=offerings, since_at=since_at, now=now))
+        items.extend(cls._deadline_items(offerings=offerings, since_at=since_at, now=now, dashboard_data=dashboard_data))
         items = [item for item in items if item["when"] and item["when"] > since_at]
         items.sort(key=lambda row: (row["when"], row["priority"]), reverse=True)
         has_more = len(items) > limit
@@ -471,6 +486,7 @@ class FacultyDashboardUpdatesService(FacultyDashboardService):
 
 class FacultyActivityHistoryService(FacultyDashboardUpdatesService):
     DEFAULT_LIMIT = 100
+    SOURCE_LIMIT = None
 
     @staticmethod
     def _actor_label(actor):

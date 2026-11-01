@@ -24,16 +24,14 @@ class FacultyMobileVisibilityTemplateTests(SimpleTestCase):
         self.assertIn('data-tour-id="performance-trends"', source)
         self.assertIn('data-tour-id="activity-history"', source)
 
-    def test_dashboard_marks_requested_sections_as_mobile_hidden(self):
+    def test_dashboard_keeps_grade_status_and_issues_visible_on_mobile(self):
         source = self._template_source("dashboard.html")
 
-        self.assertIn("dashboard-mobile-hidden-updates faculty-mobile-hidden", source)
-        self.assertIn("dashboard-mobile-hidden-grade-status faculty-mobile-hidden", source)
-        self.assertIn("dashboard-mobile-hidden-pending-issues faculty-mobile-hidden", source)
-        self.assertIn(
-            'class="faculty-mobile-hidden" href="{% url \'faculty_portal:parallel_section_comparison\' %}"',
-            source,
-        )
+        self.assertIn("dashboard-grade-status", source)
+        self.assertIn("dashboard-table-scroll", source)
+        self.assertIn("dashboard-inline-actions", source)
+        self.assertNotIn("dashboard-mobile-hidden", source)
+        self.assertIn("dashboard-action-compact", source)
 
     def test_course_and_period_pages_hide_only_requested_mobile_cards(self):
         courses_source = self._template_source("my_courses.html")
