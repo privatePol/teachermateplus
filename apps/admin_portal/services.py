@@ -974,8 +974,10 @@ class AdminScopeService:
         return AdminScopeService._visible_queryset(request, queryset)
 
     @staticmethod
-    def scoped_grade_correction_requests(request):
-        offerings = AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
+    def scoped_grade_correction_requests(request, *, monitoring_offering_ids=None):
+        offerings = monitoring_offering_ids
+        if offerings is None:
+            offerings = AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
         queryset = (
             GradeCorrectionRequest.objects.filter(offering_id__in=offerings)
             .select_related(
@@ -998,8 +1000,10 @@ class AdminScopeService:
         return AdminScopeService._visible_queryset(request, queryset)
 
     @staticmethod
-    def scoped_grade_submission_reopen_requests(request):
-        offerings = AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
+    def scoped_grade_submission_reopen_requests(request, *, monitoring_offering_ids=None):
+        offerings = monitoring_offering_ids
+        if offerings is None:
+            offerings = AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
         queryset = (
             GradeSubmissionReopenRequest.objects.filter(offering_id__in=offerings)
             .select_related(

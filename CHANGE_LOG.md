@@ -1,3 +1,16 @@
+## 2026-11-01 - Admin Dashboard P1/P2 remediation (uncommitted; await independent re-review)
+
+- Bind CML dashboard counts, listing and review lookup to the selected authorized tenant/campus while retaining existing department/program/ownership selectors and separate view/review permissions. Page-level campus filters only narrow this scope; malformed filters return an empty listing. Scope-bound CML buttons restore their selected tenant/campus through the normal scope resolver and recheck campus permission, including direct DENY. Other campuses remain reachable through authorized top-bar selection.
+- Share the exact monitoring-offering subquery between reopen and pending corrections within one request, keyed by user and scope identity. Existing selector defaults remain unchanged elsewhere; no global cache or added permission queries. Matched fixture: 96 -> 86 queries (baseline 84) at 0/100/600 pending applications per queue; measured medians and full results are in docs/ADMIN_DASHBOARD_LAYOUT_IMPLEMENTATION.md.
+- Add 11 regressions for multi-campus/DENY/filter/count-list parity and request-local monitoring-scope reuse. Preserve dashboard layout, polling, session reconciliation, Faculty behavior, auditing and pending-only counts. No schema, commit, push, deployment or restart.
+
+## 2026-11-01 - Admin Dashboard layout feedback (uncommitted)
+
+- Arrange the dashboard as header; equal Tenants/Campus/Users summaries; academic scope, logged-in users, workflow and reminder cards; then stacked correction/CML queues, reopen requests and lock monitor. Remove the entire Quick Actions card while retaining existing routes and scoped sidebar navigation.
+- Show distinct PENDING GradeCorrectionRequest and ClassListChangeRequest applications through existing AdminScopeService selectors and effective listing permissions. The user explicitly refined corrections to Pending Grade Corrections; initial rendering never loads/validates approved windows or computes an active-approved count. Other statuses remain available in the existing authorized workflow.
+- Add active AY/term filters shared by queue counts and pending destinations, plus an explicit CML term filter. Missing configuration displays Unavailable and returns no active-scope requests. No new schema, background polling, grading-policy change or Faculty Dashboard change.
+- Preserve session-registry reconciliation and the visible-tab 600-second reopen-only refresh. Validation and measured baseline cost are recorded in docs/ADMIN_DASHBOARD_LAYOUT_IMPLEMENTATION.md; await independent review. No commit, push or deployment.
+
 ## 2026-11-01 - Admin Dashboard authenticated-session registry reconciliation (local; independent re-review pending)
 
 - Fixed premature monitoring-marker initialization: valid sessions inherited from the baseline now register before dashboard rendering, including Django Admin password-change session-key rotations. Current user/session/backend/auth-hash identity, fresh password/active state, backing-session expiry and registry ownership are checked before repair.

@@ -27,7 +27,7 @@ before(async () => {
   assert.ok(existsSync(cssPath), 'Provide Bootstrap 5.3.3 CSS; see README.md');
   const css = readFileSync(cssPath, 'utf8');
   for (const variant of ['authorized', 'denied']) {
-    let html = readFileSync(join(root, variant + '.html'), 'utf8');
+    let html = readFileSync(join(root, 'layout-' + variant + '.html'), 'utf8');
     html = html.replace(/<link href="https:\/\/cdn\.jsdelivr\.net\/[^>]+>/g, () => '<style>' + css + '</style>')
       .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/[^>]+><\/script>/g, '');
     for (const name of ['sidebar', 'dashboard']) {
@@ -62,6 +62,7 @@ before(async () => {
     if (result.error) item.reject(new Error(JSON.stringify(result.error))); else item.resolve(result.result);
   });
   await command('Page.enable');
+  writeFileSync(join(root,'chrome-version.json'),JSON.stringify(await command('Browser.getVersion'),null,2));
 });
 after(() => { if (socket) socket.close(); if (processHandle) processHandle.kill(); });
 
@@ -73,7 +74,38 @@ async function browserChecks(width, variant) {
   const css=element=>getComputedStyle(element);
   const overflow=()=>check(document.documentElement.scrollWidth<=innerWidth+1,'page overflow');
   check(innerWidth===width,'viewport mismatch'); overflow();
-  check(css(q('.admin-dashboard')).gridTemplateColumns.split(' ').length===(width>=1400?3:width>=768?2:1),'card columns');
+  const columns=selector=>css(q(selector)).gridTemplateColumns.split(' ').length;
+  check(columns('.dashboard-summary')===3,'three equal summary slots');
+  check(columns('.dashboard-context')===(width>=1200?4:width>=768?2:1),'scope/guidance columns');
+  check(columns('.dashboard-queues')===(width>=1200?3:1),'queue columns');
+  const rect=selector=>q(selector)?.getBoundingClientRect();
+  const summary=[...q('.dashboard-summary').children].map(el=>el.getBoundingClientRect());
+  check(summary.every(r=>Math.abs(r.width-summary[0].width)<1),'equal summary widths');
+  check(rect('.dash-header').bottom<=rect('.dashboard-summary').top,'header before summary');
+  check(rect('.dashboard-summary').bottom<=rect('.dashboard-context').top,'summary before context');
+  check(rect('.dashboard-context').bottom<=rect('.dashboard-queues').top,'context before queues');
+  check(![...document.querySelectorAll('.section-title')].some(el=>/Quick Actions|Audit Logs|Governance Alerts/.test(el.textContent)),'removed cards');
+  check(Boolean(q('#correction-queue-title'))===(variant==='authorized'),'correction queue permission');
+  check(Boolean(q('#cml-queue-title'))===(variant==='authorized'),'CML queue permission');
+  if(variant==='authorized') {
+    const correction=rect('[aria-labelledby="correction-queue-title"]'), cml=rect('[aria-labelledby="cml-queue-title"]');
+    check(correction.bottom<cml.top && Math.abs(correction.x-cml.x)<1,'left queue stack order');
+    const correctionLink=[...document.querySelectorAll('a')].find(a=>a.textContent==='View Grade Corrections');
+    const cmlLink=[...document.querySelectorAll('a')].find(a=>a.textContent==='View CML Requests');
+    for(const link of [correctionLink,cmlLink]) {
+      check(link && link.getAttribute('href').includes('academic_scope=active') && link.getAttribute('href').includes('status=PENDING'),'filtered pending link');
+    }
+  }
+  if(width>=1200) {
+    check(rect('.dashboard-scope').x<rect('.dashboard-workflow').x && rect('.dashboard-workflow').x<rect('.dashboard-reminder').x,'context order');
+    check(rect('.dashboard-workflow').width>rect('.dashboard-scope').width*1.8,'reference guidance proportion');
+    check(Math.abs(rect('.dashboard-workflow').bottom-rect('.dashboard-scope').bottom)<1,'context card bottom alignment');
+    check(rect('.dashboard-reopen').x>rect('.dashboard-queue-stack').x && rect('.dashboard-locks').x>rect('.dashboard-reopen').x,'left center right queue order');
+    check(Math.abs(rect('.dashboard-reopen').top-rect('.dashboard-locks').top)<1,'monitor top alignment');
+  }
+  for(const element of document.querySelectorAll('.admin-dashboard h3,.admin-dashboard p,.admin-dashboard a.btn')) {
+    if(!element.closest('.table-responsive')) check(element.scrollWidth<=element.clientWidth+1,'text/button horizontal clipping');
+  }
   check(Boolean(q('[data-menu-code="USERS"]'))===(variant==='authorized'),'user menu permission');
   check(Boolean(q('[data-menu-code="AUDIT"]'))===(variant==='authorized'),'audit menu permission');
   check(Boolean([...document.querySelectorAll('a')].find(a=>a.textContent==='View Logged-in Users'))===(variant==='authorized'),'logged-in summary permission');
@@ -98,7 +130,11 @@ async function browserChecks(width, variant) {
     check(!q('.admin-main').inert && document.body.style.overflow==='','unlocks');
     opener.click();q('.admin-drawer-backdrop').click();check(opener.getAttribute('aria-expanded')==='false','backdrop closes');
     opener.click();close.click();check(opener.getAttribute('aria-expanded')==='false','Close closes');
-  } else {check(!sidebar.inert,'desktop navigation enabled');}
+  } else {
+    check(!sidebar.inert,'desktop navigation enabled');
+    const main=q('.admin-main').getBoundingClientRect(), nav=sidebar.getBoundingClientRect();
+    check(main.x>=nav.right-1 && Math.abs(main.top-nav.top)<1,'desktop sidebar and main alignment');
+  }
   for(const table of document.querySelectorAll('.admin-dashboard .table-responsive')) {
     check(css(table).overflowX==='auto','table scrolling');
     if(table.scrollWidth>table.clientWidth) {table.scrollLeft=40;check(table.scrollLeft>0,'table scroll accessible');table.scrollLeft=0;}
@@ -110,7 +146,7 @@ async function browserChecks(width, variant) {
     navigation:{domContentLoaded: navigation.domContentLoadedEventEnd,load:navigation.loadEventEnd},
     resources:performance.getEntriesByType('resource').map(r=>({name:r.name,duration:r.duration,blocking:r.renderBlockingStatus}))};
 }
-for(const width of [375,390,440,767,768,992,1440]) {
+for(const width of [375,390,440,767,768,992,1280,1440]) {
   for(const variant of ['authorized','denied']) {
     test(`${variant} admin layout and drawer at ${width}px`,{skip:unavailable},async()=>{
       await command('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:false});
@@ -121,6 +157,9 @@ for(const width of [375,390,440,767,768,992,1440]) {
       const evidence=result.result.value;
       writeFileSync(join(root,`${variant}-${width}.json`),JSON.stringify(evidence,null,2));
       const screenshot=await command('Page.captureScreenshot',{format:'png'});writeFileSync(join(root,`${variant}-${width}.png`),Buffer.from(screenshot.data,'base64'));
+      await command('Runtime.evaluate',{expression:'window.scrollTo(0,document.documentElement.scrollHeight)'});
+      await pause(50);
+      const bottom=await command('Page.captureScreenshot',{format:'png'});writeFileSync(join(root,`${variant}-${width}-bottom.png`),Buffer.from(bottom.data,'base64'));
       assert.deepEqual(evidence.errors,[],JSON.stringify(evidence));
     });
   }

@@ -11,6 +11,12 @@
 </div>
 <form class="row g-2 mb-3">
   <div class="col-md-2">
+    <select class="form-select" name="academic_scope" aria-label="Academic scope">
+      <option value="">All academic scopes</option>
+      <option value="active" {% if academic_scope_filter == 'active' %}selected{% endif %}>Active AY / term</option>
+    </select>
+  </div>
+  <div class="col-md-2">
     <select class="form-select" name="term_id">
       <option value="">All Terms</option>
       {% for t in terms %}
@@ -33,6 +39,7 @@
     <button class="btn btn-outline-secondary w-100">Filter</button>
   </div>
 </form>
+{% if academic_scope_filter == 'active' %}<p class="small text-muted">Active AY / term only. Missing active configuration returns no requests. Pending and Approved are separate statuses; Approved alone does not establish an active correction window.</p>{% endif %}
 
 <div class="card border-0 shadow-sm">
   <div class="table-responsive">

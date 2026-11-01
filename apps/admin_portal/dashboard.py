@@ -1,5 +1,6 @@
 """Read-only Admin dashboard selectors and fragment endpoints."""
 from datetime import datetime, time, timedelta
+from urllib.parse import urlencode
 
 from django.contrib.sessions.models import Session
 from django.core import signing
@@ -7,6 +8,7 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Exists, OuterRef, Q, Subquery
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 from django.views.decorators.cache import never_cache
@@ -15,7 +17,8 @@ from apps.accounts.models import ActivePortalSession, User
 from apps.academics.services import AcademicGovernanceService
 from apps.core.decorators import portal_required, permission_required
 from apps.core.services.permissions import PermissionService
-from apps.grading.models import GradeSubmissionReopenRequest
+from apps.enrollment.models import ClassListChangeRequest
+from apps.grading.models import GradeCorrectionRequest, GradeSubmissionReopenRequest
 from apps.grading.services import GradingGovernanceService
 from .services import AdminScopeService
 
@@ -65,6 +68,94 @@ def academic_scope(request):
     return result
 
 
+def active_term_requests(request, queryset):
+    """Use the same tenant-configured AY/term on cards and their destinations.
+
+    Missing configuration must not silently expand an active-term queue to history.
+    Existing AdminScopeService selectors retain all authorization/supervision rules.
+    """
+    year, term = academic_scope(request)
+    if not (year and term):
+        return queryset.none()
+    return queryset.filter(offering__academic_year=year, offering__term=term)
+
+
+def monitoring_offering_ids(request):
+    """Reuse the dashboard's exact supervision selector within this request only.
+
+    Keep a lazy SQL subquery, never a materialized request/offering listing. Scope
+    identity guards against reuse if a caller changes selection on this request.
+    Other AdminScopeService consumers continue resolving their scope normally.
+    """
+    scope = getattr(request, "scope", {})
+    key = (request.user.pk, scope.get("tenant_id"), scope.get("campus_id"),
+           tuple(sorted(scope.get("tenant_ids", []))), tuple(sorted(scope.get("campus_ids", []))),
+           tuple(sorted(scope.get("department_ids", []))))
+    cached = getattr(request, "_dashboard_monitoring_offering_ids", None)
+    if cached is None or cached[0] != key:
+        ids = AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
+        cached = request._dashboard_monitoring_offering_ids = (key, ids)
+    return cached[1]
+
+
+def selected_campus_cml_requests(request):
+    """Intersect existing CML ownership/department scope with selected scope.
+
+    Entry points enforce their existing permission in this selected tenant/campus
+    (view for dashboard/list, review for the review route). Page-level URL filters
+    may narrow this queryset but cannot substitute another campus for selection.
+    """
+    scope = getattr(request, "scope", {})
+    tenant_id, campus_id = scope.get("tenant_id"), scope.get("campus_id")
+    qs = AdminScopeService.scoped_class_list_change_requests(request)
+    if (not tenant_id or not campus_id or tenant_id not in scope.get("tenant_ids", [])
+            or campus_id not in scope.get("campus_ids", [])):
+        return qs.none()
+    return qs.filter(tenant_id=tenant_id, campus_id=campus_id,
+                     offering__tenant_id=tenant_id, offering__campus_id=campus_id)
+
+
+def request_queues(request, *, permissions):
+    """Pending applications only, per the approved two-level dashboard design.
+
+    Never materialize requests/items or inspect approved correction windows here.
+    Approved status alone is not authoritative for correction access; the existing
+    workflow retains its live governance and immutable reviewer/audit validation.
+    """
+    correction = cml = None
+    can_correct = "corrections.read" in permissions
+    can_cml = "class_list_change_requests.view" in permissions
+    if not (can_correct or can_cml):
+        return correction, cml
+    year, term = academic_scope(request)
+    configured = bool(year and term)
+    if can_correct:
+        correction = {
+            "pending_count": None, "configured": configured,
+            "url": reverse("admin_portal:grade_correction_request_list") + "?academic_scope=active&status=PENDING",
+        }
+        if configured:
+            correction["pending_count"] = active_term_requests(
+                request, AdminScopeService.scoped_grade_correction_requests(
+                    request, monitoring_offering_ids=monitoring_offering_ids(request),
+                ),
+            ).filter(status=GradeCorrectionRequest.Status.PENDING).values("pk").distinct().count()
+    if can_cml:
+        cml = {
+            "pending_count": None, "configured": configured,
+            "url": reverse("admin_portal:class_list_change_request_list") + "?" + urlencode({
+                "academic_scope": "active", "status": "PENDING",
+                "scope_tenant_id": getattr(request, "scope", {}).get("tenant_id") or "",
+                "scope_campus_id": getattr(request, "scope", {}).get("campus_id") or "",
+            }),
+        }
+        if configured:
+            cml["pending_count"] = active_term_requests(
+                request, selected_campus_cml_requests(request),
+            ).filter(status=ClassListChangeRequest.Status.PENDING).values("pk").distinct().count()
+    return correction, cml
+
+
 def scope_identity(request):
     year, term = academic_scope(request)
     scope = getattr(request, "scope", {})
@@ -82,7 +173,9 @@ def reopen_monitor(request, *, permissions, now=None):
     if not (can_read or can_review):
         return None
     now = now or timezone.now()
-    qs = AdminScopeService.scoped_grade_submission_reopen_requests(request)
+    qs = AdminScopeService.scoped_grade_submission_reopen_requests(
+        request, monitoring_offering_ids=monitoring_offering_ids(request),
+    )
     year, term = academic_scope(request)
     if year and term:
         qs = qs.filter(offering__academic_year=year, offering__term=term)

@@ -7,8 +7,20 @@
 
 <form class="row g-2 mb-3">
   <div class="col-md-2">
+    <select class="form-select" name="academic_scope" aria-label="Academic scope">
+      <option value="">All academic scopes</option>
+      <option value="active" {% if academic_scope_filter == 'active' %}selected{% endif %}>Active AY / term</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="term_id" aria-label="Term">
+      <option value="">All Terms</option>
+      {% for term in terms %}<option value="{{ term.id }}" {% if term_id == term.id|stringformat:'s' %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
     <select class="form-select" name="campus_id">
-      <option value="">All Campuses</option>
+      <option value="">Selected campus</option>
       {% for campus in campuses %}
       <option value="{{ campus.id }}" {% if campus_id|stringformat:"s" == campus.id|stringformat:"s" %}selected{% endif %}>
         {{ campus.name|default:campus.code }}
@@ -39,6 +51,8 @@
     <button class="btn btn-outline-secondary w-100">Filter</button>
   </div>
 </form>
+<p class="small text-muted">Requests are restricted to the campus selected in the top scope bar. Select another authorized campus there to view its requests.</p>
+{% if academic_scope_filter == 'active' %}<p class="small text-muted">Active AY / term only. Missing active configuration returns no requests. Dashboard CML counts use Pending status.</p>{% endif %}
 
 <div class="card border-0 shadow-sm">
   <div class="table-responsive">

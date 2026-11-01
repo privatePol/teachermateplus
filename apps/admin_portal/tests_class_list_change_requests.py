@@ -1,4 +1,5 @@
 from datetime import date
+from unittest.mock import patch
 
 from django.http import Http404
 from django.test import RequestFactory, TestCase
@@ -295,13 +296,21 @@ class ClassListChangeRequestWorkflowTests(TestCase):
         with self.assertRaises(Http404):
             class_list_change_request_review_view(request, request_id=self.cubao_remove_request.id)
 
-    def test_superadmin_sees_all_campus_requests(self):
-        request = self._build_request(self.superadmin, method="get", path=reverse("admin_portal:class_list_change_request_list"))
-        response = class_list_change_request_list_view(request)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Fairview")
-        self.assertContains(response, "Cubao")
+    def test_superadmin_can_select_each_campus_without_combining_listings(self):
+        for campus, expected, excluded in (
+            (self.fairview, self.fairview_add_request, self.cubao_remove_request),
+            (self.cubao, self.cubao_remove_request, self.fairview_add_request),
+        ):
+            request = self._build_request(self.superadmin, method="get",
+                path=reverse("admin_portal:class_list_change_request_list"),
+                data={"scope_tenant_id": self.tenant.pk, "scope_campus_id": campus.pk})
+            from django.shortcuts import render
+            with patch("apps.admin_portal.views.render", wraps=render) as rendered:
+                response = class_list_change_request_list_view(request)
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, campus.name)
+            rows = rendered.call_args.args[2]["page_obj"]
+            self.assertEqual([row.pk for row in rows], [expected.pk])
 
     def test_cancelled_class_list_change_requests_are_hidden_from_admin_queue(self):
         ClassListChangeRequestService.cancel_request(user=self.cubao_faculty, request_obj=self.cubao_remove_request)

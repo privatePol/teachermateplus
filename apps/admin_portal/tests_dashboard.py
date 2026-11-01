@@ -70,7 +70,8 @@ class AdminDashboardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         for text in ["Stage 0.75", "Import Batches", "Pending Confirmations", "Failed Batches", "Imported Rows", "window.location.reload", "30000"]:
             self.assertNotContains(response, text)
-        self.assertContains(response, "View Governance Alerts")
+        self.assertNotContains(response, "Quick Actions")
+        self.assertNotContains(response, "View Governance Alerts")
         self.assertContains(response, "View Logged-in Users")
         self.assertContains(response, "Pending Review")
         self.assertNotIn("audit_logs", response.context["stats"])

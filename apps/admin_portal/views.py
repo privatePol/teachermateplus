@@ -138,7 +138,10 @@ from apps.academics.models import (
 from apps.auditlog.models import AuditLog
 from apps.core.decorators import permission_required, portal_required
 from .dashboard import (
+    active_term_requests as _dashboard_active_term_requests,
     logged_in_users as _dashboard_logged_in_users,
+    request_queues as _dashboard_request_queues,
+    selected_campus_cml_requests as _dashboard_cml_requests,
     reopen_monitor as _dashboard_reopen_monitor,
     scope_token as _dashboard_scope_token,
 )
@@ -1673,6 +1676,7 @@ def dashboard_view(request):
 
     request._admin_dashboard_academic_scope = (current_tenant_id, active_academic_year, active_term)
     reopen_request_monitor = _dashboard_reopen_monitor(request, permissions=permissions, now=now)
+    correction_queue, cml_queue = _dashboard_request_queues(request, permissions=permissions)
 
     context = {
         "stats": {
@@ -1695,6 +1699,8 @@ def dashboard_view(request):
         "has_reopen_requests_read": has_reopen_requests_read,
         "has_reopen_requests_review": has_reopen_requests_review,
         "reopen_request_monitor": reopen_request_monitor,
+        "correction_queue": correction_queue,
+        "cml_queue": cml_queue,
         "has_governance_alerts": has_governance_alerts,
         "dashboard_scope_token": _dashboard_scope_token(request),
     }
@@ -11573,13 +11579,20 @@ def enrollment_update_view(request, enrollment_id: int):
 @portal_required("ADMIN")
 @permission_required("class_list_change_requests.view")
 def class_list_change_request_list_view(request):
-    queryset = AdminScopeService.scoped_class_list_change_requests(request)
+    queryset = _dashboard_cml_requests(request)
+    academic_scope_filter = request.GET.get("academic_scope", "")
+    if academic_scope_filter == "active":
+        queryset = _dashboard_active_term_requests(request, queryset)
+    term_id = request.GET.get("term_id", "").strip()
+    if term_id:
+        queryset = queryset.filter(offering__term_id=term_id) if term_id.isdecimal() else queryset.none()
     campus_id = request.GET.get("campus_id", "").strip()
     status = request.GET.get("status", "").strip().upper()
     request_type = request.GET.get("request_type", "").strip().upper()
     q = request.GET.get("q", "").strip()
     if campus_id:
-        queryset = queryset.filter(campus_id=campus_id)
+        parsed_campus_id = ScopeService._parse_int(campus_id)
+        queryset = queryset.filter(campus_id=parsed_campus_id) if parsed_campus_id else queryset.none()
     if status:
         queryset = queryset.filter(status=status)
     if request_type:
@@ -11602,8 +11615,13 @@ def class_list_change_request_list_view(request):
         "q": q,
         "status": status,
         "request_type": request_type,
+        "academic_scope_filter": academic_scope_filter,
+        "term_id": term_id,
+        "terms": AdminScopeService.active_scoped_terms(request).select_related("academic_year"),
         "campus_id": campus_id,
-        "campuses": AdminScopeService.active_scoped_campuses(request),
+        "campuses": AdminScopeService.active_scoped_campuses(request).filter(
+            tenant_id=request.scope.get("tenant_id"), id=request.scope.get("campus_id"),
+        ),
         "status_choices": ClassListChangeRequest.Status.choices,
         "request_type_choices": ClassListChangeRequest.RequestType.choices,
     }
@@ -11615,7 +11633,7 @@ def class_list_change_request_list_view(request):
 @permission_required("class_list_change_requests.review")
 def class_list_change_request_review_view(request, request_id: int):
     request_obj = get_object_or_404(
-        AdminScopeService.scoped_class_list_change_requests(request),
+        _dashboard_cml_requests(request),
         id=request_id,
     )
     can_review_request = (
@@ -14989,6 +15007,9 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
 def grade_correction_request_list_view(request):
     GradingGovernanceService.auto_lapse_expired_correction_windows()
     queryset = AdminScopeService.scoped_grade_correction_requests(request)
+    academic_scope_filter = request.GET.get("academic_scope", "")
+    if academic_scope_filter == "active":
+        queryset = _dashboard_active_term_requests(request, queryset)
     if request.GET.get("term_id"):
         queryset = queryset.filter(offering__term_id=request.GET.get("term_id"))
     if request.GET.get("status"):
@@ -15012,6 +15033,7 @@ def grade_correction_request_list_view(request):
         "page_obj": page_obj,
         "q": q,
         "status": request.GET.get("status", ""),
+        "academic_scope_filter": academic_scope_filter,
         "terms": AdminScopeService.active_scoped_terms(request),
         "status_choices": GradeCorrectionRequest.Status.choices,
     }
