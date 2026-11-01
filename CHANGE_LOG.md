@@ -1,3 +1,10 @@
+## 2026-11-01 - Faculty responsive navigation and support controls (local, uncommitted)
+
+- Authorized Grading Analytics, Performance Trends and Activity History links remain available at phone widths, along with the dashboard Performance Trends shortcut. Existing menu permissions, direct DENY and feature configuration still determine availability; the shared mobile hiding utility is retained for other uses.
+- Below 992px, Faculty support controls follow page content in normal document flow. Phones retain the Help & Privacy disclosure; desktop support controls retain their floating layout. Grade Encoding Status keeps one horizontal row per class with inline actions and internal horizontal scrolling.
+- Browser checks also verified that animating drawer visibility prevented initial Close-button focus. Visibility now changes immediately while the existing transform slide animation remains.
+- Added scoped menu/permission regressions and offline Chrome viewport checks at 375, 390, 440, 767, 768 and 992px. No backend behavior, database schema or other portal layout changed.
+
 ## 2026-11-01 - Faculty Dashboard metadata remediation round 2 (local, uncommitted)
 
 - Activity edit/archive now lock and reload the scoped persisted activity before comparison. Activity edits compare database-effective values; stale caller instances cannot hide changes or invent no-op timestamps. Repeated archives retain their dependent operations without advancing the marker again.

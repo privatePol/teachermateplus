@@ -11,7 +11,7 @@ class FacultyMobileVisibilityTemplateTests(SimpleTestCase):
             encoding="utf-8"
         )
 
-    def test_base_collapses_utilities_and_hides_requested_mobile_navigation(self):
+    def test_base_preserves_phone_utilities_and_exposes_authorized_navigation(self):
         source = self._template_source("base.html")
 
         self.assertIn("@media (max-width: 767.98px)", source)
@@ -20,9 +20,14 @@ class FacultyMobileVisibilityTemplateTests(SimpleTestCase):
         self.assertIn('aria-controls="faculty-utility-actions"', source)
         self.assertIn("faculty-utility-actions", source)
         self.assertIn("Help &amp; Privacy", source)
-        self.assertIn("node.item.code == 'FACULTY_ANALYTICS'", source)
+        self.assertNotIn("node.item.code == 'FACULTY_ANALYTICS'", source)
         self.assertIn('data-tour-id="performance-trends"', source)
         self.assertIn('data-tour-id="activity-history"', source)
+        self.assertNotIn('class="sidebar-link faculty-mobile-hidden', source)
+        mobile_css = source.split("@media (max-width: 991.98px)", 1)[1].split("@media (max-width: 767.98px)", 1)[0]
+        support_css = mobile_css.split(".faculty-utility-stack {", 1)[1].split("}", 1)[0]
+        self.assertIn("position: static", support_css)
+        self.assertNotIn("bottom:", support_css)
 
     def test_dashboard_keeps_grade_status_and_issues_visible_on_mobile(self):
         source = self._template_source("dashboard.html")
@@ -32,6 +37,8 @@ class FacultyMobileVisibilityTemplateTests(SimpleTestCase):
         self.assertIn("dashboard-inline-actions", source)
         self.assertNotIn("dashboard-mobile-hidden", source)
         self.assertIn("dashboard-action-compact", source)
+        shortcuts = source.split('aria-label="Dashboard shortcuts"', 1)[1].split("</nav>", 1)[0]
+        self.assertNotIn("faculty-mobile-hidden", shortcuts)
 
     def test_course_and_period_pages_hide_only_requested_mobile_cards(self):
         courses_source = self._template_source("my_courses.html")
