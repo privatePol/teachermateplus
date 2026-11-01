@@ -30,7 +30,7 @@
   .admin-main {
     min-width: 0;
   }
-  @media (min-width: 768px) {
+  @media (min-width: 992px) {
     .admin-shell > .row > .admin-sidebar {
       flex: 0 0 var(--admin-sidebar-expanded-width);
       max-width: var(--admin-sidebar-expanded-width);
@@ -395,13 +395,40 @@
     font-size: 0.8rem;
     line-height: 1.25;
   }
+  .admin-mobile-nav, .admin-drawer-close, .admin-drawer-backdrop { display: none; }
+  .admin-main { min-width: 0; }
+  @media (max-width: 991.98px) {
+    .admin-shell > .row > .admin-sidebar { width: 100%; max-width: 100%; }
+    .admin-shell > .row > .admin-main { flex: 0 0 100%; max-width: 100%; width: 100%; }
+    .admin-shell.admin-drawer-ready > .row > .admin-sidebar {
+      display: block; position: fixed; top: 0; bottom: 0; left: 0; width: min(86vw, 320px);
+      max-width: 320px; overflow-y: auto; z-index: 1050; visibility: hidden;
+      transform: translateX(-100%); transition: transform .2s ease;
+    }
+    .admin-shell.admin-drawer-open > .row > .admin-sidebar { visibility: visible; transform: translateX(0); }
+    .admin-mobile-nav, .admin-drawer-close { display: inline-flex; }
+    .admin-sidebar-toggle { display: none; }
+    .admin-drawer-close { position: absolute; top: .7rem; right: .7rem; }
+    .admin-drawer-backdrop:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 1040; background: #10281899; border: 0; }
+    .admin-main > section { padding: 1rem !important; }
+    .admin-topbar { gap: .6rem; flex-wrap: wrap; }
+    .admin-scope-stack, .admin-user-actions { max-width: 100%; min-width: 0; }
+    .admin-scope-form select { max-width: 100%; }
+  }
+  @media (max-width: 991.98px) {
+    .admin-shell.sidebar-collapsed .admin-sidebar .sidebar-copy,
+    .admin-shell.sidebar-collapsed .admin-sidebar .group-label-text,
+    .admin-shell.sidebar-collapsed .admin-sidebar .sidebar-link-text { display: inline !important; }
+  }
+  @media (prefers-reduced-motion: reduce) { .admin-sidebar { transition: none !important; } }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container-fluid admin-shell{% if privacy_consent_pending %} sidebar-collapsed privacy-consent-lock{% endif %}"{% if privacy_consent_pending %} data-privacy-consent-lock="1"{% endif %}>
   <div class="row min-vh-100">
-    <aside class="col-12 col-md-3 col-lg-2 admin-sidebar p-3"{% if privacy_consent_pending %} aria-label="Navigation unavailable until privacy consent is accepted"{% endif %}>
+    <aside id="admin-sidebar" class="col-12 col-md-3 col-lg-2 admin-sidebar p-3"{% if privacy_consent_pending %} aria-label="Navigation unavailable until privacy consent is accepted"{% endif %}>
+      <button type="button" class="btn btn-light admin-drawer-close" aria-label="Close navigation">Close</button>
       <div class="mb-4 admin-logo-wrap">
         <img src="{% get_media_prefix %}logos/teachermate_logo_text_official.png" alt="TeacherMatePlus" class="img-fluid" style="max-width: 230px;">
       </div>
@@ -451,8 +478,10 @@
       {% endfor %}
       {% endif %}
     </aside>
-    <main class="col-12 col-md-9 col-lg-10 p-0">
+    <button class="admin-drawer-backdrop" type="button" aria-label="Close navigation" tabindex="-1" hidden></button>
+    <main class="col-12 col-md-9 col-lg-10 p-0 admin-main">
       <nav class="navbar navbar-expand-lg navbar-light admin-topbar px-3">
+        {% if not privacy_consent_pending %}<button id="admin-mobile-nav" class="btn btn-outline-success admin-mobile-nav" type="button" aria-controls="admin-sidebar" aria-expanded="false">Menu</button>{% endif %}
         <span class="navbar-brand mb-0 h1 admin-brand">Admin Portal</span>
         <div class="admin-scope-stack">
           {% if scope_tenants %}
@@ -517,6 +546,7 @@
 </div>
 {% endblock %}
 {% block extra_js %}
+<script src="{% static 'admin_portal/sidebar.js' %}" defer></script>
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const storageKey = "TeacherMate+_admin_sidebar_groups";
@@ -776,7 +806,7 @@
 
     toggles.forEach((toggle) => {
       toggle.addEventListener("click", function (event) {
-        if (!shell || !shell.classList.contains("sidebar-collapsed")) {
+        if (!shell || window.matchMedia("(max-width: 991.98px)").matches || !shell.classList.contains("sidebar-collapsed")) {
           return;
         }
         const targetUrl = findCollapsedTargetUrl(toggle);
@@ -802,11 +832,11 @@
 
       target.addEventListener("shown.bs.collapse", function () {
         savedState[groupKey] = true;
-        localStorage.setItem(storageKey, JSON.stringify(savedState));
+        try { localStorage.setItem(storageKey, JSON.stringify(savedState)); } catch (e) { /* Storage is optional. */ }
       });
       target.addEventListener("hidden.bs.collapse", function () {
         savedState[groupKey] = false;
-        localStorage.setItem(storageKey, JSON.stringify(savedState));
+        try { localStorage.setItem(storageKey, JSON.stringify(savedState)); } catch (e) { /* Storage is optional. */ }
       });
     });
 

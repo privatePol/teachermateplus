@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.conf import settings
-from django.http import HttpResponseForbidden
+from django.contrib.sessions.models import Session
+from django.http import HttpResponse, HttpResponseForbidden
+from django.utils import timezone
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.cache import patch_cache_control
@@ -33,6 +37,8 @@ class SessionTimeoutMiddleware:
         return max(seconds // 60, 1)
 
     def __call__(self, request):
+        from apps.accounts.services import ActivePortalSessionService
+
         user = getattr(request, "user", None)
         session = getattr(request, "session", None)
         if session is not None and getattr(user, "is_authenticated", False):
@@ -41,8 +47,29 @@ class SessionTimeoutMiddleware:
                 tenant_id=tenant_id,
                 default=self._default_timeout_minutes(),
             )
-            session.set_expiry(timeout_minutes * 60)
-        return self.get_response(request)
+            if request.path_info == "/admin-portal/dashboard/reopen-card/" and request.method == "GET":
+                # Background monitoring is not human activity. Scope middleware and
+                # SESSION_SAVE_EVERY_REQUEST may still save the session, so retain
+                # its absolute persisted deadline rather than renewing idle expiry.
+                now = timezone.now()
+                deadline = Session.objects.filter(
+                    session_key=session.session_key, expire_date__gt=now,
+                ).values_list("expire_date", flat=True).first()
+                if deadline is None:
+                    session.flush()
+                    return HttpResponse("Sign-in expired.", status=401)
+                session.set_expiry(min(deadline, now + timedelta(minutes=timeout_minutes)))
+            else:
+                session.set_expiry(timeout_minutes * 60)
+            ActivePortalSessionService.reconcile_authenticated_session(request=request, user=user)
+        response = self.get_response(request)
+        current_user = getattr(request, "user", None)
+        if (session is not None and getattr(current_user, "is_authenticated", False) and session.session_key
+                and session.get(ActivePortalSessionService.MONITOR_SESSION_KEY) != session.session_key):
+            # Password-change and auth-hash key rotations keep their existing
+            # authentication behavior; repair only the monitoring projection.
+            ActivePortalSessionService.reconcile_authenticated_session(request=request, user=current_user)
+        return response
 
 
 class PortalCacheControlMiddleware:

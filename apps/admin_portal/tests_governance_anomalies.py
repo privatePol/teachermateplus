@@ -244,7 +244,8 @@ class GovernanceAnomalyDetectionTests(TestCase):
         response = self.client.get(reverse("admin_portal:dashboard"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Governance Alerts")
-        self.assertContains(response, "Visible scoped alert.")
+        self.assertNotContains(response, "Visible scoped alert.")
+        self.assertContains(response, "View Governance Alerts")
         self.assertNotContains(response, "Other tenant alert.")
 
         self.client.force_login(self.dashboard_user)

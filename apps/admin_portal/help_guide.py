@@ -6,6 +6,19 @@ from apps.core.services.permissions import PermissionService
 
 
 ADMIN_HELP_SECTIONS = [
+    {"code": "dashboard", "title": "Admin Dashboard",
+     "topics": [{"code": "dashboard-overview", "title": "Scope and pending decisions",
+                 "permissions": ["dashboard.read"],
+                 "purpose": "Use compact cards to review academic scope, locks and reopen requests. On mobile, open Menu for the authorized navigation drawer; close it with Close, the backdrop or Escape.",
+                 "check_first": ["Confirm tenant, campus and academic scope in the top bar.",
+                                 "The logged-in count is distinct active users with live registered sessions; it is a checked-at snapshot. Existing authenticated sessions are reconciled on their next request, including sessions carried over from an earlier release. Open View Logged-in Users for the paginated listing.",
+                                 "The reopen card updates every 10 minutes while the tab is visible. Other cards remain page-load snapshots.",
+                                 "If sign-in, permissions or scope changes, reload the dashboard to obtain a fresh authorized view."],
+                 "actions": [{"name": "View Governance Alerts", "does": "Opens the authorized Critical Actions report without loading alert details on the dashboard.",
+                              "when": "Investigate governance events.", "avoid": "Access still requires audit permission.", "result": "Scoped critical actions and anomaly flags are shown."},
+                             {"name": "Review reopen requests", "does": "Opens an eligible pending request for its explicitly assigned reviewer.",
+                              "when": "Pending Review is nonzero.", "avoid": "Dashboard visibility does not grant approval authority.", "result": "Existing approval, deadline and reviewer-campus rules apply."}]}]},
+
     {'code': 'quitizz-configuration',
      'title': 'QuiTizz Configuration',
      'topics': [{'code': 'quitizz-toggle',

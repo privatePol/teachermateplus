@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import logging
 import random
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 import hashlib
@@ -11,15 +12,16 @@ import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib.auth import BACKEND_SESSION_KEY, HASH_SESSION_KEY, SESSION_KEY, get_user_model
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
-from django.db import transaction
+from django.db import OperationalError, connection, transaction
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare
 from PIL import Image
 
 from apps.accounts.models import (
@@ -42,6 +44,67 @@ logger = logging.getLogger("teachermateplus.system")
 
 
 class ActivePortalSessionService:
+    MONITOR_SESSION_KEY = "TeacherMate+_registered_session_key"
+
+    @classmethod
+    def reconcile_authenticated_session(cls, *, request, user) -> bool:
+        """Repair only this authenticated DB session's monitoring registration.
+
+        The session marker is a hint, never proof of registration. One indexed
+        existence check handles healthy requests without a registry write. A gap
+        locks user -> session before inserting, matching password invalidation's
+        user lock; another initializer can then reuse the winner's unique row.
+        Unlike login registration this never saves, rotates, or revokes sessions.
+        """
+        session = getattr(request, "session", None)
+        if (session is None or not getattr(user, "is_authenticated", False)
+                or not getattr(user, "is_active", False) or not session.session_key):
+            return False
+        key = session.session_key
+        if (str(session.get(SESSION_KEY, "")) != str(user.pk)
+                or session.get(BACKEND_SESSION_KEY) not in settings.AUTHENTICATION_BACKENDS
+                or not constant_time_compare(session.get(HASH_SESSION_KEY, ""), user.get_session_auth_hash())):
+            return False
+
+        if (not ActivePortalSession.objects.filter(session_key=key, user_id=user.pk).exists()
+                and not cls._reconcile_missing_session(key=key, user=user)):
+            return False
+
+        if session.get(cls.MONITOR_SESSION_KEY) != key:
+            session[cls.MONITOR_SESSION_KEY] = key
+        return True
+
+    @classmethod
+    def _reconcile_missing_session(cls, *, key, user) -> bool:
+        # SQLite cannot lock the user row: two readers upgrading to writers can
+        # conflict. Retry the entire rolled-back repair, never a partial write.
+        for attempt in range(3):
+            try:
+                return cls._insert_authenticated_registration(key=key, user=user)
+            except OperationalError as error:
+                if connection.vendor != "sqlite" or "locked" not in str(error).lower() or attempt == 2:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+        return False
+
+    @staticmethod
+    def _insert_authenticated_registration(*, key, user) -> bool:
+        with transaction.atomic():
+            persisted = User.objects.select_for_update().filter(pk=user.pk).only("password", "is_active").first()
+            if persisted is None or not persisted.is_active or persisted.password != user.password:
+                return False
+            live = Session.objects.select_for_update().filter(
+                session_key=key, expire_date__gt=timezone.now(),
+            ).only("session_key").first()
+            if live is None:
+                return False
+            registration, _ = ActivePortalSession.objects.get_or_create(
+                session_key=key, defaults={"user_id": user.pk},
+            )
+            if registration.user_id != user.pk:
+                return False  # Never transfer another account's registration.
+            return True
+
     @staticmethod
     def _enforcement_tenant_ids(user) -> list[int]:
         tenant_ids = []
@@ -106,7 +169,11 @@ class ActivePortalSessionService:
             return 0
 
         with transaction.atomic():
-            User.objects.select_for_update().only("id").get(id=user.id)
+            persisted_user = User.objects.select_for_update().only("id", "password").get(id=user.id)
+            if persisted_user.password != user.password:
+                # Authentication may have raced a committed password change.
+                # Do not advertise that stale session as currently logged in.
+                return 0
             registered = list(
                 ActivePortalSession.objects.select_for_update()
                 .filter(user_id=user.id)
@@ -140,6 +207,7 @@ class ActivePortalSessionService:
                 session_key=current_key,
                 defaults={"user_id": user.id},
             )
+            request.session[cls.MONITOR_SESSION_KEY] = current_key
             return revoked_sessions
 
     @classmethod

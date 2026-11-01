@@ -2,7 +2,7 @@ import uuid
 
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 
@@ -83,6 +83,24 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.username
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if self._state.adding or (update_fields is not None and "password" not in update_fields):
+            return super().save(*args, **kwargs)
+        # Keep the monitoring registry consistent with Django's password invalidation.
+        # Registration already locks this same user row. No Session is deleted here;
+        # Django retains ownership of authentication and session-hash validation.
+        from django.db import router
+        using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            persisted_password = type(self).objects.using(using).select_for_update().filter(
+                pk=self.pk,
+            ).values_list("password", flat=True).first()
+            result = super().save(*args, **kwargs)
+            if persisted_password is not None and persisted_password != self.password:
+                ActivePortalSession.objects.using(using).filter(user_id=self.pk).delete()
+            return result
 
     @property
     def full_name(self):

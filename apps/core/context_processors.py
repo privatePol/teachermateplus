@@ -197,11 +197,14 @@ def portal_menu(request):
         return {"current_portal": portal, "portal_menu": [], "effective_permissions": set()}
 
     scope = getattr(request, "scope", {})
-    permissions = PermissionService.get_effective_permission_codes(
-        request.user,
-        tenant_id=scope.get("tenant_id"),
-        campus_id=scope.get("campus_id"),
-    )
+    dashboard_permissions = getattr(request, "_admin_dashboard_permissions", None)
+    permission_key = (request.user.pk, scope.get("tenant_id"), scope.get("campus_id"))
+    if portal == "ADMIN" and dashboard_permissions and dashboard_permissions[:3] == permission_key:
+        permissions = dashboard_permissions[3]
+    else:
+        permissions = PermissionService.get_effective_permission_codes(
+            request.user, tenant_id=scope.get("tenant_id"), campus_id=scope.get("campus_id"),
+        )
     menu = MenuService.get_menu_tree(
         request.user,
         portal=portal,
@@ -327,9 +330,13 @@ def portal_menu(request):
     faculty_active_academic_year = None
     faculty_active_term = None
     if portal == "ADMIN" and scope.get("tenant_id"):
-        admin_active_academic_year, admin_active_term = AcademicGovernanceService.resolve_active_scope(
-            tenant_id=scope.get("tenant_id")
-        )
+        dashboard_academic_scope = getattr(request, "_admin_dashboard_academic_scope", None)
+        if dashboard_academic_scope and dashboard_academic_scope[0] == scope.get("tenant_id"):
+            admin_active_academic_year, admin_active_term = dashboard_academic_scope[1:]
+        else:
+            admin_active_academic_year, admin_active_term = AcademicGovernanceService.resolve_active_scope(
+                tenant_id=scope.get("tenant_id")
+            )
         admin_academic_performance_insights_enabled = (
             FeatureSettingsService.is_academic_performance_insights_enabled(
                 tenant_id=scope.get("tenant_id"),

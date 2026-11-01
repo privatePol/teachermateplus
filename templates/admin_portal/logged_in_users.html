@@ -1,0 +1,12 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<h2 class="h4">Currently Logged-in Users</h2>
+<p>{{ page_obj.paginator.count }} distinct active users. Checked at {{ checked_at|date:"Y-m-d H:i:s T" }}.</p>
+<p class="small text-muted">Live registered database sessions, using the actual session expiry and idle deadline. Refresh this page to check again.</p>
+<a class="btn btn-sm btn-outline-success mb-3" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+<div class="table-responsive"><table class="table table-sm"><thead><tr><th>User</th><th>Tenant / Campus</th><th>Department</th><th>Latest session expiry</th></tr></thead><tbody>
+{% for user in page_obj %}<tr><td>{{ user.full_name|default:user.username }}<br><small>{{ user.username }}</small></td><td>{{ user.default_tenant.code|default:"-" }} / {{ user.default_campus.code|default:"-" }}</td><td>{{ user.default_department.name|default:"-" }}</td><td>{{ user.session_expires_at|date:"Y-m-d H:i:s T" }}</td></tr>
+{% empty %}<tr><td colspan="4">No currently logged-in users in this scope.</td></tr>{% endfor %}
+</tbody></table></div>
+<nav aria-label="User listing pages">{% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %} Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}</nav>
+{% endblock %}

@@ -137,6 +137,11 @@ from apps.academics.models import (
 )
 from apps.auditlog.models import AuditLog
 from apps.core.decorators import permission_required, portal_required
+from .dashboard import (
+    logged_in_users as _dashboard_logged_in_users,
+    reopen_monitor as _dashboard_reopen_monitor,
+    scope_token as _dashboard_scope_token,
+)
 from apps.core.services.audit import AuditService
 from apps.core.services.csv_safety import csv_safe
 from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
@@ -1591,59 +1596,21 @@ def admin_portal_root_view(request):
 @portal_required("ADMIN")
 @permission_required("dashboard.read")
 def dashboard_view(request):
-    tenant_ids = getattr(request, "scope", {}).get("tenant_ids", [])
-    campus_ids = getattr(request, "scope", {}).get("campus_ids", [])
     current_tenant_id = getattr(request, "scope", {}).get("tenant_id")
     current_campus_id = getattr(request, "scope", {}).get("campus_id")
     now = timezone.now()
-    has_import_read = PermissionService.has_permission(
-        request.user,
-        "import_batches.read",
-        tenant_id=current_tenant_id,
-        campus_id=current_campus_id,
+    permissions = PermissionService.get_effective_permission_codes(
+        request.user, tenant_id=current_tenant_id, campus_id=current_campus_id,
     )
-    has_users_read = PermissionService.has_permission(
-        request.user,
-        "users.read",
-        tenant_id=current_tenant_id,
-        campus_id=current_campus_id,
-    )
-    has_system_settings_update = PermissionService.has_permission(
-        request.user,
-        "system_settings.update",
-        tenant_id=current_tenant_id,
-        campus_id=current_campus_id,
-    )
-    has_faculty_assignments_read = PermissionService.has_permission(
-        request.user,
-        "faculty_assignments.read",
-        tenant_id=current_tenant_id,
-        campus_id=current_campus_id,
-    )
-    has_grading_period_lock = PermissionService.has_permission(
-        request.user,
-        "grading_periods.lock",
-        tenant_id=current_tenant_id,
-        campus_id=current_campus_id,
-    )
-    has_reopen_requests_read = PermissionService.has_permission(
-        request.user,
-        "reopen_requests.read",
-        tenant_id=current_tenant_id,
-        campus_id=current_campus_id,
-    )
-    has_reopen_requests_review = PermissionService.has_permission(
-        request.user,
-        "reopen_requests.review",
-        tenant_id=current_tenant_id,
-        campus_id=current_campus_id,
-    )
-    has_governance_alerts = PermissionService.has_permission(
-        request.user,
-        "audit_logs.read",
-        tenant_id=current_tenant_id,
-        campus_id=current_campus_id,
-    )
+    request._admin_dashboard_permissions = (request.user.pk, current_tenant_id, current_campus_id, permissions)
+    has_import_read = "import_batches.read" in permissions
+    has_users_read = "users.read" in permissions
+    has_system_settings_update = "system_settings.update" in permissions
+    has_faculty_assignments_read = "faculty_assignments.read" in permissions
+    has_grading_period_lock = "grading_periods.lock" in permissions
+    has_reopen_requests_read = "reopen_requests.read" in permissions
+    has_reopen_requests_review = "reopen_requests.review" in permissions
+    has_governance_alerts = "audit_logs.read" in permissions
 
     active_academic_year = None
     active_term = None
@@ -1665,25 +1632,8 @@ def dashboard_view(request):
                 default=True,
             )
 
-    import_stats = None
-    if has_import_read:
-        import_qs = AdminScopeService.scoped_import_batches(request)
-        imported_rows_total = import_qs.aggregate(total=Sum("imported_rows")).get("total") or 0
-        import_stats = {
-            "total_batches": import_qs.count(),
-            "pending_confirmations": import_qs.filter(
-                status__in=[ImportBatch.Status.VALIDATED, ImportBatch.Status.CONFIRM_FAILED],
-                valid_rows__gt=0,
-            ).count(),
-            "failed_batches": import_qs.filter(
-                status__in=[ImportBatch.Status.VALIDATION_FAILED, ImportBatch.Status.CONFIRM_FAILED]
-            ).count(),
-            "imported_rows_total": imported_rows_total,
-        }
-
-    active_user_sessions = []
-    if has_users_read:
-        active_user_sessions = _active_user_activity_rows(request, limit=25)
+    # Count live registered users in SQL; session payloads and user details stay off this path.
+    active_user_count = _dashboard_logged_in_users(request, now=now).count() if has_users_read else None
 
     lock_monitor = None
     if has_grading_period_lock:
@@ -1721,36 +1671,21 @@ def dashboard_view(request):
             "recently_auto_locked": recently_auto_locked,
         }
 
-    reopen_request_monitor = None
-    if has_reopen_requests_read or has_reopen_requests_review:
-        reopen_qs = AdminScopeService.scoped_grade_submission_reopen_requests(request)
-        pending_reopen_requests = list(
-            reopen_qs.filter(status=GradeSubmissionReopenRequest.Status.PENDING)
-            .order_by("-created_at", "-id")[:5]
-        )
-        reopen_request_monitor = {
-            "pending_count": reopen_qs.filter(status=GradeSubmissionReopenRequest.Status.PENDING).count(),
-            "reviewed_today_count": reopen_qs.filter(
-                reviewed_at__date=timezone.localdate(now),
-            ).count(),
-            "latest_pending": pending_reopen_requests,
-            "can_review": has_reopen_requests_review,
-        }
+    request._admin_dashboard_academic_scope = (current_tenant_id, active_academic_year, active_term)
+    reopen_request_monitor = _dashboard_reopen_monitor(request, permissions=permissions, now=now)
 
     context = {
         "stats": {
             "tenants": AdminScopeService.active_scoped_tenants(request).count(),
             "campuses": AdminScopeService.active_scoped_campuses(request).count(),
-            "users": _scoped_users_queryset(request).count(),
-            "audit_logs": _scoped_audit_queryset(request).count(),
+            "users": _scoped_users_queryset(request).count() if has_users_read else None,
         },
         "has_import_read": has_import_read,
         "has_users_read": has_users_read,
         "has_system_settings_update": has_system_settings_update,
         "has_faculty_assignments_read": has_faculty_assignments_read,
-        "import_stats": import_stats,
-        "active_user_sessions": active_user_sessions,
-        "active_user_count": len(active_user_sessions),
+        "active_user_count": active_user_count,
+        "active_users_checked_at": now,
         "active_academic_year": active_academic_year,
         "active_term": active_term,
         "active_grading_period": active_grading_period,
@@ -1761,7 +1696,7 @@ def dashboard_view(request):
         "has_reopen_requests_review": has_reopen_requests_review,
         "reopen_request_monitor": reopen_request_monitor,
         "has_governance_alerts": has_governance_alerts,
-        "governance_alerts": _governance_alert_rows(request, limit=20) if has_governance_alerts else [],
+        "dashboard_scope_token": _dashboard_scope_token(request),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/dashboard.html", context)

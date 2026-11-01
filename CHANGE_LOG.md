@@ -1,3 +1,18 @@
+## 2026-11-01 - Admin Dashboard authenticated-session registry reconciliation (local; independent re-review pending)
+
+- Fixed premature monitoring-marker initialization: valid sessions inherited from the baseline now register before dashboard rendering, including Django Admin password-change session-key rotations. Current user/session/backend/auth-hash identity, fresh password/active state, backing-session expiry and registry ownership are checked before repair.
+- Healthy authenticated requests use one indexed ownership lookup with no registry write. Missing-row creation uses existing uniqueness and user/session locks; two concurrent SQLite initializers safely recover from a rolled-back write-lock conflict with bounded retries. Reconciliation does not save/rotate/revoke sessions or change authentication, audit, expiry, direct DENY or tenant/campus scope.
+- Added 15 regressions; final focused suite 52/52 passed and broader suite 517 total, 511 passed, six existing MariaDB-only skips, zero failures/errors. Local dashboard queries 76 -> 77 with session-volume-independent growth; login POST queries remain 46. Healthy helper median 0.4461ms across 50 local SQLite calls, zero repeated registry writes. Full before/after latency samples and their limits are recorded in docs/ADMIN_DASHBOARD_IMPLEMENTATION.md.
+- Legacy reconciliation is lazy on the next authenticated request; real MariaDB locking and live staging acceptance remain pending. No migration, commit, push, deployment, service restart or non-test migration application.
+
+## 2026-11-01 - Admin Dashboard responsive cards and scoped monitoring (original implementation evidence)
+
+- Replaced the Admin dashboard's detailed session/governance tables and import/audit aggregates with compact scoped cards and authorized destination links. Live registered users use a distinct SQL count and a separate paginated listing, with actual stored session expiry and a checked-at timestamp.
+- Added a server-rendered reopen-request card with a 600-second fragment-only refresh, visibility pause, overlap protection and revalidation of permissions and signed academic scope. Background polling preserves the stored idle deadline. Existing reviewer-campus, supervision, deadline and approval rules remain authoritative.
+- Added an Admin-only mobile drawer and compact three/two/one-column card stacks, retaining NCBA branding, scope selectors and existing authorized navigation. Removed Stage 0.75 and the unconditional 30-second page reload.
+- Reused request-local dashboard permissions/AY/term. Password changes invalidate only monitoring registry rows atomically; key rotation and stale-credential registration remain consistent with that registry. No schema change or password-security weakening.
+- Validation: final broader run 447 tests (441 passed, six MariaDB-only skips); focused account/user/dashboard/session/probe run 107/107; JS/Chrome 26/26. One unrelated guide assertion reproduced identically on the untouched baseline remains open. Controlled dashboard queries 113 -> 76; no proven end-to-end browser login speedup. See docs/ADMIN_DASHBOARD_IMPLEMENTATION.md and HANDOFF.md for timing limits and exact evidence. No commit/push/deploy/operational restart or non-test migration.
+
 ## 2026-11-01 - Faculty responsive navigation and support controls (local, uncommitted)
 
 - Authorized Grading Analytics, Performance Trends and Activity History links remain available at phone widths, along with the dashboard Performance Trends shortcut. Existing menu permissions, direct DENY and feature configuration still determine availability; the shared mobile hiding utility is retained for other uses.
