@@ -47,6 +47,24 @@ class DashboardQueueTests(TestCase):
         values.update(kwargs)
         return GradeCorrectionRequest.objects.create(**values)
 
+    def test_dashboard_performance_evidence(self):
+        import json
+        from statistics import median
+        from time import perf_counter
+        self.correction()
+        self.cml()
+        self.dashboard()  # warm session registry and templates equally in both runs
+        samples = []
+        for _ in range(7):
+            started = perf_counter()
+            with CaptureQueriesContext(connection) as queries:
+                self.dashboard()
+            samples.append({"queries": len(queries), "ms": round((perf_counter()-started)*1000, 3)})
+        result = {"samples": samples, "median_ms": median(row["ms"] for row in samples)}
+        print("DASHBOARD_PERFORMANCE " + json.dumps(result))
+        if os.environ.get("TMP_ADMIN_EVIDENCE"):
+            Path(os.environ["TMP_ADMIN_EVIDENCE"], "performance-" + os.environ.get("TMP_PERF_PHASE", "candidate") + ".json").write_text(json.dumps(result), encoding="utf-8")
+
     def cml(self, status="PENDING", **kwargs):
         values = dict(tenant=self.tenant, campus=self.campus, offering=self.offering,
                       faculty_requester=self.faculty_user, request_type="ADD", status=status)
@@ -440,3 +458,178 @@ class DashboardQueueTests(TestCase):
             self.assertNotContains(response, "Quick Actions")
             if os.environ.get("TMP_ADMIN_EVIDENCE"):
                 Path(os.environ["TMP_ADMIN_EVIDENCE"], "layout-"+variant+".html").write_text(response.content.decode(), encoding="utf-8")
+
+    def refresh_queues(self, token=None, **params):
+        if token is None:
+            token = self.dashboard().context['dashboard_scope_token']
+        return self.client.get(reverse('admin_portal:dashboard_queue_counts'), {'scope_token': token, **params})
+
+    def test_queue_refresh_counts_current_pending_requests_and_returns_no_rows(self):
+        self.correction()
+        self.cml()
+        token = self.dashboard().context['dashboard_scope_token']
+        self.correction()
+        self.correction('APPROVED')
+        self.cml('REJECTED')
+        with patch.object(GradingGovernanceService, 'get_approved_correction_governance_state', side_effect=AssertionError('approved validation')), patch.object(GradingGovernanceService, 'auto_lapse_expired_correction_windows', side_effect=AssertionError('maintenance')):
+            response = self.refresh_queues(token)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['correction']['pending_count'], 2)
+        self.assertEqual(response.json()['cml']['pending_count'], 1)
+        self.assertEqual(response.json()['scope_token'], token)
+        self.assertIn('no-store', response['Cache-Control'])
+        self.assertEqual(set(response.json()), {'scope_token', 'correction', 'cml'})
+        for name in ('correction', 'cml'):
+            row = response.json()[name]
+            listing = self.client.get(row['url'])
+            self.assertEqual(listing.context['page_obj'].paginator.count, row['pending_count'])
+
+    def test_queue_refresh_rechecks_permissions_without_reopen_access(self):
+        self.correction()
+        self.cml()
+        token = self.dashboard().context['dashboard_scope_token']
+        self.deny('reopen_requests.read')
+        self.deny('reopen_requests.review')
+        self.assertEqual(self.refresh_queues(token).status_code, 200)
+        self.deny('corrections.read')
+        response = self.refresh_queues(token)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()['correction'])
+        self.assertEqual(response.json()['cml']['pending_count'], 1)
+        self.deny('class_list_change_requests.view')
+        self.assertEqual(self.refresh_queues(token).status_code, 403)
+
+    def test_correction_only_refresh_and_dashboard_permission_revocation(self):
+        self.deny('class_list_change_requests.view')
+        response = self.refresh_queues()
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()['cml'])
+        token = response.json()['scope_token']
+        self.deny('dashboard.read')
+        self.assertEqual(self.refresh_queues(token).status_code, 403)
+
+    def test_queue_refresh_is_get_only_and_rejects_invalid_or_expired_tokens(self):
+        url = reverse('admin_portal:dashboard_queue_counts')
+        self.assertEqual(self.client.post(url).status_code, 405)
+        self.assertEqual(self.refresh_queues('forged').status_code, 409)
+        token = self.dashboard().context['dashboard_scope_token']
+        with patch('django.core.signing.time.time', return_value=timezone.now().timestamp()+86401):
+            self.assertEqual(self.refresh_queues(token).status_code, 409)
+        self.client.logout()
+        self.assertIn(self.client.get(url).status_code, (302, 401))
+
+    def test_queue_refresh_scope_selection_cannot_be_forged_or_restore_another_tab_scope(self):
+        campus, a, b = self.multi_campus_cml()
+        token = self.dashboard().context['dashboard_scope_token']
+        self.assertEqual(self.refresh_queues(token).json()['cml']['pending_count'], 1)
+        for endpoint in ('dashboard_queue_counts', 'dashboard_reopen_card'):
+            response = self.client.get(reverse('admin_portal:'+endpoint), {'scope_token': token, 'scope_tenant_id': self.tenant.pk, 'scope_campus_id': campus.pk})
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(self.client.session[ScopeService.SESSION_CAMPUS_KEY], self.campus.pk)
+        self.client.get(reverse('admin_portal:dashboard'), {'scope_tenant_id': self.tenant.pk, 'scope_campus_id': campus.pk})
+        self.assertEqual(self.refresh_queues(token).status_code, 409)
+        self.assertEqual(self.client.session[ScopeService.SESSION_CAMPUS_KEY], campus.pk)
+        token_b = self.dashboard().context['dashboard_scope_token']
+        UserPermission.objects.create(user=self.admin_user, permission=Permission.objects.get(code='class_list_change_requests.view'), tenant=self.tenant, campus=campus, grant_type='DENY')
+        response = self.refresh_queues(token_b)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()['cml'])
+
+    def test_queue_refresh_rejects_changed_academic_scope_and_departments(self):
+        token = self.dashboard().context['dashboard_scope_token']
+        AcademicGovernanceService.set_active_scope(tenant_id=self.tenant.pk, academic_year=None, term=None)
+        self.assertEqual(self.refresh_queues(token).status_code, 409)
+        response = self.refresh_queues()
+        self.assertIsNone(response.json()['correction']['pending_count'])
+        self.assertIsNone(response.json()['cml']['pending_count'])
+        token = response.json()['scope_token']
+        with patch.object(ScopeService, 'get_accessible_department_ids', return_value=[]):
+            self.assertEqual(self.refresh_queues(token).status_code, 409)
+
+    def test_queue_refresh_preserves_idle_expiry_with_save_every_request_and_denial(self):
+        from django.contrib.sessions.models import Session
+        token = self.dashboard().context['dashboard_scope_token']
+        key = self.client.session.session_key
+        deadline = timezone.now()+timedelta(seconds=90)
+        Session.objects.filter(session_key=key).update(expire_date=deadline)
+        with self.settings(SESSION_SAVE_EVERY_REQUEST=True):
+            self.assertEqual(self.refresh_queues(token).status_code, 200)
+            self.assertEqual(Session.objects.get(session_key=key).expire_date, deadline)
+            self.assertEqual(self.refresh_queues(token, scope_campus_id=self.campus.pk).status_code, 409)
+            self.assertEqual(Session.objects.get(session_key=key).expire_date, deadline)
+            self.deny('corrections.read')
+            self.deny('class_list_change_requests.view')
+            self.assertEqual(self.refresh_queues(token).status_code, 403)
+            self.assertEqual(Session.objects.get(session_key=key).expire_date, deadline)
+        Session.objects.filter(session_key=key).update(expire_date=timezone.now()-timedelta(seconds=1))
+        self.assertIn(self.refresh_queues(token).status_code, (302, 401))
+
+    def test_queue_refresh_uses_count_sql_and_no_workflow_or_listings(self):
+        import json
+        from statistics import median
+        from time import perf_counter
+        self.correction()
+        self.cml()
+        token = self.dashboard().context['dashboard_scope_token']
+        original = QuerySet._fetch_all
+        def no_listing(queryset):
+            if queryset.model in (GradeCorrectionRequest, ClassListChangeRequest):
+                raise AssertionError('polling loaded request rows')
+            return original(queryset)
+        samples = []
+        with patch.object(QuerySet, '_fetch_all', no_listing), patch.object(AdminScopeService, 'scoped_monitoring_course_offerings', wraps=AdminScopeService.scoped_monitoring_course_offerings) as selector:
+            for _ in range(7):
+                started = perf_counter()
+                with CaptureQueriesContext(connection) as queries:
+                    response = self.refresh_queues(token)
+                self.assertEqual(response.status_code, 200)
+                sql = [q['sql'] for q in queries if 'FROM "grade_correction_requests"' in q['sql'] or 'FROM "class_list_change_requests"' in q['sql']]
+                self.assertEqual(len(sql), 2)
+                self.assertTrue(all('COUNT(' in q and 'DISTINCT' in q for q in sql))
+                samples.append({'queries': len(queries), 'ms': round((perf_counter()-started)*1000, 3)})
+            self.assertEqual(selector.call_count, 7)
+        result = {'samples': samples, 'median_ms': median(row['ms'] for row in samples)}
+        print('QUEUE_PERFORMANCE ' + json.dumps(result))
+        if os.environ.get('TMP_ADMIN_EVIDENCE'):
+            Path(os.environ['TMP_ADMIN_EVIDENCE'], 'queue-performance.json').write_text(json.dumps(result), encoding='utf-8')
+
+    def test_concurrent_scope_change_during_poll_is_rejected_and_never_overwritten(self):
+        from django.contrib.sessions.backends.db import SessionStore
+        from django.contrib.sessions.models import Session
+        from . import dashboard as selectors
+        campus, a, b = self.multi_campus_cml()
+        token = self.dashboard().context['dashboard_scope_token']
+        key = self.client.session.session_key
+        deadline = timezone.now()+timedelta(minutes=20)
+        original = selectors.request_queues
+        def changed_in_another_tab(*args, **kwargs):
+            result = original(*args, **kwargs)
+            concurrent = SessionStore(session_key=key)
+            concurrent[ScopeService.SESSION_CAMPUS_KEY] = campus.pk
+            concurrent.set_expiry(deadline)
+            concurrent.save()
+            return result
+        with self.settings(SESSION_SAVE_EVERY_REQUEST=True), patch.object(selectors, 'request_queues', side_effect=changed_in_another_tab):
+            self.assertEqual(self.refresh_queues(token).status_code, 409)
+        saved = Session.objects.get(session_key=key)
+        self.assertEqual(saved.expire_date, deadline)
+        self.assertEqual(saved.get_decoded()[ScopeService.SESSION_CAMPUS_KEY], campus.pk)
+
+    def test_refresh_preserves_supervision_and_cross_tenant_isolation(self):
+        self.test_cross_tenant_and_campus_rows_are_excluded()
+        response = self.refresh_queues()
+        self.assertEqual(response.json()['correction']['pending_count'], 1)
+        self.assertEqual(response.json()['cml']['pending_count'], 1)
+        outside = Department.objects.create(tenant=self.tenant, campus=self.campus, code='UNSUP', name='Unsupervised')
+        UserRole.objects.filter(user=self.faculty_user).update(department=outside)
+        self.faculty_user.default_department = outside
+        self.faculty_user.save(update_fields=['default_department'])
+        response = self.refresh_queues()
+        self.assertEqual(response.json()['correction']['pending_count'], 0)
+
+    def test_refresh_preserves_existing_superuser_semantics(self):
+        self.test_current_superuser_permission_semantics_are_preserved()
+        response = self.refresh_queues()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['correction']['pending_count'], 1)
+        self.assertEqual(response.json()['cml']['pending_count'], 1)

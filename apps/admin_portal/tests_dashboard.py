@@ -5,7 +5,7 @@ from django.conf import settings
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
 from django.db import connection
-from django.test import TestCase, RequestFactory
+from django.test import TestCase, RequestFactory, Client, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -325,3 +325,213 @@ class DashboardReopenTests(TestCase):
         SystemSettingService.set(AcademicGovernanceService.ACTIVE_TERM_KEY,self.term.code,tenant_id=self.tenant.pk,value_type="STRING")
         fragment = self.client.get(reverse("admin_portal:dashboard_reopen_card"),{"scope_token":token})
         self.assertEqual(fragment.status_code,409)
+
+@override_settings(SESSION_SAVE_EVERY_REQUEST=True)
+class DashboardPollingCookieTests(TestCase):
+    """Real-stack responses delivered after newer interactive responses.
+
+    A separate Client snapshots the outgoing poll's browser cookies. Applying its
+    completed response cookies later models network delivery order deterministically.
+    No SessionMiddleware methods are replaced in the race tests.
+    """
+    endpoints = ('dashboard_queue_counts', 'dashboard_reopen_card')
+    password = 'CookieRacePass123!'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tenant = Tenant.objects.create(code='COOKIE', name='Cookie tests')
+        cls.campus = Campus.objects.create(tenant=cls.tenant, code='MAIN', name='Main')
+        cls.role = Role.objects.create(code='COOKIE_ADMIN', name='Cookie administrator')
+        for code in ('admin_portal.access', 'dashboard.read', 'corrections.read',
+                     'class_list_change_requests.view', 'reopen_requests.read'):
+            module, action = code.split('.')
+            permission, _ = Permission.objects.get_or_create(code=code, defaults={'module': module, 'action': action})
+            RolePermission.objects.create(role=cls.role, permission=permission)
+        cls.admin = User.objects.create_user(
+            username='cookie-admin', email='cookie@example.test', password=cls.password,
+            default_tenant=cls.tenant, default_campus=cls.campus, must_change_password=False,
+            privacy_consent_version=settings.PRIVACY_CONSENT_VERSION, privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(user=cls.admin, role=cls.role, tenant=cls.tenant, campus=cls.campus)
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def token(self):
+        response = self.client.get(reverse('admin_portal:dashboard'))
+        self.assertEqual(response.status_code, 200)
+        return response.context['dashboard_scope_token']
+
+    def pending_response(self, endpoint, token):
+        from copy import deepcopy
+        browser = Client()
+        browser.cookies = deepcopy(self.client.cookies)
+        return browser.get(reverse('admin_portal:'+endpoint), {'scope_token': token})
+
+    def assert_no_session_cookie(self, response):
+        self.assertNotIn(settings.SESSION_COOKIE_NAME, response.cookies, response.cookies.output())
+
+    def test_successful_polls_emit_no_cookie_and_keep_idle_deadline(self):
+        for endpoint in self.endpoints:
+            with self.subTest(endpoint=endpoint):
+                token = self.token()
+                key = self.client.session.session_key
+                deadline = timezone.now()+timedelta(seconds=90)
+                Session.objects.filter(session_key=key).update(expire_date=deadline)
+                response = self.pending_response(endpoint, token)
+                self.assertEqual(response.status_code, 200)
+                self.assert_no_session_cookie(response)
+                self.assertEqual(Session.objects.get(session_key=key).expire_date, deadline)
+
+    def test_denied_polls_emit_no_cookie_and_keep_idle_deadline(self):
+        token = self.token()
+        key = self.client.session.session_key
+        deadline = Session.objects.get(session_key=key).expire_date
+        UserPermission.objects.create(user=self.admin, tenant=self.tenant, campus=self.campus,
+            permission=Permission.objects.get(code='dashboard.read'), grant_type='DENY')
+        for endpoint in self.endpoints:
+            with self.subTest(endpoint=endpoint):
+                response = self.pending_response(endpoint, token)
+                self.assertEqual(response.status_code, 403)
+                self.assert_no_session_cookie(response)
+                self.assertEqual(Session.objects.get(session_key=key).expire_date, deadline)
+
+    def test_scope_mismatch_polls_emit_no_cookie(self):
+        self.token()
+        for endpoint in self.endpoints:
+            with self.subTest(endpoint=endpoint):
+                response = self.pending_response(endpoint, 'tampered')
+                self.assertEqual(response.status_code, 409)
+                self.assert_no_session_cookie(response)
+
+    def test_expired_polls_emit_no_cookie_deletion(self):
+        for endpoint in self.endpoints:
+            with self.subTest(endpoint=endpoint):
+                self.client = Client()
+                self.client.force_login(self.admin)
+                token = self.token()
+                key = self.client.session.session_key
+                Session.objects.filter(session_key=key).update(expire_date=timezone.now()-timedelta(seconds=1))
+                response = self.pending_response(endpoint, token)
+                self.assertEqual(response.status_code, 302)  # normal sign-in redirect
+                self.assert_no_session_cookie(response)
+
+    def test_expiry_between_authentication_and_timeout_check_emits_no_cookie(self):
+        from apps.core.services.features import FeatureSettingsService
+        original = FeatureSettingsService.get_session_timeout_minutes
+        for endpoint in self.endpoints:
+            with self.subTest(endpoint=endpoint):
+                self.client = Client()
+                self.client.force_login(self.admin)
+                token = self.token()
+                key = self.client.session.session_key
+                def expire_after_authentication(**kwargs):
+                    Session.objects.filter(session_key=key).update(expire_date=timezone.now()-timedelta(seconds=1))
+                    return original(**kwargs)
+                with patch.object(FeatureSettingsService, 'get_session_timeout_minutes', side_effect=expire_after_authentication):
+                    response = self.pending_response(endpoint, token)
+                self.assertEqual(response.status_code, 401)
+                self.assert_no_session_cookie(response)
+
+    def test_delayed_poll_cannot_shorten_newer_interactive_cookie(self):
+        for endpoint in self.endpoints:
+            with self.subTest(endpoint=endpoint):
+                token = self.token()
+                key = self.client.session.session_key
+                deadline = timezone.now()+timedelta(seconds=90)
+                Session.objects.filter(session_key=key).update(expire_date=deadline)
+                delayed = self.pending_response(endpoint, token)
+                self.assertEqual(delayed.status_code, 200)
+                interactive = self.client.get(reverse('admin_portal:dashboard'))
+                self.assertEqual(interactive.status_code, 200)
+                self.assertIn(settings.SESSION_COOKIE_NAME, interactive.cookies)
+                latest = self.client.cookies[settings.SESSION_COOKIE_NAME].OutputString()
+                renewed = Session.objects.get(session_key=key).expire_date
+                self.assertGreater(renewed, deadline)
+                self.client.cookies.update(delayed.cookies)  # delayed HTTP delivery
+                self.assertEqual(self.client.cookies[settings.SESSION_COOKIE_NAME].OutputString(), latest)
+                self.assertEqual(Session.objects.get(session_key=key).expire_date, renewed)
+                self.assertEqual(self.client.get(reverse('admin_portal:dashboard')).status_code, 200)
+
+    def test_delayed_poll_cannot_restore_key_rotated_by_password_change(self):
+        for index, endpoint in enumerate(self.endpoints):
+            with self.subTest(endpoint=endpoint):
+                self.admin.set_password(self.password)
+                self.admin.save(update_fields=['password'])
+                self.client = Client()
+                self.client.force_login(self.admin)
+                token = self.token()
+                old_key = self.client.session.session_key
+                delayed = self.pending_response(endpoint, token)
+                self.assertEqual(delayed.status_code, 200)
+                new_password = f'CookieUpdatedPass{index}456!'
+                interactive = self.client.post(reverse('accounts:admin_change_password'), {
+                    'old_password': self.password, 'new_password1': new_password, 'new_password2': new_password,
+                })
+                self.assertEqual(interactive.status_code, 302)
+                new_key = self.client.cookies[settings.SESSION_COOKIE_NAME].value
+                self.assertNotEqual(new_key, old_key)
+                self.assertFalse(Session.objects.filter(session_key=old_key).exists())
+                self.client.cookies.update(delayed.cookies)
+                self.assertEqual(self.client.cookies[settings.SESSION_COOKIE_NAME].value, new_key)
+                self.assertEqual(self.client.get(reverse('admin_portal:dashboard')).status_code, 200)
+                self.assertTrue(Session.objects.filter(session_key=new_key).exists())
+
+    def test_expired_delayed_poll_cannot_delete_a_new_login_cookie(self):
+        for endpoint in self.endpoints:
+            with self.subTest(endpoint=endpoint):
+                self.client = Client()
+                self.client.force_login(self.admin)
+                token = self.token()
+                old_key = self.client.session.session_key
+                Session.objects.filter(session_key=old_key).update(expire_date=timezone.now()-timedelta(seconds=1))
+                delayed = self.pending_response(endpoint, token)
+                self.assertEqual(delayed.status_code, 302)
+                login = self.client.post(reverse('accounts:admin_login'), {'username': self.admin.username, 'password': self.password})
+                self.assertEqual(login.status_code, 302)
+                self.assertIn(settings.SESSION_COOKIE_NAME, login.cookies)
+                new_key = self.client.cookies[settings.SESSION_COOKIE_NAME].value
+                self.assertNotEqual(new_key, old_key)
+                self.client.cookies.update(delayed.cookies)
+                self.assertEqual(self.client.cookies[settings.SESSION_COOKIE_NAME].value, new_key)
+                self.assertEqual(self.client.get(reverse('admin_portal:dashboard')).status_code, 200)
+
+    def test_custom_session_cookie_is_blocked_and_other_cookies_preserved(self):
+        from apps.core.middleware import PortalCacheControlMiddleware
+        original = PortalCacheControlMiddleware.__call__
+        def downstream_cookies(middleware, request):
+            response = original(middleware, request)
+            response.set_cookie('poll_notice', 'kept', httponly=True, secure=True, samesite='Strict')
+            response.set_cookie(settings.SESSION_COOKIE_NAME, 'obsolete-inner-key')
+            return response
+        with self.settings(SESSION_COOKIE_NAME='tm_custom_session'):
+            self.client = Client()
+            self.client.force_login(self.admin)
+            token = self.token()
+            for endpoint in self.endpoints:
+                with self.subTest(endpoint=endpoint), patch.object(PortalCacheControlMiddleware, '__call__', downstream_cookies):
+                    response = self.pending_response(endpoint, token)
+                    self.assertEqual(response.status_code, 200)
+                    self.assert_no_session_cookie(response)
+                    other = response.cookies['poll_notice']
+                    self.assertEqual(other.value, 'kept')
+                    self.assertTrue(other['httponly'])
+                    self.assertTrue(other['secure'])
+                    self.assertEqual(other['samesite'], 'Strict')
+
+    def test_interactive_login_renewal_rotation_and_logout_keep_normal_cookies(self):
+        browser = Client()
+        login = browser.post(reverse('accounts:admin_login'), {'username': self.admin.username, 'password': self.password})
+        self.assertEqual(login.status_code, 302)
+        self.assertIn(settings.SESSION_COOKIE_NAME, login.cookies)
+        key = browser.cookies[settings.SESSION_COOKIE_NAME].value
+        Session.objects.filter(session_key=key).update(expire_date=timezone.now()+timedelta(seconds=90))
+        interactive = browser.get(reverse('admin_portal:dashboard'))
+        self.assertEqual(interactive.status_code, 200)
+        self.assertIn(settings.SESSION_COOKIE_NAME, interactive.cookies)
+        self.assertGreater(int(interactive.cookies[settings.SESSION_COOKIE_NAME]['max-age']), 90)
+        logout = browser.get(reverse('accounts:admin_logout'))
+        self.assertEqual(logout.status_code, 302)
+        self.assertIn(settings.SESSION_COOKIE_NAME, logout.cookies)
+        self.assertEqual(logout.cookies[settings.SESSION_COOKIE_NAME]['max-age'], 0)
+        self.assertFalse(Session.objects.filter(session_key=key).exists())

@@ -1,3 +1,119 @@
+## 2026-11-02 - Dashboard polling session-cookie remediation (uncommitted)
+
+- Authorized gate: targeted cookie remediation and focused validation only. Worktree `D:/tmp_branches/tmp-admin-dashboard-layout`, branch `feat/admin-dashboard-ux-icons-refresh`, unchanged full HEAD `a5a2ff0ccfb8116ac5065941737ca564c91ef386`.
+- This entry supersedes the earlier claim of complete polling session safety: the previous fix protected persisted session scope/deadlines but did not prevent late browser session-cookie replacement.
+- Root cause verified against the installed Django implementation and actual MIDDLEWARE list: SessionMiddleware wraps ScopeResolutionMiddleware/SessionTimeoutMiddleware and processes responses later. SAVE_EVERY_REQUEST still calls response.set_cookie after a no-op session.save; empty/expired sessions can call delete_cookie. Delayed response delivery could shorten a renewed cookie, restore an old rotated key, or clear a newer login cookie.
+- Exact fix in `apps/core/middleware.py`: only responses on the two exact dashboard polling routes remove any already-added configured session cookie and receive a response-local set_cookie guard. Later SessionMiddleware cookie-setting/deletion calls are filtered by the configured cookie name; delete_cookie delegates to set_cookie in installed Django. All other cookie names delegate to the original implementation. No global cookie or framework patch, middleware reordering, settings change, new endpoint or additional SQL. Existing idle-deadline/session-save protection and registry reconciliation remain intact.
+- Both routes are covered regardless of response status: queue counts and reopen fragment, including 200, direct-DENY 403, scope-mismatch 409, expired-session 302 and timeout-window 401. Interactive login/renewal/password-change key rotation/logout retain their normal cookie behavior.
+
+### Current validation
+
+| Check | Actual result |
+| --- | --- |
+| Dedicated real-stack cookie suite | 10 test methods passed, 0 failures/skips, 2.767s; each polling scenario covers both endpoints |
+| Regression control with response cookie guard disabled | 10 methods run, 18 failing endpoint subtests; ordinary interactive cookie control passes, 2.401s |
+| Focused dashboard/layout/CML/reopen/help suite | 114 run: 113 passed, 1 known baseline-equivalent guide failure, 0 skips, 25.101s |
+| Broader Accounts/Faculty/users/scope/CML/reopen/governance/banner/correction-label/permissions/timeout suite | 507 run: 500 passed, 1 known baseline-equivalent Governance Alerts failure, 6 MariaDB-only skips, 94.129s |
+| Actual AJAX/drawer scripts (JSDOM) | 32 passed, no failures/skips, 3.791s |
+| Django check | PASS, no issues |
+| makemigrations --check --dry-run | PASS, no changes detected |
+| migrate --plan | PASS, no planned operations on the disposable read-only schema |
+| git diff --check / full diff review | PASS |
+
+Suites overlap; do not add totals. New tests use Django Client through the real installed middleware stack with SESSION_SAVE_EVERY_REQUEST=True. Separate outgoing cookie-jar snapshots and delayed application of fully processed response cookies deterministically reproduce network delivery order. Tests verify unchanged DB idle expiry, a newer interactive cookie surviving delayed polling, password-change rotation surviving delayed polling, expired polls not deleting a new login cookie, subsequent authenticated dashboard GETs, unrelated Secure/HttpOnly/SameSite cookies, a custom SESSION_COOKIE_NAME, and normal login/renewal/logout cookies. SessionMiddleware is not mocked in race tests. The custom-cookie preservation test injects downstream cookies while retaining all normal middleware.
+
+The pre-fix run reproduced 18 failed endpoint subtests. A final method-level disabled-guard control reproduces the same failures using the final tests and real stack, while enabling the guard passes all 10 methods. An initial control using TestSuite.run was flattened by Django's suite reordering and did not activate its patch; that superseded harness result is retained separately and is not regression evidence.
+
+The two unchanged failures remain `AdminHelpGuideTests.test_departmental_exam_configurer_receives_stage41_help` and `GovernanceAnomalyDetectionTests.test_dashboard_alerts_require_audit_permission_and_follow_scope`, independently reproduced on the approved baseline during the preceding gate. Neither was weakened or repaired outside scope; Governance Alerts was not reintroduced. Six MariaDB/InnoDB-only tests remain skipped on SQLite. Headless Chrome layout was not rerun for this server-cookie-only correction; the prior 48/48 JS/Chrome evidence remains historical, with UI/scripts unchanged in this gate. No new query/latency benchmark was required or claimed; the guard performs no database operation by source inspection, and earlier measurements remain recorded below.
+
+### Incremental scope and preservation
+
+Exactly six paths changed in this remediation gate:
+
+- `apps/core/middleware.py`
+- `apps/admin_portal/tests_dashboard.py`
+- `frontend/admin-dashboard/README.md`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
+
+The existing 16-file UX diff is preserved. Eleven opening paths outside the five updated existing paths retain their exact opening SHA256 content; tests_dashboard.py is the newly modified 17th approved path. The combined package is 17 modified tracked paths, all unstaged, with no untracked files or changes outside the approved allowlist. Opening and final hashes/full diffs/status are exported in the evidence directory. Layout, icons, both 600-second timers, RBAC/direct-DENY, signed academic scope, selected-campus isolation, supervision, audit/governance behavior and Faculty sources were not changed by the remediation.
+
+Evidence root: `C:/Users/Lenovo/AppData/Local/Temp/tmp-admin-dashboard-cookie-remediation-20261102`. Logs: `before-cookie-tests.log`, `after-cookie-tests.log`, `disabled-guard-control.log`, `superseded-control-wrapper.log`, `focused.log`, `broader.log`, `ajax-js.log`, `check.log`, `makemigrations.log`, `migration-plan.log`. `validation-commands.txt` records exact commands/environment, and `cookie_guard_disabled_control.py` records the final causal control. Tests use the previously documented validation interpreter and a fresh pristine SQLite schema clone for each suite; management checks open that disposable schema read-only. No persistent operational database was migrated.
+
+Remaining risks: two baseline assertions remain failing; MariaDB locking/capacity, authenticated staging and physical-browser/network timing acceptance remain separate evidence. Cookie races here are deterministic real-Django-stack response-delivery tests, not a production/browser concurrency certification. Previous unresolved items below remain open.
+
+No commit, push, deployment, service restart, non-test migration or destructive Git operation occurred. Exact next step: independent read-only re-review of the six incremental paths and the complete 17-path UX package, especially the response-local cookie guard and delayed-delivery regression evidence. Stop before publication/release.
+
+## 2026-11-02 - Admin Dashboard UX refinement: implementation and focused validation
+
+- Worktree: `D:/tmp_branches/tmp-admin-dashboard-layout`.
+- Branch: `feat/admin-dashboard-ux-icons-refresh`; unchanged full HEAD: `a5a2ff0ccfb8116ac5065941737ca564c91ef386`.
+- Opening state was clean on `feat/admin-dashboard-layout-feedback` at that exact HEAD. Created only the authorized follow-up branch. All changes remain unstaged and uncommitted within the supplied 17-path allowlist; 16 paths changed (`tests_dashboard.py` is unchanged).
+- Completed: natural card heights/top alignment with the same approved PDF order, proportions and breakpoints; heading-adjacent 44px named icon links with native titles and visible keyboard focus; circled Practical Guide icon retaining its ID, route, privacy guard and print suppression.
+- Completed: GET-only `/admin-portal/dashboard/queue-counts/` for both pending request-header counts, using existing scoped SQL selectors. Effective RBAC/direct DENY, supervision, tenant/campus, departments and active AY/term are checked on every request. Signed scope includes accessible tenant/campus IDs. No correction request rows, approved-window validation or workflow maintenance are loaded by polling.
+- Completed: one combined queue timer and the separate reopen timer retain 600000ms cadence. Hidden tabs pause; visibility/window focus verifies before restoring counts/actions. Abort/generation checks cover overlapping requests, late bodies, timeout, redirects and authorization errors. Storage/BroadcastChannel messages invalidate across Admin tabs; scope/BFCache changes require reload. No full-page refresh or job was added.
+- Completed: polling cannot select scope through URL filters or overwrite a concurrent tab's saved scope/deadline. Scope is checked again against the persisted session after selectors run. Both background routes preserve absolute idle expiry and suppress request-local session saves even with SAVE_EVERY_REQUEST; registry reconciliation still runs. Inherited sessions without saved selectors use authorized defaults. Other middleware paths and Faculty sources remain unchanged.
+
+### Actual final validation
+
+| Check | Result |
+| --- | --- |
+| `git diff --check` | PASS |
+| `manage.py check` | PASS, no issues |
+| `makemigrations --check --dry-run` | PASS, no changes detected |
+| `migrate --plan` | PASS, no planned operations against the disposable read-only schema |
+| Focused dashboard/layout/CML/reopen/help suite | 104 run: 103 passed, 1 baseline-equivalent guide failure, 0 skips; 57.133s |
+| Broader Accounts/Faculty/users/scope/CML/reopen/governance/banner/correction-label/permissions/timeout suite | 507 run: 500 passed, 1 baseline-equivalent Governance Alerts failure, 6 MariaDB-only skips; 246.037s |
+| Session registry and timeout rerun | 17 passed, 0 failures/skips; 3.734s |
+| JSDOM and real headless Chrome | 48 passed: 32 script checks and 16 authorized/denied responsive checks, 0 failures/skips |
+| Responsive widths | 375, 390, 440, 767, 768, 992, 1280, 1440px; no page overflow; internal table scrolling, icon targets/focus, guide print hiding and drawer checks pass |
+
+Suites overlap; do not add their totals. Baseline-equivalent failures were independently reproduced on the unchanged approved SHA in the clean release worktree: `AdminHelpGuideTests.test_departmental_exam_configurer_receives_stage41_help` still expects a positional `blocks Exempt only` guide entry; `GovernanceAnomalyDetectionTests.test_dashboard_alerts_require_audit_permission_and_follow_scope` still expects the previously removed Governance Alerts card. Neither assertion was weakened and the removed card was not reintroduced.
+
+Preliminary failures were corrected and retained separately: test string syntax; mobile overflow caused by an absolutely positioned hidden icon label in a scrollable table (contained with relative icon positioning); inherited-session scope mismatch; and a disposable-schema seed loss after transaction tests (final focused run uses a fresh pristine clone). An early in-memory baseline attempt completed migrations but failed on mixed module versions while implementation was in progress; it is not baseline evidence. Final comparable measurements below use the exact unchanged approved worktree and the final candidate sequentially, after other tests finished.
+
+### Comparable SQL and GET timing evidence
+
+Identical external `layout_benchmark` fixture, validation interpreter, settings and separate pristine SQLite clones; Python 3.14.3, SQLite 3.50.4, MD5 disposable hasher, force-login/setup outside timing. Full Django test-client GET includes middleware/templates and SQL capture. Two warmups then seven samples per volume, baseline followed by candidate, without overlapping our browser/test jobs. Approved corrections equal the pending-per-queue volume and remain excluded from counts.
+
+| Pending per queue | Baseline queries | Candidate queries | Baseline median ms | Candidate median ms |
+| --- | --- | --- | --- | --- |
+| 0 | 86 | 86 | 348.691 | 345.204 |
+| 100 | 86 | 86 | 347.473 | 343.896 |
+| 600 | 86 | 86 | 335.562 | 360.929 |
+
+Initial-dashboard SQL impact is zero in these fixtures. Candidate latency at 600 is 25.367ms (about 7.6%) higher in this local sample; the two smaller samples are slightly lower. Do not infer a universal speedup or production latency guarantee. Separate isolated queue endpoint measurement: seven GETs, 44 queries each, median 166.027ms; exactly two DISTINCT COUNT queries, one monitoring-scope resolution per request, no queue listing loads/maintenance. The new queue pair causes one request per visible 600-second interval, plus access verification when returning to visibility/focus. Reopen remains its separate interval.
+
+### Exact changed files
+
+```text
+templates/admin_portal/dashboard.html
+templates/admin_portal/base.html
+templates/admin_portal/_dashboard_reopen_card.html
+static/admin_portal/dashboard.js
+apps/admin_portal/dashboard.py
+apps/admin_portal/urls.py
+apps/core/middleware.py
+apps/admin_portal/tests_dashboard_layout.py
+apps/admin_portal/tests_help_guide.py
+frontend/admin-dashboard/dashboard.test.cjs
+frontend/admin-dashboard/responsive.test.cjs
+frontend/admin-dashboard/README.md
+apps/admin_portal/help_guide.py
+CHANGE_LOG.md
+TEACHERMATEPLUS_CONTEXT.md
+HANDOFF.md
+```
+
+Evidence: `C:/Users/Lenovo/AppData/Local/Temp/tmp-admin-dashboard-ux-20261102` contains final focused/broader/session/baseline failure logs, JS/Chrome log, per-width JSON/top/bottom screenshots, Chrome version, exact baseline/candidate performance JSON/logs, isolated queue JSON/log and management-check logs. Final diff/status/hash manifests are exported there. Existing external harness: `%TEMP%/tmp-admin-dashboard-layout-remediation-20261101/{layout_validation_settings.py,layout_plan_settings.py,layout_benchmark.py,pristine.sqlite3,bootstrap.min.css}`. Interpreter: `D:/codex-worktrees/TMP-Grade-Filters-Performance/.validation-env/Scripts/python.exe`; use `-B` to avoid repository bytecode writes. Clone pristine.sqlite3 to a new LAYOUT_TEST_DB there for each suite; set PYTHONPATH to that harness directory and use `--settings=layout_validation_settings --keepdb --noinput`. Management checks use `--settings=layout_plan_settings`, which opens the disposable schema read-only. Set TMP_ADMIN_EVIDENCE to the current evidence directory when exporting Chrome fixtures. Exact executed command lines are included in `validation-commands.txt`.
+
+No models/migrations/dependencies or files outside the allowlist changed. No operational DB migration, commit, push, deployment or service restart occurred. No secrets, .env or logs/system.log are part of the diff. Prior unresolved items below remain open.
+
+Remaining risks: two independently reproduced baseline assertions remain failing, six MariaDB/InnoDB-only cases remain skipped, and SQL/timings are synthetic local SQLite evidence. Chrome uses offline rendered fixtures; authenticated staging, physical devices, other engines, real two-tab networking and MariaDB locking/capacity acceptance were not performed. Independent review should inspect the count authorization, signed/persisted scope checks, request-local session save suppression and cross-tab invalidation before any release gate.
+
+Exact next step: independent read-only review of this 16-path uncommitted diff and evidence. Do not commit, push or deploy without a separate authorized gate.
+
 ## 2026-11-01 - TMP-ADMIN-DASHBOARD-LAYOUT-IMPLEMENT-01 (P1/P2 remediated; await independent re-review)
 
 - Verified worktree `D:/tmp_branches/tmp-admin-dashboard-layout`, branch `feat/admin-dashboard-layout-feedback`, unchanged full HEAD `b7a68a26bc754feb49c35d41990606d6568a4167`. Captured/hash-copied all 14 opening paths before edits. Current candidate: **16 unstaged paths (14 modified, two untracked), empty index**. No unrelated worktree change or forbidden release action.

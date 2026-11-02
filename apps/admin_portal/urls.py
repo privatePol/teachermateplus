@@ -1,4 +1,4 @@
-from .dashboard import logged_in_users_view, reopen_card_view
+from .dashboard import logged_in_users_view, reopen_card_view, queue_counts_view
 from django.urls import path
 from .learning_insights_views import learning_performance_insights_view
 from .assessment_alignment_views import assessment_alignment_view
@@ -197,6 +197,7 @@ app_name = "admin_portal"
 urlpatterns = [
     path("admin-portal/dashboard/logged-in-users/", logged_in_users_view, name="dashboard_logged_in_users"),
     path("admin-portal/dashboard/reopen-card/", reopen_card_view, name="dashboard_reopen_card"),
+    path("admin-portal/dashboard/queue-counts/", queue_counts_view, name="dashboard_queue_counts"),
     path("admin-portal/grading/academic-performance-insights/unified-preview/", unified_insights_view,
          name="unified_academic_insights_preview"),
     path("admin-portal", admin_portal_root_view, name="root"),

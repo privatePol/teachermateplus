@@ -10,7 +10,7 @@
           {% if reopen_request_monitor.pending_count %}
           <span class="badge text-bg-warning">{{ reopen_request_monitor.pending_count }} pending</span>
           {% endif %}
-          {% if reopen_request_monitor.can_read %}<a class="btn btn-sm btn-outline-warning" href="{% url 'admin_portal:grade_submission_reopen_request_list' %}">Open Reopen Requests</a>{% endif %}
+          {% if reopen_request_monitor.can_read %}<a class="admin-action-icon" href="{% url 'admin_portal:grade_submission_reopen_request_list' %}" aria-label="Open Reopen Requests" title="Open Reopen Requests"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Open Reopen Requests</span></a>{% endif %}
         </div>
       </div>
       <p class="small text-muted px-3 pt-2 mb-0">Checked at {{ reopen_request_monitor.checked_at|date:"Y-m-d H:i:s T" }}</p>
@@ -56,9 +56,9 @@
                 <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
                 <td class="text-end">
                   {% if row.dashboard_can_review %}
-                  <a class="btn btn-sm btn-outline-warning" href="{% url 'admin_portal:grade_submission_reopen_request_review' row.id %}">Review</a>
+                  <a class="admin-action-icon" href="{% url 'admin_portal:grade_submission_reopen_request_review' row.id %}" aria-label="Review reopen request {{ row.id }}" title="Review reopen request {{ row.id }}"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Review</span></a>
                   {% elif reopen_request_monitor.can_read %}
-                  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grade_submission_reopen_request_list' %}?status=PENDING">View</a>
+                  <a class="admin-action-icon" href="{% url 'admin_portal:grade_submission_reopen_request_list' %}?status=PENDING" aria-label="View pending reopen requests" title="View pending reopen requests"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">View</span></a>
                   {% endif %}
                 </td>
               </tr>

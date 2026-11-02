@@ -17,6 +17,7 @@ from apps.accounts.models import ActivePortalSession, User
 from apps.academics.services import AcademicGovernanceService
 from apps.core.decorators import portal_required, permission_required
 from apps.core.services.permissions import PermissionService
+from apps.core.services.scope import ScopeService
 from apps.enrollment.models import ClassListChangeRequest
 from apps.grading.models import GradeCorrectionRequest, GradeSubmissionReopenRequest
 from apps.grading.services import GradingGovernanceService
@@ -160,11 +161,60 @@ def scope_identity(request):
     year, term = academic_scope(request)
     scope = getattr(request, "scope", {})
     return [request.user.pk, scope.get("tenant_id"), scope.get("campus_id"),
-            sorted(scope.get("department_ids", [])), getattr(year, "pk", None), getattr(term, "pk", None)]
+            sorted(scope.get("department_ids", [])), getattr(year, "pk", None), getattr(term, "pk", None),
+            sorted(scope.get("tenant_ids", [])), sorted(scope.get("campus_ids", []))]
 
 
 def scope_token(request):
     return signing.dumps(scope_identity(request), salt="admin-dashboard-scope", compress=True)
+
+
+def persisted_poll_scope_matches(request):
+    """Catch a selection saved by another tab while this poll was computing."""
+    session = Session.objects.filter(
+        session_key=request.session.session_key, expire_date__gt=timezone.now(),
+    ).only("session_data").first()
+    if session is None:
+        return False
+    saved = session.get_decoded()
+    scope = getattr(request, "scope", {})
+    tenant_id = saved.get(ScopeService.SESSION_TENANT_KEY)
+    campus_id = saved.get(ScopeService.SESSION_CAMPUS_KEY)
+    if ScopeService.SESSION_TENANT_KEY not in saved or ScopeService.SESSION_CAMPUS_KEY not in saved:
+        # Sessions inherited from an earlier release may not have saved selectors
+        # yet. Resolve their authorized defaults just as scope middleware does.
+        defaults = ScopeService.build_scope(request.user, tenant_id=tenant_id, campus_id=campus_id)
+        tenant_id, campus_id = defaults.get("tenant_id"), defaults.get("campus_id")
+    return tenant_id == scope.get("tenant_id") and campus_id == scope.get("campus_id")
+
+
+@require_GET
+@never_cache
+def queue_counts_view(request):
+    """Count-only polling: fresh authorization and signed current session scope."""
+    if {"scope_tenant_id", "scope_campus_id"} & request.GET.keys():
+        return JsonResponse({"error": "scope_changed"}, status=409)
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "sign_in_expired"}, status=401)
+    scope = getattr(request, "scope", {})
+    permissions = PermissionService.get_effective_permission_codes(
+        request.user, tenant_id=scope.get("tenant_id"), campus_id=scope.get("campus_id"),
+    )
+    if not {"admin_portal.access", "dashboard.read"}.issubset(permissions):
+        return JsonResponse({"error": "permission_changed"}, status=403)
+    token = request.GET.get("scope_token", "")
+    try:
+        identity = signing.loads(token, salt="admin-dashboard-scope", max_age=86400)
+    except signing.BadSignature:
+        return JsonResponse({"error": "scope_changed"}, status=409)
+    if identity != scope_identity(request):
+        return JsonResponse({"error": "scope_changed"}, status=409)
+    if not {"corrections.read", "class_list_change_requests.view"} & permissions:
+        return JsonResponse({"error": "permission_changed"}, status=403)
+    correction, cml = request_queues(request, permissions=permissions)
+    if not persisted_poll_scope_matches(request):
+        return JsonResponse({"error": "scope_changed"}, status=409)
+    return JsonResponse({"scope_token": token, "correction": correction, "cml": cml})
 
 
 def reopen_monitor(request, *, permissions, now=None):
@@ -228,6 +278,8 @@ def logged_in_users_view(request):
 @portal_required("ADMIN")
 @permission_required("dashboard.read")
 def reopen_card_view(request):
+    if {"scope_tenant_id", "scope_campus_id"} & request.GET.keys():
+        return JsonResponse({"error": "scope_changed"}, status=409)
     scope = getattr(request, "scope", {})
     permissions = PermissionService.get_effective_permission_codes(
         request.user, tenant_id=scope.get("tenant_id"), campus_id=scope.get("campus_id"),
@@ -241,4 +293,6 @@ def reopen_card_view(request):
     if identity != scope_identity(request):
         return JsonResponse({"error": "scope_changed"}, status=409)
     monitor = reopen_monitor(request, permissions=permissions)
+    if not persisted_poll_scope_matches(request):
+        return JsonResponse({"error": "scope_changed"}, status=409)
     return render(request, "admin_portal/_dashboard_reopen_card.html", {"reopen_request_monitor": monitor})

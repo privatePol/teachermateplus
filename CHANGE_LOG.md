@@ -1,3 +1,16 @@
+## 2026-11-02 - Dashboard polling cookie race correction (uncommitted)
+
+- Protect both dashboard polling response paths from emitting the configured session cookie, including late Django SessionMiddleware set/delete calls with SAVE_EVERY_REQUEST. Other cookies and interactive session lifecycle remain intact; existing DB idle protection remains active.
+- Add real-stack delayed-delivery regressions for renewal, password-change key rotation, expired responses/new login, denied/scope-mismatch responses, custom cookie names and unrelated cookies. No layout, timer, RBAC/scope, schema or migration changes in this correction.
+- Dedicated cookie suite: 10 passed; focused: 113 passed plus one known baseline failure; broader: 500 passed, one known baseline failure and six MariaDB-only skips; AJAX/drawer: 32 passed. See HANDOFF.md for evidence and limitations. Await independent re-review; no commit/push/deployment.
+
+## 2026-11-02 ? Admin Dashboard UX refinement (uncommitted)
+
+- Preserve PDF card order, column proportions and breakpoints; use natural card heights and top alignment.
+- Replace dashboard action buttons with accessible, named 44px arrow icons beside headings and a circled Practical Guide icon. Existing routes, permissions, guide ID, consent and print rules remain intact.
+- Refresh pending Correction/CML request-header counts together through one authorized, signed-scope GET every 600 seconds. Keep the separate reopen refresh, pause hidden tabs, reverify on focus, reject stale responses and invalidate across Admin tabs. Polls cannot renew idle expiry or overwrite a concurrent scope selection.
+- No schema, Faculty source, workflow, migration, commit, push, deployment or service changes. Validation and unresolved baseline failures: see the current HANDOFF entry.
+
 ## 2026-11-01 - Admin Dashboard P1/P2 remediation (uncommitted; await independent re-review)
 
 - Bind CML dashboard counts, listing and review lookup to the selected authorized tenant/campus while retaining existing department/program/ownership selectors and separate view/review permissions. Page-level campus filters only narrow this scope; malformed filters return an empty listing. Scope-bound CML buttons restore their selected tenant/campus through the normal scope resolver and recheck campus permission, including direct DENY. Other campuses remain reachable through authorized top-bar selection.

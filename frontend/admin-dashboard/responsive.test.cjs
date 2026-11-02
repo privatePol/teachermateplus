@@ -90,8 +90,8 @@ async function browserChecks(width, variant) {
   if(variant==='authorized') {
     const correction=rect('[aria-labelledby="correction-queue-title"]'), cml=rect('[aria-labelledby="cml-queue-title"]');
     check(correction.bottom<cml.top && Math.abs(correction.x-cml.x)<1,'left queue stack order');
-    const correctionLink=[...document.querySelectorAll('a')].find(a=>a.textContent==='View Grade Corrections');
-    const cmlLink=[...document.querySelectorAll('a')].find(a=>a.textContent==='View CML Requests');
+    const correctionLink=[...document.querySelectorAll('a')].find(a=>a.getAttribute('aria-label')==='View Grade Corrections');
+    const cmlLink=[...document.querySelectorAll('a')].find(a=>a.getAttribute('aria-label')==='View CML Requests');
     for(const link of [correctionLink,cmlLink]) {
       check(link && link.getAttribute('href').includes('academic_scope=active') && link.getAttribute('href').includes('status=PENDING'),'filtered pending link');
     }
@@ -99,16 +99,26 @@ async function browserChecks(width, variant) {
   if(width>=1200) {
     check(rect('.dashboard-scope').x<rect('.dashboard-workflow').x && rect('.dashboard-workflow').x<rect('.dashboard-reminder').x,'context order');
     check(rect('.dashboard-workflow').width>rect('.dashboard-scope').width*1.8,'reference guidance proportion');
-    check(Math.abs(rect('.dashboard-workflow').bottom-rect('.dashboard-scope').bottom)<1,'context card bottom alignment');
+    check(css(q('.dashboard-context')).alignItems==='start','natural top-aligned context');
+    check(Math.abs(rect('.dashboard-workflow').height-rect('.dashboard-scope').height)>1,'context heights follow content');
     check(rect('.dashboard-reopen').x>rect('.dashboard-queue-stack').x && rect('.dashboard-locks').x>rect('.dashboard-reopen').x,'left center right queue order');
     check(Math.abs(rect('.dashboard-reopen').top-rect('.dashboard-locks').top)<1,'monitor top alignment');
   }
-  for(const element of document.querySelectorAll('.admin-dashboard h3,.admin-dashboard p,.admin-dashboard a.btn')) {
+  for(const element of document.querySelectorAll('.admin-dashboard h3,.admin-dashboard p,.admin-dashboard a.admin-action-icon')) {
     if(!element.closest('.table-responsive')) check(element.scrollWidth<=element.clientWidth+1,'text/button horizontal clipping');
   }
   check(Boolean(q('[data-menu-code="USERS"]'))===(variant==='authorized'),'user menu permission');
   check(Boolean(q('[data-menu-code="AUDIT"]'))===(variant==='authorized'),'audit menu permission');
-  check(Boolean([...document.querySelectorAll('a')].find(a=>a.textContent==='View Logged-in Users'))===(variant==='authorized'),'logged-in summary permission');
+  check(Boolean([...document.querySelectorAll('a')].find(a=>a.getAttribute('aria-label')==='View Logged-in Users'))===(variant==='authorized'),'logged-in summary permission');
+  for(const link of document.querySelectorAll('.admin-action-icon')) {
+    const box=link.getBoundingClientRect();
+    check(Boolean(link.getAttribute('aria-label')) && Boolean(link.title),'icon accessible name and native tooltip');
+    check(box.width>=43 && box.height>=43,'44px icon touch target');
+    check(box.width<=45,'compact icon width');
+    link.focus();
+    check(document.activeElement===link,'icon keyboard focus');
+  }
+  check(q('#admin-practical-guide-link').getAttribute('href')==='/admin-portal/guide/','guide destination unchanged');
   const opener=q('#admin-mobile-nav'), sidebar=q('#admin-sidebar'), close=q('.admin-drawer-close');
   check((css(opener).display!=='none' && opener.getBoundingClientRect().width>0)===(width<992),'menu button breakpoint');
   if(width<992) {
@@ -156,11 +166,16 @@ for(const width of [375,390,440,767,768,992,1280,1440]) {
       assert.ok(!result.exceptionDetails,JSON.stringify(result.exceptionDetails));
       const evidence=result.result.value;
       writeFileSync(join(root,`${variant}-${width}.json`),JSON.stringify(evidence,null,2));
+      await command('Runtime.evaluate',{expression:"window.scrollTo({top:0,left:0,behavior:'instant'})"});
       const screenshot=await command('Page.captureScreenshot',{format:'png'});writeFileSync(join(root,`${variant}-${width}.png`),Buffer.from(screenshot.data,'base64'));
-      await command('Runtime.evaluate',{expression:'window.scrollTo(0,document.documentElement.scrollHeight)'});
+      await command('Runtime.evaluate',{expression:"window.scrollTo({top:document.documentElement.scrollHeight,left:0,behavior:'instant'})"});
       await pause(50);
       const bottom=await command('Page.captureScreenshot',{format:'png'});writeFileSync(join(root,`${variant}-${width}-bottom.png`),Buffer.from(bottom.data,'base64'));
       assert.deepEqual(evidence.errors,[],JSON.stringify(evidence));
+      await command('Emulation.setEmulatedMedia',{media:'print'});
+      const printed=await command('Runtime.evaluate',{expression:"getComputedStyle(document.querySelector('.admin-utility-footer')).display",returnByValue:true});
+      assert.equal(printed.result.value,'none','help icon is omitted from print');
+      await command('Emulation.setEmulatedMedia',{media:''});
     });
   }
 }

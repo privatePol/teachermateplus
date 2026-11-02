@@ -96,8 +96,20 @@ class AdminHelpGuideTests(TestCase):
                 self.assertContains(response, 'class="admin-utility-footer"', count=1, html=False)
                 self.assertContains(response, 'id="admin-practical-guide-link"', count=1, html=False)
                 self.assertContains(response, f'href="{reverse("admin_portal:guide")}"', html=False)
-                self.assertContains(response, "<span>Admin Practical Guide</span>", count=1, html=True)
+                self.assertContains(response, '<span class="visually-hidden">Admin Practical Guide</span>', count=1, html=True)
                 self.assertNotContains(response, "admin-help-fab")
+
+    def test_shared_help_icon_remains_hidden_until_privacy_consent(self):
+        user = self._make_user(
+            username="guide_consent", role_code="GUIDE_CONSENT",
+            permissions=[self.portal_permission, self.dashboard_permission],
+        )
+        user.privacy_consent_at = None
+        user.save(update_fields=["privacy_consent_at"])
+        self.client.force_login(user)
+        response = self.client.get(reverse("admin_portal:dashboard"), follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'id="admin-practical-guide-link"')
 
     def test_campus_admin_does_not_receive_superadmin_help(self):
         user = self._make_user(

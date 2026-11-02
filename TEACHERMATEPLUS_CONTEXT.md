@@ -1,3 +1,16 @@
+## 2026-11-02 - Dashboard polling cookie race correction (uncommitted)
+
+- Protect both dashboard polling response paths from emitting the configured session cookie, including late Django SessionMiddleware set/delete calls with SAVE_EVERY_REQUEST. Other cookies and interactive session lifecycle remain intact; existing DB idle protection remains active.
+- Add real-stack delayed-delivery regressions for renewal, password-change key rotation, expired responses/new login, denied/scope-mismatch responses, custom cookie names and unrelated cookies. No layout, timer, RBAC/scope, schema or migration changes in this correction.
+- Dedicated cookie suite: 10 passed; focused: 113 passed plus one known baseline failure; broader: 500 passed, one known baseline failure and six MariaDB-only skips; AJAX/drawer: 32 passed. See HANDOFF.md for evidence and limitations. Await independent re-review; no commit/push/deployment.
+
+## 2026-11-02 ? Admin Dashboard UX refinement (uncommitted)
+
+- Preserve PDF card order, column proportions and breakpoints; use natural card heights and top alignment.
+- Replace dashboard action buttons with accessible, named 44px arrow icons beside headings and a circled Practical Guide icon. Existing routes, permissions, guide ID, consent and print rules remain intact.
+- Refresh pending Correction/CML request-header counts together through one authorized, signed-scope GET every 600 seconds. Keep the separate reopen refresh, pause hidden tabs, reverify on focus, reject stale responses and invalidate across Admin tabs. Polls cannot renew idle expiry or overwrite a concurrent scope selection.
+- No schema, Faculty source, workflow, migration, commit, push, deployment or service changes. Validation and unresolved baseline failures: see the current HANDOFF entry.
+
 ## 2026-11-01 - Admin Dashboard security/performance remediation
 
 This update supersedes the preceding layout implementation's broad CML-campus and 96-query behavior. CML count/list/review lookup now intersect the existing selector with the selected authorized tenant and campus, including matching offering scope. Effective view/review permissions are still checked separately at the existing entry points. Removed, forged or altered page-level filters cannot expand campus access. The View CML Requests URL retains scope_tenant_id/scope_campus_id plus active AY/term and PENDING filters; normal scope selection and permission reauthorization apply when opened. Use the top scope bar to select another authorized campus; the listing's campus filter offers only the selected campus. Ordinary-user campus DENY and current superuser permission semantics are preserved.

@@ -19,9 +19,46 @@ class ScopeResolutionMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
+    @staticmethod
+    def _protect_poll_session_cookie(response):
+        """Keep late poll responses from replacing a newer browser session.
+
+        SessionMiddleware is outside this middleware: its response processing
+        runs later and can set/delete the cookie even when session.save is a
+        no-op. Guard this response's cookie API as well as any existing cookie.
+        HttpResponse.delete_cookie delegates to set_cookie, so expiry redirects
+        are covered too. Other cookie names retain their normal implementation.
+        """
+        cookie_name = settings.SESSION_COOKIE_NAME
+        response.cookies.pop(cookie_name, None)
+        original_set_cookie = response.set_cookie
+
+        def set_non_session_cookie(key, *args, **kwargs):
+            if key != cookie_name:
+                return original_set_cookie(key, *args, **kwargs)
+
+        response.set_cookie = set_non_session_cookie
+        return response
+
     def __call__(self, request):
-        ScopeService.attach_scope_to_request(request)
-        return self.get_response(request)
+        if (request.path_info in {"/admin-portal/dashboard/queue-counts/", "/admin-portal/dashboard/reopen-card/"}
+                and {"scope_tenant_id", "scope_campus_id"} & request.GET.keys()):
+            # Polls must observe the shared session selection, never select scope.
+            # Leave rejection to the view so idle-deadline handling still runs.
+            original_query = request.GET
+            request.GET = original_query.copy()
+            request.GET.pop("scope_tenant_id", None)
+            request.GET.pop("scope_campus_id", None)
+            try:
+                ScopeService.attach_scope_to_request(request)
+            finally:
+                request.GET = original_query
+        else:
+            ScopeService.attach_scope_to_request(request)
+        response = self.get_response(request)
+        if request.path_info in {"/admin-portal/dashboard/queue-counts/", "/admin-portal/dashboard/reopen-card/"}:
+            return self._protect_poll_session_cookie(response)
+        return response
 
 
 class SessionTimeoutMiddleware:
@@ -41,13 +78,16 @@ class SessionTimeoutMiddleware:
 
         user = getattr(request, "user", None)
         session = getattr(request, "session", None)
+        background_monitor = request.method == "GET" and request.path_info in {
+            "/admin-portal/dashboard/reopen-card/", "/admin-portal/dashboard/queue-counts/",
+        }
         if session is not None and getattr(user, "is_authenticated", False):
             tenant_id = getattr(request, "scope", {}).get("tenant_id")
             timeout_minutes = FeatureSettingsService.get_session_timeout_minutes(
                 tenant_id=tenant_id,
                 default=self._default_timeout_minutes(),
             )
-            if request.path_info == "/admin-portal/dashboard/reopen-card/" and request.method == "GET":
+            if background_monitor:
                 # Background monitoring is not human activity. Scope middleware and
                 # SESSION_SAVE_EVERY_REQUEST may still save the session, so retain
                 # its absolute persisted deadline rather than renewing idle expiry.
@@ -69,6 +109,13 @@ class SessionTimeoutMiddleware:
             # Password-change and auth-hash key rotations keep their existing
             # authentication behavior; repair only the monitoring projection.
             ActivePortalSessionService.reconcile_authenticated_session(request=request, user=current_user)
+        if background_monitor and session is not None and getattr(current_user, "is_authenticated", False):
+            # SessionMiddleware runs after us and may SAVE_EVERY_REQUEST. A poll
+            # must not write its old session snapshot over a concurrent tab's
+            # new scope or interactive idle deadline. This store is request-local;
+            # reconciliation above still repairs the independent registry.
+            session.modified = False
+            session.save = lambda *args, **kwargs: None
         return response
 
 
