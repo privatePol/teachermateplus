@@ -365,7 +365,7 @@ class GradeCorrectionRequestForm(forms.Form):
             if parsed_new_value < 0 or parsed_new_value > max_value:
                 self.add_error(
                     None,
-                    f"Corrected value for {activity.title} must be between 0 and {self._format_decimal(max_value)}.",
+                    f"To value for {activity.title} must be between 0 and {self._format_decimal(max_value)}.",
                 )
                 continue
 

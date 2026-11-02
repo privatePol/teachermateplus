@@ -32,99 +32,6 @@ class CorrectionNotificationService:
             configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
         )
 
-    @classmethod
-    def _role_recipient_rows(cls, *, request_obj: GradeCorrectionRequest):
-        role_codes = FeatureSettingsService.get_correction_submission_approval_email_role_codes(
-            tenant_id=request_obj.tenant_id
-        )
-        if not role_codes:
-            return []
-
-        assignments = list(
-            UserRole.objects.filter(
-                role__code__in=role_codes,
-                is_active=True,
-                role__is_active=True,
-                user__is_active=True,
-            )
-            .filter(
-                tenant_id=request_obj.tenant_id,
-            )
-            .filter(Q(campus_id=request_obj.campus_id) | Q(campus_id__isnull=True))
-            .select_related("user", "role")
-            .order_by("role__name", "user__last_name", "user__first_name", "user__id")
-        )
-
-        recipients = []
-        seen_keys = set()
-        for role_code in role_codes:
-            role_rows = [row for row in assignments if row.role.code == role_code and (row.user.email or "").strip()]
-            if not role_rows:
-                continue
-
-            if request_obj.faculty_department_id:
-                department_rows = [
-                    row for row in role_rows if row.user.default_department_id == request_obj.faculty_department_id
-                ]
-                if department_rows:
-                    role_rows = department_rows
-
-            for row in role_rows:
-                dedupe_key = (row.user_id, (row.user.email or "").strip().lower())
-                if dedupe_key in seen_keys:
-                    continue
-                seen_keys.add(dedupe_key)
-                recipients.append(
-                    {
-                        "user": row.user,
-                        "role": row.role,
-                        "email": row.user.email.strip(),
-                    }
-                )
-        return recipients
-
-    @classmethod
-    def _step_recipient_rows(cls, *, request_obj: GradeCorrectionRequest, step):
-        assignments = (
-            UserRole.objects.filter(
-                role_id=step.approver_role_id,
-                is_active=True,
-                role__is_active=True,
-                user__is_active=True,
-            )
-            .filter(Q(tenant_id=request_obj.tenant_id) | Q(tenant__isnull=True))
-            .filter(Q(campus_id=request_obj.campus_id) | Q(campus__isnull=True))
-            .select_related("user", "role", "department")
-            .order_by("user__last_name", "user__first_name", "user__id")
-        )
-        recipients = []
-        seen_keys = set()
-        for row in assignments:
-            email = (row.user.email or "").strip()
-            if not email:
-                continue
-            if row.department_id:
-                if not request_obj.faculty_department_id:
-                    continue
-                from apps.core.services.scope import ScopeService
-
-                if not ScopeService.department_scope_covers(row.department_id, request_obj.faculty_department_id):
-                    continue
-            elif step.requires_same_department:
-                user_dept_id = getattr(row.user, "default_department_id", None)
-                if not user_dept_id:
-                    continue
-                from apps.core.services.scope import ScopeService
-
-                if not ScopeService.department_scope_covers(user_dept_id, request_obj.faculty_department_id):
-                    continue
-            dedupe_key = (row.user_id, email.lower())
-            if dedupe_key in seen_keys:
-                continue
-            seen_keys.add(dedupe_key)
-            recipients.append({"user": row.user, "role": row.role, "email": email})
-        return recipients
-
     @staticmethod
     def _email_event_exists(*, action: str, request_obj: GradeCorrectionRequest, event_key: str):
         return AuditLog.objects.filter(
@@ -200,90 +107,19 @@ class CorrectionNotificationService:
 
     @classmethod
     def send_correction_submission_approval_notifications(cls, *, request_obj: GradeCorrectionRequest):
-        if not FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=request_obj.tenant_id):
-            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "feature_disabled"}
+        from apps.grading.correction_reminders import CorrectionReminderService
 
-        recipients = cls._role_recipient_rows(request_obj=request_obj)
-        if not recipients:
-            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_role_recipients"}
-
-        sent = 0
-        errors = []
-        notified_emails = []
-        for recipient in recipients:
-            message = cls._build_correction_approval_message(
-                request_obj=request_obj,
-                recipient_email=recipient["email"],
-                approver_label=recipient["role"].name or recipient["role"].code,
-            )
-            try:
-                result = message.send(fail_silently=False)
-            except Exception as exc:  # pragma: no cover - defensive branch for SMTP/runtime failures
-                errors.append({"email": recipient["email"], "error": str(exc)})
-                continue
-            if result:
-                sent += 1
-                notified_emails.append(recipient["email"])
-
-        return {
-            "attempted": len(recipients),
-            "sent": sent,
-            "errors": errors,
-            "recipients": notified_emails,
-            "reason": None if recipients else "no_matching_role_recipients",
-        }
+        step = CorrectionReminderService.current_step(request_obj)
+        return cls.send_correction_step_approval_notifications(request_obj=request_obj, step=step)
 
     @classmethod
     def send_correction_step_approval_notifications(cls, *, request_obj: GradeCorrectionRequest, step):
-        if not step:
-            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_pending_step"}
-        if not FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=request_obj.tenant_id):
-            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "feature_disabled"}
+        # Compatibility entry point: intent is durable before any post-commit dispatch.
+        from apps.grading.correction_reminders import CorrectionReminderService
 
-        event_key = f"step:{step.id}:pending"
-        if cls._email_event_exists(
-            action="EMAIL_CORRECTION_STEP_APPROVER",
-            request_obj=request_obj,
-            event_key=event_key,
-        ):
-            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "already_sent"}
-
-        recipients = cls._step_recipient_rows(request_obj=request_obj, step=step)
-        if not recipients:
-            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_step_recipients"}
-
-        sent = 0
-        errors = []
-        notified_emails = []
-        for recipient in recipients:
-            message = cls._build_correction_approval_message(
-                request_obj=request_obj,
-                recipient_email=recipient["email"],
-                approver_label=step.approver_label or recipient["role"].name or recipient["role"].code,
-            )
-            try:
-                result = message.send(fail_silently=False)
-            except Exception as exc:  # pragma: no cover - defensive branch for SMTP/runtime failures
-                errors.append({"email": recipient["email"], "error": str(exc)})
-                continue
-            if result:
-                sent += 1
-                notified_emails.append(recipient["email"])
-
-        if notified_emails:
-            cls._record_email_event(
-                action="EMAIL_CORRECTION_STEP_APPROVER",
-                request_obj=request_obj,
-                event_key=event_key,
-                recipients=notified_emails,
-            )
-        return {
-            "attempted": len(recipients),
-            "sent": sent,
-            "errors": errors,
-            "recipients": notified_emails,
-            "reason": None if recipients else "no_matching_step_recipients",
-        }
+        intent = CorrectionReminderService.activate(request_obj)
+        return {"attempted": 0, "sent": 0, "errors": [], "recipients": [],
+                "reason": "queued_after_commit" if intent else "no_pending_step"}
 
     @classmethod
     def send_correction_faculty_decision_notification(cls, *, request_obj: GradeCorrectionRequest):

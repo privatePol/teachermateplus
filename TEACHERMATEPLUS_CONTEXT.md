@@ -1,5 +1,17 @@
 # TEACHERMATEPLUS_CONTEXT.md
 
+## Correction email expired-claim remediation (2026-11-02)
+- Dispatch must not finalize `preflight` outcome `claim_lost`: expiry and ownership loss are lease state, not notification-skip decisions. An expired owned PROCESSING row remains available to the existing atomic reclaim path, while the current token/status predicate still protects completion from stale senders.
+- Current eligible rediscovery also requeues previously stranded SKIPPED / claim_lost deliveries using the existing schedule identity, without resetting attempt history or retrying SENT rows. Recipient/approval guards, reminder policy and scheduler are unchanged; grading migration 0036 is unchanged. Six focused regressions cover expiry/recovery, replacement-owner fencing, stale completion, SENT finality, and old initial/reminder rows.
+
+
+## Grade Correction reminders (2026-11-02)
+- Configuration Management links to tenant Grade Correction Email Reminders: default enabled, daily at 08:00 Asia/Manila, with 2/3/7-calendar-day alternatives. Settings use the existing SystemSetting store and are read dynamically; the initial approval-email toggle retains its separate existing default/policy. Initial recipient role lists are now legacy configuration: only the current valid governance step and actual request-review authorization select recipients.
+- `grading.0036_correction_email_outbox` adds protected per-step activation intent and per-recipient initial/reminder delivery records with schedule/date uniqueness, outcome codes, attempt/acceptance timestamps, UUID claim leases and retry indexes. Creation/handoff intents commit with governance; on_commit dispatch and polling recover crashes. The email-history page reuses the authorized review selector and tenant/campus scope.
+- `process_correction_reminders` polls persisted settings, discovers existing pending requests, queues only today's eligible reminder and revalidates authorization before SMTP. A prepared every-minute flock cron line is not installed. Claims/retries prevent normal duplicate dispatch; SMTP uncertain outcomes can duplicate delivery after a crash. Preflight releases DB locks before SMTP, so a decision after that boundary may race with an in-flight email. Console email backends are refused to keep bodies out of cron logs.
+- From / To labels cover Faculty/Admin forms, reviews, correction history and official PDF; database grade fields and approval/computation rules are unchanged. Operational details and release prerequisites: docs/GRADE_CORRECTION_REMINDERS.md. MariaDB/InnoDB concurrency, real SMTP delivery, browser/staging acceptance and scheduler installation are separate unverified gates.
+
+
 ## Final Grade Summary integrity (2026-10-25)
 - Submitted summary GETs use saved final grades and skip draft period refreshes, including during correction access. Draft final previews calculate in memory from stored period grades; score saving still updates saved grades immediately.
 - `recompute_final_grades_for_students(is_submitted=None)` protects existing submitted rows. Explicit lifecycle states remain supported for submission/correction and draft writes; authorized reopening clears flags through governance.

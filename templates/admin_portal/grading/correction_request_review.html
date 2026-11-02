@@ -16,6 +16,7 @@
       </a>
       {% endif %}
     {% endif %}
+    <a href="{% url 'admin_portal:correction_email_history' correction_request.pk %}" class="btn btn-sm btn-outline-primary">Email history</a>
     <a href="{% url 'admin_portal:grade_correction_request_list' %}" class="btn btn-sm btn-outline-secondary">Back</a>
   </div>
 </div>
@@ -105,8 +106,8 @@
                 <tr>
                   <th>Student</th>
                   <th>Grading Item</th>
-                  <th>Original Value</th>
-                  <th>Corrected Value</th>
+                  <th>From</th>
+                  <th>To</th>
                 </tr>
               </thead>
               <tbody>

@@ -158,7 +158,7 @@
           <div class="border rounded p-3">
             <div class="d-flex justify-content-between align-items-center mb-2">
               <label class="form-label mb-0">Correction Encoding</label>
-              <span class="small text-muted">Original values are loaded from the submitted gradebook.</span>
+              <span class="small text-muted">From values are loaded from the submitted gradebook.</span>
             </div>
             <div id="correction-grid-sections">
               <div class="text-muted py-3">Select students and grading items to build the correction encoding sections.</div>
@@ -269,7 +269,7 @@
         wrapper.className = "table-responsive";
         const table = document.createElement("table");
         table.className = "table table-hover mb-0 align-middle";
-        table.innerHTML = '<thead><tr><th style="width:72px;">No.</th><th>Name</th><th>Status</th><th style="width:160px;">Original Value</th><th style="width:200px;">Corrected Value</th></tr></thead>';
+        table.innerHTML = '<thead><tr><th style="width:72px;">No.</th><th>Name</th><th>Status</th><th style="width:160px;">From</th><th style="width:200px;">To</th></tr></thead>';
         const tbody = document.createElement("tbody");
         studentIds.forEach((studentId, index) => {
           const student = studentMap.get(String(studentId));

@@ -1425,6 +1425,55 @@ class GradeCorrectionApprovalStep(TimeStampedModel):
         return f"{self.correction_request_id}:S{self.step_order}:{self.status}"
 
 
+class CorrectionStepNotificationIntent(TimeStampedModel):
+    """Durable activation marker, including steps with no eligible recipients yet."""
+
+    step = models.OneToOneField(GradeCorrectionApprovalStep, on_delete=models.PROTECT, related_name="email_intent")
+    activated_at = models.DateTimeField()
+
+
+class CorrectionEmailDelivery(TimeStampedModel):
+    class Kind(models.TextChoices):
+        INITIAL = "INITIAL", "Initial notification"
+        REMINDER = "REMINDER", "Reminder"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        PROCESSING = "PROCESSING", "Processing"
+        SENT = "SENT", "Accepted by email backend"
+        FAILED = "FAILED", "Failed"
+        SKIPPED = "SKIPPED", "Skipped"
+
+    correction_request = models.ForeignKey(GradeCorrectionRequest, on_delete=models.PROTECT, related_name="email_deliveries")
+    step = models.ForeignKey(GradeCorrectionApprovalStep, on_delete=models.PROTECT, related_name="email_deliveries")
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT)
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT)
+    recipient = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
+    recipient_email = models.EmailField(blank=True)
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    scheduled_local_date = models.DateField()
+    scheduled_at = models.DateTimeField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    attempt_count = models.PositiveIntegerField(default=0)
+    first_attempt_at = models.DateTimeField(null=True, blank=True)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    claim_token = models.UUIDField(null=True, blank=True)
+    claimed_until = models.DateTimeField(null=True, blank=True)
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
+    outcome_code = models.CharField(max_length=48, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["step", "recipient", "kind", "scheduled_local_date"], name="uq_correction_email_delivery"),
+        ]
+        indexes = [
+            models.Index(fields=["status", "next_attempt_at"], name="idx_correction_email_retry"),
+            models.Index(fields=["tenant", "campus", "scheduled_at"], name="idx_correction_email_scope"),
+        ]
+        ordering = ["scheduled_at", "id"]
+
+
 class ImmutableCorrectionApprovalAuthoritySnapshotQuerySet(models.QuerySet):
     """Keep correction approval-time authority append-only in application code."""
 
