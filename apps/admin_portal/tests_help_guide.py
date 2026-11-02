@@ -96,7 +96,7 @@ class AdminHelpGuideTests(TestCase):
                 self.assertContains(response, 'class="admin-utility-footer"', count=1, html=False)
                 self.assertContains(response, 'id="admin-practical-guide-link"', count=1, html=False)
                 self.assertContains(response, f'href="{reverse("admin_portal:guide")}"', html=False)
-                self.assertContains(response, '<span class="visually-hidden">Admin Practical Guide</span>', count=1, html=True)
+                self.assertContains(response, '<span>Practical Guide</span>', count=1, html=True)
                 self.assertNotContains(response, "admin-help-fab")
 
     def test_shared_help_icon_remains_hidden_until_privacy_consent(self):

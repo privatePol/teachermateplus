@@ -76,14 +76,12 @@ async function browserChecks(width, variant) {
   check(innerWidth===width,'viewport mismatch'); overflow();
   const columns=selector=>css(q(selector)).gridTemplateColumns.split(' ').length;
   check(columns('.dashboard-summary')===3,'three equal summary slots');
-  check(columns('.dashboard-context')===(width>=1200?4:width>=768?2:1),'scope/guidance columns');
-  check(columns('.dashboard-queues')===(width>=1200?3:1),'queue columns');
+  check(columns('.dashboard-columns')===(width>=992?2:1),'two desktop columns, single mobile column');
   const rect=selector=>q(selector)?.getBoundingClientRect();
   const summary=[...q('.dashboard-summary').children].map(el=>el.getBoundingClientRect());
   check(summary.every(r=>Math.abs(r.width-summary[0].width)<1),'equal summary widths');
   check(rect('.dash-header').bottom<=rect('.dashboard-summary').top,'header before summary');
-  check(rect('.dashboard-summary').bottom<=rect('.dashboard-context').top,'summary before context');
-  check(rect('.dashboard-context').bottom<=rect('.dashboard-queues').top,'context before queues');
+  check(rect('.dashboard-summary').bottom<=rect('.dashboard-columns').top,'summary before independent stacks');
   check(![...document.querySelectorAll('.section-title')].some(el=>/Quick Actions|Audit Logs|Governance Alerts/.test(el.textContent)),'removed cards');
   check(Boolean(q('#correction-queue-title'))===(variant==='authorized'),'correction queue permission');
   check(Boolean(q('#cml-queue-title'))===(variant==='authorized'),'CML queue permission');
@@ -96,28 +94,60 @@ async function browserChecks(width, variant) {
       check(link && link.getAttribute('href').includes('academic_scope=active') && link.getAttribute('href').includes('status=PENDING'),'filtered pending link');
     }
   }
-  if(width>=1200) {
-    check(rect('.dashboard-scope').x<rect('.dashboard-workflow').x && rect('.dashboard-workflow').x<rect('.dashboard-reminder').x,'context order');
-    check(rect('.dashboard-workflow').width>rect('.dashboard-scope').width*1.8,'reference guidance proportion');
-    check(css(q('.dashboard-context')).alignItems==='start','natural top-aligned context');
-    check(Math.abs(rect('.dashboard-workflow').height-rect('.dashboard-scope').height)>1,'context heights follow content');
-    check(rect('.dashboard-reopen').x>rect('.dashboard-queue-stack').x && rect('.dashboard-locks').x>rect('.dashboard-reopen').x,'left center right queue order');
-    check(Math.abs(rect('.dashboard-reopen').top-rect('.dashboard-locks').top)<1,'monitor top alignment');
+  const stacks=[...document.querySelectorAll('.dashboard-column')];
+  check(stacks.length===2,'two independent card groups');
+  for(const stack of stacks) {
+    const cards=[...stack.children].map(el=>el.getBoundingClientRect()).filter(r=>r.height>0);
+    check(cards.every(r=>Math.abs(r.width-stack.getBoundingClientRect().width)<1),'consistent card widths');
+    for(let i=1;i<cards.length;i++) {
+      const gap=cards[i].top-cards[i-1].bottom;
+      check(gap>=12 && gap<=15,'compact independent vertical gaps');
+    }
+    check(css(stack).alignContent==='start','natural stacked heights');
   }
-  for(const element of document.querySelectorAll('.admin-dashboard h3,.admin-dashboard p,.admin-dashboard a.admin-action-icon')) {
+  const [left,right]=stacks.map(el=>el.getBoundingClientRect());
+  if(width>=992) {
+    check(Math.abs(left.width-right.width)<1,'equal desktop columns');
+    check(left.right<right.left && Math.abs(left.top-right.top)<1,'top-aligned desktop groups');
+    check(rect('.dashboard-scope').bottom<rect('.dashboard-reopen').top,'scope before request monitors');
+  } else {
+    check(Math.abs(left.x-right.x)<1 && left.bottom<right.top,'mobile column reading order');
+  }
+  function luminance(color) {
+    const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});
+    return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;
+  }
+  for(const header of document.querySelectorAll('.admin-dashboard .section-header')) {
+    const heading=header.querySelector('.section-title');
+    check(css(header).backgroundColor==='rgb(242, 244, 243)','consistent light-gray header');
+    const fg=luminance(css(heading).color), bg=luminance(css(header).backgroundColor);
+    check((Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05)>=4.5,'heading WCAG AA contrast');
+    const titleBox=heading.getBoundingClientRect();
+    for(const link of header.querySelectorAll('.admin-action-pill')) {
+      const box=link.getBoundingClientRect();
+      check(titleBox.right<=box.left+1 || box.right<=titleBox.left+1 || titleBox.bottom<=box.top+1 || box.bottom<=titleBox.top+1,'header action does not overlap title');
+    }
+  }
+  for(const element of document.querySelectorAll('.admin-dashboard h3,.admin-dashboard p,.admin-dashboard a.admin-action-pill')) {
     if(!element.closest('.table-responsive')) check(element.scrollWidth<=element.clientWidth+1,'text/button horizontal clipping');
   }
   check(Boolean(q('[data-menu-code="USERS"]'))===(variant==='authorized'),'user menu permission');
   check(Boolean(q('[data-menu-code="AUDIT"]'))===(variant==='authorized'),'audit menu permission');
   check(Boolean([...document.querySelectorAll('a')].find(a=>a.getAttribute('aria-label')==='View Logged-in Users'))===(variant==='authorized'),'logged-in summary permission');
-  for(const link of document.querySelectorAll('.admin-action-icon')) {
+  for(const link of document.querySelectorAll('.admin-action-pill')) {
     const box=link.getBoundingClientRect();
-    check(Boolean(link.getAttribute('aria-label')) && Boolean(link.title),'icon accessible name and native tooltip');
-    check(box.width>=43 && box.height>=43,'44px icon touch target');
-    check(box.width<=45,'compact icon width');
+    check(Boolean(link.getAttribute('aria-label')) && Boolean(link.title),'pill accessible name and native tooltip');
+    check(box.width>=44 && box.height>=(width<992?44:36),'practical pill target');
+    check(box.width>box.height && box.height<=45,'compact non-circular pill');
+    const label=link.querySelector('span:last-child').innerText.trim();
+    check(label.length>2,'visible action label without tooltip JavaScript');
+    check(link.getAttribute('aria-label').toLowerCase().includes(label.toLowerCase()),'accessible name includes visible label');
+    check(css(link).position==='static','no floating action bubbles');
     link.focus();
-    check(document.activeElement===link,'icon keyboard focus');
+    check(document.activeElement===link,'pill keyboard focus');
+    check(parseFloat(css(link).outlineWidth)>=2,'visible keyboard focus ring');
   }
+  check(!q('.admin-action-icon'),'no legacy circular controls');
   check(q('#admin-practical-guide-link').getAttribute('href')==='/admin-portal/guide/','guide destination unchanged');
   const opener=q('#admin-mobile-nav'), sidebar=q('#admin-sidebar'), close=q('.admin-drawer-close');
   check((css(opener).display!=='none' && opener.getBoundingClientRect().width>0)===(width<992),'menu button breakpoint');
@@ -152,7 +182,7 @@ async function browserChecks(width, variant) {
   overflow();
   await new Promise(resolve=>setTimeout(resolve,240));
   const navigation=performance.getEntriesByType('navigation')[0];
-  return {width,variant,pageWidth:document.documentElement.scrollWidth,errors,
+  return {width,variant,pageWidth:document.documentElement.scrollWidth,stackHeights:[left.height,right.height],errors,
     navigation:{domContentLoaded: navigation.domContentLoadedEventEnd,load:navigation.loadEventEnd},
     resources:performance.getEntriesByType('resource').map(r=>({name:r.name,duration:r.duration,blocking:r.renderBlockingStatus}))};
 }
@@ -166,7 +196,10 @@ for(const width of [375,390,440,767,768,992,1280,1440]) {
       assert.ok(!result.exceptionDetails,JSON.stringify(result.exceptionDetails));
       const evidence=result.result.value;
       writeFileSync(join(root,`${variant}-${width}.json`),JSON.stringify(evidence,null,2));
-      await command('Runtime.evaluate',{expression:"window.scrollTo({top:0,left:0,behavior:'instant'})"});
+      await command('Runtime.evaluate',{expression:"document.activeElement?.blur();window.scrollTo({top:0,left:0,behavior:'instant'})"});
+      await pause(80);
+      evidence.capture=await command('Runtime.evaluate',{expression:'window.scrollTo({top:0,left:0,behavior:"instant"});({scrollY,topbar:document.querySelector(".admin-topbar").getBoundingClientRect().top})',returnByValue:true});
+      writeFileSync(join(root,`${variant}-${width}.json`),JSON.stringify(evidence,null,2));
       const screenshot=await command('Page.captureScreenshot',{format:'png'});writeFileSync(join(root,`${variant}-${width}.png`),Buffer.from(screenshot.data,'base64'));
       await command('Runtime.evaluate',{expression:"window.scrollTo({top:document.documentElement.scrollHeight,left:0,behavior:'instant'})"});
       await pause(50);
@@ -174,7 +207,7 @@ for(const width of [375,390,440,767,768,992,1280,1440]) {
       assert.deepEqual(evidence.errors,[],JSON.stringify(evidence));
       await command('Emulation.setEmulatedMedia',{media:'print'});
       const printed=await command('Runtime.evaluate',{expression:"getComputedStyle(document.querySelector('.admin-utility-footer')).display",returnByValue:true});
-      assert.equal(printed.result.value,'none','help icon is omitted from print');
+      assert.equal(printed.result.value,'none','Practical Guide pill is omitted from print');
       await command('Emulation.setEmulatedMedia',{media:''});
     });
   }

@@ -1,3 +1,9 @@
+## 2026-11-02 - Admin Dashboard visual v2 (uncommitted)
+
+- Replace the previous four-context/three-queue-column arrangement with three equal summary cards and two equal, independently stacked desktop columns from 992px; use one column below 992px. Preserve every authorized card and its information with natural heights and compact gaps.
+- Use light-gray headers, muted dark-gray headings and compact labeled green-outline pill actions. Replace the shared Practical Guide circle with a labeled pill while preserving its ID, destination, consent guard and print suppression. Keep keyboard focus, accessible names/native tooltips and larger mobile/coarse-pointer targets.
+- Preserve scoped pending counts, links and permissions, 600-second queue/reopen refreshes, session-cookie race protection, auditing and Faculty behavior. No backend workflow, schema or migration changes. Validation, screenshots and limitations are recorded in the current HANDOFF entry; await independent review.
+
 ## 2026-11-02 - Dashboard polling cookie race correction (uncommitted)
 
 - Protect both dashboard polling response paths from emitting the configured session cookie, including late Django SessionMiddleware set/delete calls with SAVE_EVERY_REQUEST. Other cookies and interactive session lifecycle remain intact; existing DB idle protection remains active.

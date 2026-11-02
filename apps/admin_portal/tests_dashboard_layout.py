@@ -444,6 +444,11 @@ class DashboardQueueTests(TestCase):
         ):
             item = MenuItem.objects.create(portal="ADMIN", menu_group=group, code=code, label=label, route_name="admin_portal:"+route)
             MenuItemPermission.objects.create(menu_item=item, permission=Permission.objects.get(code=permission))
+        # Exercise the busiest header layout, including all authorized settings actions.
+        for code in ("system_settings.update", "faculty_assignments.read"):
+            module, action = code.split(".")
+            permission, _ = Permission.objects.get_or_create(code=code, defaults={"module": module, "action": action})
+            RolePermission.objects.get_or_create(role=Role.objects.get(code="DEAN"), permission=permission)
         self.correction()
         self.cml()
         GradeSubmissionReopenRequest.objects.create(tenant=self.tenant, campus=self.campus, submission=self.submission,
@@ -452,7 +457,7 @@ class DashboardQueueTests(TestCase):
             term=self.term, period_code="PRELIM", course_offering=self.offering, deadline_at=timezone.now()+timedelta(days=1))
         for variant in ("authorized", "denied"):
             if variant == "denied":
-                for code in ("users.read", "audit_logs.read", "corrections.read", "class_list_change_requests.view"):
+                for code in ("users.read", "audit_logs.read", "corrections.read", "class_list_change_requests.view", "system_settings.update", "faculty_assignments.read"):
                     self.deny(code)
             response = self.dashboard()
             self.assertNotContains(response, "Quick Actions")

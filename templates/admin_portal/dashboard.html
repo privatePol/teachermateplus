@@ -4,30 +4,27 @@
 {% block extra_head %}
 {{ block.super }}
 <style>
-  .admin-dashboard { display: grid; gap: 1rem; max-width: 1360px; margin: 0 auto; }
-  .dashboard-summary, .dashboard-context, .dashboard-queues { display: grid; gap: 1rem; min-width: 0; }
+  .admin-dashboard { display: grid; gap: .85rem; max-width: 1360px; margin: 0 auto; }
+  .dashboard-summary, .dashboard-columns, .dashboard-column, .dashboard-queue-stack { display: grid; gap: .85rem; min-width: 0; }
   .dashboard-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .dashboard-context, .dashboard-queues { grid-template-columns: minmax(0, 1fr); align-items: start; }
-  .dashboard-queue-stack { display: grid; gap: 1rem; min-width: 0; }
+  .dashboard-columns { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .dashboard-column { align-content: start; }
   .admin-dashboard * { min-width: 0; }
   .admin-dashboard .dashboard-section { margin-top: 0; }
   .admin-dashboard .dash-header { margin-bottom: 0; }
-  .admin-dashboard .section-card, .admin-dashboard .help-card { height: auto; }
+  .admin-dashboard .section-card { height: auto; }
   .admin-dashboard .badge { white-space: normal; text-align: left; }
   .admin-dashboard .table-responsive { max-width: 100%; }
-  .admin-dashboard .col-lg-6, .dashboard-queues .col-md-4 { width: 100%; }
-  .dashboard-context .scope-card-body, .dashboard-context .help-card { padding: .85rem; }
-  .dashboard-context .section-title, .dashboard-queue-stack .section-title { overflow-wrap: anywhere; }
+  .dashboard-locks .col-lg-6 { width: 100%; }
+  .dashboard-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+  .dashboard-column .section-title { overflow-wrap: anywhere; }
   .dashboard-reopen > [data-reopen-content] > .dashboard-section { margin-top: 0; }
-  @media (min-width: 768px) { .dashboard-context { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (min-width: 1200px) {
-    .dashboard-context { grid-template-columns: 1fr 1.07fr 1.95fr 1.65fr; }
-    .dashboard-queues { grid-template-columns: 1.1fr 1.05fr .9fr; }
-    .dashboard-scope, .dashboard-queue-stack { grid-column: 1; }
-    .dashboard-users, .dashboard-reopen { grid-column: 2; }
-    .dashboard-workflow, .dashboard-locks { grid-column: 3; }
-    .dashboard-reminder { grid-column: 4; }
-    .dashboard-context > *, .dashboard-queues > * { grid-row: 1; }
+  .dashboard-column p:last-child { margin-bottom: 0; }
+  @media (min-width: 992px) {
+    .dashboard-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (min-width: 992px) and (max-width: 1199.98px) {
+    .dashboard-locks .col-md-4 { width: 100%; }
   }
   .dash-header {
     border: 1px solid #d7e1d5;
@@ -50,23 +47,23 @@
     margin-top: 1.05rem;
   }
   .section-card {
-    border: 1px solid #d7e1d5;
+    border: 1px solid #dce1df;
     border-radius: 12px;
     background: #ffffff;
-    box-shadow: 0 8px 20px rgba(26, 58, 35, 0.06);
+    box-shadow: 0 2px 6px rgba(26, 58, 35, 0.035);
   }
   .section-header {
-    padding: 0.78rem 0.95rem;
-    border-bottom: 1px solid #dfe8dc;
-    background: linear-gradient(120deg, #f7faf6 0%, #eff5ee 100%);
+    padding: .75rem .95rem;
+    border-bottom: 1px solid #dce1df;
+    background: #f2f4f3;
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
   }
   .section-title {
     margin: 0;
-    color: #214d35;
-    font-size: 1rem;
-    font-weight: 800;
+    color: #46534d;
+    font-size: .95rem;
+    font-weight: 700;
   }
   .section-subtitle {
     margin: 0.25rem 0 0;
@@ -124,7 +121,7 @@
     margin-bottom: 0.2rem;
   }
   .mini-metric .hint {
-    color: #6c8579;
+    color: #52645a;
     font-size: 0.79rem;
     margin: 0;
   }
@@ -156,33 +153,8 @@
     letter-spacing: 0.03em;
     border-bottom: 1px solid #dfe8dd;
   }
-  .help-card {
-    border: 1px solid #d3e1d3;
-    border-radius: 12px;
-    background: linear-gradient(135deg, #fbfdf7 0%, #f3f8ef 62%, #eef5e6 100%);
-    box-shadow: 0 8px 18px rgba(24, 57, 35, 0.05);
-    height: auto;
-    padding: 1rem;
-  }
-  .help-card .eyebrow {
-    font-size: 0.76rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #748676;
-    margin-bottom: 0.35rem;
-    font-weight: 700;
-  }
-  .help-card h3 {
-    font-size: 1rem;
-    font-weight: 800;
-    color: #1d482f;
-    margin-bottom: 0.35rem;
-  }
-  .help-card p {
-    color: #5a6f62;
-    font-size: 0.88rem;
-    margin-bottom: 0.85rem;
-  }
+  .dashboard-guidance h4 { color: #46534d; font-size: .95rem; font-weight: 700; margin-bottom: .4rem; }
+  .dashboard-guidance p { color: #52645a; font-size: .88rem; }
   @media (max-width: 767.98px) {
     .dash-header {
       padding: 0.85rem 0.9rem;
@@ -227,7 +199,8 @@
       </div>{% endif %}
   </div>
 
-  <div class="dashboard-context" aria-label="Academic scope and guidance">
+  <div class="dashboard-columns" aria-label="Dashboard details">
+    <div class="dashboard-column" aria-label="Academic scope and request queues">
   <div class="dashboard-section dashboard-scope">
     <div class="section-card">
       <div class="section-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
@@ -240,9 +213,9 @@
         {% endif %}
         {% if has_system_settings_update %}
         <div class="d-flex flex-wrap gap-2">
-          <a class="admin-action-icon" href="{% url 'admin_portal:active_academic_term_settings' %}" aria-label="Configure Active AY / Term" title="Configure Active AY / Term"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Configure Active AY / Term</span></a>
-          <a class="admin-action-icon" href="{% url 'admin_portal:active_grading_period_settings' %}" aria-label="Configure Active Grading Period" title="Configure Active Grading Period"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Configure Active Grading Period</span></a>
-          <a class="admin-action-icon" href="{% url 'admin_portal:configurable_features_settings' %}" aria-label="Configuration Management" title="Configuration Management"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Configuration Management</span></a>
+          <a class="admin-action-pill" href="{% url 'admin_portal:active_academic_term_settings' %}" aria-label="Configure Active AY / Term" title="Configure Active AY / Term"><span aria-hidden="true">&#8594;</span><span>AY / Term</span></a>
+          <a class="admin-action-pill" href="{% url 'admin_portal:active_grading_period_settings' %}" aria-label="Configure Active Grading Period" title="Configure Active Grading Period"><span aria-hidden="true">&#8594;</span><span>Grading Period</span></a>
+          <a class="admin-action-pill" href="{% url 'admin_portal:configurable_features_settings' %}" aria-label="Configuration Management" title="Configuration Management"><span aria-hidden="true">&#8594;</span><span>Configuration</span></a>
         </div>
         {% endif %}
       </div>
@@ -276,49 +249,12 @@
     </div>
   </div>
 
-  {% if has_users_read %}
-  <div class="dashboard-section section-card p-3 dashboard-users">
-    <div class="dashboard-heading"><h3 class="section-title">Currently Logged-in Users</h3><a class="admin-action-icon" href="{% url 'admin_portal:dashboard_logged_in_users' %}" aria-label="View Logged-in Users" title="View Logged-in Users"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">View Logged-in Users</span></a></div>
-    <p class="metric-value my-3">{{ active_user_count }}</p>
-    <p class="small text-muted">Distinct active users with live registered sessions in your scope.</p>
-    <p class="small text-muted">Checked at {{ active_users_checked_at|date:"Y-m-d H:i:s T" }}</p>
-
-  </div>
-  {% endif %}
-        <div class="help-card dashboard-workflow">
-          <div class="dashboard-heading"><div class="eyebrow">Important Workflow</div>
-          <div class="d-flex gap-2 flex-wrap">
-            <a class="admin-action-icon" href="{% url 'admin_portal:guide' %}#assignment-acceptance" aria-label="Open Guide" title="Open Guide"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Open Guide</span></a>
-            {% if has_faculty_assignments_read %}
-            <a class="admin-action-icon" href="{% url 'admin_portal:faculty_assignment_dashboard' %}" aria-label="Open Assignment Dashboard" title="Open Assignment Dashboard"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Open Assignment Dashboard</span></a>
-            {% endif %}
-          </div>
-          </div>
-          <h3>Assigned Loads Must Be Confirmed First</h3>
-          <p>New teaching loads remain pending until the faculty accepts them or an authorized administrator confirms them. Faculty may also request clarification or decline. Pending and expired loads should be monitored before grading starts.</p>
-
-        </div>
-        <div class="help-card dashboard-reminder">
-          <div class="dashboard-heading"><div class="eyebrow">Operations Reminder</div>
-          <div class="d-flex gap-2 flex-wrap">
-            {% if has_system_settings_update %}
-            <a class="admin-action-icon" href="{% url 'admin_portal:configurable_features_settings' %}" aria-label="Open Configuration Management" title="Open Configuration Management"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Open Configuration Management</span></a>
-            {% endif %}
-            <a class="admin-action-icon" href="{% url 'admin_portal:guide' %}#assignment-acceptance" aria-label="Review Rules" title="Review Rules"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Review Rules</span></a>
-          </div>
-          </div>
-          <h3>Reminder and Expiry Rules Are Configurable</h3>
-          <p>Use Configuration Management to define response-window days, reminder timing, and whether overdue assignments expire automatically for the selected tenant.</p>
-
-        </div>
-  </div>
-
-  <div class="dashboard-queues" aria-label="Request queues and period locks">
+    {% if correction_queue or cml_queue %}
     <div class="dashboard-queue-stack" {% if correction_queue or cml_queue %}id="dashboard-queue-counts"{% endif %} data-scope-token="{{ dashboard_scope_token }}" data-refresh-url="{% url 'admin_portal:dashboard_queue_counts' %}?scope_token={{ dashboard_scope_token|urlencode }}">
     <div class="dashboard-queue-stack" data-queue-content>
       {% if correction_queue %}
       <section class="section-card" data-queue="correction" aria-labelledby="correction-queue-title">
-        <div class="section-header dashboard-heading"><h3 class="section-title" id="correction-queue-title">Grade Correction Queue</h3><a data-queue-link class="admin-action-icon" href="{{ correction_queue.url }}" aria-label="View Grade Corrections" title="View Grade Corrections"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">View Grade Corrections</span></a></div>
+        <div class="section-header dashboard-heading"><h3 class="section-title" id="correction-queue-title">Grade Correction Queue</h3><a data-queue-link class="admin-action-pill" href="{{ correction_queue.url }}" aria-label="View Grade Corrections" title="View Grade Corrections"><span aria-hidden="true">&#8594;</span><span>Grade Corrections</span></a></div>
         <div class="p-3">
           <p class="metric-label">Pending Grade Corrections</p>
           <p class="metric-value" data-queue-count>{{ correction_queue.pending_count|default_if_none:"Unavailable" }}{% if correction_queue.configured %} <span class="small">pending</span>{% endif %}</p>
@@ -329,7 +265,7 @@
       {% endif %}
       {% if cml_queue %}
       <section class="section-card" data-queue="cml" aria-labelledby="cml-queue-title">
-        <div class="section-header dashboard-heading"><h3 class="section-title" id="cml-queue-title">CML Change Request</h3><a data-queue-link class="admin-action-icon" href="{{ cml_queue.url }}" aria-label="View CML Requests" title="View CML Requests"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">View CML Requests</span></a></div>
+        <div class="section-header dashboard-heading"><h3 class="section-title" id="cml-queue-title">CML Change Request</h3><a data-queue-link class="admin-action-pill" href="{{ cml_queue.url }}" aria-label="View CML Requests" title="View CML Requests"><span aria-hidden="true">&#8594;</span><span>CML Requests</span></a></div>
         <div class="p-3">
           <p class="metric-value" data-queue-count>{{ cml_queue.pending_count|default_if_none:"Unavailable" }}{% if cml_queue.configured %} <span class="small">pending</span>{% endif %}</p>
           <p class="small text-muted mt-2" data-queue-config {% if cml_queue.configured %}hidden{% endif %}>Configure the active AY / term to view this queue.</p>
@@ -340,6 +276,7 @@
     </div>
     {% if correction_queue or cml_queue %}<p class="small text-muted m-2" data-queue-status role="status">Updates every 10 minutes while this tab is visible.</p>{% endif %}
     </div>
+    {% endif %}
   {% if reopen_request_monitor %}
   <div class="dashboard-reopen" id="dashboard-reopen" data-refresh-url="{% url 'admin_portal:dashboard_reopen_card' %}?scope_token={{ dashboard_scope_token|urlencode }}">
     <div data-reopen-content>{% include "admin_portal/_dashboard_reopen_card.html" %}</div>
@@ -347,6 +284,46 @@
   </div>
   {% endif %}
 
+    </div>
+    <div class="dashboard-column" aria-label="People, workflow and operations">
+  {% if has_users_read %}
+  <div class="dashboard-section section-card dashboard-users">
+    <div class="section-header dashboard-heading"><h3 class="section-title">Currently Logged-in Users</h3><a class="admin-action-pill" href="{% url 'admin_portal:dashboard_logged_in_users' %}" aria-label="View Logged-in Users" title="View Logged-in Users"><span aria-hidden="true">&#8594;</span><span>Users</span></a></div>
+    <div class="p-3">
+    <p class="metric-value mb-2">{{ active_user_count }}</p>
+    <p class="small text-muted">Distinct active users with live registered sessions in your scope.</p>
+    <p class="small text-muted">Checked at {{ active_users_checked_at|date:"Y-m-d H:i:s T" }}</p>
+    </div>
+  </div>
+  {% endif %}
+        <div class="section-card dashboard-guidance dashboard-workflow">
+          <div class="section-header dashboard-heading"><h3 class="section-title">Important Workflow</h3>
+          <div class="dashboard-actions">
+            <a class="admin-action-pill" href="{% url 'admin_portal:guide' %}#assignment-acceptance" aria-label="Open Guide" title="Open Guide"><span aria-hidden="true">&#8594;</span><span>Guide</span></a>
+            {% if has_faculty_assignments_read %}
+            <a class="admin-action-pill" href="{% url 'admin_portal:faculty_assignment_dashboard' %}" aria-label="Assignments: Open Assignment Dashboard" title="Open Assignment Dashboard"><span aria-hidden="true">&#8594;</span><span>Assignments</span></a>
+            {% endif %}
+          </div>
+          </div>
+          <div class="p-3">
+          <h4>Assigned Loads Must Be Confirmed First</h4>
+          <p>New teaching loads remain pending until the faculty accepts them or an authorized administrator confirms them. Faculty may also request clarification or decline. Pending and expired loads should be monitored before grading starts.</p>
+          </div>
+        </div>
+        <div class="section-card dashboard-guidance dashboard-reminder">
+          <div class="section-header dashboard-heading"><h3 class="section-title">Operations Reminder</h3>
+          <div class="dashboard-actions">
+            {% if has_system_settings_update %}
+            <a class="admin-action-pill" href="{% url 'admin_portal:configurable_features_settings' %}" aria-label="Open Configuration Management" title="Open Configuration Management"><span aria-hidden="true">&#8594;</span><span>Configuration</span></a>
+            {% endif %}
+            <a class="admin-action-pill" href="{% url 'admin_portal:guide' %}#assignment-acceptance" aria-label="Review Rules" title="Review Rules"><span aria-hidden="true">&#8594;</span><span>Review Rules</span></a>
+          </div>
+          </div>
+          <div class="p-3">
+          <h4>Reminder and Expiry Rules Are Configurable</h4>
+          <p>Use Configuration Management to define response-window days, reminder timing, and whether overdue assignments expire automatically for the selected tenant.</p>
+          </div>
+        </div>
   {% if has_grading_period_lock and lock_monitor %}
   <div class="dashboard-section dashboard-locks">
     <div class="section-card">
@@ -359,7 +336,7 @@
           {% if lock_monitor.overdue_open_count %}
           <span class="badge text-bg-danger">{{ lock_monitor.overdue_open_count }} overdue</span>
           {% endif %}
-          <a class="admin-action-icon" href="{% url 'admin_portal:grading_period_lock_list' %}" aria-label="Open Lock Rules" title="Open Lock Rules"><span aria-hidden="true">&#8599;</span><span class="visually-hidden">Open Lock Rules</span></a>
+          <a class="admin-action-pill" href="{% url 'admin_portal:grading_period_lock_list' %}" aria-label="Open Lock Rules" title="Open Lock Rules"><span aria-hidden="true">&#8594;</span><span>Lock Rules</span></a>
         </div>
       </div>
       <div class="p-3">
@@ -455,6 +432,7 @@
     </div>
   </div>
   {% endif %}
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -1,3 +1,11 @@
+## 2026-11-02 - Admin Dashboard visual v2
+
+The authorized visual revision is isolated in `D:/tmp_branches/tmp-admin-dashboard-visual-v2`, branch `feat/admin-dashboard-visual-v2`, based on `4c0ed38015f3414f9b66ced0fbfb389f04c266cb`. It supersedes the earlier PDF row/column arrangement and circular dashboard action controls. Tenants/Campus/Users retain three equal summary slots. Below, two equal columns start at 992px: academic scope, Correction/CML queue stack and reopen monitor on the left; logged-in users, workflow, operations reminder and period-lock monitor on the right. Each column stacks independently with natural card heights and .85rem gaps. Below 992px the complete left group precedes the right group in DOM/keyboard order.
+
+All detail cards have light-gray headers and muted dark-gray headings. Compact labeled pills replace arrow circles, with native tooltips, accessible names and visible focus. Desktop actions are at least 36px high; mobile/coarse-pointer actions and the shared Practical Guide are at least 44px. The Practical Guide retains its existing link ID, permission/consent behavior and print suppression across Admin pages.
+
+Only templates, guide text, related tests and documentation change. Dashboard queries/selectors, routes, polling JavaScript, middleware/session-cookie protection and Faculty source remain unchanged. Pending application semantics, direct DENY, campus/tenant/AY/term boundaries, supervision and both independent 600-second polling cycles remain authoritative. No models, migrations, feature flags or jobs are added. Synthetic SQLite/offline Chrome evidence does not establish authenticated staging, physical-device or MariaDB acceptance; see HANDOFF.md for actual results and next steps. Older unresolved handoff items remain open.
+
 ## 2026-11-02 - Dashboard polling cookie race correction (uncommitted)
 
 - Protect both dashboard polling response paths from emitting the configured session cookie, including late Django SessionMiddleware set/delete calls with SAVE_EVERY_REQUEST. Other cookies and interactive session lifecycle remain intact; existing DB idle protection remains active.
