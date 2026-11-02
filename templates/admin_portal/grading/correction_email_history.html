@@ -1,0 +1,22 @@
+{% extends "admin_portal/base.html" %}
+{% load tz %}
+{% block admin_content %}
+{% timezone "Asia/Manila" %}
+<h2 class="h5">{{ title }}</h2>
+<p>Sent means accepted by the configured email backend. Inbox delivery is not guaranteed. Failed attempts retry automatically while the step and recipient remain eligible.</p>
+<div class="table-responsive"><table class="table table-sm">
+  <thead><tr><th>Step</th><th>Recipient</th><th>Type</th><th>Scheduled (Asia/Manila date)</th><th>Scheduled time</th><th>Status</th><th>Attempts</th><th>First attempt</th><th>Last attempt</th><th>Sent</th><th>Outcome</th></tr></thead>
+  <tbody>{% for row in page_obj %}<tr>
+    <td>{{ row.step.step_order }}: {{ row.step.approver_label }}</td>
+    <td>{{ row.recipient.username }}{% if row.recipient_email %}<br>{{ row.recipient_email }}{% endif %}</td>
+    <td>{{ row.get_kind_display }}</td><td>{{ row.scheduled_local_date|date:"Y-m-d" }}</td><td>{{ row.scheduled_at|date:"Y-m-d H:i T" }}</td>
+    <td>{{ row.get_status_display }}</td><td>{{ row.attempt_count }}</td><td>{{ row.first_attempt_at|date:"Y-m-d H:i:s"|default:"—" }}</td>
+    <td>{{ row.last_attempt_at|date:"Y-m-d H:i:s"|default:"—" }}</td><td>{{ row.sent_at|date:"Y-m-d H:i:s"|default:"—" }}</td><td>{{ row.outcome_code }}</td>
+  </tr>{% empty %}<tr><td colspan="11">No email deliveries recorded.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+<span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+{% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+<p><a href="{% url 'admin_portal:grade_correction_request_review' correction_request.pk %}">Back to correction review</a></p>
+{% endtimezone %}
+{% endblock %}

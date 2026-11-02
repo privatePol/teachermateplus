@@ -318,7 +318,7 @@
           <div class="border rounded p-3">
             <div class="d-flex justify-content-between align-items-center mb-2">
               <label class="form-label mb-0">Correction Encoding</label>
-              <span class="small text-muted">Original values are loaded automatically from the gradebook.</span>
+              <span class="small text-muted">From values are loaded automatically from the gradebook.</span>
             </div>
             <div class="alert alert-light border small mb-3">
               Recommended workflow: <strong>1)</strong> select all affected students first, <strong>2)</strong> select all affected grading items next, <strong>3)</strong> encode the corrected values below. You may go back and adjust selections without losing already entered corrected values.
@@ -477,12 +477,12 @@
         const numericValue = Number(rawValue);
         const maxValue = Number(input.dataset.maxValue || input.getAttribute("max"));
         if (Number.isNaN(numericValue)) {
-          showValidationError("Please enter a valid corrected value or leave the field blank.", input);
+          showValidationError("Please enter a valid To value or leave the field blank.", input);
           return false;
         }
         if (numericValue < 0 || numericValue > maxValue) {
           showValidationError(
-            `Corrected value cannot be lower than 0 or higher than ${maxValue}. Please review the highlighted entry.`,
+            `To value cannot be lower than 0 or higher than ${maxValue}. Please review the highlighted entry.`,
             input
           );
           return false;
@@ -553,8 +553,8 @@
               <th style="width: 72px;">No.</th>
               <th>Name</th>
               <th>Status</th>
-              <th style="width: 160px;">Original Value</th>
-              <th style="width: 200px;">Corrected Value</th>
+              <th style="width: 160px;">From</th>
+              <th style="width: 200px;">To</th>
             </tr>
           </thead>
         `;

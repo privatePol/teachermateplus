@@ -1162,7 +1162,9 @@
             <li>If the faculty member is inactive or unavailable, an authorized admin can file the request on their behalf.</li>
             <li>Approvers review it based on the configured ordered route matrix and permissions, such as Area Chair -> CAO or Area Chair -> College Dean -> CAO.</li>
             <li>Faculty may include multiple students or the entire class plus multiple grading items in one request.</li>
-            <li>Original values are shown in the request, and faculty enters only the corrected values.</li>
+            <li>From values are shown in the request, and faculty enters only the To values.</li>
+            <li>In Configuration Management, use Grade Correction Email Reminders to enable reminders and set their calendar-day frequency and Asia/Manila time (defaults: on, daily, 08:00). Initial approval emails retain their separate toggle and follow the current authorized approval step. Viewing a request does not stop reminders.</li>
+            <li>Use Email history on a correction review page to inspect recipient outcomes, attempts, and sanitized status codes. Sent means accepted by the email backend, not confirmed inbox delivery.</li>
             <li>Final approval updates the gradebook and recomputes the affected grades.</li>
             <li>No extra faculty finalize step is needed for this direct correction flow.</li>
             <li>If enabled, approved requests can open as official PDFs for registrar or AIMS reference.</li>

@@ -8,6 +8,8 @@ from .insights_views import (
     academic_performance_section_detail_view,
 )
 
+from .correction_email_views import correction_email_settings_view, correction_email_history_view
+
 from .api_views import sis_periodic_grades_api_view
 from .academic_data_reconciliation import (
     academic_data_reconciliation_roster_view,
@@ -745,6 +747,8 @@ urlpatterns = [
         grade_submission_reopen_request_review_view,
         name="grade_submission_reopen_request_review",
     ),
+    path("admin-portal/tools/correction-email-reminders/", correction_email_settings_view, name="correction_email_settings"),
+    path("admin-portal/grading/corrections/<int:request_id>/emails/", correction_email_history_view, name="correction_email_history"),
     path(
         "admin-portal/grading/corrections/",
         grade_correction_request_list_view,

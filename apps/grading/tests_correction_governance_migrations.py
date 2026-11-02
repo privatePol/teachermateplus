@@ -30,7 +30,8 @@ class CorrectionGovernanceMigrationTests(TransactionTestCase):
         # 0033 -> 0034 migration on the disposable test database.
         current_apps = self.executor.loader.project_state(self.to_state).apps
         current_policy = current_apps.get_model("grading", "CorrectionPetitionWindowPolicy")
-        old_policy = self.executor.loader.project_state(self.from_state).apps.get_model(
+        # Other mainline app leaves depend on grading 0035; exclude them from the 0033 fixture state.
+        old_policy = self.executor.loader.project_state([self.migrate_from]).apps.get_model(
             "grading", "CorrectionPetitionWindowPolicy"
         )
         with connection.schema_editor() as schema_editor:
@@ -40,7 +41,7 @@ class CorrectionGovernanceMigrationTests(TransactionTestCase):
             app="grading", name=self.migrate_to[1]
         ).delete()
         self.executor = MigrationExecutor(connection)
-        self.old_apps = self.executor.loader.project_state(self.from_state).apps
+        self.old_apps = self.executor.loader.project_state([self.migrate_from]).apps
         self.fixture = self._legacy_fixture()
 
     def tearDown(self):

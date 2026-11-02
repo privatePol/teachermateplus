@@ -5160,11 +5160,11 @@ class GradingGovernanceService:
 
                 new_value_raw = str(item.get("new_value") or "").strip()
                 if not new_value_raw:
-                    raise ValidationError("Corrected value is required for score correction.")
+                    raise ValidationError("To value is required for score correction.")
                 try:
                     parsed_new_value = Decimal(new_value_raw)
                 except (InvalidOperation, ValueError, TypeError):
-                    raise ValidationError("Corrected value must be a valid number.") from None
+                    raise ValidationError("To value must be a valid number.") from None
 
                 score_input_mode = FacultyGradingService.resolve_score_input_mode(
                     template_component=activity.template_component,
@@ -5174,7 +5174,7 @@ class GradingGovernanceService:
                 max_value = Decimal("100") if score_input_mode == "DIRECT_PERCENTAGE" else Decimal(activity.total_score)
                 if parsed_new_value < 0 or parsed_new_value > max_value:
                     raise ValidationError(
-                        f"Corrected value for {activity.title} must be between 0 and {cls._format_decimal_value(max_value)}."
+                        f"To value for {activity.title} must be between 0 and {cls._format_decimal_value(max_value)}."
                     )
 
                 normalized_items.append(
@@ -5395,6 +5395,9 @@ class GradingGovernanceService:
                 )
             )
         GradeCorrectionRequestItem.objects.bulk_create(item_rows)
+        from apps.grading.correction_reminders import CorrectionReminderService
+
+        CorrectionReminderService.activate(request_obj)
         return request_obj
 
     @classmethod
@@ -5492,6 +5495,9 @@ class GradingGovernanceService:
             request_obj.reviewed_at = now
             request_obj.review_remarks = remarks_value
             request_obj.save(update_fields=["reviewed_by_user", "reviewed_at", "review_remarks", "updated_at"])
+            from apps.grading.correction_reminders import CorrectionReminderService
+
+            CorrectionReminderService.activate(request_obj)
             return request_obj
 
         request_obj.reviewed_by_user = reviewer

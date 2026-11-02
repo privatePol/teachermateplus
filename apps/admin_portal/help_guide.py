@@ -835,14 +835,16 @@ ADMIN_HELP_SECTIONS = [
                 ),
                 "steps": [
                     "Open Grading -> Correction Queue to review an existing request.",
-                    "Open the request and compare the original value, requested value, student, grading item, reason, and attachment.",
+                    "Open the request and compare the From value, To value, student, grading item, reason, and attachment.",
                     "Record the current approval-step decision with clear remarks.",
+                    "Use Email history on the review page to inspect individual recipient attempts; Sent means accepted by the email backend.",
+                    "Authorized configuration administrators can set Grade Correction Email Reminders in Configuration Management (default on, every calendar day at 08:00 Asia/Manila). Viewing a request does not stop reminders.",
                     "If authorized staff must start the request, open Grading -> Create Correction On Behalf.",
                     "Complete the configured approval route and verify the recomputed official result after final approval.",
                 ],
                 "check_first": [
                     "Confirm the gradebook was submitted.",
-                    "Check the original value, requested value, student, activity, and reason.",
+                    "Check the From value, To value, student, activity, and reason.",
                     "Review supporting attachments and the configured approval route.",
                 ],
                 "actions": [

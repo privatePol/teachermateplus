@@ -7037,6 +7037,7 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                 elif (
                     FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=offering.tenant_id)
                     and notification_result["attempted"] == 0
+                    and notification_result.get("reason") != "queued_after_commit"
                 ):
                     messages.warning(
                         request,

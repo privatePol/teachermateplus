@@ -1,3 +1,14 @@
+## 2026-11-02 - Correction email expired-claim durability remediation
+- A lost/expired dispatch claim no longer becomes a terminal SKIPPED delivery. Expired PROCESSING rows remain reclaimable; stale workers leave replacement owners untouched.
+- Rediscovery can recover previously stranded SKIPPED / claim_lost rows for an eligible current step and currently due schedule. Existing attempt timestamps/counts, delivery identity, SENT finality and authorization checks are preserved. No notification policy, UI, scheduler or migration schema changed.
+
+
+## 2026-11-02 - Grade Correction email reminders
+- Added tenant controls in Configuration Management for independent automatic reminders (default on), 1/2/3/7-calendar-day frequency and configurable time (default 08:00 Asia/Manila).
+- Correction creation and approval handoff now persist step email intent transactionally and dispatch initial emails after commit under the existing initial-email toggle. Current-step recipients must pass ordinary assignments, review/portal permissions, direct DENY, tenant/campus/department, supervision and request guards; legacy role lists no longer broaden recipients.
+- Added per-recipient durable delivery history, atomic claims, recoverable retries and a prepared every-minute cron command; existing pending requests are discovered. Sent means backend acceptance; SMTP uncertainty and decision-boundary races are documented in docs/GRADE_CORRECTION_REMINDERS.md.
+- Standardized Grade Correction form/review/history/PDF labels to From / To without changing stored grade values or computation. Added grading.0036_correction_email_outbox; normal database migration and scheduler activation were not performed.
+
 ## 2026-11-02 - Admin Dashboard visual v2 (uncommitted)
 
 - Replace the previous four-context/three-queue-column arrangement with three equal summary cards and two equal, independently stacked desktop columns from 992px; use one column below 992px. Preserve every authorized card and its information with natural heights and compact gaps.

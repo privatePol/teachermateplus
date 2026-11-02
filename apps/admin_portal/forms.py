@@ -3654,13 +3654,13 @@ class ConfigurableFeatureSettingForm(forms.Form):
     correction_submission_approval_email_enabled = forms.BooleanField(
         required=False,
         label="Enable approval notification email on correction submission",
-        help_text="When enabled, TeacherMate+ emails the selected approval-role recipients as soon as a faculty member submits a petition for correction of grades.",
+        help_text="When enabled, TeacherMate+ queues an email for authorized approvers of each newly active correction approval step, after commit.",
     )
     correction_submission_approval_email_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
-        label="Recipient roles for correction submission notification",
-        help_text="Select the approval roles that should receive the notification email. Recommended: CAO and College Dean.",
+        label="Legacy correction submission recipient roles",
+        help_text="Retained for compatibility. Correction approval emails now follow the current governance step and review authorization; this list does not broaden recipients.",
     )
     correction_registrar_auto_email_enabled = forms.BooleanField(
         required=False,
@@ -4124,15 +4124,6 @@ class ConfigurableFeatureSettingForm(forms.Form):
         if not cleaned.get("user_signatures_enabled"):
             cleaned["user_signatures_final_clearance_enabled"] = False
             cleaned["user_signatures_correction_report_enabled"] = False
-
-        if (
-            cleaned.get("correction_submission_approval_email_enabled")
-            and not cleaned.get("correction_submission_approval_email_roles")
-        ):
-            self.add_error(
-                "correction_submission_approval_email_roles",
-                "Select at least one recipient role before enabling approval notification email.",
-            )
 
         parsed_default = self._parse_email_list(cleaned.get("correction_registrar_default_recipients", ""))
         for email in parsed_default:

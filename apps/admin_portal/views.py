@@ -15559,6 +15559,7 @@ def grade_correction_request_review_view(request, request_id: int):
                 handoff_email_result
                 and FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=updated.tenant_id)
                 and handoff_email_result["attempted"] == 0
+                and handoff_email_result.get("reason") != "queued_after_commit"
             ):
                 messages.warning(
                     request,

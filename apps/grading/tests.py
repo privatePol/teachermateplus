@@ -27,6 +27,7 @@ from apps.auditlog.models import AuditLog
 from apps.enrollment.models import Enrollment
 from apps.faculty_portal.forms import GradeCorrectionRequestForm
 from apps.grading.models import (
+    CorrectionEmailDelivery,
     CorrectionApprovalRouteRule,
     CorrectionApprovalRouteStep,
     CorrectionPetitionWindowPolicy,
@@ -520,7 +521,22 @@ class CorrectionWorkflowTests(TestCase):
         follow_up = self.client.get(url)
         self.assertNotContains(follow_up, 'id="correction-validation-summary"')
 
+    def _grant_correction_email_access(self, role):
+        # Approval emails now require review authorization, not just a role name.
+        for code in ("corrections.review", "admin_portal.access"):
+            permission, _ = Permission.objects.get_or_create(code=code, defaults={"module": "corrections", "action": "review"})
+            RolePermission.objects.get_or_create(role=role, permission=permission)
+        FacultyAssignment.objects.filter(offering=self.offering).update(response_status=FacultyAssignment.ResponseStatus.ACCEPTED)
+
+    def _commit_step_notification_callbacks(self, correction, step):
+        with self.captureOnCommitCallbacks(execute=True):
+            result = CorrectionNotificationService.send_correction_step_approval_notifications(request_obj=correction, step=step)
+        self.assertEqual(result["reason"], "queued_after_commit")
+        rows = CorrectionEmailDelivery.objects.filter(correction_request=correction, status="SENT")
+        return {"sent": rows.count(), "recipients": list(rows.values_list("recipient_email", flat=True))}
+
     def _send_step_approval_notification(self, *, role, user, approver_label):
+        self._grant_correction_email_access(role)
         SystemSettingService.set(
             FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
             True,
@@ -549,10 +565,7 @@ class CorrectionWorkflowTests(TestCase):
             ],
         )
         pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
-        result = CorrectionNotificationService.send_correction_step_approval_notifications(
-            request_obj=correction,
-            step=pending_step,
-        )
+        result = self._commit_step_notification_callbacks(correction, pending_step)
         self.assertEqual(result["sent"], 1)
         self.assertEqual(result["recipients"], [user.email])
         return mail.outbox[0], correction
@@ -1205,6 +1218,7 @@ class CorrectionWorkflowTests(TestCase):
             approver_role=self.cao_role,
             approver_label="CAO",
         )
+        self._grant_correction_email_access(area_role)
         correction = GradingGovernanceService.create_correction_request(
             user=self.faculty_user,
             offering=self.offering,
@@ -1221,18 +1235,12 @@ class CorrectionWorkflowTests(TestCase):
         )
         pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
 
-        first_result = CorrectionNotificationService.send_correction_step_approval_notifications(
-            request_obj=correction,
-            step=pending_step,
-        )
-        second_result = CorrectionNotificationService.send_correction_step_approval_notifications(
-            request_obj=correction,
-            step=pending_step,
-        )
+        first_result = self._commit_step_notification_callbacks(correction, pending_step)
+        second_result = self._commit_step_notification_callbacks(correction, pending_step)
 
         self.assertEqual(first_result["sent"], 1)
         self.assertEqual(first_result["recipients"], ["area3@example.com"])
-        self.assertEqual(second_result["reason"], "already_sent")
+        self.assertEqual(second_result, first_result)
         self.assertEqual(len(mail.outbox), 1)
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -1294,7 +1302,7 @@ class CorrectionWorkflowTests(TestCase):
         )
 
         self.assertEqual(result["attempted"], 0)
-        self.assertEqual(result["reason"], "no_matching_step_recipients")
+        self.assertEqual(result["reason"], "queued_after_commit")
         self.assertEqual(len(mail.outbox), 0)
 
     def test_correction_route_form_commit_false_saves_ordered_steps(self):
@@ -1879,7 +1887,7 @@ class CorrectionWorkflowTests(TestCase):
         )
 
         self.assertEqual(result["attempted"], 0)
-        self.assertEqual(result["reason"], "no_matching_step_recipients")
+        self.assertEqual(result["reason"], "queued_after_commit")
         self.assertEqual(len(mail.outbox), 0)
 
     def test_correction_request_form_rejects_corrected_value_above_activity_total(self):
@@ -2458,7 +2466,7 @@ class CorrectionWorkflowTests(TestCase):
             0,
         )
 
-    def test_correction_submission_notification_emails_configured_roles(self):
+    def test_correction_submission_notification_ignores_legacy_roles_beyond_current_step(self):
         SystemSettingService.set(
             FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
             True,
@@ -2471,6 +2479,7 @@ class CorrectionWorkflowTests(TestCase):
             tenant_id=self.tenant.id,
             value_type="JSON",
         )
+        self._grant_correction_email_access(self.reviewer_role)
         correction = GradingGovernanceService.create_correction_request(
             user=self.faculty_user,
             offering=self.offering,
@@ -2486,14 +2495,11 @@ class CorrectionWorkflowTests(TestCase):
             ],
         )
 
-        result = CorrectionNotificationService.send_correction_submission_approval_notifications(
-            request_obj=correction
-        )
-
-        self.assertEqual(result["attempted"], 2)
-        self.assertEqual(result["sent"], 2)
-        self.assertCountEqual(result["recipients"], ["cao1@example.com", "reviewer1@example.com"])
-        self.assertEqual(len(mail.outbox), 2)
+        with self.captureOnCommitCallbacks(execute=True):
+            result = CorrectionNotificationService.send_correction_submission_approval_notifications(request_obj=correction)
+        self.assertEqual(result["reason"], "queued_after_commit")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [self.reviewer_user.email])
         for message in mail.outbox:
             self.assertEqual(
                 message.subject,
@@ -2505,7 +2511,7 @@ class CorrectionWorkflowTests(TestCase):
             self.assertIn("Approval Notification", html_body)
             self.assertIn("Petitioner:", html_body)
 
-    def test_correction_submission_notification_supports_tenant_wide_role_assignment(self):
+    def test_correction_submission_notification_excludes_tenant_wide_super_admin_override(self):
         SystemSettingService.set(
             FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
             True,
@@ -2533,13 +2539,11 @@ class CorrectionWorkflowTests(TestCase):
             ],
         )
 
-        result = CorrectionNotificationService.send_correction_submission_approval_notifications(
-            request_obj=correction
-        )
-
-        self.assertEqual(result["attempted"], 1)
-        self.assertEqual(result["sent"], 1)
-        self.assertEqual(result["recipients"], ["superadmin1@example.com"])
+        with self.captureOnCommitCallbacks(execute=True):
+            result = CorrectionNotificationService.send_correction_submission_approval_notifications(request_obj=correction)
+        self.assertEqual(result["reason"], "queued_after_commit")
+        self.assertFalse(CorrectionEmailDelivery.objects.filter(recipient=self.super_admin_user).exists())
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_registrar_official_report_email_sends_pdf_attachment(self):
         SystemSettingService.set(

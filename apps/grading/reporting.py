@@ -833,8 +833,8 @@ class CorrectionOfficialReportService:
                         [
                             "Student No.",
                             "Student Name",
-                            f"{report['official_grade_label']} (Original)",
-                            f"{report['official_grade_label']} (Corrected)",
+                            f"{report['official_grade_label']} (From)",
+                            f"{report['official_grade_label']} (To)",
                         ]
                     ]
                     + (report["official_grade_rows"] or [["-", "-", "-", "-"]]),

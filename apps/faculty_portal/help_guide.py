@@ -414,8 +414,8 @@ FACULTY_HELP_SECTIONS = [
             {
                 "code": "corrections",
                 "title": "Correction of Grades",
-                "purpose": "Requests an audited change to a grade that was already submitted.",
-                "check_first": ["Choose the correct class, period, student, and activity.", "Confirm the original and corrected value.", "Prepare a clear reason and supporting document when required."],
+                "purpose": "Requests an audited change to a grade that was already submitted. From is the saved value; To is the proposed replacement. Viewing a petition does not stop reminders to authorized current-step approvers.",
+                "check_first": ["Choose the correct class, period, student, and activity.", "Confirm the From and To values.", "Prepare a clear reason and supporting document when required."],
                 "actions": [
                     {"name": "Request Correction", "does": "Creates a correction request for review.", "when": "Use it for a genuine submitted-grade error.", "avoid": "Do not use it for an unfinished draft gradebook.", "result": "The request enters the configured approval route.", "editable": "The grade does not change until final approval."},
                     {"name": "Finalize Request", "does": "Confirms the correction details and sends them for review.", "when": "Use it after checking every student and value in the request.", "avoid": "Do not finalize incomplete or unsupported values.", "result": "Reviewers can approve or reject the request.", "editable": "Later changes may require a new request."},
@@ -423,7 +423,7 @@ FACULTY_HELP_SECTIONS = [
                 ],
                 "avoid": "Never ask an administrator to directly overwrite submitted grades outside the correction workflow.",
                 "next_step": "Monitor the request until it is approved, rejected, closed, or returned for follow-up.",
-                "workflow": {"starts": "Faculty or an authorized admin creates the request.", "reviews": "The configured reviewer checks the evidence and values.", "approves": "The final configured approver decides.", "receives": "Faculty and configured registrar recipients receive the result.", "complete": "Approved changes are applied and recomputed, or the request is formally closed.", "records": "Original/corrected values, reason, attachments, decisions, recomputed grades, and audit logs."},
+                "workflow": {"starts": "Faculty or an authorized admin creates the request.", "reviews": "The configured reviewer checks the evidence and values.", "approves": "The final configured approver decides.", "receives": "Faculty and configured registrar recipients receive the result.", "complete": "Approved changes are applied and recomputed, or the request is formally closed.", "records": "From/To values, reason, attachments, decisions, recomputed grades, and audit logs."},
             },
         ],
     },

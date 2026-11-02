@@ -317,6 +317,12 @@
   <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
 </div>
 
+<div class="card card-body mb-3">
+  <h3 class="h6">Grade Correction Email Reminders</h3>
+  <p>Configure tenant reminder frequency and time independently of initial approval emails.</p>
+  <a href="{% url 'admin_portal:correction_email_settings' %}">Configure correction reminders</a>
+</div>
+
 <form method="post" novalidate class="feature-settings-form">
   {% csrf_token %}
   {% if form.non_field_errors %}
