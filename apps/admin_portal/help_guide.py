@@ -983,11 +983,14 @@ ADMIN_HELP_SECTIONS = [
                         "configurations within the examination unit."
                     ),
                     (
-                        "Passed counts, passing rates and Top Performers remain unavailable pending a verified standalone "
-                        "exam-grade definition and historical passing rules. Final includes verified FX/Final aliases; "
-                        "conflicting or multiple active Final periods remain unavailable. Previous Midterm rank and "
-                        "movement show N/A because retained submissions cannot prove historical grading compatibility. "
-                        "N/A is not zero. DEPTAL reflects the selected cycle classification."
+                        "Passed counts and rates compare saved confirmed exam grades against the configured passing "
+                        "threshold, using the full eligible roster only when results are complete. Identity-authorized "
+                        "Top Performers ranks available confirmed saved grades per campus, including ties at rank 10; "
+                        "stored raw scores and maximum points appear only when their exam activity is unambiguous. "
+                        "Cross-campus Overall requires a shared assessment identity; it is not inferred from a common scale. "
+                        "Final includes verified FX/Final aliases; ambiguous Final periods remain unavailable. Midterm rank "
+                        "and movement compare confirmed saved Midterm results in the same valid examination unit and "
+                        "authorized offering population. No student grade is recalculated. DEPTAL reflects cycle classification."
                     ),
                     (
                         "On Grading Analytics, choose one Course code to show every authorized section or "

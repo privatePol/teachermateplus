@@ -12,10 +12,10 @@ from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import (
-    BigIntegerField, Case, CharField, Count, F, IntegerField, Max, Min, OuterRef,
-    Q, Subquery, Sum, Value, When,
+    BigIntegerField, Case, CharField, Count, DecimalField, Exists, F, IntegerField, Max, Min, OuterRef,
+    Q, Subquery, Sum, Value, When, Window,
 )
-from django.db.models.functions import Cast, Coalesce, Lower, Round
+from django.db.models.functions import Cast, Coalesce, Lower, Rank, Round
 from django.http import Http404
 from django.urls import reverse
 
@@ -34,7 +34,7 @@ from apps.departmental_exams.models import (
 from apps.enrollment.models import Enrollment
 from apps.grading.models import (
     CourseBaseValueOverride, CourseTemplateAssignment, GradeSubmission,
-    GradingTemplate, GradingTemplatePeriod, StudentPeriodGrade, TenantGradingProfile,
+    GradeActivity, GradingTemplate, GradingTemplatePeriod, StudentActivityScore, StudentPeriodGrade, TenantGradingProfile,
 )
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.rbac.models import UserPermission, UserRole
@@ -252,8 +252,8 @@ class _BulkGradingConfiguration:
 class MidtermExamPerformanceReportService:
     """Periodical class aggregates; legacy name retained for existing callers.
 
-    Official stored exam results remain the source of existing class statistics.
-    They are not asserted to be a standalone transmuted assessment grade.
+    Submitted, finalized StudentPeriodGrade.exam_grade values are authoritative.
+    Reporting never recalculates grades or reapplies transmutation.
     """
 
     PERMISSION_CODE = "grading_analytics.read"
@@ -271,11 +271,7 @@ class MidtermExamPerformanceReportService:
     STATUS_INVALID_SCALE = "Official result outside 0-100 scale"
     STATUS_INVALID_UNIT = "Invalid examination unit"
     STATUS_AMBIGUOUS_PERIOD = "Ambiguous Final grading period"
-    HISTORY_BLOCKER = (
-        "Historical grading compatibility is unverified: retained submissions "
-        "identify the template and period but do not retain the applied formula, "
-        "base, transmutation and passing rules. Previous rank and movement are unavailable."
-    )
+    HISTORY_BLOCKER = "Confirmed Midterm results or a matching examination-unit population are unavailable."
 
     @staticmethod
     def _safe_int(value):
@@ -284,16 +280,9 @@ class MidtermExamPerformanceReportService:
         except (TypeError, ValueError):
             return None
 
-    GRADE_BLOCKER = (
-        "Standalone examination transmutation and its historical passing threshold "
-        "are not captured with the finalized result. DepEd transmutation applies "
-        "to the weighted period grade, not automatically to the exam alone. "
-        "Passed counts and student rankings are unavailable until an authoritative "
-        "exam-grade definition and historical configuration are established."
-    )
     COMPARABILITY_BLOCKER = (
-        "Cross-section and cross-campus student rankings also require verified "
-        "assessment identity or equivalence; a shared grade scale is insufficient."
+        "Overall across campuses is unavailable: saved exam grades and grade activities "
+        "do not identify a shared assessment revision across campuses."
     )
 
     @staticmethod
@@ -468,42 +457,151 @@ class MidtermExamPerformanceReportService:
         )
 
     @classmethod
-    def _snapshot_scope(cls, request, cycle, campus_ids):
+    def _snapshot_scope(cls, request, cycle, campus_ids, *, offering_ids=None):
+        if offering_ids is None:
+            offering_ids = cls._scoped_offering_ids(request, cycle, campus_ids)
         return CycleCourseOffering.objects.filter(
             cycle_course__cycle=cycle,
             cycle_course__inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
-            offering_id__in=cls._scoped_offering_ids(request, cycle, campus_ids),
+            offering_id__in=offering_ids,
             campus_id__in=campus_ids,
         )
 
     @classmethod
-    def top_performers(cls, request, cycle, course_id):
-        """Fail closed at the unresolved grade-definition boundary, after scope checks.
-
-        Do not release identities, score rows, or a fabricated transmutation.
-        This action is deliberately lazy and issues no student-result query.
-        """
-        if cycle is None:
-            raise Http404("Examination course unavailable.")
-        campuses = cls._authorized_campuses(request, cycle.tenant_id)
-        scope = cls._snapshot_scope(request, cycle, [campus.id for campus in campuses])
-        campus_ids = set(scope.filter(offering__course_id=course_id).order_by().values_list(
-            "campus_id", flat=True,
-        ))
-        if not campus_ids:
-            raise Http404("Examination course unavailable.")
-        # Identity permission is independent of aggregate analytics permission.
+    def _identity_access(cls, request, tenant_id, campus_ids):
+        """Identity disclosure is separate from aggregate report access."""
         for campus_id in campus_ids:
             permissions = PermissionService._scoped_user_permissions(
-                request.user, tenant_id=cycle.tenant_id, campus_id=campus_id,
+                request.user, tenant_id=tenant_id, campus_id=campus_id,
             ).filter(permission__code="gradebook.view_student_identity")
             if (permissions.filter(grant_type=UserPermission.GrantType.DENY).exists()
                     or not PermissionService.has_permission(
                         request.user, "gradebook.view_student_identity",
-                        tenant_id=cycle.tenant_id, campus_id=campus_id,
+                        tenant_id=tenant_id, campus_id=campus_id,
                     )):
-                return {"available": False, "message": "Student identity access is required for this course scope."}
-        return {"available": False, "message": cls.GRADE_BLOCKER + " " + cls.COMPARABILITY_BLOCKER}
+                return False
+        return True
+
+    @staticmethod
+    def _period_pairs(rows):
+        periods = defaultdict(list)
+        for row in rows:
+            periods[row["_period"]].append(row["offering_id"])
+        match = Q(pk__in=[])
+        for period, offerings in periods.items():
+            match |= Q(offering_id__in=offerings, template_period_id=period)
+        return match
+
+    @classmethod
+    def top_performers(cls, request, cycle, course_id):
+        if cycle is None:
+            raise Http404("Examination course unavailable.")
+        campuses = cls._authorized_campuses(request, cycle.tenant_id)
+        scope = cls._snapshot_scope(request, cycle, [campus.id for campus in campuses])
+        member = CycleCourse.objects.filter(
+            pk__in=scope.filter(offering__course_id=course_id).values("cycle_course_id"),
+        ).select_related("cycle", "course").first()
+        if member is None:
+            raise Http404("Examination course unavailable.")
+        try:
+            unit = _resolve_report_unit(member)
+        except ValidationError:
+            return {"available": False, "message": "Examination unit unavailable."}
+        scope = scope.filter(cycle_course_id__in=unit.member_ids)
+        campus_ids = set(scope.values_list("campus_id", flat=True))
+        if not cls._identity_access(request, cycle.tenant_id, campus_ids):
+            return {"available": False, "message": "Student identity access is required for this course scope."}
+        summaries, signatures, _, _, _ = cls._ranked_summaries(scope, cycle)
+        usable = [r for r in summaries if r["_status"] in {cls.STATUS_COMPLETE, cls.STATUS_INCOMPLETE} and r["_finalized"]]
+        # Per-campus comparisons use the same configuration compatibility rule
+        # as the class report. Different configurations never share a ranking.
+        campus_by_offering = {row["offering_id"]: row["campus_id"] for row in summaries}
+        contexts = defaultdict(set)
+        for row in usable:
+            contexts[campus_by_offering[row["offering_id"]]].add(signatures[row["_context"]])
+        comparable = {campus for campus, values in contexts.items() if len(values) == 1}
+        usable = [r for r in usable if campus_by_offering[r["offering_id"]] in comparable]
+        if not usable:
+            return {"available": False, "message": "No comparable confirmed examination results are available."}
+        eligible = Enrollment.objects.filter(
+            course_offering_id=OuterRef("offering_id"), student_id=OuterRef("student_id"),
+            is_active=True, student__is_active=True, student__department__is_active=True,
+        ).filter(Q(student__program__isnull=True) | Q(student__program__is_active=True)).exclude(
+            enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES,
+        )
+        grades = StudentPeriodGrade.objects.filter(
+            cls._period_pairs(usable), tenant_id=cycle.tenant_id,
+            campus_id=F("offering__campus_id"), student__tenant_id=cycle.tenant_id,
+            is_finalized=True, exam_grade__gte=0, exam_grade__lte=100,
+        ).filter(Exists(eligible))
+        # Multiple saved records for one student in this unit are ambiguous;
+        # do not silently choose the highest or disclose the student twice.
+        duplicates = grades.order_by().values("student_id").annotate(n=Count("pk")).filter(n__gt=1)
+        grades = grades.exclude(student_id__in=Subquery(duplicates.values("student_id")))
+        top = list(grades.annotate(rank=Window(
+            expression=Rank(), partition_by=[F("campus_id")], order_by=F("exam_grade").desc(),
+        )).filter(rank__lte=10).order_by("campus_id", "rank", "student_id", "offering_id").values(
+            "student_id", "student__student_no", "student__first_name", "student__last_name",
+            "offering_id", "offering__section__code", "template_period_id", "campus_id", "exam_grade", "computed_at", "rank",
+        ))
+        if not top:
+            return {"available": False, "message": "No unambiguous confirmed student results are available."}
+        # Only stored scores from a single exam activity, retained at submission
+        # or the later finalized grade's computed_at, can be paired unambiguously.
+        # Missing raw data never hides a saved grade.
+        activities = defaultdict(list)
+        for activity in GradeActivity.objects.filter(
+            cls._period_pairs(usable), tenant_id=cycle.tenant_id,
+            campus_id=F("offering__campus_id"), is_active=True,
+            template_component__is_exam_component=True,
+            template_component__template_period_id=F("template_period_id"),
+        ).values("id", "offering_id", "template_period_id", "total_score", "updated_at"):
+            activities[(activity["offering_id"], activity["template_period_id"])].append(activity)
+        submissions = {(r["offering_id"], r["template_period_id"]): r["submitted_at"] for r in GradeSubmission.objects.filter(
+            cls._period_pairs(usable), tenant_id=cycle.tenant_id, campus_id=F("offering__campus_id"),
+            status=GradeSubmission.Status.SUBMITTED,
+        ).values("offering_id", "template_period_id", "submitted_at")}
+        singles = {}
+        for pair, choices in activities.items():
+            submitted_at = submissions.get(pair)
+            if len(choices) == 1 and submitted_at:
+                singles[pair] = choices[0]
+        raw = {(r["activity_id"], r["student_id"]): r for r in StudentActivityScore.objects.filter(
+            activity_id__in=[a["id"] for a in singles.values()], student_id__in=[r["student_id"] for r in top],
+            is_active=True, is_excused=False,
+        ).values("activity_id", "student_id", "raw_score", "updated_at")}
+        result = []
+        for campus in campuses:
+            rows = []
+            for saved in top:
+                if saved["campus_id"] != campus.pk:
+                    continue
+                pair = (saved["offering_id"], saved["template_period_id"])
+                activity = singles.get(pair)
+                confirmed_at = max(submissions[pair], saved["computed_at"]) if activity else None
+                if activity and activity["updated_at"] > confirmed_at:
+                    activity = None
+                score = raw.get((activity["id"], saved["student_id"])) if activity else None
+                valid_raw = bool(score and score["updated_at"] <= confirmed_at
+                    and 0 <= score["raw_score"] <= activity["total_score"])
+                rows.append({
+                    "rank": saved["rank"], "student_no": saved["student__student_no"],
+                    "name": (saved["student__last_name"] + ", " + saved["student__first_name"]).strip(", "),
+                    "section": saved["offering__section__code"], "exam_grade": str(cls._round(saved["exam_grade"])),
+                    "raw_score": str(score["raw_score"]) if valid_raw else None,
+                    "maximum_points": str(activity["total_score"]) if activity else None,
+                })
+            if rows:
+                result.append({"campus": campus.code, "rows": rows})
+        # A single-campus Overall is the same authorized comparison. The model
+        # has no grade/activity -> shared assessment revision FK for combining
+        # results across campuses, so that field alone remains unavailable.
+        overall = result[0]["rows"] if len(campus_ids) == 1 and len(result) == 1 else None
+        return {"available": bool(result), "campuses": result, "overall": overall,
+            "message": "Top 10 confirmed saved exam grades per campus; competition ties include rank 10. "
+                "Only available confirmed grades participate; incomplete offerings may have missing students. "
+                "Ambiguous duplicate student results are excluded.",
+            "overall_note": "" if overall is not None else cls.COMPARABILITY_BLOCKER}
 
     @classmethod
     def build_report(cls, request, cycle):
@@ -519,7 +617,8 @@ class MidtermExamPerformanceReportService:
         if cycle is None or not campus_ids:
             report["restart_required"] = bool(request.GET.get("cursor"))
             return report
-        snapshots_scope = cls._snapshot_scope(request, cycle, campus_ids)
+        authorized_offerings = cls._scoped_offering_ids(request, cycle, campus_ids)
+        snapshots_scope = cls._snapshot_scope(request, cycle, campus_ids, offering_ids=authorized_offerings)
         visible_courses = sorted(snapshots_scope.order_by().values_list(
             "cycle_course_id", "cycle_course__course__code", "cycle_course__course__title",
         ).distinct())
@@ -557,6 +656,8 @@ class MidtermExamPerformanceReportService:
         ranking_scope = snapshots_scope.filter(cycle_course_id__in=ranking_ids)
         summaries, signatures, unit_details, _histogram, incompatible = cls._ranked_summaries(ranking_scope, cycle)
 
+        history = cls._midterm_comparison(request, cycle, summaries, unit_details, campus_ids, authorized_offerings)
+
         # A signed continuation is bound to the actor, filters and current batch.
         # Changes to scope/rosters/results within a course batch require a fresh
         # page rather than appending rows whose rank/order may have changed.
@@ -572,7 +673,7 @@ class MidtermExamPerformanceReportService:
             sort_keys=True, default=str,
         ).encode()).hexdigest()
         fingerprint = hashlib.sha256(json.dumps(
-            [visible_courses, summaries, signatures, version], sort_keys=True, default=str,
+            [visible_courses, summaries, signatures, history, version], sort_keys=True, default=str,
         ).encode()).hexdigest()
         binding = [request.user.pk, cycle.pk, course_code, course_page.number]
         token = request.GET.get("cursor")
@@ -614,6 +715,20 @@ class MidtermExamPerformanceReportService:
             faculty_by_offering.setdefault(assignment.offering_id, assignment.faculty_user)
         rows = []
         course_groups = {}
+        identity_by_campus = {
+            campus_id: cls._identity_access(request, cycle.tenant_id, [campus_id])
+            for campus_id in {r["campus_id"] for r in summaries}
+        } if any(r["_finalized"] and r["_status"] in {cls.STATUS_COMPLETE, cls.STATUS_INCOMPLETE} for r in summaries) else {}
+        top_available = {}
+        for unit_id in {row["_unit"] for row in summaries}:
+            members = [r for r in summaries if r["_unit"] == unit_id]
+            contexts = defaultdict(set)
+            for member in members:
+                if member["_status"] in {cls.STATUS_COMPLETE, cls.STATUS_INCOMPLETE} and member["_finalized"]:
+                    contexts[member["campus_id"]].add(signatures[member["_context"]])
+            top_available[unit_id] = any(len(values) == 1 for values in contexts.values()) and all(
+                identity_by_campus.get(r["campus_id"], False) for r in members
+            )
         for summary in page_values:
             snapshot = snapshots[summary["pk"]]
             offering = snapshot.offering
@@ -639,11 +754,13 @@ class MidtermExamPerformanceReportService:
                 "lowest_score": cls._round(summary["_lowest"]) if complete else None,
                 "class_average": cls._average(summary["_sum_hundredths"], summary["_roster"]) if complete else None,
                 "rank": summary["_rank"],
-                "passed_count": None, "passing_rate": None,
-                "grade_blocker": cls.GRADE_BLOCKER,
-                # submit_period retains IDs/labels, not applied grading rules.
-                # Current profiles cannot establish historical compatibility.
-                "midterm_rank": None, "rank_movement": None,
+                "passed_count": summary["_passed"] if complete and summary["_threshold"] is not None else None,
+                "passing_rate": cls._round(Decimal(summary["_passed"]) * 100 / summary["_roster"])
+                    if complete and summary["_threshold"] is not None else None,
+                "passing_threshold": summary["_threshold"],
+                "midterm_rank": history.get(offering.pk),
+                "rank_movement": history[offering.pk] - summary["_rank"]
+                    if offering.pk in history and summary["_rank"] is not None else None,
                 "history_blocker": cls.HISTORY_BLOCKER,
                 "data_status": status, "context_signature": signatures[summary["_context"]],
                 "status_detail": ("Different grading configurations within this examination unit."
@@ -656,6 +773,11 @@ class MidtermExamPerformanceReportService:
                 "id": offering.course_id, "code": offering.course.code,
                 "title": offering.course.title, "rows": [],
                 "is_deptal": snapshot.cycle_course.exam_classification == CycleCourse.ExamClassification.DEPARTMENTAL,
+                "top_available": top_available.get(summary["_unit"], False),
+                "history_available": any(r["offering_id"] in history for r in summaries
+                    if r["cycle_course_id"] == snapshot.cycle_course_id),
+                "passing_available": any(r["_status"] == cls.STATUS_COMPLETE and r["_threshold"] is not None
+                    for r in summaries if r["cycle_course_id"] == snapshot.cycle_course_id),
                 "top_url": reverse("admin_portal:periodical_exam_top_performers", args=[offering.course_id]) + "?" + urlencode({
                     "cycle_id": cycle.pk, "exam_period": cycle.exam_period,
                 }),
@@ -688,6 +810,96 @@ class MidtermExamPerformanceReportService:
         return report
 
     @classmethod
+    def _midterm_comparison(cls, request, cycle, current, unit_details, campus_ids, authorized_offerings):
+        """Rank confirmed saved Midterm grades; never reconstruct historical rules."""
+        if cycle.exam_period != ExaminationCycle.ExamPeriod.FINAL or not any(r["_rank"] is not None for r in current):
+            return {}
+        cycles = list(ExaminationCycle.objects.filter(
+            tenant_id=cycle.tenant_id, academic_year_id=cycle.academic_year_id,
+            term_id=cycle.term_id, exam_period=ExaminationCycle.ExamPeriod.MIDTERM,
+            is_active=True,
+        )[:2])
+        if len(cycles) != 1:
+            return {}
+        midterm = cycles[0]
+        current_units = {}
+        for row in current:
+            unit, invalid = unit_details[row["cycle_course_id"]]
+            if not invalid:
+                current_units[row["_unit"]] = frozenset(member.course_id for member in unit.members)
+        if not current_units:
+            return {}
+        course_ids = set().union(*current_units.values())
+        previous_scope = cls._snapshot_scope(request, midterm, campus_ids, offering_ids=authorized_offerings).filter(
+            cycle_course__course_id__in=course_ids,
+        )
+        previous_units = {}
+        for member in CycleCourse.objects.filter(
+            pk__in=previous_scope.values("cycle_course_id"),
+        ).select_related("course", "cycle"):
+            if member.pk in previous_units:
+                continue
+            try:
+                unit = _resolve_report_unit(member)
+            except ValidationError:
+                continue
+            for item in unit.members:
+                previous_units[item.pk] = frozenset(m.course_id for m in unit.members)
+        # Resolve physical saved periods from submitted records, independently
+        # of today's profile/template and their active/published state. Batch
+        # roster and grade aggregates avoid nested correlated subquery expansion.
+        previous = list(previous_scope.values("offering_id", "cycle_course_id", "campus_id"))
+        offering_ids = [row["offering_id"] for row in previous]
+        submitted = defaultdict(list)
+        for row in GradeSubmission.objects.filter(
+            tenant_id=cycle.tenant_id, campus_id=F("offering__campus_id"),
+            offering_id__in=offering_ids, status=GradeSubmission.Status.SUBMITTED,
+            template_period__template__tenant_id=cycle.tenant_id,
+            template_period__code=cls.PERIOD_CODE,
+        ).values("offering_id", "template_period_id"):
+            submitted[row["offering_id"]].append(row["template_period_id"])
+        eligible = Enrollment.objects.filter(
+            course_offering_id__in=offering_ids, is_active=True,
+            student__is_active=True, student__department__is_active=True,
+        ).filter(Q(student__program__isnull=True) | Q(student__program__is_active=True)).exclude(
+            enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES,
+        )
+        roster = dict(eligible.order_by().values("course_offering_id").annotate(
+            n=Count("student_id", distinct=True),
+        ).values_list("course_offering_id", "n"))
+        saved = StudentPeriodGrade.objects.filter(
+            tenant_id=cycle.tenant_id, campus_id=F("offering__campus_id"),
+            offering_id__in=offering_ids, template_period__code=cls.PERIOD_CODE,
+            is_finalized=True, exam_grade__gte=0, exam_grade__lte=100,
+        ).filter(Exists(eligible.filter(
+            course_offering_id=OuterRef("offering_id"), student_id=OuterRef("student_id"),
+        ))).order_by().values("offering_id", "template_period_id").annotate(
+            n=Count("student_id"), total=Sum(Cast(Round(F("exam_grade") * 100), BigIntegerField())),
+        )
+        grades = {(r["offering_id"], r["template_period_id"]): r for r in saved}
+        for row in previous:
+            periods = submitted[row["offering_id"]]
+            values = grades.get((row["offering_id"], periods[0]), {}) if len(periods) == 1 else {}
+            row.update(_period_count=len(periods), _roster=roster.get(row["offering_id"], 0),
+                _count=values.get("n", 0), _sum=values.get("total"))
+        ranks = {}
+        for unit_id, members in current_units.items():
+            now = [r for r in current if r["_unit"] == unit_id]
+            before = [r for r in previous if previous_units.get(r["cycle_course_id"]) == members]
+            if ({r["offering_id"] for r in now} != {r["offering_id"] for r in before}
+                    or any(r["_rank"] is None for r in now)
+                    or any(r["_period_count"] != 1 or not r["_roster"] or r["_count"] != r["_roster"] for r in before)):
+                continue
+            ordered = sorted(before, key=lambda r: (-cls._average(r["_sum"], r["_roster"]), r["offering_id"]))
+            last, rank = None, None
+            for position, row in enumerate(ordered, 1):
+                average = cls._average(row["_sum"], row["_roster"])
+                if average != last:
+                    rank, last = position, average
+                ranks[row["offering_id"]] = rank
+        return ranks
+
+    @classmethod
     def _ranked_summaries(cls, snapshots, cycle):
         queryset, signatures, unit_details = cls._summaries(snapshots, cycle)
         # Aggregate rows only: no student identities/results or off-page models.
@@ -695,8 +907,9 @@ class MidtermExamPerformanceReportService:
         summaries = list(queryset.order_by(
             Lower("cycle_course__course__code"), "cycle_course_id",
             Lower("offering__campus__code"), Lower("offering__section__code"), "offering_id",
-        ).values("pk", "offering_id", "cycle_course_id", "_context", "_unit",
-                 "_roster", "_status", "_highest", "_lowest", "_sum_hundredths"))
+        ).values("pk", "offering_id", "campus_id", "cycle_course_id", "_context", "_unit",
+                 "_roster", "_status", "_highest", "_lowest", "_sum_hundredths",
+                 "_period", "_threshold", "_passed", "_finalized"))
         buckets = {}
         course_order = {}
         for row in summaries:
@@ -760,6 +973,7 @@ class MidtermExamPerformanceReportService:
         ambiguous_contexts = []
         context_cases = []
         period_cases = []
+        threshold_cases = []
         for number, offering in enumerate(inputs):
             period, signatures[number], ambiguous = configuration.resolve_with_state(offering)
             periods[number] = period.pk if period else None
@@ -771,6 +985,9 @@ class MidtermExamPerformanceReportService:
             )
             context_cases.append(When(match, then=Value(number)))
             period_cases.append(When(match, then=Value(periods[number])))
+            threshold = Decimal(signatures[number][4]) if signatures[number] else None
+            if threshold is not None and threshold.is_finite() and 0 <= threshold <= 100:
+                threshold_cases.append(When(match, then=Value(threshold)))
         unit_details = {}
         for member in CycleCourse.objects.filter(
             pk__in=snapshots.values("cycle_course_id"),
@@ -791,7 +1008,10 @@ class MidtermExamPerformanceReportService:
                 When(cycle_course_id=member_id, then=Value(unit.primary.pk))
                 for member_id, (unit, invalid) in unit_details.items()
             ], output_field=IntegerField()),
-        ).annotate(_period=Case(*period_cases, output_field=IntegerField()))
+        ).annotate(
+            _period=Case(*period_cases, output_field=IntegerField()),
+            _threshold=Case(*threshold_cases, output_field=DecimalField(max_digits=6, decimal_places=2)),
+        )
         eligible = Enrollment.objects.filter(
             course_offering_id=OuterRef("offering_id"), is_active=True,
             student__is_active=True, student__department__is_active=True,
@@ -800,10 +1020,12 @@ class MidtermExamPerformanceReportService:
         ).exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
         roster = eligible.order_by().values("course_offering_id").annotate(n=Count("student_id", distinct=True))
         grades = StudentPeriodGrade.objects.filter(
+            tenant_id=cycle.tenant_id, campus_id=OuterRef("campus_id"),
             offering_id=OuterRef("offering_id"), template_period_id=OuterRef("_period"),
             student_id__in=eligible.values("student_id"),
         ).order_by().values("offering_id").annotate(
             finalized=Count("pk", filter=Q(is_finalized=True, exam_grade__isnull=False)),
+            passed=Count("pk", filter=Q(is_finalized=True, exam_grade__gte=OuterRef("_threshold"))),
             highest=Max("exam_grade"), lowest=Min("exam_grade"),
             # Official grades have two decimal places. Normalize each value to
             # integer hundredths before summing: SQLite stores decimal values as
@@ -813,11 +1035,13 @@ class MidtermExamPerformanceReportService:
             total_hundredths=Sum(Cast(Round(F("exam_grade") * 100), BigIntegerField())),
         )
         submissions = GradeSubmission.objects.filter(
+            tenant_id=cycle.tenant_id, campus_id=OuterRef("campus_id"),
             offering_id=OuterRef("offering_id"), template_period_id=OuterRef("_period"),
         ).order_by().values("status")[:1]
         snapshots = snapshots.annotate(
             _roster=Coalesce(Subquery(roster.values("n")), 0),
             _finalized=Coalesce(Subquery(grades.values("finalized")), 0),
+            _passed=Subquery(grades.values("passed")),
             _highest=Subquery(grades.values("highest")), _lowest=Subquery(grades.values("lowest")),
             _sum_hundredths=Subquery(grades.values("total_hundredths")), _submission=Subquery(submissions),
         ).annotate(_status=Case(

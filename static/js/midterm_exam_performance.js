@@ -10,6 +10,7 @@
   const sentinel = document.getElementById("midterm-scroll-sentinel");
   const dialog = document.getElementById("midterm-top-dialog");
   const topStatus = document.getElementById("midterm-top-status");
+  const topResults = document.getElementById("midterm-top-results");
   let busy = false, obsolete = false, restart = false, paused = false, loadingAll = false;
   let controller = new AbortController(), topController = new AbortController();
   let generation = 0, topGeneration = 0, filtersChanged = false;
@@ -33,6 +34,7 @@
     controls();
   };
   const closeTop = () => {
+    topResults?.replaceChildren();
     topGeneration++;
     topController.abort(); topController = new AbortController();
     if (dialog?.open) dialog.close();
@@ -143,6 +145,38 @@
     const mutation = new MutationObserver(() => window.setTimeout(auto, 0));
     mutation.observe(groups, { childList: true, subtree: true });
   }
+  const renderTop = data => {
+    if (!topResults) return;
+    topResults.replaceChildren();
+    const show = (title, rows) => {
+      if (!Array.isArray(rows) || !rows.length) return;
+      const heading = document.createElement("h3");
+      heading.className = "h6 mt-3"; heading.textContent = title;
+      const table = document.createElement("table");
+      table.className = "table table-sm";
+      const raw = rows.some(row => row.maximum_points !== null && row.maximum_points !== undefined);
+      const head = table.createTHead().insertRow();
+      for (const label of ["Rank", "Student", "Section", "Official exam grade", ...(raw ? ["Stored raw / maximum"] : [])]) {
+        const th = document.createElement("th"); th.scope = "col"; th.textContent = label; head.append(th);
+      }
+      const body = table.createTBody();
+      for (const row of rows) {
+        const tr = body.insertRow();
+        for (const value of [row.rank, `${row.name} (${row.student_no})`, row.section, row.exam_grade,
+          ...(raw ? [row.maximum_points !== null && row.maximum_points !== undefined ? `${row.raw_score ?? "?"} / ${row.maximum_points}` : "?"] : [])]) {
+          tr.insertCell().textContent = String(value ?? "?");
+        }
+      }
+      const wrapper = document.createElement("div"); wrapper.className = "table-responsive"; wrapper.append(table);
+      topResults.append(heading, wrapper);
+    };
+    for (const campus of data.campuses || []) show(`Top 10 ? ${campus.campus}`, campus.rows);
+    if (data.overall) show("Top 10 overall (authorized scope)", data.overall);
+    if (data.overall_note) {
+      const note = document.createElement("p"); note.className = "small text-muted";
+      note.textContent = data.overall_note; topResults.append(note);
+    }
+  };
   groups.addEventListener("click", async event => {
     const button = event.target.closest("[data-top-url]");
     if (!button || obsolete || !dialog || !topStatus) return;
@@ -158,6 +192,7 @@
       const data = await response.json();
       if (requestGeneration !== topGeneration || obsolete) return;
       topStatus.textContent = data.message;
+      if (data.available) renderTop(data);
     } catch (error) {
       if (requestGeneration === topGeneration && !obsolete) topStatus.textContent = "Top Performers are unavailable for this scope. Close and retry.";
     }

@@ -42,7 +42,7 @@
 </form>
 
 {% if selected_cycle %}
-<div class="alert alert-warning small">Passed counts, passing rates, and student rankings are unavailable until a verified standalone examination grade and its historical passing rule are established. Existing class statistics below use official saved exam grades.</div>
+<div class="alert alert-info small">Results use saved official exam grades only. Passed and Passing Rate compare those grades with the configured passing threshold shown on each class; this is not a reconstructed submission-time threshold. Missing results are never counted as failures. Student details require identity permission.</div>
 <div class="alert alert-light border mb-3">
   <strong>Ranking rule:</strong> Complete rows rank within their resolved examination unit only when grading configurations are compatible, by the displayed two-decimal class average. Equal averages use competition ranking (1, 1, 3). Exempt courses are omitted. Missing results are never treated as zero.
 </div>
@@ -73,6 +73,7 @@
 <dialog id="midterm-top-dialog" aria-labelledby="midterm-top-title" style="max-width:min(92vw,640px);border:1px solid #ccc;border-radius:8px;padding:1.5rem;">
   <h2 class="h5" id="midterm-top-title">Top Performers</h2>
   <p id="midterm-top-status" role="status"></p>
+  <div id="midterm-top-results"></div>
   <button id="midterm-top-close" class="btn btn-secondary" type="button">Close</button>
 </dialog>
 {% endblock %}

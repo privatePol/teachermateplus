@@ -1,3 +1,10 @@
+## 2026-11-03 - Saved official Periodical Exam Performance analytics
+- Supersedes the earlier grade-definition/formula reconstruction hold: reporting reads submitted, finalized `StudentPeriodGrade.exam_grade` values without recalculation or transmutation.
+- Added Passed/Passing Rate against the existing configured passing threshold for complete eligible rosters; threshold provenance is described as current configured policy, not reconstructed submission-time policy. Missing grades are not failures.
+- Added identity-authorized campus Top 10 with competition ties through rank 10, stored raw/max pairs when unambiguous, and Overall for a single-campus authorized population. Cross-campus Overall alone remains unavailable because grading records lack a shared assessment-revision relationship.
+- Restored previous Midterm rank/movement from confirmed saved results when the valid examination unit and authorized offering population match. Historical formula reconstruction is not required. Reopened, missing, ambiguous and changed-population comparisons stay unavailable.
+- Preserved existing navigation, EXEMPT/DEPTAL, current class ranks, scopes, direct DENY, pagination and cancellation. No grade writes, schema changes or cross-request caching.
+
 ## 2026-11-03 - Academic Performance Insights navigation
 - Corrected the unified Insights button label to Periodical Exam Performance and returned the report Back link to the unified interface. The legacy Insights route and CSV exports remain available.
 

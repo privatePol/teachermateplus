@@ -12,7 +12,7 @@ function setup({ observer = false } = {}) {
     <a id="midterm-load-more" href="?cycle_id=2&course_code=IS&row_page=2">Load more</a>
     <button id="midterm-load-all" hidden>Load All</button><button id="midterm-cancel" hidden>Cancel</button>
     <progress id="midterm-load-progress"></progress><div id="midterm-scroll-sentinel"></div>
-    <dialog id="midterm-top-dialog"><p id="midterm-top-status"></p><button id="midterm-top-close">Close</button></dialog>
+    <dialog id="midterm-top-dialog"><p id="midterm-top-status"></p><div id="midterm-top-results"></div><button id="midterm-top-close">Close</button></dialog>
     <span id="midterm-load-status" tabindex="-1"></span>`, {
     url: 'https://example.test/admin-portal/grading/midterm-exam-performance/?cycle_id=2&course_code=IS',
     runScripts: 'outside-only',
@@ -168,5 +168,27 @@ test('Top Performers is lazy, escapes its message, and discards responses after 
   release({ available: false, message: '<img src=x onerror=alert(1)>' }); await tick();
   assert.equal(document.querySelector('#midterm-top-status img'), null);
   assert.match(document.getElementById('midterm-top-status').textContent, /<img/);
+  dom.window.close();
+});
+
+
+test('Top Performers renders saved grades and available raw scores as text, preserving ties', async () => {
+  const { dom, window, document } = setup();
+  window.fetch = async () => ({ ok: true, json: async () => ({ available: true, message: 'Saved results',
+    campuses: [{ campus: 'FV', rows: [
+      { rank: 10, name: '<img src=x onerror=alert(1)>', student_no: 'S-1', section: 'A', exam_grade: '85.00', raw_score: '35.00', maximum_points: '40.00' },
+      { rank: 10, name: 'Other', student_no: 'S-2', section: 'A', exam_grade: '85.00', raw_score: null, maximum_points: null },
+    ] }], overall: null, overall_note: 'Shared assessment is not recorded',
+  }) });
+  const button = document.createElement('button'); button.dataset.topUrl = '/top/';
+  document.getElementById('midterm-course-groups').append(button); button.click(); await tick();
+  const output = document.getElementById('midterm-top-results');
+  assert.equal(output.querySelectorAll('tbody tr').length, 2);
+  assert.equal(output.querySelector('img'), null);
+  assert.match(output.textContent, /85.00/);
+  assert.match(output.textContent, /35.00 \/ 40.00/);
+  assert.match(output.textContent, /Shared assessment/);
+  document.getElementById('midterm-top-close').click();
+  assert.equal(output.textContent, '');
   dom.window.close();
 });

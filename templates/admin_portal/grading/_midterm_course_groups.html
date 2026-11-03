@@ -1,14 +1,15 @@
 {% for group in course_groups %}
 <section class="card border-0 shadow-sm mb-4" data-course-id="{{ group.id }}">
   <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap"><h2 class="h5 mb-0">{{ group.code }} | {{ group.title }}{% if group.is_deptal %} <span class="badge text-bg-primary">DEPTAL</span>{% endif %}</h2>
-    <button class="btn btn-sm btn-outline-success" type="button" data-top-url="{{ group.top_url }}" aria-haspopup="dialog">View Top Performers</button></div>
+    {% if group.top_available %}<button class="btn btn-sm btn-outline-success" type="button" data-top-url="{{ group.top_url }}" aria-haspopup="dialog">View Top Performers</button>{% endif %}</div>
+  {% if exam_period == 'FINAL' and not group.history_available %}<p class="small text-muted px-3 pt-2 mb-0">Midterm comparison unavailable for this examination unit.</p>{% endif %}
   <div class="table-responsive">
     <table class="table table-sm align-middle mb-0">
       <thead class="table-light"><tr>
         <th scope="col">Rank</th><th scope="col">Campus</th><th scope="col">Faculty</th><th scope="col">Section</th>
         <th scope="col" class="text-end">Eligible Students</th><th scope="col" class="text-end">Highest</th>
-        <th scope="col" class="text-end">Passed</th><th scope="col" class="text-end">Passing Rate</th>
-        {% if exam_period == 'FINAL' %}<th scope="col">Midterm Rank</th><th scope="col">Rank Movement</th>{% endif %}
+        {% if group.passing_available %}<th scope="col" class="text-end">Passed</th><th scope="col" class="text-end">Passing Rate</th>{% endif %}
+        {% if group.history_available %}<th scope="col">Midterm Rank</th><th scope="col">Rank Movement</th>{% endif %}
         <th scope="col" class="text-end">Lowest</th><th scope="col" class="text-end">Class Ave</th><th scope="col">Data Status</th>
       </tr></thead>
       <tbody>
@@ -19,10 +20,11 @@
           <td>{{ row.faculty_name }}</td><td>{{ row.section_code }}</td>
           <td class="text-end">{{ row.student_count }}</td>
           <td class="text-end">{% if row.highest_score is not None %}{{ row.highest_score|floatformat:2 }}{% endif %}</td>
-          <td class="text-end" title="{{ row.grade_blocker }}">N/A</td><td class="text-end" title="{{ row.grade_blocker }}">N/A</td>
-          {% if exam_period == 'FINAL' %}
-          <td title="{{ row.history_blocker }}">{% if row.midterm_rank is not None %}{{ row.midterm_rank }}{% else %}N/A{% endif %}</td>
-          <td title="{{ row.history_blocker }}">{% if row.rank_movement is not None %}{% if row.rank_movement > 0 %}+{% endif %}{{ row.rank_movement }}{% else %}N/A{% endif %}</td>
+          {% if group.passing_available %}<td class="text-end" title="Configured passing threshold: {{ row.passing_threshold|floatformat:2 }}">{% if row.passed_count is not None %}{{ row.passed_count }}{% else %}&mdash;{% endif %}</td>
+          <td class="text-end" title="Confirmed results divided by the full eligible roster; configured threshold {{ row.passing_threshold|floatformat:2 }}">{% if row.passing_rate is not None %}{{ row.passing_rate|floatformat:2 }}%{% else %}&mdash;{% endif %}</td>{% endif %}
+          {% if group.history_available %}
+          <td>{% if row.midterm_rank is not None %}{{ row.midterm_rank }}{% else %}N/A{% endif %}</td>
+          <td>{% if row.rank_movement is not None %}{% if row.rank_movement > 0 %}+{% endif %}{{ row.rank_movement }}{% else %}N/A{% endif %}</td>
           {% endif %}
           <td class="text-end">{% if row.lowest_score is not None %}{{ row.lowest_score|floatformat:2 }}{% endif %}</td>
           <td class="text-end">{% if row.class_average is not None %}{{ row.class_average|floatformat:2 }}{% endif %}</td>
