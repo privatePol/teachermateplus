@@ -819,7 +819,7 @@ class MidtermExamPerformanceReportTests(TestCase):
         self.assertContains(response, f"{course.code} | {course.title}", count=1)
         html = response.content.decode()
         self.assertEqual(re.findall(r'<th\b[^>]*>(.*?)</th>', html), [
-            "Rank", "Campus", "Faculty", "Section", "Eligible Students", "Highest", "Lowest", "Class Ave", "Data Status",
+            "Rank", "Campus", "Faculty", "Section", "Eligible Students", "Highest", "Passed", "Passing Rate", "Lowest", "Class Ave", "Data Status",
         ])
         self.assertNotIn(course.code, re.search(r'<tbody>(.*?)</tbody>', html, re.S).group(1))
 

@@ -4,23 +4,30 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
   <div>
-    <h1 class="h4 mb-1">Midterm Examination Class Performance</h1>
-    <p class="text-muted mb-0">Aggregate official Midterm results for included examination courses, regardless of historical classification.</p>
+    <h1 class="h4 mb-1">Periodical Exam Performance</h1>
+    <p class="text-muted mb-0">Aggregate official examination results for included examination courses, regardless of historical classification.</p>
   </div>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:academic_performance_insights' %}">Back to Performance Insights</a>
 </div>
 
 <form id="midterm-filters" method="get" class="card border-0 shadow-sm mb-3">
   <div class="card-body row g-3 align-items-end">
-    <div class="col-lg-7">
-      <label class="form-label" for="cycle_id">Midterm examination cycle</label>
+    <div class="col-lg-3">
+      <label class="form-label" for="exam_period">Examination period</label>
+      <select class="form-select" id="exam_period" name="exam_period">
+        <option value="MIDTERM"{% if exam_period == 'MIDTERM' %} selected{% endif %}>Midterm</option>
+        <option value="FINAL"{% if exam_period == 'FINAL' %} selected{% endif %}>Final Exam</option>
+      </select>
+    </div>
+    <div class="col-lg-4">
+      <label class="form-label" for="cycle_id">Examination cycle</label>
       <select class="form-select" id="cycle_id" name="cycle_id">
         {% for cycle in cycle_options %}
         <option value="{{ cycle.id }}"{% if selected_cycle and selected_cycle.id == cycle.id %} selected{% endif %}>
           {{ cycle.academic_year.code }} / {{ cycle.term.code }} - {{ cycle.get_status_display }}
         </option>
         {% empty %}
-        <option value="">No authorized Midterm examination cycle</option>
+        <option value="">No authorized Examination cycle</option>
         {% endfor %}
       </select>
     </div>
@@ -29,12 +36,13 @@
       <input class="form-control" id="course_code" name="course_code" value="{{ selected_course_code }}" maxlength="64" placeholder="Optional exact code">
     </div>
     <div class="col-lg-1 d-flex gap-2">
-      <button class="btn btn-success" type="submit"{% if not cycle_options %} disabled{% endif %}>View report</button>
+      <button class="btn btn-success" type="submit">View report</button>
     </div>
   </div>
 </form>
 
 {% if selected_cycle %}
+<div class="alert alert-warning small">Passed counts, passing rates, and student rankings are unavailable until a verified standalone examination grade and its historical passing rule are established. Existing class statistics below use official saved exam grades.</div>
 <div class="alert alert-light border mb-3">
   <strong>Ranking rule:</strong> Complete rows rank within their resolved examination unit only when grading configurations are compatible, by the displayed two-decimal class average. Equal averages use competition ranking (1, 1, 3). Exempt courses are omitted. Missing results are never treated as zero.
 </div>
@@ -42,20 +50,31 @@
 {% if restart_required %}
 <div class="alert alert-info">Results or access changed. <a href="{{ restart_url }}">Reload report</a> to continue.</div>
 {% else %}
-<div id="midterm-course-groups">
+<div id="midterm-course-groups" data-total-rows="{{ total_rows }}">
   {% include "admin_portal/grading/_midterm_course_groups.html" %}
 </div>
 {% if not rows %}
 <p class="text-muted">No included examination offerings are available in your authorized scope for this cycle.</p>
 {% endif %}
-<nav class="d-flex align-items-center gap-3 my-3" aria-label="More course results">
-  {% if next_url %}<a id="midterm-load-more" class="btn btn-outline-success" href="{{ next_url }}">Load more</a>{% endif %}
-  <span id="midterm-load-status" role="status" tabindex="-1">{% if rows and not next_url %}All matching results loaded.{% endif %}</span>
+<nav class="d-flex align-items-center flex-wrap gap-3 my-3" aria-label="More course results">
+  {% if next_url %}
+  <button id="midterm-load-all" class="btn btn-outline-success" type="button" hidden>Load All</button>
+  <button id="midterm-cancel" class="btn btn-outline-secondary" type="button" hidden>Cancel loading</button>
+  <a id="midterm-load-more" class="btn btn-outline-secondary" href="{{ next_url }}">Continue loading</a>
+  {% endif %}
+  <progress id="midterm-load-progress" max="{{ total_rows|default:1 }}" value="{{ rows|length }}" aria-label="Loaded class results"></progress>
+  <span id="midterm-load-status" role="status" tabindex="-1">{{ rows|length }} of {{ total_rows }} class results loaded.</span>
+  <div class="w-100" id="midterm-scroll-sentinel" aria-hidden="true"></div>
 </nav>
 {% endif %}
 {% else %}
-<div class="alert alert-info border">No authorized Midterm examination cycle is available.</div>
+<div class="alert alert-info border">No authorized examination cycle is available.</div>
 {% endif %}
+<dialog id="midterm-top-dialog" aria-labelledby="midterm-top-title" style="max-width:min(92vw,640px);border:1px solid #ccc;border-radius:8px;padding:1.5rem;">
+  <h2 class="h5" id="midterm-top-title">Top Performers</h2>
+  <p id="midterm-top-status" role="status"></p>
+  <button id="midterm-top-close" class="btn btn-secondary" type="button">Close</button>
+</dialog>
 {% endblock %}
 
 {% block extra_js %}

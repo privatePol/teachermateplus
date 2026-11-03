@@ -1,3 +1,13 @@
+## 2026-11-03 - Periodical Exam Performance focused remediation
+- Fixed Final resolution for authoritative Final/Final Exam, FX and FINALS aliases while retaining the exact physical period ID for saved results/submissions. Multiple active matches or contradictory code/name identities are explicitly rejected; Midterm resolution is unchanged.
+- Removed misleading historical Midterm rank/movement derived from current profiles. Authoritative retained submission metadata lacks applied historical grading rules, so these fields remain N/A; no history is reconstructed. Existing saved grades, Midterm aggregates and competition rankings are preserved.
+- Evaluate selected-unit aggregates once and reuse them for ranks, continuation fingerprints and display pagination. Removed repeated historical ranking/configuration work and per-rank SQL CASE expansion. No cache, schema or index change; pass statistics and student leaderboards remain blocked.
+
+## 2026-11-03 - Periodical Exam Performance (grade-dependent features remain blocked)
+- Renamed the existing Midterm report while preserving its URL/service name. Added Midterm/Final selection, automatic incremental loading, sequential Load All with acknowledged progress/cancellation, and cycle-specific DEPTAL badges. Existing EXEMPT exclusion, finalized-result statuses, competition class ranks, filtering and authorization remain.
+- The original implementation compared current Midterm/Final profiles; the focused remediation below supersedes that behavior with N/A because historical compatibility is unproven.
+- Per the authorized correctness stop condition, Passed/Passing Rate show N/A and lazy Top Performers returns an explicit unavailable reason. Standalone transmutation, historical passing rules and cross-offering assessment identity are not established by the saved exam field. No student ranking or raw/computed pair is fabricated. See docs/PERIODICAL_EXAM_PERFORMANCE.md.
+
 ## 2026-11-03 - Grade Correction reminder UI polish
 - Moved reminder controls into the existing responsive, colored Configuration Management card grid, with the same Bootstrap expansion, rounded panels and switch styling as Faculty Attendance. The existing dedicated URL uses the shared styling and fields.
 - Reminder saves continue through the authorized, CSRF-protected endpoint with tenant-scoped auditing; the card's independent form cannot submit unrelated feature switches. Defaults, policy, delivery tracking, retries and cron behavior are unchanged.

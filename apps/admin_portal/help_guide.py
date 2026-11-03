@@ -969,18 +969,25 @@ ADMIN_HELP_SECTIONS = [
                         "but does not remove underlying query or computation costs. Analytics are not official grade equivalents."
                     ),
                     (
-                        "For Midterm Exam Performance, select the Midterm examination cycle, then use Load more "
-                        "to show additional course tables and sections. Each heading shows COURSE CODE | COURSE TITLE; "
+                        "For Periodical Exam Performance, select Midterm or Final Exam and an examination cycle. Scroll "
+                        "near the bottom to load more course tables, or use Load All with progress and Cancel loading. Each heading shows COURSE CODE | COURSE TITLE; "
                         "ranked sections appear in numeric rank order, followed by unranked sections. An exact Course "
                         "code filter includes its full authorized examination unit. Ranks include all authorized "
                         "sections in that unit, even before they are displayed. Exempt courses are omitted."
                     ),
                     (
-                        "A Midterm row receives statistics only after the exact gradebook submission is "
+                        "An examination row receives statistics only after the exact gradebook submission is "
                         "Submitted and every eligible student has a finalized official exam grade. "
                         "Included offerings are reported regardless of historical examination classification; "
                         "authoritatively Exempt courses are omitted. Ranking also requires compatible grading "
                         "configurations within the examination unit."
+                    ),
+                    (
+                        "Passed counts, passing rates and Top Performers remain unavailable pending a verified standalone "
+                        "exam-grade definition and historical passing rules. Final includes verified FX/Final aliases; "
+                        "conflicting or multiple active Final periods remain unavailable. Previous Midterm rank and "
+                        "movement show N/A because retained submissions cannot prove historical grading compatibility. "
+                        "N/A is not zero. DEPTAL reflects the selected cycle classification."
                     ),
                     (
                         "On Grading Analytics, choose one Course code to show every authorized section or "
@@ -996,7 +1003,7 @@ ADMIN_HELP_SECTIONS = [
                 "check_first": [
                     "Confirm campus, academic year, term, period, and report date.",
                     "Confirm whether the source gradebook is Draft, Submitted, or Reopened.",
-                    "Treat blank Midterm statistics as unavailable or incomplete data, never as zero scores.",
+                    "Treat blank examination statistics as unavailable or incomplete data, never as zero scores.",
                     "Check that student and faculty scope is correct before export or printing.",
                 ],
                 "actions": [

@@ -6,16 +6,27 @@ const { JSDOM } = createRequire(import.meta.url)('jsdom');
 const script = readFileSync(new URL('../../static/js/midterm_exam_performance.js', import.meta.url), 'utf8');
 const course = (id, ids) => `<section data-course-id="${id}"><h2>COURSE ${id} | TITLE</h2><table><tbody>${ids.map(n => `<tr data-offering-id="${n}"><td>${n}</td></tr>`).join('')}</tbody></table></section>`;
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
-function setup() {
+function setup({ observer = false } = {}) {
   const dom = new JSDOM(`<form id="midterm-filters"><select><option>Cycle</option></select></form>
-    <div id="midterm-course-groups">${course(1, [1])}</div>
+    <div id="midterm-course-groups" data-total-rows="4">${course(1, [1])}</div>
     <a id="midterm-load-more" href="?cycle_id=2&course_code=IS&row_page=2">Load more</a>
+    <button id="midterm-load-all" hidden>Load All</button><button id="midterm-cancel" hidden>Cancel</button>
+    <progress id="midterm-load-progress"></progress><div id="midterm-scroll-sentinel"></div>
+    <dialog id="midterm-top-dialog"><p id="midterm-top-status"></p><button id="midterm-top-close">Close</button></dialog>
     <span id="midterm-load-status" tabindex="-1"></span>`, {
     url: 'https://example.test/admin-portal/grading/midterm-exam-performance/?cycle_id=2&course_code=IS',
     runScripts: 'outside-only',
   });
+  let observe;
+  if (observer) dom.window.IntersectionObserver = class {
+    constructor(callback, options) { observe = callback; assert.equal(options.rootMargin, '600px'); }
+    observe() {}
+  };
+  const dialog = dom.window.document.getElementById('midterm-top-dialog');
+  dialog.showModal = () => dialog.setAttribute('open', '');
+  dialog.close = () => dialog.removeAttribute('open');
   dom.window.eval(script);
-  return { dom, window: dom.window, document: dom.window.document,
+  return { dom, window: dom.window, document: dom.window.document, observe: () => observe([{ isIntersecting: true }]),
     click: () => dom.window.document.getElementById('midterm-load-more').click() };
 }
 test('append courses once, deduplicate rows, keep navigation and prevent concurrent loads', async () => {
@@ -74,5 +85,88 @@ test('browser back restores loading and ignores the previous in-flight response'
     json: async () => ({ html: course(1, [2]), next_url: '' }) });
   click(); await tick();
   assert.deepEqual([...document.querySelectorAll('tr')].map(n => n.dataset.offeringId), ['1', '2']);
+  dom.window.close();
+});
+
+
+test('near-bottom observation automatically loads bounded batches without overlapping fetches', async () => {
+  const { dom, window, document, observe } = setup({ observer: true });
+  let calls = 0, active = 0, maxActive = 0;
+  window.fetch = async () => {
+    calls++; active++; maxActive = Math.max(active, maxActive);
+    await tick(); active--;
+    return { ok: true, status: 200, json: async () => ({ html: course(1, [calls + 1]), next_url: calls < 2 ? '?row_page=3' : '', total_rows: 3 }) };
+  };
+  observe(); observe();
+  for (let i = 0; i < 12; i++) await tick();
+  assert.equal(calls, 2);
+  assert.equal(maxActive, 1);
+  assert.equal(document.getElementById('midterm-load-progress').value, 3);
+  dom.window.close();
+});
+
+test('Load All renders each response and reports actual acknowledged progress', async () => {
+  const { dom, window, document } = setup();
+  let second;
+  window.fetch = async url => ({ ok: true, status: 200,
+    json: url.includes('row_page=3') ? () => new Promise(resolve => { second = resolve; })
+      : async () => ({ html: course(1, [2]), next_url: '?row_page=3', total_rows: 3 }) });
+  document.getElementById('midterm-load-all').click(); await tick();
+  assert.equal(document.querySelectorAll('tr').length, 2);
+  assert.equal(document.getElementById('midterm-load-progress').value, 2);
+  second({ html: course(2, [3]), next_url: '', total_rows: 3 }); await tick();
+  assert.equal(document.getElementById('midterm-load-progress').value, 3);
+  assert.match(document.getElementById('midterm-load-status').textContent, /3 of 3/);
+  dom.window.close();
+});
+
+test('Cancel discards late response, stops automatic loads, and resumes the same URL', async () => {
+  const { dom, window, document, observe, click } = setup({ observer: true });
+  let release, signal, calls = 0;
+  window.fetch = async (url, options) => { calls++; signal = options.signal;
+    return { ok: true, status: 200, json: () => new Promise(resolve => { release = resolve; }) }; };
+  document.getElementById('midterm-load-all').click(); await tick();
+  document.getElementById('midterm-cancel').click();
+  assert.equal(signal.aborted, true);
+  release({ html: course(1, [999]), next_url: '?row_page=99', total_rows: 4 }); await tick();
+  observe(); await tick();
+  assert.equal(calls, 1);
+  assert.equal(document.querySelectorAll('tr').length, 1);
+  window.fetch = async url => {
+    assert.match(url, /row_page=2/);
+    return { ok: true, status: 200, json: async () => ({ html: course(1, [2]), next_url: '', total_rows: 2 }) };
+  };
+  click(); await tick();
+  assert.equal(document.querySelectorAll('tr').length, 2);
+  dom.window.close();
+});
+
+test('filter change stops Load All and late responses never update progress', async () => {
+  const { dom, window, document } = setup();
+  let release;
+  window.fetch = async () => ({ ok: true, status: 200, json: () => new Promise(resolve => { release = resolve; }) });
+  document.getElementById('midterm-load-all').click(); await tick();
+  document.querySelector('select').dispatchEvent(new window.Event('change', { bubbles: true }));
+  release({ html: course(1, [3]), next_url: '?row_page=3', total_rows: 99 }); await tick();
+  assert.equal(document.getElementById('midterm-load-progress').value, 1);
+  assert.equal(document.getElementById('midterm-load-all').hidden, true);
+  dom.window.close();
+});
+
+test('Top Performers is lazy, escapes its message, and discards responses after closing', async () => {
+  const { dom, window, document } = setup();
+  let calls = 0, release;
+  window.fetch = async () => { calls++; return { ok: true, json: () => new Promise(resolve => { release = resolve; }) }; };
+  const button = document.createElement('button'); button.dataset.topUrl = '/top/';
+  document.getElementById('midterm-course-groups').append(button);
+  assert.equal(calls, 0);
+  button.click(); await tick();
+  document.getElementById('midterm-top-close').click();
+  release({ available: false, message: 'late' }); await tick();
+  assert.notEqual(document.getElementById('midterm-top-status').textContent, 'late');
+  button.click(); await tick();
+  release({ available: false, message: '<img src=x onerror=alert(1)>' }); await tick();
+  assert.equal(document.querySelector('#midterm-top-status img'), null);
+  assert.match(document.getElementById('midterm-top-status').textContent, /<img/);
   dom.window.close();
 });

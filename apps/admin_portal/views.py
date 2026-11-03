@@ -2992,12 +2992,14 @@ def midterm_exam_performance_view(request):
     report = MidtermExamPerformanceReportService.build_report(request, selected_cycle)
     restart_url = request.path + "?" + urlencode({
         "cycle_id": selected_cycle.pk if selected_cycle else "",
+        "exam_period": MidtermExamPerformanceReportService.selected_exam_period(request),
         "course_code": report["selected_course_code"],
     })
     if request.headers.get("X-Midterm-Fragment") == "1":
         response = JsonResponse({
             "html": render_to_string("admin_portal/grading/_midterm_course_groups.html", report, request=request),
             "next_url": report["next_url"], "restart_url": restart_url,
+            "total_rows": report["total_rows"],
         }, status=409 if report["restart_required"] else 200)
         response["Cache-Control"] = "no-store"
         return response
@@ -3012,6 +3014,18 @@ def midterm_exam_performance_view(request):
         },
         status=409 if report["restart_required"] else 200,
     )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@portal_required("ADMIN")
+@permission_required("grading_analytics.read")
+@require_GET
+def periodical_exam_top_performers_view(request, course_id):
+    _require_academic_performance_insights(request)
+    cycle = MidtermExamPerformanceReportService.selected_cycle(request)
+    result = MidtermExamPerformanceReportService.top_performers(request, cycle, course_id)
+    response = JsonResponse(result)
     response["Cache-Control"] = "no-store"
     return response
 

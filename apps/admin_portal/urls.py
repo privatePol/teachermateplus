@@ -28,6 +28,7 @@ from .import_views import (
 from .views import (
     academic_activity_consistency_view,
     midterm_exam_performance_view,
+    periodical_exam_top_performers_view,
     academic_intervention_monitor_view,
     academic_intervention_monitor_detail_view,
     academic_year_create_view,
@@ -229,6 +230,11 @@ urlpatterns = [
         "admin-portal/grading/performance-insights/",
         academic_performance_insights_view,
         name="academic_performance_insights",
+    ),
+    path(
+        "admin-portal/grading/midterm-exam-performance/top-performers/<int:course_id>/",
+        periodical_exam_top_performers_view,
+        name="periodical_exam_top_performers",
     ),
     path(
         "admin-portal/grading/midterm-exam-performance/",
