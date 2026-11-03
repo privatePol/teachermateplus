@@ -1,3 +1,7 @@
+## 2026-11-03 - Grade Correction reminder UI polish
+- Moved reminder controls into the existing responsive, colored Configuration Management card grid, with the same Bootstrap expansion, rounded panels and switch styling as Faculty Attendance. The existing dedicated URL uses the shared styling and fields.
+- Reminder saves continue through the authorized, CSRF-protected endpoint with tenant-scoped auditing; the card's independent form cannot submit unrelated feature switches. Defaults, policy, delivery tracking, retries and cron behavior are unchanged.
+
 ## 2026-11-02 - Correction email expired-claim durability remediation
 - A lost/expired dispatch claim no longer becomes a terminal SKIPPED delivery. Expired PROCESSING rows remain reclaimable; stale workers leave replacement owners untouched.
 - Rediscovery can recover previously stranded SKIPPED / claim_lost rows for an eligible current step and currently due schedule. Existing attempt timestamps/counts, delivery identity, SENT finality and authorization checks are preserved. No notification policy, UI, scheduler or migration schema changed.

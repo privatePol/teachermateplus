@@ -1,314 +1,9 @@
 {% extends "admin_portal/base.html" %}
+{% load static %}
 
 {% block extra_head %}
 {{ block.super }}
-<style>
-  .feature-settings-form .settings-card-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 1.5rem;
-  }
-
-  @media (min-width: 992px) {
-    .feature-settings-form .settings-card-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      align-items: start;
-    }
-  }
-
-  .feature-settings-form .settings-card {
-    overflow: hidden;
-    border-radius: 1rem;
-    box-shadow: 0 0.75rem 1.8rem rgba(28, 49, 38, 0.14) !important;
-  }
-
-  .feature-settings-form .settings-card.is-expanded {
-    grid-column: 1 / -1;
-  }
-
-  .feature-settings-form .settings-card .card-header,
-  .feature-settings-form .settings-card .settings-card-toggle {
-    border: 0;
-    color: #fff !important;
-    background-color: transparent !important;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 500;
-    font-size: 0.79rem;
-    padding: 0.9rem 1.1rem;
-  }
-
-  .feature-settings-form .settings-card .settings-card-toggle {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .feature-settings-form .settings-card .settings-card-toggle:focus {
-    outline: none;
-    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.28);
-  }
-
-  .feature-settings-form .settings-card .card-header strong {
-    font-weight: 500;
-  }
-
-  .feature-settings-form .settings-card .toggle-indicator {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.8rem;
-    height: 1.8rem;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.16);
-    font-size: 1rem;
-    transform: rotate(-180deg);
-    transition: transform 0.18s ease, background 0.18s ease;
-  }
-
-  .feature-settings-form .settings-card .settings-card-toggle.collapsed .toggle-indicator {
-    transform: rotate(0deg);
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  .feature-settings-form .settings-card .card-body {
-    padding: 1.2rem;
-  }
-
-  .feature-settings-form .settings-card-summary {
-    display: none;
-    width: 100%;
-    border: 0;
-    background: linear-gradient(180deg, #ffffff, #f7fbf8);
-    padding: 1rem 1.1rem 1.15rem;
-    text-align: left;
-    color: #365242;
-    cursor: pointer;
-  }
-
-  .feature-settings-form .settings-card-summary:hover {
-    background: linear-gradient(180deg, #fbfdfb, #eff6f1);
-  }
-
-  .feature-settings-form .settings-card-summary:focus {
-    outline: none;
-    box-shadow: inset 0 0 0 2px rgba(52, 93, 70, 0.14);
-  }
-
-  .feature-settings-form .settings-card-summary-title {
-    display: block;
-    font-weight: 600;
-    color: #1f3d29;
-    margin-bottom: 0.35rem;
-  }
-
-  .feature-settings-form .settings-card-summary-text {
-    display: block;
-    font-size: 0.94rem;
-    line-height: 1.45;
-    color: #5c7366;
-  }
-
-  .feature-settings-form .settings-card-toggle.has-subtitle {
-    align-items: flex-start;
-  }
-
-  .feature-settings-form .settings-card-toggle-copy {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.2rem;
-    min-width: 0;
-  }
-
-  .feature-settings-form .settings-card-toggle-topline {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.45rem;
-    min-width: 0;
-  }
-
-  .feature-settings-form .settings-card-toggle-subtitle {
-    display: block;
-    color: rgba(255, 255, 255, 0.86);
-    font-size: 0.86rem;
-    font-weight: 400;
-    line-height: 1.35;
-    letter-spacing: 0;
-    text-transform: none;
-  }
-
-  .feature-settings-form .settings-card.is-collapsed .settings-card-summary {
-    display: block;
-  }
-
-  .feature-settings-form .settings-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.75rem;
-    margin-bottom: 1rem;
-  }
-
-  .feature-settings-form .settings-footer {
-    margin-top: 2.4rem;
-  }
-
-  .feature-settings-form .settings-card:nth-of-type(19n + 1) .card-header { background: linear-gradient(135deg, #3d6b35, #68a357) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 2) .card-header { background: linear-gradient(135deg, #1b6c72, #4aa39d) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 3) .card-header { background: linear-gradient(135deg, #7a4c2f, #d08c60) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 4) .card-header { background: linear-gradient(135deg, #315c8d, #6ca6d9) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 5) .card-header { background: linear-gradient(135deg, #5f3f8f, #9575cd) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 6) .card-header { background: linear-gradient(135deg, #7b5c13, #d4b24c) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 7) .card-header { background: linear-gradient(135deg, #1f6f5f, #58b19f) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 8) .card-header { background: linear-gradient(135deg, #8a3b4f, #d17a8f) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 9) .card-header { background: linear-gradient(135deg, #2c5e52, #6c9a8b) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 10) .card-header { background: linear-gradient(135deg, #5d4e8c, #8e83c9) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 11) .card-header { background: linear-gradient(135deg, #6a4b1f, #c78b42) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 12) .card-header { background: linear-gradient(135deg, #365f7c, #6aa5c8) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 13) .card-header { background: linear-gradient(135deg, #276a5b, #65b79f) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 14) .card-header { background: linear-gradient(135deg, #7a4e7d, #c083ba) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 15) .card-header { background: linear-gradient(135deg, #8a5a20, #d39a4a) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 16) .card-header { background: linear-gradient(135deg, #365f7c, #6aa5c8) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 17) .card-header { background: linear-gradient(135deg, #2f6a54, #67b488) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 18) .card-header { background: linear-gradient(135deg, #305f87, #6ca1d6) !important; }
-  .feature-settings-form .settings-card:nth-of-type(19n + 19) .card-header { background: linear-gradient(135deg, #7b5b18, #d7b24f) !important; }
-
-  .feature-settings-form .settings-card .card-header .text-muted,
-  .feature-settings-form .settings-card .card-header .small {
-    color: rgba(255, 255, 255, 0.82) !important;
-  }
-
-  .feature-settings-form .form-check.form-switch {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 0.8rem;
-    row-gap: 0.2rem;
-    align-items: start;
-    padding: 0.9rem 1rem;
-    border: 1px solid #dce7df;
-    border-radius: 0.9rem;
-    background: linear-gradient(180deg, #ffffff, #f7fbf8);
-  }
-
-  .feature-settings-form .form-check.form-switch .form-check-input {
-    margin-left: 0;
-    margin-top: 0.15rem;
-    float: none;
-  }
-
-  .feature-settings-form .form-check.form-switch .form-check-label {
-    font-weight: 600;
-    color: #214a33;
-  }
-
-  .feature-settings-form .form-check.form-switch .form-text,
-  .feature-settings-form .form-check.form-switch .text-danger {
-    grid-column: 2;
-    margin-bottom: 0;
-  }
-
-  .feature-settings-form .settings-anchor-card {
-    scroll-margin-top: 6rem;
-  }
-
-  .feature-settings-form .selected-class-preview {
-    background: #fbfcfa;
-    border: 1px solid #d7e3da;
-    border-radius: 0.9rem;
-    padding: 0.85rem 1rem;
-  }
-
-  .feature-settings-form .selected-class-preview ul {
-    margin: 0.45rem 0 0;
-    padding-left: 1rem;
-  }
-
-  .feature-settings-form .selected-class-preview li + li {
-    margin-top: 0.35rem;
-  }
-
-  .feature-settings-form .class-offering-picker {
-    border: 1px solid #d7e3da;
-    border-radius: 0.95rem;
-    background: linear-gradient(180deg, #ffffff, #f7fbf8);
-    max-height: 18rem;
-    overflow: auto;
-    padding: 0.35rem;
-  }
-
-  .feature-settings-form .class-offering-picker .empty-state {
-    padding: 1rem 0.9rem;
-    color: #607565;
-    font-size: 0.94rem;
-  }
-
-  .feature-settings-form .class-offering-option {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.7rem;
-    align-items: start;
-    padding: 0.7rem 0.8rem;
-    border-radius: 0.8rem;
-  }
-
-  .feature-settings-form .class-offering-option:hover {
-    background: #eef6ef;
-  }
-
-  .feature-settings-form .class-offering-option input[type="checkbox"] {
-    margin-top: 0.28rem;
-  }
-
-  .feature-settings-form .class-offering-title {
-    color: #1f3d29;
-    font-weight: 600;
-  }
-
-  .feature-settings-form .class-offering-meta {
-    color: #5f7364;
-    font-size: 0.88rem;
-  }
-
-  .feature-settings-form .class-offering-meta strong {
-    font-weight: 700;
-    color: #24422b;
-  }
-
-  .feature-settings-form .prediction-controls {
-    display: grid;
-    gap: 1rem;
-  }
-
-  .feature-settings-form .prediction-primary-grid,
-  .feature-settings-form .prediction-toggle-grid {
-    display: grid;
-    gap: 1rem;
-  }
-
-  .feature-settings-form .prediction-primary-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .feature-settings-form .prediction-toggle-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  @media (min-width: 992px) {
-    .feature-settings-form .prediction-primary-grid {
-      grid-template-columns: minmax(0, 0.95fr) minmax(16rem, 1fr);
-      align-items: start;
-    }
-
-    .feature-settings-form .prediction-toggle-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-  }
-</style>
+<link rel="stylesheet" href="{% static 'admin_portal/feature_settings.css' %}">
 {% endblock %}
 
 {% block admin_content %}
@@ -317,11 +12,12 @@
   <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
 </div>
 
-<div class="card card-body mb-3">
-  <h3 class="h6">Grade Correction Email Reminders</h3>
-  <p>Configure tenant reminder frequency and time independently of initial approval emails.</p>
-  <a href="{% url 'admin_portal:correction_email_settings' %}">Configure correction reminders</a>
-</div>
+{% if correction_reminder_form %}
+<form id="correction-reminder-settings" method="post" action="{% url 'admin_portal:correction_email_settings' %}">
+  {% csrf_token %}
+  <input type="hidden" name="return_to" value="configuration">
+</form>
+{% endif %}
 
 <form method="post" novalidate class="feature-settings-form">
   {% csrf_token %}
@@ -1526,6 +1222,15 @@
       </div>
     </div>
   </div>
+  {% if correction_reminder_form %}
+  <div id="correction-reminders-card" class="card border-0 shadow-sm settings-card settings-anchor-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-reminders" aria-expanded="false" aria-controls="feature-card-correction-reminders"><strong>Grade Correction Email Reminders</strong><span class="toggle-indicator" aria-hidden="true">+</span></button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-reminders" aria-expanded="false" aria-controls="feature-card-correction-reminders"><span class="settings-card-summary-title">Grade Correction Email Reminders</span><span class="settings-card-summary-text">Remind authorized current-step approvers on your tenant's schedule. Default: daily at 08:00 Asia/Manila.</span></button>
+    <div id="feature-card-correction-reminders" class="collapse"><div class="card-body">
+      {% include "admin_portal/tools/_correction_reminder_fields.html" with form=correction_reminder_form submit_form_id="correction-reminder-settings" %}
+    </div></div>
+  </div>
+  {% endif %}
   </div>
 
   <div class="settings-footer">
@@ -1575,6 +1280,12 @@
         syncCollapsedState(collapseElement);
       });
     });
+    if (window.location.hash === "#correction-reminders-card") {
+      const reminderPanel = document.getElementById("feature-card-correction-reminders");
+      if (reminderPanel) {
+        bootstrap.Collapse.getOrCreateInstance(reminderPanel, { toggle: false }).show();
+      }
+    }
     if (expandAllButton) {
       expandAllButton.addEventListener("click", function () {
         collapseElements.forEach(function (collapseElement) {

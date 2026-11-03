@@ -2,8 +2,11 @@
 
 ## Administrator controls
 
-Configuration Management links to **Grade Correction Email Reminders** at
-`/admin-portal/tools/correction-email-reminders/`. It requires Admin Portal access
+In Configuration Management, expand the **Grade Correction Email Reminders** card
+to change the toggle, frequency and reminder time, then choose **Save reminder settings**.
+The card saves independently of the other feature settings. The existing dedicated page at
+`/admin-portal/tools/correction-email-reminders/` uses the same styled controls and remains available.
+It requires Admin Portal access
 and `system_settings.update` in the selected tenant scope. Settings persist in the
 existing tenant `SystemSetting` JSON key `GRADE_CORRECTION_REMINDER_POLICY`:
 

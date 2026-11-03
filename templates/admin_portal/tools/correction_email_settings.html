@@ -1,13 +1,22 @@
 {% extends "admin_portal/base.html" %}
+{% load static %}
+{% block extra_head %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'admin_portal/feature_settings.css' %}">
+{% endblock %}
 {% block admin_content %}
-<h2 class="h5">{{ title }}</h2>
-<p>Tenant settings. Calendar days include weekends and holidays. Timezone: Asia/Manila.</p>
-<form method="post" class="card card-body mb-3">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="{% url 'admin_portal:configurable_features_settings' %}#correction-reminders-card" class="btn btn-sm btn-outline-secondary">Configuration Management</a>
+</div>
+<form method="post" class="feature-settings-form">
   {% csrf_token %}
-  {{ form.as_p }}
-  <button type="submit" class="btn btn-primary">Save reminder settings</button>
+  {% if return_to_configuration %}<input type="hidden" name="return_to" value="configuration">{% endif %}
+  <div class="card border-0 shadow-sm settings-card is-expanded">
+    <div class="card-header"><strong>Grade Correction Email Reminders</strong></div>
+    <div class="card-body">
+      {% include "admin_portal/tools/_correction_reminder_fields.html" %}
+    </div>
+  </div>
 </form>
-<p>Reminders start on the next eligible calendar date after the step became active. Frequency is measured from that activation date. Only the current due date is sent after a missed run.</p>
-<p>The existing initial approval email setting controls immediate notifications separately. Viewing a request does not stop reminders. Email history is available from each correction review page.</p>
-<a href="{% url 'admin_portal:configurable_features_settings' %}" class="btn btn-outline-secondary">Configuration Management</a>
 {% endblock %}

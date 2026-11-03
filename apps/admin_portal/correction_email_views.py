@@ -3,6 +3,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods
 
 from apps.admin_portal.services import AdminScopeService
@@ -23,6 +24,32 @@ def _enforce_direct_denies(request, *codes):
         raise PermissionDenied("A direct permission denial applies to this action.")
 
 
+def reminder_settings_form(*, tenant_id, data=None, form_id=None):
+    form = CorrectionReminderSettingsForm(data, initial=CorrectionReminderPolicy.get(tenant_id))
+    form.fields["enabled"].help_text = "Tenant settings. Only authorized approvers of the current pending step receive reminders."
+    form.fields["interval_days"].help_text = "Calendar days include weekends and holidays."
+    form.fields["send_time"].help_text = "Default: 08:00 Asia/Manila. Changes take effect without a service restart."
+    form.fields["enabled"].widget.attrs["role"] = "switch"
+    for name, field in form.fields.items():
+        field.widget.attrs["class"] = {
+            "enabled": "form-check-input", "interval_days": "form-select", "send_time": "form-control",
+        }[name]
+        if form_id:
+            field.widget.attrs["form"] = form_id
+    return form
+
+
+def configuration_reminder_form(request):
+    # Match the dedicated page's direct-DENY rule, including privileged users.
+    try:
+        _enforce_direct_denies(request, "admin_portal.access", "system_settings.update")
+    except PermissionDenied:
+        return None
+    return reminder_settings_form(
+        tenant_id=request.scope["tenant_id"], form_id="correction-reminder-settings",
+    )
+
+
 @portal_required("ADMIN")
 @permission_required("system_settings.update")
 @require_http_methods(["GET", "POST"])
@@ -31,8 +58,10 @@ def correction_email_settings_view(request):
     tenant_id = getattr(request, "scope", {}).get("tenant_id")
     if not tenant_id:
         raise PermissionDenied("Select an authorized tenant first.")
-    initial = CorrectionReminderPolicy.get(tenant_id)
-    form = CorrectionReminderSettingsForm(request.POST if request.method == "POST" else None, initial=initial)
+    form = reminder_settings_form(
+        tenant_id=tenant_id, data=request.POST if request.method == "POST" else None,
+    )
+    return_to_configuration = request.POST.get("return_to") == "configuration"
     if request.method == "POST" and form.is_valid():
         from django.db import transaction
         with transaction.atomic():
@@ -44,9 +73,12 @@ def correction_email_settings_view(request):
                     "send_time": form.cleaned_data["send_time"].strftime("%H:%M"), "timezone": "Asia/Manila"},
                 request=request)
         messages.success(request, "Grade Correction reminder settings saved.")
+        if return_to_configuration:
+            return redirect(reverse("admin_portal:configurable_features_settings") + "#correction-reminders-card")
         return redirect("admin_portal:correction_email_settings")
     return render(request, "admin_portal/tools/correction_email_settings.html", {
-        "title": "Grade Correction Email Reminders", "form": form})
+        "title": "Grade Correction Email Reminders", "form": form,
+        "return_to_configuration": return_to_configuration})
 
 
 @portal_required("ADMIN")

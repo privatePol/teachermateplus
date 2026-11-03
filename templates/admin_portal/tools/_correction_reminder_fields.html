@@ -1,0 +1,26 @@
+{% if form.errors %}
+<div class="alert alert-danger" role="alert">Review the reminder settings below. Your changes have not been saved.</div>
+{% endif %}
+{{ form.non_field_errors }}
+<div class="form-check form-switch mb-3">
+  {{ form.enabled }}
+  <label class="form-check-label" for="{{ form.enabled.id_for_label }}">{{ form.enabled.label }}</label>
+  <div class="form-text" id="{{ form.enabled.auto_id }}_helptext">{{ form.enabled.help_text }}</div>
+  {{ form.enabled.errors }}
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-md-6">
+    <label class="form-label" for="{{ form.interval_days.id_for_label }}">{{ form.interval_days.label }}</label>
+    {{ form.interval_days }}
+    <div class="form-text" id="{{ form.interval_days.auto_id }}_helptext">{{ form.interval_days.help_text }}</div>
+    {{ form.interval_days.errors }}
+  </div>
+  <div class="col-md-6">
+    <label class="form-label" for="{{ form.send_time.id_for_label }}">{{ form.send_time.label }}</label>
+    {{ form.send_time }}
+    <div class="form-text" id="{{ form.send_time.auto_id }}_helptext">{{ form.send_time.help_text }}</div>
+    {{ form.send_time.errors }}
+  </div>
+</div>
+<p class="small text-muted">Reminders start on the next eligible calendar date after the step becomes active. Missed runs send only the current due date. Initial approval emails keep their separate toggle; viewing a request does not stop reminders. Save this card independently of other feature settings.</p>
+<button type="submit" class="btn btn-primary"{% if submit_form_id %} form="{{ submit_form_id }}"{% endif %}>Save reminder settings</button>

@@ -1,3 +1,7 @@
+## Grade Correction reminder UI (2026-11-03)
+- Configuration Management now contains an expandable Grade Correction Email Reminders card. Its toggle, frequency and Manila time controls save independently and return to the expanded card. The existing dedicated route remains available and displays validation errors using the same shared fields/styles.
+- Shared feature-card CSS was extracted without changing existing selectors or card ordering/colors. Reminder controls have explicit HTML form ownership outside the general feature-settings form; tenant/RBAC/direct-DENY/CSRF/audit enforcement remains at the existing save endpoint. Worker, migration and scheduler behavior is unchanged.
+
 ## Correction email expired-claim remediation (2026-11-02)
 - Dispatch must not finalize `preflight` outcome `claim_lost`: expiry and ownership loss are lease state, not notification-skip decisions. An expired owned PROCESSING row remains available to the existing atomic reclaim path, while the current token/status predicate still protects completion from stale senders.
 - Current eligible rediscovery also requeues previously stranded SKIPPED / claim_lost deliveries using the existing schedule identity, without resetting attempt history or retrying SENT rows. Recipient/approval guards, reminder policy and scheduler are unchanged; grading migration 0036 is unchanged. Six focused regressions cover expiry/recovery, replacement-owner fencing, stale completion, SENT finality, and old initial/reminder rows.

@@ -838,7 +838,7 @@ ADMIN_HELP_SECTIONS = [
                     "Open the request and compare the From value, To value, student, grading item, reason, and attachment.",
                     "Record the current approval-step decision with clear remarks.",
                     "Use Email history on the review page to inspect individual recipient attempts; Sent means accepted by the email backend.",
-                    "Authorized configuration administrators can set Grade Correction Email Reminders in Configuration Management (default on, every calendar day at 08:00 Asia/Manila). Viewing a request does not stop reminders.",
+                    "Authorized configuration administrators can expand the Grade Correction Email Reminders card in Configuration Management, set its toggle, frequency and time, then choose Save reminder settings (default on, every calendar day at 08:00 Asia/Manila). Viewing a request does not stop reminders.",
                     "If authorized staff must start the request, open Grading -> Create Correction On Behalf.",
                     "Complete the configured approval route and verify the recomputed official result after final approval.",
                 ],

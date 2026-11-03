@@ -5823,8 +5823,11 @@ def configurable_features_settings_view(request):
             redirect_url = f"{redirect_url}?{urlencode(redirect_params, doseq=True)}"
         return redirect(redirect_url)
 
+    from .correction_email_views import configuration_reminder_form
+
     context = {
         "title": "Configuration Management",
+        "correction_reminder_form": configuration_reminder_form(request),
         "form": form,
         "campus_count": campus_queryset.count(),
         "campus_field_rows": [{"campus": campus, "field": form[field_name]} for field_name, campus in form.campus_fields],
