@@ -41,11 +41,45 @@ class UnifiedTests(TestCase):
             self.assertEqual(self.post("options").status_code, 200)
         text = response.content.decode()
         for label in ("Performance Overview", "Exam Comparison", "Formative\u2013Summative Alignment",
-                      "Export Sections CSV", "Export Student Review CSV", "Midterm Exam Performance", "Activity Consistency", "Back to Dashboard"):
+                      "Export Sections CSV", "Export Student Review CSV", "Periodical Exam Performance", "Activity Consistency", "Back to Dashboard"):
             self.assertIn(label, text)
         self.assertEqual(text.count('id="learning-filters"'), 1)
         for path in ("performance-insights/", "learning-performance-insights/preview/", "assessment-alignment/preview/"):
             self.assertTrue(resolve("/admin-portal/grading/" + path))
+
+    def test_periodical_navigation_links_and_access(self):
+        report_url = reverse("admin_portal:midterm_exam_performance")
+        unified = self.client.get(self.url)
+        self.assertContains(unified, f'<a class="btn btn-sm btn-outline-success" href="{report_url}">Periodical Exam Performance</a>', html=True)
+        self.assertEqual(resolve(report_url).url_name, "midterm_exam_performance")
+        for period in ("MIDTERM", "FINAL"):
+            with self.subTest(period=period):
+                report = self.client.get(report_url, {"exam_period": period})
+                self.assertContains(report, f'<a class="btn btn-sm btn-outline-secondary" href="{self.url}">Back to Performance Insights</a>', html=True)
+        self.assertEqual(resolve(self.url).url_name, "unified_academic_insights_preview")
+        self.assertEqual(self.client.get(reverse("admin_portal:academic_performance_insights")).status_code, 200)
+
+        permission = Permission.objects.get(code="grading_analytics.read")
+        UserPermission.objects.create(user=self.area_chair, permission=permission,
+            tenant=self.tenant, campus=self.campus, grant_type="DENY")
+        for url in (self.url, report_url):
+            with self.subTest(denied_url=url):
+                self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_periodical_navigation_routes_require_enabled_feature(self):
+        from apps.core.services.features import FeatureSettingsService
+        from apps.core.services.settings import SystemSettingService
+        SystemSettingService.set(FeatureSettingsService.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY,
+            False, tenant_id=self.tenant.pk, value_type="BOOL", is_active=True)
+        for url in (self.url, reverse("admin_portal:midterm_exam_performance")):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_periodical_navigation_routes_require_login(self):
+        self.client.logout()
+        for url in (self.url, reverse("admin_portal:midterm_exam_performance")):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 302)
 
     def test_tabs_share_only_required_engine_and_cache(self):
         with patch.object(learning_insights, "build_report", wraps=learning_insights.build_report) as overview, \

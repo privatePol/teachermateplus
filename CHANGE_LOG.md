@@ -1,3 +1,6 @@
+## 2026-11-03 - Academic Performance Insights navigation
+- Corrected the unified Insights button label to Periodical Exam Performance and returned the report Back link to the unified interface. The legacy Insights route and CSV exports remain available.
+
 ## 2026-11-03 - Periodical Exam Performance focused remediation
 - Fixed Final resolution for authoritative Final/Final Exam, FX and FINALS aliases while retaining the exact physical period ID for saved results/submissions. Multiple active matches or contradictory code/name identities are explicitly rejected; Midterm resolution is unchanged.
 - Removed misleading historical Midterm rank/movement derived from current profiles. Authoritative retained submission metadata lacks applied historical grading rules, so these fields remain N/A; no history is reconstructed. Existing saved grades, Midterm aggregates and competition rankings are preserved.

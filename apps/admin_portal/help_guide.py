@@ -904,7 +904,7 @@ ADMIN_HELP_SECTIONS = [
                 ],
                 "purpose": "Supports academic review, submission follow-up, clearance, audit, and printing.",
                 "menu_path": (
-                    "Admin Portal -> Grading -> Academic Performance Insights -> Midterm Exam Performance; "
+                    "Admin Portal -> Grading -> Academic Performance Insights -> Periodical Exam Performance; "
                     "Admin Portal -> Grading -> Grading Analytics or Grade Distribution Monitor; "
                     "Admin Portal -> Academics -> Faculty Final Clearance; Admin Portal -> Audit"
                 ),

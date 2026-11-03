@@ -1,3 +1,6 @@
+## Academic Performance Insights navigation - 2026-11-03
+- The unified Insights preview links to Periodical Exam Performance; the report Back link returns to that unified page. The legacy performance-insights route and exports remain available. Authorization and report calculations are unchanged.
+
 ## Periodical Exam Performance - 2026-11-03
 - Isolated branch `feat/periodical-exam-performance`, base `07f45a0da15e47c18a118e3aeef1c982c8617725`; original worktrees preserved. Compatibility route remains `/admin-portal/grading/midterm-exam-performance/`; `exam_period=MIDTERM|FINAL` filters cycles. Final resolves verified FX/FINALS/Final Exam aliases to a unique active physical period; ambiguity/conflicting identities are unavailable. Midterm remains exact.
 - Five course identities and at most 50 offering rows per batch; full authorized unit aggregate rows preserve competition ranks independently of rendering; rows are evaluated once per selected course batch and reused for ranks, fingerprints and display pagination. Scroll loading and sequential Load All use signed continuations, acknowledged row progress, AbortController and generation guards. Cancel retains the next URL for explicit resume. Existing feature configuration governs the report and lazy Top Performers endpoint.
