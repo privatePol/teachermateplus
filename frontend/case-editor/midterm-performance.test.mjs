@@ -6,13 +6,13 @@ const { JSDOM } = createRequire(import.meta.url)('jsdom');
 const script = readFileSync(new URL('../../static/js/midterm_exam_performance.js', import.meta.url), 'utf8');
 const course = (id, ids) => `<section data-course-id="${id}"><h2>COURSE ${id} | TITLE</h2><table><tbody>${ids.map(n => `<tr data-offering-id="${n}"><td>${n}</td></tr>`).join('')}</tbody></table></section>`;
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
-function setup({ observer = false } = {}) {
+function setup({ observer = false, legacyDialog = false } = {}) {
   const dom = new JSDOM(`<form id="midterm-filters"><select><option>Cycle</option></select></form>
     <div id="midterm-course-groups" data-total-rows="4">${course(1, [1])}</div>
     <a id="midterm-load-more" href="?cycle_id=2&course_code=IS&row_page=2">Load more</a>
     <button id="midterm-load-all" hidden>Load All</button><button id="midterm-cancel" hidden>Cancel</button>
     <progress id="midterm-load-progress"></progress><div id="midterm-scroll-sentinel"></div>
-    <dialog id="midterm-top-dialog"><p id="midterm-top-status"></p><div id="midterm-top-results"></div><button id="midterm-top-close">Close</button></dialog>
+    <dialog id="midterm-top-dialog"><p id="midterm-top-status"></p>${legacyDialog ? '' : '<div id="midterm-top-results"></div>'}<button id="midterm-top-close">Close</button></dialog>
     <span id="midterm-load-status" tabindex="-1"></span>`, {
     url: 'https://example.test/admin-portal/grading/midterm-exam-performance/?cycle_id=2&course_code=IS',
     runScripts: 'outside-only',
@@ -187,8 +187,32 @@ test('Top Performers renders saved grades and available raw scores as text, pres
   assert.equal(output.querySelector('img'), null);
   assert.match(output.textContent, /85.00/);
   assert.match(output.textContent, /35.00 \/ 40.00/);
-  assert.match(output.textContent, /Shared assessment/);
+  assert.doesNotMatch(output.textContent, /Shared assessment|overall/);
+  assert.equal(document.getElementById('midterm-top-status').hidden, true);
   document.getElementById('midterm-top-close').click();
   assert.equal(output.textContent, '');
+  dom.window.close();
+});
+
+
+test('Fairview results render alone, with no empty campus reports or explanatory boilerplate', async () => {
+  const { dom, window, document } = setup({ legacyDialog: true });
+  window.fetch = async () => ({ ok: true, json: async () => ({ available: true,
+    message: 'Top 10 confirmed saved exam grades per campus; competition ties include rank 10.',
+    campuses: [
+      { campus: 'Fairview', rows: [{ rank: 1, name: 'Juan Dela Cruz', student_no: 'FV-1', section: 'A', exam_grade: '96.00', raw_score: null, maximum_points: null }] },
+      { campus: 'Taytay', rows: [] }, { campus: 'Cubao', rows: [] },
+    ], overall: [{ rank: 1, name: 'Duplicate overall table' }], overall_note: 'Assessment linkage unavailable',
+  }) });
+  const button = document.createElement('button'); button.dataset.topUrl = '/top/';
+  document.getElementById('midterm-course-groups').append(button); button.click(); await tick();
+  const output = document.getElementById('midterm-top-results');
+  assert.equal(output.querySelectorAll('table').length, 1);
+  assert.match(output.textContent, /Top 10 - Fairview/);
+  assert.match(output.textContent, /Juan Dela Cruz/);
+  assert.match(output.textContent, /Converted exam grade/);
+  assert.match(output.textContent, /96.00/);
+  assert.doesNotMatch(output.textContent, /Taytay|Cubao|overall|Assessment/);
+  assert.equal(document.getElementById('midterm-top-status').textContent, '');
   dom.window.close();
 });

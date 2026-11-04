@@ -814,10 +814,11 @@ class MidtermExamPerformanceReportService:
         """Rank confirmed saved Midterm grades; never reconstruct historical rules."""
         if cycle.exam_period != ExaminationCycle.ExamPeriod.FINAL or not any(r["_rank"] is not None for r in current):
             return {}
+        # Catalog activation controls current selection, not retained official
+        # history. The tenant/year/term/period and unit relationships still bind it.
         cycles = list(ExaminationCycle.objects.filter(
             tenant_id=cycle.tenant_id, academic_year_id=cycle.academic_year_id,
             term_id=cycle.term_id, exam_period=ExaminationCycle.ExamPeriod.MIDTERM,
-            is_active=True,
         )[:2])
         if len(cycles) != 1:
             return {}
@@ -881,14 +882,22 @@ class MidtermExamPerformanceReportService:
             periods = submitted[row["offering_id"]]
             values = grades.get((row["offering_id"], periods[0]), {}) if len(periods) == 1 else {}
             row.update(_period_count=len(periods), _roster=roster.get(row["offering_id"], 0),
-                _count=values.get("n", 0), _sum=values.get("total"))
+                _count=values.get("n", 0), _sum=values.get("total"),
+                _ambiguous=len(periods) > 1 and any((row["offering_id"], period) in grades for period in periods))
         ranks = {}
         for unit_id, members in current_units.items():
-            now = [r for r in current if r["_unit"] == unit_id]
-            before = [r for r in previous if previous_units.get(r["cycle_course_id"]) == members]
-            if ({r["offering_id"] for r in now} != {r["offering_id"] for r in before}
-                    or any(r["_rank"] is None for r in now)
-                    or any(r["_period_count"] != 1 or not r["_roster"] or r["_count"] != r["_roster"] for r in before)):
+            # Form each period's confirmed ranking population independently.
+            # A section unranked in both periods cannot veto other sections;
+            # a section participating in only one period changes the population.
+            now = [r for r in current if r["_unit"] == unit_id and r["_rank"] is not None]
+            unit_previous = [r for r in previous if previous_units.get(r["cycle_course_id"]) == members]
+            # Conflicting physical periods with confirmed grades are not absent
+            # history. Submission metadata without any confirmed grade is absent.
+            if any(r["_ambiguous"] for r in unit_previous):
+                continue
+            before = [r for r in unit_previous
+                      if r["_period_count"] == 1 and r["_roster"] > 0 and r["_count"] == r["_roster"]]
+            if not now or {r["offering_id"] for r in now} != {r["offering_id"] for r in before}:
                 continue
             ordered = sorted(before, key=lambda r: (-cls._average(r["_sum"], r["_roster"]), r["offering_id"]))
             last, rank = None, None

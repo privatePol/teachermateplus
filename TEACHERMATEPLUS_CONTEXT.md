@@ -1,3 +1,11 @@
+## 2026-11-03 - Previous Midterm comparison guards
+- Compare independent confirmed Midterm and Final ranking populations. Unconfirmed sections in both periods no longer suppress valid comparisons elsewhere in the unit; genuinely different confirmed populations or units remain unavailable.
+- Retained submitted/finalized Midterm results remain eligible when the historical cycle is inactive. Tenant/year/term/course/offering/period and validated unit relationships still establish the match. Existing competition ties and current class rankings are preserved; no saved grade is recalculated or written.
+
+## 2026-11-03 - Campus Top 10 popup
+- Show each campus Top 10 directly from its confirmed saved converted exam grades. Fairview results remain available while Taytay/Cubao have no confirmed results; empty campuses have no report.
+- Display the student tables with a Converted exam grade column, omit duplicate Overall tables and generic ranking boilerplate, and version the report script URL to refresh cached JavaScript. The renderer can also create its result container for older dialog markup. Backend ranking, grades and authorization are unchanged.
+
 ## 2026-11-03 - Saved official Periodical Exam Performance analytics
 - Supersedes the earlier grade-definition/formula reconstruction hold: reporting reads submitted, finalized `StudentPeriodGrade.exam_grade` values without recalculation or transmutation.
 - Added Passed/Passing Rate against the existing configured passing threshold for complete eligible rosters; threshold provenance is described as current configured policy, not reconstructed submission-time policy. Missing grades are not failures.

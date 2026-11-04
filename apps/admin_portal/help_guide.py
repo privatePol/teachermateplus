@@ -985,7 +985,9 @@ ADMIN_HELP_SECTIONS = [
                     (
                         "Passed counts and rates compare saved confirmed exam grades against the configured passing "
                         "threshold, using the full eligible roster only when results are complete. Identity-authorized "
-                        "Top Performers ranks available confirmed saved grades per campus, including ties at rank 10; "
+                        "Top Performers ranks available confirmed saved converted exam grades per campus, including ties at rank 10. "
+                        "A campus with results displays its own Top 10 without waiting for other campuses; campuses without "
+                        "confirmed results are omitted. The popup shows student names and converted exam grades directly; "
                         "stored raw scores and maximum points appear only when their exam activity is unambiguous. "
                         "Cross-campus Overall requires a shared assessment identity; it is not inferred from a common scale. "
                         "Final includes verified FX/Final aliases; ambiguous Final periods remain unavailable. Midterm rank "

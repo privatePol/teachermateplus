@@ -76,7 +76,7 @@ class PeriodicalExamPerformanceTests(TestCase):
         self.assertContains(response, 'Midterm Rank')
         self.assertContains(response, 'Rank Movement')
 
-    def test_missing_midterm_cycle_is_na(self):
+    def test_inactive_midterm_without_confirmed_history_is_na(self):
         offering = self._offering(self.cycle_course, self.fairview, self.faculty_fv, 'NO-MID')
         student = self._student(offering, 'NO-MID')
         self._final(offering)
@@ -630,6 +630,137 @@ class PeriodicalExamPerformanceTests(TestCase):
         response = self._get(cycle_id=self.cycle.pk)
         self.assertNotContains(response, 'data-top-url=')
         self.assertEqual(sorted(r['passed_count'] for r in response.context['rows']), [0, 1])
+
+
+    def test_fairview_top_is_independent_of_taytay_and_cubao_missing_results(self):
+        from apps.rbac.models import UserRole
+        self._identity_permission()
+        taytay = self._campus_scope('TAY', 'Taytay')
+        faculty_tay = self._faculty('faculty-tay', taytay)
+        UserRole.objects.create(user=self.admin, role=self.cao_role, tenant=self.tenant, campus=taytay[0])
+        UserRole.objects.create(user=faculty_tay, role=self.faculty_role, tenant=self.tenant,
+            campus=taytay[0], department=taytay[1])
+        fairview = self._offering(self.cycle_course, self.fairview, self.faculty_fv, 'ONLY-FV')
+        cubao = self._offering(self.cycle_course, self.cubao, self.faculty_cub, 'PENDING-CUB')
+        self._offering(self.cycle_course, taytay, faculty_tay, 'EMPTY-TAY')
+        values = [(self._student(fairview, f'FV-TOP-{i}'), Decimal(100-i)) for i in range(12)]
+        self._submitted_results(fairview, values)
+        pending = self._student(cubao, 'CUB-PENDING')
+        self._submission(cubao, 'DRAFT')
+        self._period_grade(cubao, pending, Decimal(100), finalized=False)
+        request = self._request()
+        request.scope['campus_ids'].append(taytay[0].pk)
+        result = Service.top_performers(request, self.cycle, self.course.pk)
+        self.assertTrue(result['available'])
+        self.assertEqual([c['campus'] for c in result['campuses']], ['FV'])
+        rows = result['campuses'][0]['rows']
+        self.assertEqual([r['student_no'] for r in rows], [student.student_no for student, _ in values[:10]])
+        self.assertEqual([r['exam_grade'] for r in rows], [str(grade.quantize(Decimal('0.01'))) for _, grade in values[:10]])
+        self.assertEqual([r['rank'] for r in rows], list(range(1, 11)))
+        self.assertContains(self._get(cycle_id=self.cycle.pk), 'midterm_exam_performance.js?v=campus-top10-20261103')
+        # Cubao joins its own ranking once it has a confirmed result. Taytay's
+        # missing results do not suppress either campus.
+        GradeSubmission.objects.filter(offering=cubao).update(status='SUBMITTED')
+        StudentPeriodGrade.objects.filter(offering=cubao).update(is_finalized=True)
+        result = Service.top_performers(request, self.cycle, self.course.pk)
+        self.assertEqual({c['campus'] for c in result['campuses']}, {'FV', 'CUB'})
+
+
+    def _ae103_confirmed_sections(self):
+        self.course.code = 'AE103-MS'
+        self.course.title = 'Management Science'
+        self.course.save()
+        for index, (midterm, final) in enumerate(((90, 80), (80, 95), (80, 95), (70, 70))):
+            offering = self._offering(self.cycle_course, self.fairview, self.faculty_fv, f'FV-AE103-{index}')
+            student = self._student(offering, f'AE103-{index}')
+            self._submitted_results(offering, [(student, Decimal(midterm))])
+            self._final(offering)
+            self._submitted_results(offering, [(student, Decimal(final))], period=self.final_period)
+
+    def _ae103_rank_values(self):
+        response = self._get(exam_period='FINAL', cycle_id=self.final_cycle.pk)
+        rows = {r['section_code']: r for r in response.context['rows']}
+        return response, [(rows[f'FV-AE103-{i}']['rank'], rows[f'FV-AE103-{i}']['midterm_rank'],
+                           rows[f'FV-AE103-{i}']['rank_movement']) for i in range(4)]
+
+    def test_ae103_empty_cubao_taytay_do_not_block_four_confirmed_fairview_sections(self):
+        from apps.rbac.models import UserRole
+        self._ae103_confirmed_sections()
+        taytay = self._campus_scope('TAY', 'Taytay')
+        faculty_tay = self._faculty('ae103-faculty-tay', taytay)
+        UserRole.objects.create(user=self.admin, role=self.cao_role, tenant=self.tenant, campus=taytay[0])
+        UserRole.objects.create(user=faculty_tay, role=self.faculty_role, tenant=self.tenant,
+            campus=taytay[0], department=taytay[1])
+        for scope, faculty, label in ((self.cubao, self.faculty_cub, 'CUB'), (taytay, faculty_tay, 'TAY')):
+            offering = self._offering(self.cycle_course, scope, faculty, f'{label}-PENDING')
+            self._student(offering, f'{label}-PENDING')
+            self._final(offering)
+        before = list(StudentPeriodGrade.objects.order_by('pk').values())
+        response, observed = self._ae103_rank_values()
+        self.assertEqual(observed, [(3, 1, -2), (1, 2, 1), (1, 2, 1), (4, 4, 0)])
+        self.assertEqual({r['campus_code'] for r in response.context['rows'] if r['section_code'].endswith('-PENDING')}, {'CUB', 'TAY'})
+        self.assertContains(response, 'Midterm Rank')
+        self.assertContains(response, 'Rank Movement')
+        self.assertEqual(before, list(StudentPeriodGrade.objects.order_by('pk').values()))
+
+    def test_ae103_inactive_historical_cycle_keeps_confirmed_saved_comparison(self):
+        self._ae103_confirmed_sections()
+        self.cycle.is_active = False
+        self.cycle.save()
+        before = list(StudentPeriodGrade.objects.order_by('pk').values())
+        response, observed = self._ae103_rank_values()
+        self.assertEqual(observed, [(3, 1, -2), (1, 2, 1), (1, 2, 1), (4, 4, 0)])
+        self.assertContains(response, 'Midterm Rank')
+        self.assertEqual(before, list(StudentPeriodGrade.objects.order_by('pk').values()))
+
+    def test_ae103_different_confirmed_populations_still_block_comparison(self):
+        self._ae103_confirmed_sections()
+        other = self._offering(self.cycle_course, self.cubao, self.faculty_cub, 'CUB-MIDTERM-ONLY')
+        student = self._student(other, 'CUB-MIDTERM-ONLY')
+        self._submitted_results(other, [(student, Decimal(100))])
+        self._final(other)
+        _, observed = self._ae103_rank_values()
+        self.assertEqual([rank for rank, _, _ in observed], [3, 1, 1, 4])
+        self.assertTrue(all(midterm is None and movement is None for _, midterm, movement in observed))
+
+
+    def test_ae103_unrelated_historical_unit_still_blocks_comparison(self):
+        from apps.academics.models import Course
+        from apps.departmental_exams.exam_units import ExamCourseEquivalencyService
+        self._ae103_confirmed_sections()
+        equivalent = Course.objects.create(tenant=self.tenant, code='AE103-EQUIV', title='Midterm equivalent')
+        member = self._cycle_course(equivalent, CycleCourse.ExamClassification.STANDARDIZED)
+        self._configuration(member)
+        offering = self._offering(member, self.fairview, self.faculty_fv, 'FV-OTHER-UNIT')
+        student = self._student(offering, 'OTHER-UNIT')
+        self._submitted_results(offering, [(student, Decimal(100))])
+        ExamCourseEquivalencyService.create_group(cycle_id=self.cycle.pk,
+            primary_cycle_course_id=self.cycle_course.pk, member_ids=[self.cycle_course.pk, member.pk],
+            name='Midterm-only examination unit', actor=self.admin)
+        _, observed = self._ae103_rank_values()
+        self.assertEqual([rank for rank, _, _ in observed], [3, 1, 1, 4])
+        self.assertTrue(all(midterm is None and movement is None for _, midterm, movement in observed))
+
+
+    def test_ae103_ambiguous_confirmed_history_is_not_treated_as_missing_results(self):
+        from apps.grading.models import GradingTemplate
+        self._ae103_confirmed_sections()
+        other = self._offering(self.cycle_course, self.cubao, self.faculty_cub, 'CUB-AMBIGUOUS')
+        student = self._student(other, 'CUB-AMBIGUOUS')
+        self._submitted_results(other, [(student, Decimal(100))])
+        self._final(other)  # No confirmed Final result for this offering.
+        retained = GradingTemplate.objects.create(tenant=self.tenant, code='AE103-RETAINED',
+            name='Retained historical template', is_published=False)
+        period = GradingTemplatePeriod.objects.create(template=retained, code='MIDTERM', name='Midterm', sequence_no=1)
+        self._submitted_results(other, [(student, Decimal(95))], period=period)
+        _, observed = self._ae103_rank_values()
+        self.assertEqual([rank for rank, _, _ in observed], [3, 1, 1, 4])
+        self.assertTrue(all(midterm is None and movement is None for _, midterm, movement in observed))
+        # Metadata alone is not a confirmed result: once both ambiguous grade
+        # records are unfinalized, this section must not veto Fairview either.
+        StudentPeriodGrade.objects.filter(offering=other).update(is_finalized=False)
+        _, observed = self._ae103_rank_values()
+        self.assertEqual(observed, [(3, 1, -2), (1, 2, 1), (1, 2, 1), (4, 4, 0)])
 
 
 # Reuse fixtures without inheriting or collecting the existing regression tests twice.
