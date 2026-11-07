@@ -1,5 +1,22 @@
 # CHANGE_LOG.md
 
+## 2026-11-07 - Full faculty provisioning actor-lock correction
+- Full provisioning acquires its administrator lock before creating an account or audit record, preventing the late audit foreign-key lock upgrade. Existing-target role assignment retains ordered actor/target locks.
+- Duplicate checks now run under that actor lock. Provisioning reuses the checked assignment transaction body and retries only complete rolled-back SQLite units; nested failures propagate to their transaction owner. Focused regressions cover competing calls, rollback, audit integrity and SQL ordering. No schema or user-facing workflow changed.
+
+## 2026-11-07 - Faculty login control independent-review remediation
+- Stale account/password saves cannot overwrite independent login state or roll back revocation versions; non-editable model fields retain existing password/edit functionality.
+- Continuing active/open loading outside the cleared campus/term, including the next term at the same campus, prevents automatic disabling at scheduling and application.
+- Role/loading model and bulk writers serialize with the worker using ordered account locks; existing-target role assignment, import, replacement and initializer paths acquire account locks before their existing row locks. The later full-provisioning correction is recorded above.
+- Corrected the SUPER_ADMIN permission seed and fresh initialization; tenant scope and direct DENY remain enforced. Accounts 0014 is additive model-state metadata only; no persistent migration or release is included.
+
+## 2026-11-07 - Independent faculty login control (Gate 2, default OFF)
+- Added an independent login-disabled flag and persistent session revocation version; activation, identity, roles, faculty loading, grading, exam contributions, attendance and history are preserved.
+- Security > Users now offers confirmed, CSRF-protected Enable/Disable Login actions with a dedicated permission, strict target scope, direct-DENY precedence, stale-version rejection, administrative lockout protections and audit records.
+- The first successful official clearance PDF per faculty/campus/term can establish a deadline using configured whole days (minimum 1, default 2), each lasting 24 elapsed hours. The delay is saved with each event; day changes affect new events only. Preview, incomplete/failed rendering, historical reports and reprinting do not start or reset it. Continuing cross-campus loading and other active roles are terminal MIS-review exceptions. Manual enabling overrides existing deadlines; new cycles may qualify later.
+- Added default-OFF tenant configuration, exact-cutoff request/login enforcement, an idempotent command and a prepared cron entry. OFF permanently cancels pending deadlines without restoring disabled logins. Re-enabling cannot revive canceled cycles or PDFs first generated while OFF; manual controls remain independent. Tenant settings never inherit global activation. Four additive migrations are prepared; no normal database migration, activation, commit, push, deployment or restart is included.
+- Clearance references now include a bounded random suffix to support rapid concurrent regeneration without second-precision collisions. Operational details and validation limits: `docs/FACULTY_LOGIN_CONTROL.md` and the Gate 2 report.
+
 ## 2026-11-02 - Correction email expired-claim durability remediation
 - A lost/expired dispatch claim no longer becomes a terminal SKIPPED delivery. Expired PROCESSING rows remain reclaimable; stale workers leave replacement owners untouched.
 - Rediscovery can recover previously stranded SKIPPED / claim_lost rows for an eligible current step and currently due schedule. Existing attempt timestamps/counts, delivery identity, SENT finality and authorization checks are preserved. No notification policy, UI, scheduler or migration schema changed.

@@ -15,6 +15,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import FacultyInvitation
+from apps.accounts.login_obligations import lock_login_users, retry_login_write
 from apps.core.services.audit import AuditService
 from apps.core.services.email_assets import format_email_subject
 from apps.core.services.permissions import PermissionService
@@ -81,6 +82,8 @@ class ScopedUserRoleAssignmentService:
             raise PermissionDenied("Selected department is outside your scope.")
 
     @classmethod
+    @retry_login_write
+    @transaction.atomic
     def assign(
         cls,
         *,
@@ -95,6 +98,22 @@ class ScopedUserRoleAssignmentService:
         import_batch_id=None,
         import_row_number=None,
     ) -> RoleAssignmentResult:
+        lock_login_users([user.pk, actor.pk])
+        return cls._assign_locked(
+            actor=actor, user=user, role=role, tenant=tenant, campus=campus,
+            department=department, permission_code=permission_code, request=request,
+            import_batch_id=import_batch_id, import_row_number=import_row_number,
+        )
+
+    @classmethod
+    def _assign_locked(
+        cls, *, actor, user, role: Role, tenant: Tenant | None,
+        campus: Campus | None, department: Department | None, permission_code: str,
+        request=None, import_batch_id=None, import_row_number=None,
+    ) -> RoleAssignmentResult:
+        # Internal transaction body: the caller owns actor and target locks.
+        # A target just INSERTed by provisioning is already exclusively owned.
+        role.refresh_from_db()
         if not role.is_active:
             raise ValidationError("Selected role is inactive.")
         if not PermissionService.has_permission(
@@ -190,6 +209,7 @@ class FacultyAccountProvisioningService:
         return role
 
     @classmethod
+    @retry_login_write
     def provision(
         cls,
         *,
@@ -224,12 +244,15 @@ class FacultyAccountProvisioningService:
         normalized_username = cls.normalize_username(username)
         if not normalized_username:
             raise ValidationError("Username is required.")
-        if User.objects.filter(email__iexact=normalized_email).exists():
-            raise ValidationError("Email is already assigned to another user.")
-        if User.objects.filter(username__iexact=normalized_username).exists():
-            raise ValidationError("Username is already assigned to another user.")
-
         with transaction.atomic():
+            # Own the audit actor before any INSERT can take a shared FK lock
+            # on it. The new target row is owned by this same transaction;
+            # existing-target assignment instead locks both accounts by ID.
+            lock_login_users([actor.pk])
+            if User.objects.filter(email__iexact=normalized_email).exists():
+                raise ValidationError("Email is already assigned to another user.")
+            if User.objects.filter(username__iexact=normalized_username).exists():
+                raise ValidationError("Username is already assigned to another user.")
             user = User.objects.create_user(
                 username=normalized_username,
                 email=normalized_email,
@@ -268,7 +291,7 @@ class FacultyAccountProvisioningService:
                 },
                 request=request,
             )
-            role_result = ScopedUserRoleAssignmentService.assign(
+            role_result = ScopedUserRoleAssignmentService._assign_locked(
                 actor=actor,
                 user=user,
                 role=role,

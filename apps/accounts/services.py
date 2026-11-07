@@ -106,7 +106,11 @@ class ActivePortalSessionService:
             return 0
 
         with transaction.atomic():
-            User.objects.select_for_update().only("id").get(id=user.id)
+            from django.core.exceptions import PermissionDenied
+            from apps.accounts.login_control import LoginAccessService
+            current_user = User.objects.select_for_update().get(id=user.id)
+            if current_user.login_access_version != user.login_access_version or not LoginAccessService.login_allowed(current_user):
+                raise PermissionDenied("Login access changed. Please sign in again.")
             registered = list(
                 ActivePortalSession.objects.select_for_update()
                 .filter(user_id=user.id)

@@ -189,6 +189,8 @@ class Command(BaseCommand):
         }
 
     def _seed(self, *, tenant, campus, recipient_email, as_of_date, demo_password):
+        from apps.accounts.login_obligations import lock_login_users
+        lock_login_users(User.objects.values_list("pk", flat=True))
         existing_offering_count = CourseOffering.objects.filter(
             tenant=tenant,
             campus=campus,
@@ -676,6 +678,8 @@ class Command(BaseCommand):
             backup.delete()
 
     def _reset(self, tenant):
+        from apps.accounts.login_obligations import lock_login_users
+        lock_login_users(User.objects.values_list("pk", flat=True))
         academic_year = AcademicYear.objects.filter(tenant=tenant, code=self.ACADEMIC_YEAR_CODE).first()
         offering_ids = list(
             CourseOffering.objects.filter(

@@ -114,6 +114,7 @@ def _enforce_single_device_session(request, user, portal_code: str):
 PENDING_OTP_USER_ID_KEY = "pending_login_otp_user_id"
 PENDING_OTP_PORTAL_KEY = "pending_login_otp_portal"
 PENDING_OTP_BACKEND_KEY = "pending_login_otp_backend"
+PENDING_OTP_ACCESS_VERSION_KEY = "pending_login_otp_access_version"
 PENDING_ADMIN_RESET_USER_ID_KEY = "pending_admin_password_reset_user_id"
 PENDING_ADMIN_RESET_CHALLENGE_ID_KEY = "pending_admin_password_reset_challenge_id"
 VERIFIED_ADMIN_RESET_USER_ID_KEY = "verified_admin_password_reset_user_id"
@@ -129,6 +130,7 @@ def _login_url_name(portal_code: str) -> str:
 
 def _store_pending_otp_login(request, *, user, portal_code: str) -> None:
     request.session[PENDING_OTP_USER_ID_KEY] = user.id
+    request.session[PENDING_OTP_ACCESS_VERSION_KEY] = user.login_access_version
     request.session[PENDING_OTP_PORTAL_KEY] = (portal_code or "").upper()
     request.session[PENDING_OTP_BACKEND_KEY] = getattr(
         user,
@@ -139,7 +141,7 @@ def _store_pending_otp_login(request, *, user, portal_code: str) -> None:
 
 
 def _clear_pending_otp_login(request) -> None:
-    for key in (PENDING_OTP_USER_ID_KEY, PENDING_OTP_PORTAL_KEY, PENDING_OTP_BACKEND_KEY):
+    for key in (PENDING_OTP_USER_ID_KEY, PENDING_OTP_PORTAL_KEY, PENDING_OTP_BACKEND_KEY, PENDING_OTP_ACCESS_VERSION_KEY):
         request.session.pop(key, None)
     request.session.modified = True
 
@@ -155,6 +157,11 @@ def _clear_admin_password_reset_session(request) -> None:
 
 
 def _complete_portal_login(request, *, user, portal_code: str, dashboard_url_name: str, backend: str | None = None):
+    from apps.accounts.login_control import LoginAccessService
+    from django.core.exceptions import PermissionDenied
+    current = User.objects.get(pk=user.pk)
+    if current.login_access_version != user.login_access_version or not LoginAccessService.login_allowed(current):
+        raise PermissionDenied("Login access changed. Please sign in again.")
     LoginLockoutService.register_success(username=user.username, portal_code=portal_code)
     login(request, user, backend=backend)
     _clear_pending_otp_login(request)
@@ -264,7 +271,13 @@ class _BaseLoginOtpView(FormView):
             messages.error(request, "Please sign in again to request a new verification code.")
             return redirect(reverse(_login_url_name(self.portal_code)))
         self.pending_user = User.objects.filter(id=pending_user_id, is_active=True).first()
-        if not self.pending_user or not PermissionService.has_permission(self.pending_user, self.portal_permission):
+        from apps.accounts.login_control import LoginAccessService
+        if (
+            not self.pending_user
+            or self.pending_user.login_access_version != request.session.get(PENDING_OTP_ACCESS_VERSION_KEY, -1)
+            or not LoginAccessService.login_allowed(self.pending_user)
+            or not PermissionService.has_permission(self.pending_user, self.portal_permission)
+        ):
             _clear_pending_otp_login(request)
             messages.error(request, "Please sign in again to request a new verification code.")
             return redirect(reverse(_login_url_name(self.portal_code)))

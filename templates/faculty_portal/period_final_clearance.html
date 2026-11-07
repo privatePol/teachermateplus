@@ -1,6 +1,19 @@
 {% extends "faculty_portal/base.html" %}
+{% load tz %}
 
 {% block faculty_content %}
+{% if login_deadline %}
+<div class="alert alert-info">
+  {% if login_deadline.state == 'PENDING' %}
+    Your first successful clearance PDF started a {{ login_deadline.delay_days }}-day login deadline (24 elapsed hours per day): <strong>{{ login_deadline.disable_at|timezone:"Asia/Manila"|date:"Y-m-d H:i:s" }} Asia/Manila</strong>. Reprinting does not reset it. Contact MIS if you need continued access.
+  {% else %}
+    Clearance login control: {{ login_deadline.get_state_display }}. {{ login_deadline.reason }}
+  {% endif %}
+</div>
+{% endif %}
+{% if clearance_login_enabled and not login_deadline %}
+<div class="alert alert-warning">Generating your first successful official clearance PDF starts a {{ clearance_login_delay_days }}-day login deadline (24 elapsed hours per day). Previewing does not start it. Reprinting does not reset it. Continuing active/open loading in another campus or term (including the next term at this campus), or another active role, is referred to MIS for review.</div>
+{% endif %}
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
   <div>
     <h2 class="h4 mb-1">Final Clearance</h2>

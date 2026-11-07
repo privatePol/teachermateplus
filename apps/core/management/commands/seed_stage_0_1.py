@@ -31,6 +31,7 @@ class Command(BaseCommand):
         ("users.read", "users", "read"),
         ("users.create", "users", "create"),
         ("users.update", "users", "update"),
+        ("users.login_access.update", "users", "login_access.update"),
         ("user_roles.update", "user_roles", "update"),
         ("roles.read", "roles", "read"),
         ("roles.create", "roles", "create"),
@@ -151,6 +152,8 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        from apps.accounts.login_obligations import lock_login_users
+        lock_login_users(get_user_model().objects.values_list("pk", flat=True))
         self.stdout.write(self.style.WARNING("Seeding Stage 0.1 data..."))
 
         tenant, _ = Tenant.objects.get_or_create(
@@ -326,6 +329,9 @@ class Command(BaseCommand):
         super_admin_role = role_map["SUPER_ADMIN"]
         for perm in perm_map.values():
             RolePermission.objects.get_or_create(role=super_admin_role, permission=perm)
+        RolePermission.objects.get_or_create(
+            role=role_map["CAMPUS_ADMIN"], permission=perm_map["users.login_access.update"],
+        )
 
         group_specs = [
             ("ADMIN", "DASHBOARD", "Dashboard", 10),

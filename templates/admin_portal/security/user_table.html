@@ -26,7 +26,9 @@
           <td>{{ row.default_campus.code|default:"-" }}</td>
           <td>{{ row.default_department.code|default:"-" }}</td>
           <td>{% if row.is_staff %}<span class="badge text-bg-primary">Staff</span>{% else %}<span class="badge text-bg-light text-dark">Non-staff</span>{% endif %}</td>
-          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}
+            <div class="small mt-1">Login {% if row.login_disabled %}<span class="text-danger">disabled</span>{% else %}enabled{% endif %}</div>
+          </td>
           {% if show_privacy_tools %}
           <td>
             {% if row.privacy_consent_at and row.privacy_consent_version == privacy_consent_version %}
@@ -44,6 +46,11 @@
           {% if show_inactive_tools %}<td>{% include "admin_portal/shared/inactive_usage_cell.html" %}</td>{% endif %}
           <td class="text-end">
             <div class="user-action-group" aria-label="User actions">
+            {% if row.can_control_login %}
+            <button type="button" class="btn btn-sm btn-outline-danger user-action-btn" data-bs-toggle="modal" data-bs-target="#loginControl{{ row.id }}" aria-label="{% if row.login_disabled %}Enable{% else %}Disable{% endif %} Login for {{ row.username }}" title="{% if row.login_disabled %}Enable{% else %}Disable{% endif %} Login">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none"><rect x="5" y="10" width="14" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+            </button>
+            {% endif %}
             {% if "users.update" in effective_permissions %}
             <a
               class="btn btn-sm btn-outline-primary user-action-btn"
@@ -107,6 +114,24 @@
             {% include "admin_portal/shared/inactive_delete_action.html" with row=row %}
             {% endif %}
             </div>
+            {% if row.can_control_login %}
+            <div class="modal fade text-start" id="loginControl{{ row.id }}" tabindex="-1" aria-labelledby="loginControlTitle{{ row.id }}" aria-hidden="true">
+              <div class="modal-dialog"><div class="modal-content">
+                <form method="post" action="{% url 'admin_portal:user_login_control' row.id %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="operation" value="{% if row.login_disabled %}enable{% else %}disable{% endif %}">
+                  <input type="hidden" name="version" value="{{ row.login_access_version }}">
+                  <div class="modal-header"><h4 class="modal-title h5" id="loginControlTitle{{ row.id }}">{% if row.login_disabled %}Enable{% else %}Disable{% endif %} Login: {{ row.username }}</h4><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cancel"></button></div>
+                  <div class="modal-body">
+                    <p>This changes login access for the entire account and signs out existing sessions. Faculty loading, grades, attendance, and historical records remain intact.</p>
+                    {% if row.login_disabled %}<p>Existing clearance deadlines will be permanently overridden. Deactivation, permissions, password and OTP requirements still apply.</p>{% endif %}
+                    <label><input type="checkbox" name="confirmed" value="yes" required> I confirm this login access change for {{ row.username }}.</label>
+                  </div>
+                  <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-danger">{% if row.login_disabled %}Enable{% else %}Disable{% endif %} Login</button></div>
+                </form>
+              </div></div>
+            </div>
+            {% endif %}
           </td>
         </tr>
       {% empty %}

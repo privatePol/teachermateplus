@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.core.models import ActivatableModel, TimeStampedModel
+from apps.accounts.login_obligations import LoginObligationModel
 
 
 class AcademicYear(TimeStampedModel, ActivatableModel):
@@ -231,7 +232,8 @@ class Section(TimeStampedModel, ActivatableModel):
         return f"{self.code} - {self.name}"
 
 
-class CourseOffering(TimeStampedModel, ActivatableModel):
+class CourseOffering(LoginObligationModel, TimeStampedModel, ActivatableModel):
+    login_obligation_fields = frozenset({"is_active", "status", "term", "term_id", "campus", "campus_id", "tenant", "tenant_id"})
     class Status(models.TextChoices):
         OPEN = "OPEN", "Open"
         CLOSED = "CLOSED", "Closed"
@@ -271,7 +273,9 @@ class CourseOffering(TimeStampedModel, ActivatableModel):
         return f"{self.term.code} {self.course.code} {self.section.code}"
 
 
-class FacultyAssignment(TimeStampedModel, ActivatableModel):
+class FacultyAssignment(LoginObligationModel, TimeStampedModel, ActivatableModel):
+    login_subject_field = "faculty_user_id"
+    login_obligation_fields = frozenset({"is_active", "faculty_user", "faculty_user_id", "offering", "offering_id"})
     class ResponseStatus(models.TextChoices):
         PENDING = "PENDING", "Pending"
         ACCEPTED = "ACCEPTED", "Accepted"

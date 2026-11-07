@@ -1,9 +1,11 @@
 from django.db import models
 
 from apps.core.models import ActivatableModel, TimeStampedModel
+from apps.accounts.login_obligations import LoginObligationModel
 
 
-class Role(TimeStampedModel, ActivatableModel):
+class Role(LoginObligationModel, TimeStampedModel, ActivatableModel):
+    login_obligation_fields = frozenset({"is_active", "code"})
     code = models.CharField(max_length=64, unique=True)
     name = models.CharField(max_length=120)
     description = models.CharField(max_length=255, blank=True, null=True)
@@ -17,7 +19,8 @@ class Role(TimeStampedModel, ActivatableModel):
         return f"{self.code}"
 
 
-class Permission(TimeStampedModel, ActivatableModel):
+class Permission(LoginObligationModel, TimeStampedModel, ActivatableModel):
+    login_obligation_fields = frozenset({"is_active", "code"})
     code = models.CharField(max_length=128, unique=True)
     module = models.CharField(max_length=64)
     action = models.CharField(max_length=64)
@@ -31,7 +34,9 @@ class Permission(TimeStampedModel, ActivatableModel):
         return self.code
 
 
-class UserRole(models.Model):
+class UserRole(LoginObligationModel):
+    login_subject_field = "user_id"
+    login_obligation_fields = frozenset({"user", "user_id", "role", "role_id", "is_active"})
     user = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="user_roles")
     role = models.ForeignKey("rbac.Role", on_delete=models.PROTECT, related_name="user_roles")
     tenant = models.ForeignKey(
@@ -73,7 +78,9 @@ class RolePermission(models.Model):
         return f"{self.role.code}:{self.permission.code}"
 
 
-class UserPermission(models.Model):
+class UserPermission(LoginObligationModel):
+    login_subject_field = "user_id"
+    login_obligation_fields = frozenset({"user", "user_id", "permission", "permission_id", "grant_type"})
     class GrantType(models.TextChoices):
         ALLOW = "ALLOW", "Allow"
         DENY = "DENY", "Deny"

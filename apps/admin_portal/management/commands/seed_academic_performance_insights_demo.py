@@ -124,6 +124,8 @@ class Command(BaseCommand):
         )
 
     def _seed(self, *, password):
+        from apps.accounts.login_obligations import lock_login_users
+        lock_login_users(User.objects.values_list("pk", flat=True))
         tenant = Tenant.objects.filter(code="NCBA", is_active=True).first()
         if tenant is None:
             raise CommandError("Active NCBA tenant was not found.")
@@ -974,6 +976,8 @@ class Command(BaseCommand):
         return raw_score, missing
 
     def _remove_demo_data(self):
+        from apps.accounts.login_obligations import lock_login_users
+        lock_login_users(User.objects.values_list("pk", flat=True))
         offering_ids = list(
             CourseOffering.objects.filter(section__code__startswith=f"{self.PREFIX}-").values_list(
                 "id",
