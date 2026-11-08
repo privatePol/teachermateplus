@@ -20,7 +20,7 @@ from django.utils import timezone
 
 from apps.accounts.login_control import LoginAccessService as Access
 from apps.accounts.login_obligations import LoginObligationQuerySet
-from apps.accounts.models import User
+from apps.accounts.models import ClearanceLoginDeadline, User
 from apps.accounts.faculty_provisioning import ScopedUserRoleAssignmentService
 from apps.accounts.forms import FacultySelfChangePasswordForm, AdminSelfChangePasswordForm
 from apps.accounts.tests_login_control import LoginFixture
@@ -210,11 +210,17 @@ class ReviewRegressionTests(LoginFixture, TestCase):
         with CaptureQueriesContext(connection) as queries:
             self.manual(False)
         sql = [row["sql"].upper() for row in queries.captured_queries]
-        tenant_reads = [i for i, query in enumerate(sql) if query.startswith("SELECT") and 'FROM "TENANTS"' in query]
-        deadline_updates = [i for i, query in enumerate(sql) if query.startswith('UPDATE "CLEARANCE_LOGIN_DEADLINES"')]
+        tenant_table = connection.ops.quote_name(Tenant._meta.db_table).upper()
+        deadline_table = connection.ops.quote_name(ClearanceLoginDeadline._meta.db_table).upper()
+        tenant_reads = [i for i, query in enumerate(sql) if query.startswith("SELECT") and f"FROM {tenant_table}" in query]
+        deadline_updates = [i for i, query in enumerate(sql) if query.startswith(f"UPDATE {deadline_table}")]
         self.assertTrue(tenant_reads, "Manual transitions must acquire tenant locks before deadline locks")
         self.assertTrue(deadline_updates)
         self.assertLess(min(tenant_reads), min(deadline_updates))
+        if connection.features.has_select_for_update:
+            tenant_locks = [i for i in tenant_reads if "FOR UPDATE" in sql[i]]
+            self.assertTrue(tenant_locks, "Manual transitions must acquire a tenant row lock")
+            self.assertLess(min(tenant_locks), min(deadline_updates))
 
     def test_ordinary_super_admin_grant_scope_and_direct_deny(self):
         role = Role.objects.create(code="SUPER_ADMIN", name="Super Admin")
