@@ -1057,6 +1057,9 @@ ADMIN_HELP_SECTIONS = [
                     "Verify identity, email, default tenant, default campus, active status, and assigned roles.",
                     "For many new Faculty accounts, choose Import Faculty CSV, download the official template, upload it, and review every row before confirming.",
                     "For a temporary login block, open Security -> Login Lockouts and verify the user before unlocking.",
+                    "For independent account login control, use Enable Login / Disable Login beside the Users row icons and confirm the target. This requires a dedicated permission and preserves loading, grades, attendance, roles, active status, and history. Ordinary account and password edits preserve this independent login restriction and its session revocation version.",
+                    "Enable Login overrides existing clearance deadlines and revokes old sessions. Existing password, OTP, RBAC and deactivation requirements still apply. Reuse the existing faculty account when they return.",
+                    "Automatic Faculty Login Disabling is tenant-scoped and default OFF under Configurable Features (Configuration Management). Configure whole days, minimum 1 and default 2; each day is 24 elapsed hours after the first successful official PDF in each faculty/campus/term. Day changes affect new events only. OFF permanently cancels pending deadlines without enabling disabled logins; re-enabling never revives canceled cycles or PDFs first generated while OFF. Manual Enable/Disable Login works regardless of this policy. Preview and regeneration do not reset deadlines. Review CLEARANCE_LOGIN_EXCEPTION audit events for active/open loading in another campus or term (including the next term at this campus), or other roles.",
                 ],
                 "check_first": [
                     "Search for the user before creating another account.",

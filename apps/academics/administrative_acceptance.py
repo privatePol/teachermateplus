@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+import time
+from functools import wraps
 from collections import defaultdict
 from dataclasses import dataclass
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import connection, OperationalError, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
@@ -25,6 +27,41 @@ from .services import record_attendance_assignment_event
 
 class AdministrativeAcceptanceError(ValidationError):
     pass
+
+
+def retry_acceptance_write(fn):
+    """Restart only a complete, rolled-back acceptance transaction."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        nested = connection.in_atomic_block
+        for attempt in range(6):
+            try:
+                return fn(*args, **kwargs)
+            except OperationalError as exc:
+                code = exc.args[0] if exc.args else None
+                busy = ((connection.vendor == "mysql" and code in {1205, 1213, 3572})
+                        or (connection.vendor == "sqlite" and "locked" in str(exc).lower()))
+                if not busy:
+                    raise
+                if nested or attempt == 5:
+                    raise AdministrativeAcceptanceError(
+                        "Concurrent academic/account operation; no acceptance changes committed. Reload and retry."
+                    ) from exc
+                time.sleep(0.02 * (2 ** attempt))
+    return wrapped
+
+
+def acceptance_lock_options():
+    # Every acceptance row lock is nonblocking on InnoDB: cutoff publication
+    # may already own academic/attendance rows before reaching shared users.
+    # A busy lock rolls back this entire unit instead of forming a wait cycle.
+    if connection.vendor == "mysql" and getattr(connection, "isolation_level", None) != "read committed":
+        # Discovery reads must not pin an older repeatable-read snapshot for
+        # permission/candidate revalidation after locking current rows.
+        raise AdministrativeAcceptanceError("Administrative acceptance requires READ COMMITTED isolation.")
+    if connection.features.has_select_for_update and not connection.features.has_select_for_update_nowait:
+        raise AdministrativeAcceptanceError("This database must support NOWAIT row locking for administrative acceptance.")
+    return {"nowait": connection.features.has_select_for_update_nowait}
 
 
 @dataclass(frozen=True)
@@ -118,6 +155,7 @@ class AdministrativeFacultyAssignmentAcceptanceService:
         )
 
     @classmethod
+    @retry_acceptance_write
     def execute(
         cls,
         *,
@@ -185,7 +223,7 @@ class AdministrativeFacultyAssignmentAcceptanceService:
             audit_rows = []
             locked_candidates = {
                 row.id: row
-                for row in FacultyAssignment.objects.select_for_update()
+                for row in FacultyAssignment.objects.select_for_update(**acceptance_lock_options())
                 .filter(id__in=report.candidate_ids)
                 .select_related("offering", "offering__academic_year", "offering__term")
                 .order_by("id")
@@ -292,23 +330,35 @@ class AdministrativeFacultyAssignmentAcceptanceService:
         locked-state report is being rebuilt.
         """
 
-        tenant = Tenant.objects.select_for_update().get(pk=tenant_id)
-        academic_year = AcademicYear.objects.select_for_update().get(pk=academic_year_id)
-        term = Term.objects.select_for_update().get(pk=term_id)
-        actor = User.objects.select_for_update().get(pk=actor_id)
+        # Discover only accounts used by this term-wide scope, then lock in ID
+        # order. Membership is revalidated below using current locking reads.
+        from apps.accounts.login_obligations import lock_login_users
+        options = acceptance_lock_options()
+        participant_ids = set(FacultyAssignment.objects.filter(
+            offering__tenant_id=tenant_id, offering__academic_year_id=academic_year_id,
+            offering__term_id=term_id,
+        ).values_list("faculty_user_id", flat=True))
+        participant_ids.add(actor_id)
+        locked_accounts = lock_login_users(participant_ids, **options)
+        tenant = Tenant.objects.select_for_update(**options).get(pk=tenant_id)
+        academic_year = AcademicYear.objects.select_for_update(**acceptance_lock_options()).get(pk=academic_year_id)
+        term = Term.objects.select_for_update(**acceptance_lock_options()).get(pk=term_id)
+        if actor_id not in locked_accounts:
+            raise AdministrativeAcceptanceError("Actor account changed concurrently; reload and retry.")
+        actor = locked_accounts[actor_id]
         campus = (
-            Campus.objects.select_for_update().get(pk=campus_id)
+            Campus.objects.select_for_update(**acceptance_lock_options()).get(pk=campus_id)
             if campus_id is not None
             else None
         )
         exam_department = (
-            Department.objects.select_for_update().get(pk=exam_department_id)
+            Department.objects.select_for_update(**acceptance_lock_options()).get(pk=exam_department_id)
             if exam_department_id is not None
             else None
         )
 
         offerings = list(
-            CourseOffering.objects.select_for_update()
+            CourseOffering.objects.select_for_update(**acceptance_lock_options())
             .filter(
                 tenant_id=tenant_id,
                 academic_year_id=academic_year_id,
@@ -318,7 +368,7 @@ class AdministrativeFacultyAssignmentAcceptanceService:
         )
         offering_ids = [row.id for row in offerings]
         assignments = list(
-            FacultyAssignment.objects.select_for_update()
+            FacultyAssignment.objects.select_for_update(**acceptance_lock_options())
             .filter(offering_id__in=offering_ids)
             .order_by("id")
         )
@@ -327,46 +377,43 @@ class AdministrativeFacultyAssignmentAcceptanceService:
         section_ids = {row.section_id for row in offerings}
         program_ids = {row.program_id for row in offerings if row.program_id}
         courses = list(
-            Course.objects.select_for_update().filter(id__in=course_ids).order_by("id")
+            Course.objects.select_for_update(**acceptance_lock_options()).filter(id__in=course_ids).order_by("id")
         )
         sections = list(
-            Section.objects.select_for_update().filter(id__in=section_ids).order_by("id")
+            Section.objects.select_for_update(**acceptance_lock_options()).filter(id__in=section_ids).order_by("id")
         )
         section_program_ids = {row.program_id for row in sections}
         programs = list(
-            Program.objects.select_for_update()
+            Program.objects.select_for_update(**acceptance_lock_options())
             .filter(id__in=(program_ids | section_program_ids))
             .order_by("id")
         )
 
         faculty_user_ids = {row.faculty_user_id for row in assignments}
         locked_user_ids = faculty_user_ids | {actor_id}
-        list(
-            User.objects.select_for_update()
-            .filter(id__in=locked_user_ids)
-            .order_by("id")
-        )
+        if not locked_user_ids.issubset(locked_accounts):
+            raise AdministrativeAcceptanceError("Faculty accounts changed concurrently; reload and retry.")
         user_roles = list(
-            UserRole.objects.select_for_update()
+            UserRole.objects.select_for_update(**acceptance_lock_options())
             .filter(user_id__in=locked_user_ids)
             .order_by("id")
         )
         role_ids = {row.role_id for row in user_roles}
-        list(Role.objects.select_for_update().filter(id__in=role_ids).order_by("id"))
+        list(Role.objects.select_for_update(**acceptance_lock_options()).filter(id__in=role_ids).order_by("id"))
 
         permissions = list(
-            Permission.objects.select_for_update()
+            Permission.objects.select_for_update(**acceptance_lock_options())
             .filter(code__in=(cls.PERMISSION_CODE,))
             .order_by("id")
         )
         permission_ids = {row.id for row in permissions}
         list(
-            RolePermission.objects.select_for_update()
+            RolePermission.objects.select_for_update(**acceptance_lock_options())
             .filter(role_id__in=role_ids, permission_id__in=permission_ids)
             .order_by("id")
         )
         list(
-            UserPermission.objects.select_for_update()
+            UserPermission.objects.select_for_update(**acceptance_lock_options())
             .filter(user_id=actor_id, permission_id__in=permission_ids)
             .order_by("id")
         )
@@ -374,7 +421,7 @@ class AdministrativeFacultyAssignmentAcceptanceService:
         campus_ids = {row.campus_id for row in offerings}
         if campus_id is not None:
             campus_ids.add(campus_id)
-        list(Campus.objects.select_for_update().filter(id__in=campus_ids).order_by("id"))
+        list(Campus.objects.select_for_update(**acceptance_lock_options()).filter(id__in=campus_ids).order_by("id"))
 
         department_ids = {row.department_id for row in offerings}
         department_ids.update(row.department_id for row in courses if row.department_id)
@@ -385,7 +432,7 @@ class AdministrativeFacultyAssignmentAcceptanceService:
         if exam_department_id is not None:
             department_ids.add(exam_department_id)
         list(
-            Department.objects.select_for_update()
+            Department.objects.select_for_update(**acceptance_lock_options())
             .filter(
                 Q(id__in=department_ids)
                 | Q(tenant_id=tenant_id, campus_id__in=campus_ids)

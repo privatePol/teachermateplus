@@ -7,6 +7,18 @@
 {% endblock %}
 
 {% block admin_content %}
+<div class="card border-0 shadow-sm mb-3" id="clearance-login-policy">
+  <div class="card-body">
+    <h2 class="h5">Automatic Faculty Login Disabling</h2>
+    <p>Default OFF for each tenant. When enabled, the first successful official clearance PDF for each faculty/campus/term starts a deadline after the configured whole days (minimum 1, default 2), each lasting 24 elapsed hours. Day changes apply to new events only. Previewing and reprinting do not move the deadline. Times display in Asia/Manila.</p>
+    <p>Continuing active/open loading in another campus or term (including the next term at this campus), or another active role, is recorded for MIS review in Audit Logs (CLEARANCE_LOGIN_EXCEPTION). Turning this off permanently cancels pending deadlines without restoring disabled logins. Re-enabling does not revive canceled deadlines or schedule PDFs first generated while OFF. Manual Enable/Disable Login remains available regardless of this policy.</p>
+    <form method="post" action="{% url 'admin_portal:clearance_login_policy' %}">
+      {% csrf_token %}
+      {{ clearance_login_policy_form.as_p }}
+      <button type="submit" class="btn btn-outline-primary">Save clearance login policy</button>
+    </form>
+  </div>
+</div>
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">{{ title }}</h2>
   <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>

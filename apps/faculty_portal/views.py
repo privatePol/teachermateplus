@@ -4644,6 +4644,7 @@ def period_view_history_view(request, offering_id: int, period_id: int):
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def period_final_clearance_view(request, offering_id: int, period_id: int):
+    from apps.accounts.login_control import LoginAccessService
     assignment = _find_faculty_assignment(request.user, offering_id)
     if assignment and not assignment.is_accepted:
         messages.error(request, "Please accept this faculty assignment first before opening the class.")
@@ -4704,21 +4705,9 @@ def period_final_clearance_view(request, offering_id: int, period_id: int):
             request=request,
         )
         filename = _faculty_final_clearance_report_filename(report_obj)
-        pdf_bytes = FacultyFinalClearanceReportService.build_pdf_bytes(report_obj=report_obj)
-        AuditService.log_event(
-            action="DOWNLOAD",
-            portal="FACULTY",
-            entity_type="FacultyFinalClearanceReport",
-            entity_id=report_obj.id,
-            actor=request.user,
-            tenant=report_obj.tenant,
-            campus=report_obj.campus,
-            metadata={
-                "reference_no": report_obj.reference_no,
-                "filename": filename,
-                "content_type": "application/pdf",
-            },
-            request=request,
+        pdf_bytes = LoginAccessService.generate_clearance_pdf(
+            report=report_obj, access_version=request.user.login_access_version,
+            filename=filename, request=request,
         )
         return FileResponse(
             BytesIO(pdf_bytes),
@@ -4743,6 +4732,9 @@ def period_final_clearance_view(request, offering_id: int, period_id: int):
         "period": period,
         "preview": preview,
         "recent_reports": recent_reports,
+        "login_deadline": request.user.clearance_login_deadlines.filter(tenant_id=offering.tenant_id, campus_id=offering.campus_id, term_id=offering.term_id).first(),
+        "clearance_login_enabled": LoginAccessService.automatic_enabled(offering.tenant_id),
+        "clearance_login_delay_days": LoginAccessService.automatic_delay_days(offering.tenant_id),
     }
     return render(request, "faculty_portal/period_final_clearance.html", context)
 

@@ -5854,6 +5854,12 @@ def configurable_features_settings_view(request):
         "current_enrollment_override_map_size": len(current_enrollment_override_map),
     }
     context.update(_scope_context(request))
+    from apps.accounts.login_control import LoginAccessService
+    from apps.admin_portal.login_control_views import ClearanceLoginPolicyForm
+    context["clearance_login_policy_form"] = ClearanceLoginPolicyForm(initial={
+        "enabled": LoginAccessService.automatic_enabled(tenant_id),
+        "delay_days": LoginAccessService.automatic_delay_days(tenant_id),
+    })
     return render(request, "admin_portal/tools/configurable_features.html", context)
 
 
@@ -6823,8 +6829,12 @@ def user_list_view(request):
         )
     inactive_users = list(queryset.filter(is_active=False).order_by("username"))
     _attach_inactive_user_metadata(request, inactive_users)
+    from apps.accounts.login_control import LoginAccessService
+    active_users = list(queryset.filter(is_active=True).order_by("username"))
+    scope = getattr(request, "scope", {})
+    LoginAccessService.decorate_users(active_users + inactive_users, actor=request.user, tenant_id=scope.get("tenant_id"), campus_id=scope.get("campus_id"))
     context = {
-        "active_users": queryset.filter(is_active=True).order_by("username"),
+        "active_users": active_users,
         "inactive_users": inactive_users,
         "q": q,
         "tenant_filter": tenant_filter,

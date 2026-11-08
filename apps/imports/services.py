@@ -2323,7 +2323,9 @@ class BulkImportService:
         return "CourseOffering", row
 
     @classmethod
-    def _create_faculty_assignment(cls, normalized: dict, *, confirmation_runtime=None):
+    def _create_faculty_assignment(cls, normalized: dict, *, confirmation_runtime=None, actor=None):
+        from apps.accounts.login_obligations import lock_login_users
+        lock_login_users([normalized["faculty_user_id"], getattr(actor, "pk", None)])
         offering = (
             CourseOffering.objects.select_for_update()
             .filter(id=normalized["offering_id"])
@@ -2701,6 +2703,7 @@ class BulkImportService:
             entity_type, assignment = cls._create_faculty_assignment(
                 normalized,
                 confirmation_runtime=confirmation_runtime,
+                actor=actor,
             )
             record_attendance_assignment_event(
                 actor=actor,

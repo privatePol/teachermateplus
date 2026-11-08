@@ -8,6 +8,7 @@ from io import BytesIO
 import logging
 from pathlib import Path
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from cryptography.exceptions import InvalidTag
 from django.conf import settings
@@ -1908,7 +1909,9 @@ class FacultyFinalClearanceReportService:
 
     @classmethod
     def _reference_no(cls, *, faculty_user, term):
-        return f"FCR-{term.code}-{faculty_user.id}-{timezone.localtime().strftime('%Y%m%d%H%M%S')}"
+        # Rapid regeneration (including another campus) must not collide with
+        # the previous unique reference generated within the same second.
+        return f"FCR-{term.code[:12]}-{faculty_user.id}-{timezone.localtime().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:12]}"
 
     @classmethod
     def _verification_code(cls, *, reference_no, faculty_user_id, term_id):

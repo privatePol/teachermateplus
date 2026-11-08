@@ -7,6 +7,7 @@ from .insights_views import (
     academic_performance_insights_view,
     academic_performance_section_detail_view,
 )
+from .login_control_views import user_login_control_view, clearance_login_policy_view
 
 from .correction_email_views import correction_email_settings_view, correction_email_history_view
 
@@ -310,6 +311,8 @@ urlpatterns = [
     path("admin-portal/organization/programs/create/", program_create_view, name="program_create"),
     path("admin-portal/organization/programs/<int:program_id>/edit/", program_update_view, name="program_update"),
     path("admin-portal/security/users/", user_list_view, name="user_list"),
+    path("admin-portal/security/users/<int:user_id>/login-access/", user_login_control_view, name="user_login_control"),
+    path("admin-portal/tools/configurable-features/clearance-login/", clearance_login_policy_view, name="clearance_login_policy"),
     path(
         "admin-portal/security/faculty-deactivation/",
         faculty_deactivation_schedule_view,

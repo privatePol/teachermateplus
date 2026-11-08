@@ -707,6 +707,20 @@ class FacultyAssignmentSafetyService:
         request=None,
         attendance_effective_at=None,
     ):
+        from apps.accounts.login_obligations import lock_login_users
+        # Lock all participants before taking any assignment/offering locks.
+        assignments = list(assignments)
+        participant_ids = set(FacultyAssignment.objects.filter(
+            offering_id__in=[row.offering_id for row in assignments],
+        ).values_list("faculty_user_id", flat=True))
+        participant_ids.add(replacement_faculty.pk)
+        participant_ids.add(processed_by_user.pk)
+        lock_login_users(participant_ids)
+        current_ids = set(FacultyAssignment.objects.select_for_update().filter(
+            offering_id__in=[row.offering_id for row in assignments],
+        ).order_by("pk").values_list("faculty_user_id", flat=True))
+        if not current_ids.issubset(participant_ids):
+            raise ValueError("Faculty loading changed concurrently. Reload and retry the replacement.")
         batch_reference = cls.generate_batch_reference()
         keep_old = replacement_type in cls.KEEP_OLD_ASSIGNMENT_TYPES
         attendance_enabled = any(FeatureSettingsService.is_faculty_attendance_enabled(

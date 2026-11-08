@@ -88,6 +88,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.accounts.middleware.LoginAccessMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.core.middleware.ScopeResolutionMiddleware",
@@ -202,6 +203,10 @@ CHANNEL_LAYERS = {"default": {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.User"
+AUTHENTICATION_BACKENDS = [
+    "apps.accounts.backends.LoginControlBackend",
+    "django.contrib.auth.backends.ModelBackend",  # Existing session compatibility.
+]
 
 LOGIN_URL = "accounts:admin_login"
 LOGIN_REDIRECT_URL = "admin_portal:dashboard"

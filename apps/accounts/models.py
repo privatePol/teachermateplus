@@ -2,8 +2,10 @@ import uuid
 
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
+from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 
 
 class UserManager(BaseUserManager):
@@ -63,6 +65,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         null=True,
     )
     is_active = models.BooleanField(default=True)
+    login_disabled = models.BooleanField(default=False, editable=False)
+    login_access_version = models.PositiveIntegerField(default=0, editable=False)
     is_staff = models.BooleanField(default=False)
     must_change_password = models.BooleanField(default=False)
     faculty_quick_tour_disabled = models.BooleanField(default=False)
@@ -84,10 +88,19 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return self.username
 
+    def _do_update(self, base_qs, using, pk_val, values, update_fields, forced_update):
+        protected = {"login_disabled", "login_access_version"}
+        values = [entry for entry in values if entry[0].name not in protected]
+        return super()._do_update(base_qs, using, pk_val, values, update_fields, forced_update)
+
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
         if self._state.adding or (update_fields is not None and "password" not in update_fields):
-            return super().save(*args, **kwargs)
+            result = super().save(*args, **kwargs)
+            if not self._state.adding:
+                self.refresh_from_db(using=kwargs.get("using") or self._state.db,
+                                     fields=["login_disabled", "login_access_version"])
+            return result
         # Keep the monitoring registry consistent with Django's password invalidation.
         # Registration already locks this same user row. No Session is deleted here;
         # Django retains ownership of authentication and session-hash validation.
@@ -100,12 +113,71 @@ class User(AbstractBaseUser, PermissionsMixin):
             result = super().save(*args, **kwargs)
             if persisted_password is not None and persisted_password != self.password:
                 ActivePortalSession.objects.using(using).filter(user_id=self.pk).delete()
+            self.refresh_from_db(using=using, fields=["login_disabled", "login_access_version"])
             return result
+
+    def _get_session_auth_hash(self, secret=None):
+        # Preserve existing sessions at version zero. Once revoked, even an
+        # unregistered/rotated session can never return after manual enabling.
+        if not self.login_access_version:
+            return super()._get_session_auth_hash(secret=secret)
+        return salted_hmac(
+            "accounts.User.login_access", f"{self.password}|{self.login_access_version}",
+            secret=secret, algorithm="sha256",
+        ).hexdigest()
 
     @property
     def full_name(self):
         name = " ".join(part for part in [self.first_name, self.middle_name, self.last_name] if part)
         return name.strip() or self.username
+
+
+class ClearanceLoginDeadline(models.Model):
+    class State(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPLIED = "APPLIED", "Login disabled"
+        OVERRIDDEN = "OVERRIDDEN", "Manually overridden"
+        EXEMPT = "EXEMPT", "MIS review required"
+        CANCELED = "CANCELED", "Canceled by policy"
+
+    user = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="clearance_login_deadlines")
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT)
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT)
+    term = models.ForeignKey("academics.Term", on_delete=models.PROTECT)
+    source_report = models.ForeignKey("grading.FacultyFinalClearanceReport", on_delete=models.PROTECT)
+    first_generated_at = models.DateTimeField()
+    disable_at = models.DateTimeField()
+    delay_days = models.PositiveIntegerField(default=2, validators=[MinValueValidator(1)])
+    access_version = models.PositiveIntegerField()
+    state = models.CharField(max_length=16, choices=State.choices, default=State.PENDING)
+    reason = models.CharField(max_length=255, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="resolved_login_deadlines")
+
+    class Meta:
+        db_table = "clearance_login_deadlines"
+        ordering = ["disable_at", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "tenant", "campus", "term"], name="uq_clear_login_cycle"),
+            models.CheckConstraint(condition=models.Q(disable_at__gt=models.F("first_generated_at")), name="ck_clear_login_deadline"),
+            models.CheckConstraint(condition=models.Q(delay_days__gte=1), name="ck_clear_login_delay_days"),
+        ]
+        indexes = [
+            models.Index(fields=["state", "disable_at"], name="idx_clear_login_due"),
+            models.Index(fields=["user", "state", "disable_at"], name="idx_clear_login_user_due"),
+        ]
+
+
+class HistoricalClearanceCycle(models.Model):
+    """Cycles with a pre-upgrade report; PDF success may be unprovable."""
+    user = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT)
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT)
+    term = models.ForeignKey("academics.Term", on_delete=models.PROTECT)
+
+    class Meta:
+        db_table = "historical_clearance_cycles"
+        constraints = [models.UniqueConstraint(fields=["user", "tenant", "campus", "term"], name="uq_historical_clear_cycle")]
 
 
 class ActivePortalSession(models.Model):

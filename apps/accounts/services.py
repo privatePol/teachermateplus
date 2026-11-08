@@ -89,9 +89,12 @@ class ActivePortalSessionService:
 
     @staticmethod
     def _insert_authenticated_registration(*, key, user) -> bool:
+        from apps.accounts.login_obligations import lock_login_users
         with transaction.atomic():
-            persisted = User.objects.select_for_update().filter(pk=user.pk).only("password", "is_active").first()
-            if persisted is None or not persisted.is_active or persisted.password != user.password:
+            persisted = lock_login_users([user.pk]).get(user.pk)
+            if (persisted is None or not persisted.is_active or persisted.login_disabled
+                    or persisted.password != user.password
+                    or persisted.login_access_version != user.login_access_version):
                 return False
             live = Session.objects.select_for_update().filter(
                 session_key=key, expire_date__gt=timezone.now(),
@@ -169,11 +172,15 @@ class ActivePortalSessionService:
             return 0
 
         with transaction.atomic():
-            persisted_user = User.objects.select_for_update().only("id", "password").get(id=user.id)
+            from django.core.exceptions import PermissionDenied
+            from apps.accounts.login_control import LoginAccessService
+            persisted_user = User.objects.select_for_update().get(id=user.id)
             if persisted_user.password != user.password:
                 # Authentication may have raced a committed password change.
                 # Do not advertise that stale session as currently logged in.
                 return 0
+            if persisted_user.login_access_version != user.login_access_version or not LoginAccessService.login_allowed(persisted_user):
+                raise PermissionDenied("Login access changed. Please sign in again.")
             registered = list(
                 ActivePortalSession.objects.select_for_update()
                 .filter(user_id=user.id)
