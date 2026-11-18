@@ -5353,7 +5353,24 @@ class GradingGovernanceService:
         initiated_by_user=None,
         request_source: str | None = None,
         on_behalf_reason: str | None = None,
+        dispatch_notifications: bool = True,
     ):
+        from apps.grading.correction_actions import AdminOnBehalfSubmissionService, assert_not_denied, usable_credential, capture_signature
+        source = request_source or GradeCorrectionRequest.RequestSource.FACULTY_SELF
+        if source not in GradeCorrectionRequest.RequestSource.values:
+            raise ValidationError("Invalid correction petition source.")
+        if source == GradeCorrectionRequest.RequestSource.FACULTY_SELF:
+            if initiated_by_user is not None and initiated_by_user.pk != user.pk:
+                raise ValidationError("A faculty petition must be signed by its actual submitting faculty member.")
+            assert_not_denied(user, offering, ("faculty_portal.access", "corrections.create"))
+        else:
+            if initiated_by_user is None:
+                raise ValidationError("An actual administrative petitioner is required.")
+            AdminOnBehalfSubmissionService.authorize(initiated_by_user, offering)
+            if not FacultyAssignment.objects.filter(offering=offering, faculty_user=user, is_active=True).exists():
+                raise ValidationError("Select the original faculty member assigned to this course offering.")
+            if not (on_behalf_reason or "").strip():
+                raise ValidationError("An administrative on-behalf filing reason is required.")
         if not cls.is_system_correction_enabled(tenant_id=offering.tenant_id):
             raise ValidationError(
                 "Correction requests are disabled by tenant policy (MANUAL_ONLY). "
@@ -5367,6 +5384,9 @@ class GradingGovernanceService:
             template_period=template_period,
             items=items,
         )
+
+        signer = initiated_by_user if source == GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF else user
+        credential = usable_credential(user=signer, tenant_id=offering.tenant_id)
 
         request_obj = GradeCorrectionRequest.objects.create(
             tenant_id=offering.tenant_id,
@@ -5395,9 +5415,16 @@ class GradingGovernanceService:
                 )
             )
         GradeCorrectionRequestItem.objects.bulk_create(item_rows)
+        if credential:
+            capture_signature(credential=credential, request_obj=request_obj, signer=signer,
+                action="SUBMIT", role="Administrative Petitioner" if source == GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF else "Faculty Petitioner",
+                payload={"justification": justification.strip(), "items": normalized_items,
+                    "requested_by_user_id": user.pk, "initiated_by_user_id": signer.pk,
+                    "request_source": source, "on_behalf_reason": request_obj.on_behalf_reason},
+                at=request_obj.created_at)
         from apps.grading.correction_reminders import CorrectionReminderService
 
-        CorrectionReminderService.activate(request_obj)
+        CorrectionReminderService.activate(request_obj, dispatch=dispatch_notifications)
         return request_obj
 
     @classmethod
@@ -5411,12 +5438,34 @@ class GradingGovernanceService:
         review_remarks: str | None = None,
         window_start=None,
         window_end=None,
+        action_token=None,
+        expected_step_id=None,
+        dispatch_notifications: bool = True,
     ):
         request_obj = (
             GradeCorrectionRequest.objects.select_for_update()
             .select_related("tenant", "campus", "offering", "template_period", "requested_by_user")
             .get(pk=request_obj.pk)
         )
+        from apps.grading.correction_actions import (
+            assert_not_denied, usable_credential, capture_signature, token_key, claim_receipt, digest,
+        )
+        assert_not_denied(reviewer, request_obj.offering, ("admin_portal.access", "corrections.review"))
+        if action_token:
+            if not expected_step_id:
+                raise ValidationError("The exact approval step is required.")
+            key = token_key(action_token, kind="REVIEW", user=reviewer, offering=request_obj.offering,
+                period=request_obj.template_period, request_id=request_obj.pk, step_id=expected_step_id)
+            receipt, created = claim_receipt(key=key, payload_hash=digest([approved, review_remarks or ""]),
+                kind="REVIEW", user=reviewer, offering=request_obj.offering, period=request_obj.template_period,
+                request_obj=request_obj, step_id=expected_step_id)
+            if not created:
+                bound_step = request_obj.approval_steps.get(pk=expected_step_id)
+                if bound_step.reviewed_by_user_id != reviewer.pk or not cls._user_has_role_for_correction_step(
+                        user=reviewer, request_obj=request_obj, step=bound_step):
+                    raise ValidationError("You are not authorized to recover this decision.")
+                request_obj.action_replayed = True
+                return request_obj
         if request_obj.status != GradeCorrectionRequest.Status.PENDING:
             raise ValidationError("Only pending correction requests can be reviewed.")
 
@@ -5427,6 +5476,10 @@ class GradingGovernanceService:
         )
         if not can_review:
             raise ValidationError(reason or "You are not allowed to review this correction request.")
+
+        if expected_step_id is not None and (not pending_step or pending_step.pk != expected_step_id):
+            raise ValidationError("This approval step has already changed. Reload the request before reviewing.")
+        credential = usable_credential(user=reviewer, tenant_id=request_obj.tenant_id) if approved else None
 
         remarks_value = (review_remarks or "").strip() or None
         is_final_step = cls.is_final_correction_step(request_obj=request_obj, step=pending_step)
@@ -5489,6 +5542,11 @@ class GradingGovernanceService:
                 evidence=authority_evidence,
                 audit_row=audit_row,
             )
+            if approved:
+                role = f"{authority_evidence['authorization_type']}: {pending_step.approver_label}"
+                capture_signature(credential=credential, request_obj=request_obj, signer=reviewer,
+                    action="APPROVE", role=role, step=pending_step, at=now,
+                    payload={"step": pending_step.pk, "decision": "APPROVE", "remarks": remarks_value})
 
         if approved and not is_final_step:
             request_obj.reviewed_by_user = reviewer
@@ -5497,7 +5555,7 @@ class GradingGovernanceService:
             request_obj.save(update_fields=["reviewed_by_user", "reviewed_at", "review_remarks", "updated_at"])
             from apps.grading.correction_reminders import CorrectionReminderService
 
-            CorrectionReminderService.activate(request_obj)
+            CorrectionReminderService.activate(request_obj, dispatch=dispatch_notifications)
             return request_obj
 
         request_obj.reviewed_by_user = reviewer
@@ -6252,6 +6310,7 @@ class FacultyGradingService:
         components=None,
         score_lookup=None,
         raw_score_lookup=None,
+        attendance_lookup=None,
         period_grade_strategy=None,
         include_details: bool = False,
     ):
@@ -6446,6 +6505,7 @@ class FacultyGradingService:
                             template_period=template_period,
                             student_id=student_id,
                             base_value=base_value,
+                            attendance_lookup=attendance_lookup,
                         )
                         sub_attendance_rows = attendance_rows()
                     elif detail_rows:
@@ -7008,21 +7068,28 @@ class FacultyGradingService:
         template_period: GradingTemplatePeriod,
         student_id: int,
         base_value: Decimal,
+        attendance_lookup=None,
     ):
-        records = AttendanceRecord.objects.filter(
-            session__offering_id=offering.id,
-            session__template_period_id=template_period.id,
-            session__is_active=True,
-            student_id=student_id,
-            is_active=True,
-        ).select_related("session")
-
-        if not records.exists():
-            return None
+        if attendance_lookup is None:
+            records = AttendanceRecord.objects.filter(
+                session__offering_id=offering.id,
+                session__template_period_id=template_period.id,
+                session__is_active=True,
+                student_id=student_id,
+                is_active=True,
+            ).select_related("session")
+            if not records.exists():
+                return None
+            status_codes = (record.status_code for record in records)
+        else:
+            # An empty supplied lookup means missing attendance, not a scalar read.
+            status_codes = attendance_lookup.get(student_id, ())
+            if not status_codes:
+                return None
 
         computed_scores = []
-        for record in records:
-            raw = cls.ATTENDANCE_SCORE_MAP.get(record.status_code, Decimal("0"))
+        for status_code in status_codes:
+            raw = cls.ATTENDANCE_SCORE_MAP.get(status_code, Decimal("0"))
             computed = cls.compute_activity_score(
                 raw_score=raw,
                 total_score=Decimal("100"),
@@ -7271,6 +7338,27 @@ class FacultyGradingService:
             .order_by("sort_order", "id")
         )
 
+        attendance_lookup = defaultdict(list)
+        attendance_student_ids = {
+            enrollment.student_id for enrollment in enrollments
+            if enrollment.enrollment_status not in Enrollment.NON_ACTIVE_GRADING_STATUSES
+        }
+        if (
+            attendance_student_ids
+            and period_grade_strategy["mode"] != TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION
+            and any(sub.is_active and sub.is_attendance_component
+                    for component in components for sub in component.subcomponents.all())
+        ):
+            attendance_facts = AttendanceRecord.objects.filter(
+                session__offering_id=offering.id,
+                session__template_period_id=template_period.id,
+                session__is_active=True,
+                student_id__in=attendance_student_ids,
+                is_active=True,
+            ).order_by().values_list("student_id", "status_code")
+            for student_id, status_code in attendance_facts:
+                attendance_lookup[student_id].append(status_code)
+
         activity_scores = StudentActivityScore.objects.filter(
             activity__offering_id=offering.id,
             activity__template_period_id=template_period.id,
@@ -7376,6 +7464,7 @@ class FacultyGradingService:
                 components=components,
                 score_lookup=score_lookup,
                 raw_score_lookup=raw_score_lookup,
+                attendance_lookup=attendance_lookup,
                 period_grade_strategy=period_grade_strategy,
             )
             component_scores = detail["component_scores"]

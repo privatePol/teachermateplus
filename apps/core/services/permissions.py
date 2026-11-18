@@ -34,7 +34,10 @@ class PermissionService:
             return set()
 
         if user.is_superuser:
-            return set(Permission.objects.filter(is_active=True).values_list("code", flat=True))
+            denied = cls._scoped_user_permissions(user, tenant_id, campus_id).filter(
+                grant_type=UserPermission.GrantType.DENY
+            ).values_list("permission__code", flat=True)
+            return set(Permission.objects.filter(is_active=True).values_list("code", flat=True)) - set(denied)
 
         role_ids = cls._scoped_user_roles(user, tenant_id=tenant_id, campus_id=campus_id).values_list(
             "role_id", flat=True

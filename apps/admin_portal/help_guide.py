@@ -834,12 +834,12 @@ ADMIN_HELP_SECTIONS = [
                     "Admin Portal -> Grading -> Create Correction On Behalf"
                 ),
                 "steps": [
-                    "Open Grading -> Correction Queue to review an existing request.",
+                    "Open Grading -> Correction Queue to review an existing request. Register your own e-signature in My Signature before approval; rejection does not require a signature. A retry records only the original approval step, and captured signatures survive later credential changes.",
                     "Open the request and compare the From value, To value, student, grading item, reason, and attachment.",
                     "Record the current approval-step decision with clear remarks.",
                     "Use Email history on the review page to inspect individual recipient attempts; Sent means accepted by the email backend.",
                     "Authorized configuration administrators can expand the Grade Correction Email Reminders card in Configuration Management, set its toggle, frequency and time, then choose Save reminder settings (default on, every calendar day at 08:00 Asia/Manila). Viewing a request does not stop reminders.",
-                    "If authorized staff must start the request, open Grading -> Create Correction On Behalf.",
+                    "If authorized staff must start the request, open Grading -> Create Correction On Behalf and register your own e-signature in My Signature. You sign as administrative petitioner; the faculty concerned is identified separately. Return to the form after setup and retry with its retained submission identity.",
                     "Complete the configured approval route and verify the recomputed official result after final approval.",
                 ],
                 "check_first": [

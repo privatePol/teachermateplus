@@ -77,6 +77,7 @@ from apps.grading.models import (
     StudentPeriodGrade,
     TemplateHotfixRequest,
 )
+from apps.grading.correction_actions import CorrectionSubmissionService, CorrectionSignatureRequired, new_action_token
 from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService, GradebookReopenNotificationService
 from apps.grading.reporting import (
@@ -6906,6 +6907,21 @@ def period_corrections_view(request, offering_id: int, period_id: int):
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
+    CorrectionSubmissionService.authorize(request.user, offering)
+    active_scope = getattr(request, "scope", {})
+    if any(active_scope.get(k) and active_scope[k] != getattr(offering, k) for k in ("tenant_id", "campus_id")):
+        raise PermissionDenied("Select the correction's tenant and campus before filing.")
+    submission_payload = CorrectionSubmissionService.payload(request.POST, request.FILES) if request.method == "POST" else None
+    if request.method == "POST" and request.POST.get("submission_token"):
+        try:
+            recovered = CorrectionSubmissionService.recover(token=request.POST["submission_token"], payload=submission_payload,
+                user=request.user, offering=offering, period=period)
+        except ValidationError as exc:
+            return HttpResponse(" ".join(exc.messages), status=400)
+        if recovered:
+            messages.success(request, f"Application CGR-{recovered.pk:06d} was already submitted. No new application was created.")
+            return redirect(reverse("faculty_portal:period_corrections", args=[offering.pk, period.pk]) + f"#correction-{recovered.pk}")
+    signature_required = False
     state = _period_edit_state(offering, period)
     if not state["system_correction_enabled"]:
         messages.info(
@@ -6942,105 +6958,25 @@ def period_corrections_view(request, offering_id: int, period_id: int):
         )
     }
     form = GradeCorrectionRequestForm(
-        request.POST or None,
-        request.FILES or None,
-        student_queryset=student_qs,
-        activity_queryset=activity_qs,
-        score_lookup=score_lookup,
+        request.POST or None, request.FILES or None, student_queryset=student_qs,
+        activity_queryset=activity_qs, score_lookup=score_lookup,
+        initial={"submission_token": new_action_token(kind="SUBMIT", user=request.user, offering=offering, period=period)},
     )
-
     if request.method == "POST":
-        if not state["correction_filing_state"]["is_allowed"]:
-            messages.error(request, state["correction_filing_state"]["message"])
-            return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
         if form.is_valid():
-            items = form.cleaned_data["items"]
             try:
-                correction = GradingGovernanceService.create_correction_request(
-                    user=request.user,
-                    offering=offering,
-                    template_period=period,
-                    justification=form.cleaned_data["justification"],
-                    items=items,
+                correction, created = CorrectionSubmissionService.submit(
+                    token=form.cleaned_data.get("submission_token"), payload=submission_payload,
+                    user=request.user, offering=offering, period=period, form=form, request=request,
                 )
             except ValidationError as exc:
-                messages.error(request, str(exc))
+                signature_required = isinstance(exc, CorrectionSignatureRequired)
+                form.add_error(None, " ".join(exc.messages))
+            except OSError:
+                form.add_error(None, "Your application was not saved because attachment storage failed. Please retry with this form.")
             else:
-                attachment = form.cleaned_data.get("attachment")
-                if attachment:
-                    attachment_validation = form.cleaned_data.get("attachment_validation")
-                    correction_attachment = GradeCorrectionAttachment.objects.create(
-                        correction_request=correction,
-                        file=attachment,
-                        uploaded_by_user=request.user,
-                        original_filename=attachment_validation.original_filename if attachment_validation else attachment.name,
-                        content_type=attachment_validation.content_type if attachment_validation else getattr(attachment, "content_type", ""),
-                        file_size_bytes=attachment_validation.file_size_bytes if attachment_validation else getattr(attachment, "size", 0),
-                    )
-                    AuditService.log_event(
-                        action="UPLOAD_CORRECTION_ATTACHMENT",
-                        portal="FACULTY",
-                        entity_type="GradeCorrectionAttachment",
-                        entity_id=correction_attachment.id,
-                        actor=request.user,
-                        tenant=offering.tenant,
-                        campus=offering.campus,
-                        after_data={
-                            "correction_request_id": correction.id,
-                            "original_filename": correction_attachment.original_filename,
-                            "stored_filename": correction_attachment.file.name,
-                            "content_type": correction_attachment.content_type,
-                            "file_size_bytes": correction_attachment.file_size_bytes,
-                        },
-                        request=request,
-                    )
-                pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
-                notification_result = CorrectionNotificationService.send_correction_step_approval_notifications(
-                    request_obj=correction,
-                    step=pending_step,
-                )
-                AuditService.log_event(
-                    action="CREATE",
-                    portal="FACULTY",
-                    entity_type="GradeCorrectionRequest",
-                    entity_id=correction.id,
-                    actor=request.user,
-                    tenant=offering.tenant,
-                    campus=offering.campus,
-                    after_data={
-                        "offering_id": offering.id,
-                        "period_id": period.id,
-                        "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
-                        "correction_item_count": len(items),
-                        "student_count": len({item["student_id"] for item in items}),
-                        "grading_item_count": len({item["grade_activity_id"] for item in items}),
-                        "approval_notification_email_attempted": notification_result["attempted"],
-                        "approval_notification_email_sent": notification_result["sent"],
-                        "approval_notification_email_recipients": notification_result["recipients"],
-                    },
-                    request=request,
-                )
-                if notification_result["errors"]:
-                    messages.warning(
-                        request,
-                        "Correction request submitted, but some approval notification emails could not be sent. "
-                        "Please verify SMTP and recipient role configuration.",
-                    )
-                elif (
-                    FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=offering.tenant_id)
-                    and notification_result["attempted"] == 0
-                    and notification_result.get("reason") != "queued_after_commit"
-                ):
-                    messages.warning(
-                        request,
-                        "Correction request submitted, but no approver email recipients matched the current feature settings. "
-                        "Please review Configuration Management and the recipient role assignments.",
-                    )
-                messages.success(
-                    request,
-                    "Correction request submitted for review. Once approved, TeacherMate+ will post the corrected values automatically.",
-                )
-                return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
+                messages.success(request, f"Application CGR-{correction.pk:06d} submitted for review. Once approved, corrected values are posted automatically.")
+                return redirect(reverse("faculty_portal:period_corrections", args=[offering.pk, period.pk]) + f"#correction-{correction.pk}")
 
     requests_qs = (
         GradeCorrectionRequest.objects.filter(
@@ -7086,6 +7022,7 @@ def period_corrections_view(request, offering_id: int, period_id: int):
         "template": template,
         "period": period,
         "form": form,
+        "signature_required": signature_required,
         "requests": requests,
         "is_locked": state["is_locked"],
         "is_submitted": state["is_submitted"],
@@ -7351,7 +7288,7 @@ def period_correction_official_report_view(request, offering_id: int, period_id:
     }:
         raise PermissionDenied("Official correction report is available only after final approval.")
 
-    pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=correction_request)
+    pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=correction_request, generated_by_user=request.user)
     filename = _official_correction_report_filename(correction_request)
     AuditService.log_event(
         action="DOWNLOAD_CORRECTION_OFFICIAL_REPORT",

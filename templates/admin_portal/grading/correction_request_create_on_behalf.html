@@ -69,7 +69,7 @@
 {% if can_file and form %}
 <div class="alert alert-info">
   This creates a petition for <strong>{{ selected_faculty.full_name|default:selected_faculty.username }}</strong>
-  and records <strong>{{ request.user.full_name|default:request.user.username }}</strong> as the initiating admin user.
+  and records <strong>{{ request.user.full_name|default:request.user.username }}</strong> as the administrative petitioner, using your own registered e-signature.
 </div>
 
 <div class="card border-0 shadow-sm">
@@ -85,6 +85,7 @@
       <input type="hidden" name="template_period" value="{{ selected_period.id }}">
       <input type="hidden" name="faculty_user" value="{{ selected_faculty.id }}">
       {{ form.correction_payload }}
+      {{ form.submission_token }}
 
       {% if form.non_field_errors %}
       <div class="alert alert-danger">{{ form.non_field_errors }}</div>
@@ -176,13 +177,21 @@
           {% for error in form.attachment.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
         </div>
         <div class="col-md-4 d-flex align-items-end">
-          <button class="btn btn-primary w-100" type="submit" {% if not is_submitted %}disabled{% endif %}>Submit Petition</button>
+          <button id="on-behalf-submit" class="btn btn-primary w-100" type="submit" {% if not is_submitted %}disabled{% endif %}>Submit Petition</button>
         </div>
       </div>
     </form>
   </div>
 </div>
 {% endif %}
+
+<dialog id="on-behalf-signature-required" aria-labelledby="on-behalf-signature-title" class="border rounded shadow p-4">
+  <h3 id="on-behalf-signature-title" class="h5">Registered e-signature required</h3>
+  <p>Administrative filing requires your own registered e-signature. Save it in My Signature, then return here and retry. Your entered values and submission identity are retained; select your attachment again if needed.</p>
+  <a class="btn btn-primary" target="_blank" rel="noopener" href="{% url 'accounts:admin_signature' %}?correction_context={{ form.submission_token.value|urlencode }}">Open My Signature</a>
+  <button type="button" class="btn btn-secondary" onclick="this.closest('dialog').close()">Return to petition</button>
+</dialog>
+{% if signature_required %}<script>document.getElementById("on-behalf-signature-required").showModal();</script>{% endif %}
 
 {{ correction_students|json_script:"correction-students-data" }}
 {{ correction_activities|json_script:"correction-activities-data" }}
@@ -305,7 +314,18 @@
     });
     studentSelect.addEventListener("change", renderGrid);
     activityInputs.forEach((input) => input.addEventListener("change", renderGrid));
-    correctionForm.addEventListener("submit", syncPayloadFromGrid);
+    const submitButton = document.getElementById("on-behalf-submit");
+    let pending = false;
+    window.addEventListener("pageshow", () => {
+      pending = false; submitButton.disabled = {{ is_submitted|yesno:"false,true" }};
+      submitButton.textContent = "Submit Petition";
+    });
+    correctionForm.addEventListener("submit", (event) => {
+      syncPayloadFromGrid();
+      if (pending || !correctionForm.reportValidity()) { event.preventDefault(); return; }
+      pending = true; submitButton.disabled = true;
+      submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting your request...';
+    });
     studentSelect.disabled = applyAllCheckbox.checked;
     renderGrid();
   })();

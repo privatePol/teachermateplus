@@ -183,6 +183,7 @@ from apps.grading.models import (
     TemplateHotfixWorkflowStep,
     TenantGradingProfile,
 )
+from apps.grading.correction_actions import AdminOnBehalfSubmissionService, CorrectionSignatureRequired, new_action_token
 from apps.grading.duplication import GradingTemplateDuplicationService
 from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
@@ -15216,6 +15217,24 @@ def grade_correction_request_create_on_behalf_view(request):
     correction_form = None
 
     can_select_correction = bool(selected_offering and selected_period and selected_faculty)
+    recovery_error = None
+    if can_select_correction:
+        AdminOnBehalfSubmissionService.authorize(request.user, selected_offering)
+        submission_token = (request.POST.get("submission_token", "") if request.method == "POST" else
+            new_action_token(kind="ON_BEHALF", user=request.user, offering=selected_offering, period=selected_period))
+        if request.method == "POST":
+            try:
+                recovered = AdminOnBehalfSubmissionService.recover(token=submission_token,
+                    payload=AdminOnBehalfSubmissionService.payload(request.POST, request.FILES),
+                    user=request.user, offering=selected_offering, period=selected_period)
+            except ValidationError as exc:
+                recovery_error = exc
+            else:
+                if recovered:
+                    messages.success(request, f"Application CGR-{recovered.pk:06d} was already submitted. No new application was created.")
+                    return redirect("admin_portal:grade_correction_request_review", request_id=recovered.pk)
+    else:
+        submission_token = ""
     correction_filing_state = (
         GradingGovernanceService.get_correction_request_filing_state(
             offering=selected_offering,
@@ -15259,6 +15278,7 @@ def grade_correction_request_create_on_behalf_view(request):
             student_queryset=student_qs,
             activity_queryset=activity_qs,
             score_lookup=score_lookup,
+            initial={"submission_token": submission_token},
         )
         _style_form(correction_form)
 
@@ -15274,84 +15294,31 @@ def grade_correction_request_create_on_behalf_view(request):
             messages.error(request, "Correction requests are disabled by tenant policy (MANUAL_ONLY).")
         elif correction_form and correction_form.is_valid():
             try:
-                correction = GradingGovernanceService.create_correction_request(
-                    user=selected_faculty,
-                    initiated_by_user=request.user,
-                    request_source=GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF,
-                    on_behalf_reason=setup_form.cleaned_data.get("on_behalf_reason"),
-                    offering=selected_offering,
-                    template_period=selected_period,
-                    justification=correction_form.cleaned_data["justification"],
-                    items=correction_form.cleaned_data["items"],
+                if recovery_error:
+                    raise recovery_error
+                correction, created = AdminOnBehalfSubmissionService.submit(
+                    token=submission_token,
+                    payload=AdminOnBehalfSubmissionService.payload(request.POST, request.FILES),
+                    user=request.user, faculty=selected_faculty,
+                    on_behalf_reason=setup_form.cleaned_data["on_behalf_reason"],
+                    offering=selected_offering, period=selected_period,
+                    form=correction_form, request=request,
                 )
             except ValidationError as exc:
                 correction_form.add_error(None, "; ".join(exc.messages))
+                correction_form.signature_required = isinstance(exc, CorrectionSignatureRequired)
+            except OSError:
+                correction_form.add_error(None, "The attachment could not be saved. Select it again and retry this submission.")
             else:
-                attachment = correction_form.cleaned_data.get("attachment")
-                if attachment:
-                    attachment_validation = correction_form.cleaned_data.get("attachment_validation")
-                    correction_attachment = GradeCorrectionAttachment.objects.create(
-                        correction_request=correction,
-                        file=attachment,
-                        uploaded_by_user=request.user,
-                        original_filename=attachment_validation.original_filename if attachment_validation else attachment.name,
-                        content_type=attachment_validation.content_type if attachment_validation else getattr(attachment, "content_type", ""),
-                        file_size_bytes=attachment_validation.file_size_bytes if attachment_validation else getattr(attachment, "size", 0),
-                    )
-                    AuditService.log_event(
-                        action="UPLOAD_CORRECTION_ATTACHMENT",
-                        portal="ADMIN",
-                        entity_type="GradeCorrectionAttachment",
-                        entity_id=correction_attachment.id,
-                        actor=request.user,
-                        tenant=selected_offering.tenant,
-                        campus=selected_offering.campus,
-                        after_data={
-                            "correction_request_id": correction.id,
-                            "original_filename": correction_attachment.original_filename,
-                            "stored_filename": correction_attachment.file.name,
-                            "content_type": correction_attachment.content_type,
-                            "file_size_bytes": correction_attachment.file_size_bytes,
-                            "on_behalf": True,
-                        },
-                        request=request,
-                    )
-                pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
-                notification_result = CorrectionNotificationService.send_correction_step_approval_notifications(
-                    request_obj=correction,
-                    step=pending_step,
-                )
-                AuditService.log_event(
-                    action="CREATE_ON_BEHALF",
-                    portal="ADMIN",
-                    entity_type="GradeCorrectionRequest",
-                    entity_id=correction.id,
-                    actor=request.user,
-                    tenant=selected_offering.tenant,
-                    campus=selected_offering.campus,
-                    after_data={
-                        "offering_id": selected_offering.id,
-                        "period_id": selected_period.id,
-                        "requested_by_user_id": selected_faculty.id,
-                        "initiated_by_user_id": request.user.id,
-                        "request_source": correction.request_source,
-                        "on_behalf_reason": correction.on_behalf_reason,
-                        "correction_item_count": len(correction_form.cleaned_data["items"]),
-                        "approval_notification_email_attempted": notification_result["attempted"],
-                        "approval_notification_email_sent": notification_result["sent"],
-                        "approval_notification_email_recipients": notification_result["recipients"],
-                    },
-                    request=request,
-                )
-                if notification_result["errors"]:
-                    messages.warning(request, "Petition created, but some approval notification emails could not be sent.")
-                messages.success(request, "On-behalf correction petition submitted for review.")
-                return redirect("admin_portal:grade_correction_request_review", request_id=correction.id)
+                messages.success(request, f"On-behalf correction petition CGR-{correction.pk:06d} submitted for review." if created
+                    else f"Application CGR-{correction.pk:06d} was already submitted. No new application was created.")
+                return redirect("admin_portal:grade_correction_request_review", request_id=correction.pk)
 
     context = {
         "title": "Create Correction Petition On Behalf",
         "setup_form": setup_form,
         "form": correction_form,
+        "signature_required": getattr(correction_form, "signature_required", False),
         "selected_campus": selected_campus,
         "selected_academic_year": selected_academic_year,
         "selected_term": selected_term,
@@ -15461,154 +15428,165 @@ def grade_correction_request_review_view(request, request_id: int):
     form = GradeCorrectionReviewForm(
         request.POST or None,
         require_window=False,
+        initial={"expected_step_id": pending_step.pk if pending_step else None,
+                 "action_token": new_action_token(kind="REVIEW", user=request.user, offering=correction_request.offering,
+                    period=correction_request.template_period, request_id=correction_request.pk,
+                    step_id=pending_step.pk if pending_step else None)},
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
-        if not can_review:
-            form.add_error(None, review_guard_message or "You are not allowed to review this correction request.")
-            context = {
-                "title": f"Review Correction Request #{correction_request.id}",
-                "form": form,
-                "correction_request": correction_request,
-                "pending_step": pending_step,
-                "is_final_step": is_final_step,
-                "auto_apply_on_final_approval": auto_apply_on_final_approval,
-                "official_report_enabled": official_report_enabled,
-                "correction_window_hours": GradingGovernanceService.CORRECTION_WINDOW_HOURS,
-                "progress": GradingGovernanceService.correction_progress(request_obj=correction_request),
-            }
-            context.update(_scope_context(request))
-            return render(request, "admin_portal/grading/correction_request_review.html", context)
-
-        before = model_before_after(correction_request)
-        decision = form.cleaned_data["decision"]
-        approved = decision == GradeCorrectionReviewForm.Decision.APPROVE
-
-        try:
-            updated = GradingGovernanceService.review_correction_request(
-                request_obj=correction_request,
-                reviewer=request.user,
-                approved=approved,
-                review_remarks=form.cleaned_data.get("review_remarks"),
-                window_start=form.cleaned_data.get("window_start"),
-                window_end=form.cleaned_data.get("window_end"),
-            )
-        except ValidationError as exc:
-            form.add_error(None, str(exc))
+        if not form.cleaned_data.get("action_token") or not form.cleaned_data.get("expected_step_id"):
+            form.add_error(None, "Reload this review form to obtain its approval step identity.")
         else:
-            after = model_before_after(updated)
-            unlock_window = getattr(updated, "unlock_window", None)
-            if unlock_window:
-                after["unlock_window"] = {
-                    "start_at": unlock_window.start_at.isoformat() if unlock_window.start_at else None,
-                    "end_at": unlock_window.end_at.isoformat() if unlock_window.end_at else None,
-                    "is_active": unlock_window.is_active,
-                    "is_consumed": unlock_window.is_consumed,
-                }
-            AuditService.log_event(
-                action="APPROVE" if approved else "REJECT",
-                portal="ADMIN",
-                entity_type="GradeCorrectionRequest",
-                entity_id=updated.id,
-                actor=request.user,
-                tenant=updated.tenant,
-                campus=updated.campus,
-                before_data=before,
-                after_data=after,
-                metadata={
-                    "critical_action": True,
-                    "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
-                    "impact_summary": {
-                        "offering_id": updated.offering_id,
-                        "period_id": updated.template_period_id,
-                        "is_final_step": is_final_step,
-                        "auto_apply_on_final_approval": auto_apply_on_final_approval,
-                        "decision": "APPROVE" if approved else "REJECT",
-                    },
-                },
-                request=request,
-            )
-            registrar_email_result = None
-            handoff_email_result = None
-            faculty_decision_email_result = None
-            if approved and is_final_step and updated.status in {
-                GradeCorrectionRequest.Status.APPROVED,
-                GradeCorrectionRequest.Status.CLOSED,
-            }:
-                registrar_email_result = CorrectionNotificationService.send_registrar_official_report_email(
-                    request_obj=updated,
-                    trigger_role_code=pending_step.approver_role.code if pending_step and pending_step.approver_role_id else None,
-                )
-                faculty_decision_email_result = CorrectionNotificationService.send_correction_faculty_decision_notification(
-                    request_obj=updated
-                )
-            elif approved and not is_final_step:
-                next_step = GradingGovernanceService.get_pending_correction_step(request_obj=updated)
-                handoff_email_result = CorrectionNotificationService.send_correction_step_approval_notifications(
-                    request_obj=updated,
-                    step=next_step,
-                )
-            elif not approved:
-                faculty_decision_email_result = CorrectionNotificationService.send_correction_faculty_decision_notification(
-                    request_obj=updated
-                )
-            messages.success(
-                request,
-                (
-                    "Correction request approved, applied to the gradebook, and recomputed."
-                    if approved and is_final_step and updated.status == GradeCorrectionRequest.Status.CLOSED
-                    else "Correction request approved and unlock window opened."
-                    if approved and is_final_step
-                    else "Correction request step approved. Waiting for final approver."
-                )
-                if approved
-                else "Correction request rejected.",
-            )
-            if registrar_email_result:
-                if registrar_email_result["errors"]:
-                    messages.warning(
-                        request,
-                        "Correction request was approved, but the registrar email could not be sent. "
-                        "Please verify SMTP and registrar recipient configuration.",
-                    )
-                elif (
-                    FeatureSettingsService.is_correction_registrar_auto_email_enabled(tenant_id=updated.tenant_id)
-                    and registrar_email_result["attempted"] == 0
-                ):
-                    messages.warning(
-                        request,
-                        "Correction request was approved, but no registrar email recipient matched the current configuration "
-                        "for this campus or trigger role.",
-                    )
-            if handoff_email_result and handoff_email_result["errors"]:
-                messages.warning(request, "Step approved, but the next approver notification email could not be sent.")
-            elif (
-                handoff_email_result
-                and FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=updated.tenant_id)
-                and handoff_email_result["attempted"] == 0
-                and handoff_email_result.get("reason") != "queued_after_commit"
-            ):
-                messages.warning(
-                    request,
-                    "Step approved, but no email recipient matched the next approver step. "
-                    "Please verify role assignments and email addresses.",
-                )
-            if faculty_decision_email_result and faculty_decision_email_result["errors"]:
-                messages.warning(request, "Decision saved, but the faculty decision notification email could not be sent.")
-            elif (
-                faculty_decision_email_result
-                and FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=updated.tenant_id)
-                and faculty_decision_email_result["attempted"] == 0
-            ):
-                messages.warning(
-                    request,
-                    "Decision saved, but the faculty decision notification email was not sent because no faculty email address is available.",
-                )
-            return _redirect_back_or_default(request, "admin_portal:grade_correction_request_list")
+            return _process_bound_correction_review(request, correction_request, pending_step, is_final_step, form)
 
+    return _render_bound_correction_review(request, correction_request, pending_step, is_final_step, form)
+
+
+def _process_bound_correction_review(request, correction_request, pending_step, is_final_step, form):
+    auto_apply_on_final_approval = GradingGovernanceService.is_auto_apply_score_correction_request(
+        request_obj=correction_request
+    )
+    before = model_before_after(correction_request)
+    decision = form.cleaned_data["decision"]
+    approved = decision == GradeCorrectionReviewForm.Decision.APPROVE
+
+    try:
+        updated = GradingGovernanceService.review_correction_request(
+            request_obj=correction_request,
+            reviewer=request.user,
+            approved=approved,
+            review_remarks=form.cleaned_data.get("review_remarks"),
+            window_start=form.cleaned_data.get("window_start"),
+            window_end=form.cleaned_data.get("window_end"),
+            action_token=form.cleaned_data["action_token"], expected_step_id=form.cleaned_data["expected_step_id"],
+            dispatch_notifications=False,
+        )
+    except ValidationError as exc:
+        form.signature_required = isinstance(exc, CorrectionSignatureRequired)
+        form.add_error(None, " ".join(exc.messages))
+    else:
+        if getattr(updated, "action_replayed", False):
+            messages.success(request, "This exact review decision was already recorded.")
+            return _redirect_back_or_default(request, "admin_portal:grade_correction_request_list")
+        after = model_before_after(updated)
+        unlock_window = getattr(updated, "unlock_window", None)
+        if unlock_window:
+            after["unlock_window"] = {
+                "start_at": unlock_window.start_at.isoformat() if unlock_window.start_at else None,
+                "end_at": unlock_window.end_at.isoformat() if unlock_window.end_at else None,
+                "is_active": unlock_window.is_active,
+                "is_consumed": unlock_window.is_consumed,
+            }
+        AuditService.log_event(
+            action="APPROVE" if approved else "REJECT",
+            portal="ADMIN",
+            entity_type="GradeCorrectionRequest",
+            entity_id=updated.id,
+            actor=request.user,
+            tenant=updated.tenant,
+            campus=updated.campus,
+            before_data=before,
+            after_data=after,
+            metadata={
+                "critical_action": True,
+                "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
+                "impact_summary": {
+                    "offering_id": updated.offering_id,
+                    "period_id": updated.template_period_id,
+                    "is_final_step": is_final_step,
+                    "auto_apply_on_final_approval": auto_apply_on_final_approval,
+                    "decision": "APPROVE" if approved else "REJECT",
+                },
+            },
+            request=request,
+        )
+        registrar_email_result = None
+        handoff_email_result = None
+        faculty_decision_email_result = None
+        if approved and is_final_step and updated.status in {
+            GradeCorrectionRequest.Status.APPROVED,
+            GradeCorrectionRequest.Status.CLOSED,
+        }:
+            registrar_email_result = CorrectionNotificationService.send_registrar_official_report_email(
+                request_obj=updated,
+                trigger_role_code=pending_step.approver_role.code if pending_step and pending_step.approver_role_id else None,
+            )
+            faculty_decision_email_result = CorrectionNotificationService.send_correction_faculty_decision_notification(
+                request_obj=updated
+            )
+        elif approved and not is_final_step:
+            handoff_email_result = {"attempted": 0, "sent": 0, "errors": [], "reason": "queued_after_commit"}
+        elif not approved:
+            faculty_decision_email_result = CorrectionNotificationService.send_correction_faculty_decision_notification(
+                request_obj=updated
+            )
+        messages.success(
+            request,
+            (
+                "Correction request approved, applied to the gradebook, and recomputed."
+                if approved and is_final_step and updated.status == GradeCorrectionRequest.Status.CLOSED
+                else "Correction request approved and unlock window opened."
+                if approved and is_final_step
+                else "Correction request step approved. Waiting for final approver."
+            )
+            if approved
+            else "Correction request rejected.",
+        )
+        if registrar_email_result:
+            if registrar_email_result["errors"]:
+                messages.warning(
+                    request,
+                    "Correction request was approved, but the registrar email could not be sent. "
+                    "Please verify SMTP and registrar recipient configuration.",
+                )
+            elif (
+                FeatureSettingsService.is_correction_registrar_auto_email_enabled(tenant_id=updated.tenant_id)
+                and registrar_email_result["attempted"] == 0
+            ):
+                messages.warning(
+                    request,
+                    "Correction request was approved, but no registrar email recipient matched the current configuration "
+                    "for this campus or trigger role.",
+                )
+        if handoff_email_result and handoff_email_result["errors"]:
+            messages.warning(request, "Step approved, but the next approver notification email could not be sent.")
+        elif (
+            handoff_email_result
+            and FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=updated.tenant_id)
+            and handoff_email_result["attempted"] == 0
+            and handoff_email_result.get("reason") != "queued_after_commit"
+        ):
+            messages.warning(
+                request,
+                "Step approved, but no email recipient matched the next approver step. "
+                "Please verify role assignments and email addresses.",
+            )
+        if faculty_decision_email_result and faculty_decision_email_result["errors"]:
+            messages.warning(request, "Decision saved, but the faculty decision notification email could not be sent.")
+        elif (
+            faculty_decision_email_result
+            and FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=updated.tenant_id)
+            and faculty_decision_email_result["attempted"] == 0
+        ):
+            messages.warning(
+                request,
+                "Decision saved, but the faculty decision notification email was not sent because no faculty email address is available.",
+            )
+        return _redirect_back_or_default(request, "admin_portal:grade_correction_request_list")
+
+    return _render_bound_correction_review(request, correction_request, pending_step, is_final_step, form)
+
+
+def _render_bound_correction_review(request, correction_request, pending_step, is_final_step, form):
+    can_review, _, review_guard_message = GradingGovernanceService.can_user_review_correction_request(
+        request_obj=correction_request, user=request.user)
+    auto_apply_on_final_approval = GradingGovernanceService.is_auto_apply_score_correction_request(request_obj=correction_request)
+    official_report_enabled = FeatureSettingsService.is_correction_official_report_enabled(tenant_id=correction_request.tenant_id)
     context = {
         "title": f"Review Correction Request #{correction_request.id}",
         "form": form,
+        "signature_required": getattr(form, "signature_required", False),
         "correction_request": correction_request,
         "pending_step": pending_step,
         "is_final_step": is_final_step,
@@ -15638,7 +15616,7 @@ def grade_correction_request_official_report_view(request, request_id: int):
     }:
         raise PermissionDenied("Official correction report is available only after final approval.")
 
-    pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=correction_request)
+    pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=correction_request, generated_by_user=request.user)
     filename = _official_correction_report_filename(correction_request)
     AuditService.log_event(
         action="DOWNLOAD_CORRECTION_OFFICIAL_REPORT",

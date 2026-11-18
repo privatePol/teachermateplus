@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from apps.grading.correction_actions import signature_management_context
+
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
 from django.contrib.auth.tokens import default_token_generator
@@ -791,17 +793,18 @@ def faculty_privacy_consent_view(request):
     )
 
 
-def _signature_feature_enabled(*, user) -> bool:
+def _signature_feature_enabled(*, user, request=None) -> bool:
     return FeatureSettingsService.is_user_signatures_enabled(
-        tenant_id=getattr(user, "default_tenant_id", None),
+        tenant_id=(getattr(request, "scope", {}).get("tenant_id") or getattr(user, "default_tenant_id", None)),
         default=False,
     )
 
 
+@signature_management_context
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def faculty_signature_view(request):
-    if not _signature_feature_enabled(user=request.user):
+    if not _signature_feature_enabled(user=request.user, request=request):
         messages.error(request, "Stored signature management is currently disabled for this tenant.")
         return redirect("faculty_portal:dashboard")
 
@@ -830,8 +833,8 @@ def faculty_signature_view(request):
                         entity_type="UserSignatureCredential",
                         entity_id=credential.id,
                         actor=request.user,
-                        tenant=request.user.default_tenant_id,
-                        campus=request.user.default_campus_id,
+                        tenant=getattr(request, "scope", {}).get("tenant_id") or request.user.default_tenant_id,
+                        campus=getattr(request, "scope", {}).get("campus_id") or request.user.default_campus_id,
                         metadata={
                             "source": "UPLOAD",
                             "filename": credential.original_filename,
@@ -862,8 +865,8 @@ def faculty_signature_view(request):
                         entity_type="UserSignatureCredential",
                         entity_id=credential.id,
                         actor=request.user,
-                        tenant=request.user.default_tenant_id,
-                        campus=request.user.default_campus_id,
+                        tenant=getattr(request, "scope", {}).get("tenant_id") or request.user.default_tenant_id,
+                        campus=getattr(request, "scope", {}).get("campus_id") or request.user.default_campus_id,
                         metadata={
                             "source": "DRAW",
                             "filename": credential.original_filename,
@@ -884,8 +887,8 @@ def faculty_signature_view(request):
                     entity_type="UserSignatureCredential",
                     entity_id=credential.id,
                     actor=request.user,
-                    tenant=request.user.default_tenant_id,
-                    campus=request.user.default_campus_id,
+                    tenant=getattr(request, "scope", {}).get("tenant_id") or request.user.default_tenant_id,
+                    campus=getattr(request, "scope", {}).get("campus_id") or request.user.default_campus_id,
                     request=request,
                 )
                 messages.success(request, "Your stored signature has been removed.")
@@ -904,10 +907,11 @@ def faculty_signature_view(request):
     )
 
 
+@signature_management_context
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def faculty_signature_preview_view(request):
-    if not _signature_feature_enabled(user=request.user):
+    if not _signature_feature_enabled(user=request.user, request=request):
         return HttpResponse(status=404)
     credential = UserSignatureService.get_active_credential(user=request.user)
     if not credential:
@@ -919,8 +923,8 @@ def faculty_signature_preview_view(request):
         entity_type="UserSignatureCredential",
         entity_id=credential.id,
         actor=request.user,
-        tenant=request.user.default_tenant_id,
-        campus=request.user.default_campus_id,
+        tenant=getattr(request, "scope", {}).get("tenant_id") or request.user.default_tenant_id,
+        campus=getattr(request, "scope", {}).get("campus_id") or request.user.default_campus_id,
         metadata={
             "mime_type": credential.mime_type,
             "file_size_bytes": credential.file_size_bytes,
@@ -930,10 +934,11 @@ def faculty_signature_preview_view(request):
     return HttpResponse(image_bytes, content_type=credential.mime_type or "image/png")
 
 
+@signature_management_context
 @portal_required("ADMIN")
 @permission_required("admin_portal.access")
 def admin_signature_view(request):
-    if not _signature_feature_enabled(user=request.user):
+    if not _signature_feature_enabled(user=request.user, request=request):
         messages.error(request, "Stored signature management is currently disabled for this tenant.")
         return redirect("admin_portal:dashboard")
 
@@ -960,8 +965,8 @@ def admin_signature_view(request):
                         entity_type="UserSignatureCredential",
                         entity_id=credential.id,
                         actor=request.user,
-                        tenant=request.user.default_tenant_id,
-                        campus=request.user.default_campus_id,
+                        tenant=getattr(request, "scope", {}).get("tenant_id") or request.user.default_tenant_id,
+                        campus=getattr(request, "scope", {}).get("campus_id") or request.user.default_campus_id,
                         metadata={
                             "filename": credential.original_filename,
                             "mime_type": credential.mime_type,
@@ -982,8 +987,8 @@ def admin_signature_view(request):
                     entity_type="UserSignatureCredential",
                     entity_id=credential.id,
                     actor=request.user,
-                    tenant=request.user.default_tenant_id,
-                    campus=request.user.default_campus_id,
+                    tenant=getattr(request, "scope", {}).get("tenant_id") or request.user.default_tenant_id,
+                    campus=getattr(request, "scope", {}).get("campus_id") or request.user.default_campus_id,
                     request=request,
                 )
                 messages.success(request, "Your stored signature has been removed.")
@@ -1001,10 +1006,11 @@ def admin_signature_view(request):
     )
 
 
+@signature_management_context
 @portal_required("ADMIN")
 @permission_required("admin_portal.access")
 def admin_signature_preview_view(request):
-    if not _signature_feature_enabled(user=request.user):
+    if not _signature_feature_enabled(user=request.user, request=request):
         return HttpResponse(status=404)
     credential = UserSignatureService.get_active_credential(user=request.user)
     if not credential:
@@ -1016,8 +1022,8 @@ def admin_signature_preview_view(request):
         entity_type="UserSignatureCredential",
         entity_id=credential.id,
         actor=request.user,
-        tenant=request.user.default_tenant_id,
-        campus=request.user.default_campus_id,
+        tenant=getattr(request, "scope", {}).get("tenant_id") or request.user.default_tenant_id,
+        campus=getattr(request, "scope", {}).get("campus_id") or request.user.default_campus_id,
         metadata={
             "mime_type": credential.mime_type,
             "file_size_bytes": credential.file_size_bytes,

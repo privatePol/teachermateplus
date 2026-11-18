@@ -1616,6 +1616,61 @@ class GradeCorrectionApprovalAuthoritySnapshot(models.Model):
         return f"{self.correction_request_id}:S{self.step_order}:{self.authorization_type}"
 
 
+class CorrectionActionReceipt(models.Model):
+    """A durable, scope-bound identity. Failed actions roll back their receipt."""
+
+    key = models.UUIDField(primary_key=True)
+    kind = models.CharField(max_length=12)
+    actor = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT)
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT)
+    offering = models.ForeignKey("academics.CourseOffering", on_delete=models.PROTECT)
+    template_period = models.ForeignKey("grading.GradingTemplatePeriod", on_delete=models.PROTECT)
+    payload_sha256 = models.CharField(max_length=64)
+    correction_request = models.ForeignKey(
+        "grading.GradeCorrectionRequest", on_delete=models.PROTECT, null=True,
+        related_name="action_receipts",
+    )
+    approval_step = models.ForeignKey("grading.GradeCorrectionApprovalStep", on_delete=models.PROTECT, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class GradeCorrectionSignatureEvidence(models.Model):
+    """Encrypted signature captured by an authorized action, never reconstructed."""
+
+    action_key = models.CharField(max_length=80, unique=True)
+    correction_request = models.ForeignKey(
+        "grading.GradeCorrectionRequest", on_delete=models.PROTECT, related_name="signature_evidence",
+    )
+    approval_step = models.OneToOneField(
+        "grading.GradeCorrectionApprovalStep", on_delete=models.PROTECT, null=True,
+        related_name="signature_evidence",
+    )
+    signer = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT)
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT)
+    action = models.CharField(max_length=12)
+    signer_name = models.CharField(max_length=512)
+    signing_role = models.CharField(max_length=512)
+    signed_at = models.DateTimeField()
+    encrypted_blob = models.BinaryField()
+    encryption_nonce = models.BinaryField()
+    content_sha256 = models.CharField(max_length=64)
+    image_width = models.PositiveIntegerField()
+    image_height = models.PositiveIntegerField()
+    action_payload_sha256 = models.CharField(max_length=64)
+
+    objects = ImmutableCorrectionApprovalAuthoritySnapshotQuerySet.as_manager()
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self)._base_manager.filter(pk=self.pk).exists():
+            raise ValidationError("Correction signing evidence is immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Correction signing evidence is immutable.")
+
+
 class GradeCorrectionRequestItem(TimeStampedModel, ActivatableModel):
     class RequestedAction(models.TextChoices):
         UPDATE_SCORE = "UPDATE_SCORE", "Update Score"

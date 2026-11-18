@@ -2536,6 +2536,8 @@ class GradeSubmissionReopenReviewForm(forms.Form):
 
 
 class GradeCorrectionReviewForm(forms.Form):
+    action_token = forms.CharField(required=False, widget=forms.HiddenInput())
+    expected_step_id = forms.IntegerField(required=False, widget=forms.HiddenInput())
     class Decision(models.TextChoices):
         APPROVE = "APPROVE", "Approve"
         REJECT = "REJECT", "Reject"

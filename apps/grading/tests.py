@@ -1,16 +1,19 @@
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 from importlib import import_module
 from io import BytesIO
 from types import SimpleNamespace
+from time import perf_counter
 from unittest.mock import patch
 
 from cryptography.exceptions import InvalidTag
 from django.conf import settings
 from django.core import mail
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from django.utils import timezone
@@ -59,6 +62,7 @@ from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
 from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
 from apps.grading.services import FacultyGradingService, GradeEncodingAccessService, GradingGovernanceService
+from apps.predictions.models import PredictionDirtyQueue
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
@@ -309,6 +313,21 @@ class CorrectionWorkflowTests(TestCase):
             deadline_at=timezone.now() - timedelta(hours=1),
         )
 
+        # New faculty petitions and approvals require usable registered signatures.
+        SystemSettingService.set(FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY, True,
+            tenant_id=self.tenant.pk, value_type="BOOL")
+        signature = BytesIO()
+        Image.new("RGBA", (40, 12), (0, 0, 0, 255)).save(signature, format="PNG")
+        for signer in (self.faculty_user, self.reviewer_user, self.cao_user, self.super_admin_user):
+            UserSignatureService.store_signature(user=signer,
+                uploaded_file=SimpleUploadedFile("fixture-signature.png", signature.getvalue(), content_type="image/png"), actor=signer)
+
+    def _register_correction_signature(self, user):
+        image = BytesIO()
+        Image.new("RGBA", (40, 12), (0, 0, 0, 255)).save(image, format="PNG")
+        UserSignatureService.store_signature(user=user,
+            uploaded_file=SimpleUploadedFile("signature.png", image.getvalue(), content_type="image/png"), actor=user)
+
     def test_correction_request_form_accepts_multiple_students_and_items(self):
         form = GradeCorrectionRequestForm(
             data={
@@ -482,6 +501,7 @@ class CorrectionWorkflowTests(TestCase):
         response = self.client.post(
             url,
             {
+                "submission_token": self.client.get(url).context["form"]["submission_token"].value(),
                 "students": [self.student1.id],
                 "grade_activities": [self.activity.id],
                 "correction_payload": (
@@ -508,6 +528,7 @@ class CorrectionWorkflowTests(TestCase):
         response = self.client.post(
             url,
             {
+                "submission_token": self.client.get(url).context["form"]["submission_token"].value(),
                 "students": [self.student1.id],
                 "grade_activities": [non_exam_activity.id],
                 "correction_payload": (
@@ -661,7 +682,14 @@ class CorrectionWorkflowTests(TestCase):
         self.assertIn("Awaiting College Dean Review", message.body)
         self.assertIn("NCBA confidentiality notice", message.body)
 
+    def _grant_admin_on_behalf_access(self):
+        for code in ("admin_portal.access", "corrections.create_on_behalf"):
+            permission, _ = Permission.objects.get_or_create(code=code, defaults={"module": "corrections", "action": "create_on_behalf"})
+            RolePermission.objects.get_or_create(role=self.reviewer_role, permission=permission)
+            RolePermission.objects.get_or_create(role=self.super_admin_role, permission=permission)
+
     def test_on_behalf_correction_can_be_created_for_inactive_faculty(self):
+        self._grant_admin_on_behalf_access()
         self.faculty_user.is_active = False
         self.faculty_user.save(update_fields=["is_active"])
 
@@ -691,6 +719,7 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(correction.approval_route, self.route_rule)
 
     def test_on_behalf_initiator_cannot_review_same_petition(self):
+        self._grant_admin_on_behalf_access()
         correction = GradingGovernanceService.create_correction_request(
             user=self.faculty_user,
             initiated_by_user=self.reviewer_user,
@@ -943,6 +972,7 @@ class CorrectionWorkflowTests(TestCase):
             default_campus=self.campus,
             default_department=self.department,
         )
+        self._register_correction_signature(area_user)
         UserRole.objects.create(user=area_user, role=area_role, tenant=self.tenant, campus=self.campus)
         CorrectionApprovalRouteStep.objects.create(
             route_rule=self.route_rule,
@@ -1031,6 +1061,7 @@ class CorrectionWorkflowTests(TestCase):
             default_campus=self.campus,
             default_department=self.department,
         )
+        self._register_correction_signature(area_user)
         UserRole.objects.create(user=area_user, role=area_role, tenant=self.tenant, campus=self.campus)
         CorrectionApprovalRouteStep.objects.create(
             route_rule=self.route_rule,
@@ -1204,6 +1235,7 @@ class CorrectionWorkflowTests(TestCase):
             default_campus=self.campus,
             default_department=self.department,
         )
+        self._register_correction_signature(area_user)
         UserRole.objects.create(user=area_user, role=area_role, tenant=self.tenant, campus=self.campus)
         CorrectionApprovalRouteStep.objects.create(
             route_rule=self.route_rule,
@@ -1778,6 +1810,7 @@ class CorrectionWorkflowTests(TestCase):
             default_campus=self.campus,
             default_department=self.department,
         )
+        self._register_correction_signature(area_user)
         UserRole.objects.create(user=area_user, role=area_role, tenant=self.tenant, campus=self.campus)
         CorrectionApprovalRouteStep.objects.create(
             route_rule=self.route_rule,
@@ -2347,74 +2380,23 @@ class CorrectionWorkflowTests(TestCase):
         self.assertIsNotNone(self.faculty_user.signature_credential.last_used_at)
         self.assertIsNotNone(self.reviewer_user.signature_credential.last_used_at)
 
-    def test_official_correction_report_uses_fallback_for_invalid_signature_tag(self):
-        SystemSettingService.set(
-            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
-            True,
-            tenant_id=self.tenant.id,
-            value_type="BOOL",
-        )
-        SystemSettingService.set(
-            FeatureSettingsService.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
-            True,
-            tenant_id=self.tenant.id,
-            value_type="BOOL",
-        )
-
-        buffer = BytesIO()
-        Image.new("RGBA", (180, 60), (120, 10, 10, 255)).save(buffer, format="PNG")
-        credential = UserSignatureService.store_signature(
-            user=self.reviewer_user,
-            uploaded_file=SimpleUploadedFile(
-                "reviewer-signature.png",
-                buffer.getvalue(),
-                content_type="image/png",
-            ),
-            actor=self.reviewer_user,
-        )
-        credential.encrypted_blob = credential.encrypted_blob[:-1] + bytes([credential.encrypted_blob[-1] ^ 1])
+    def test_invalid_signature_tag_cannot_authorize_new_approval(self):
+        from apps.grading.correction_actions import CorrectionSignatureRequired
+        credential = self.reviewer_user.signature_credential
+        credential.encrypted_blob = b"invalid ciphertext"
         credential.save(update_fields=["encrypted_blob"])
-        with self.assertRaises(InvalidTag):
-            UserSignatureService.decrypt_signature_bytes(credential=credential)
-
         correction = GradingGovernanceService.create_correction_request(
-            user=self.faculty_user,
-            offering=self.offering,
-            template_period=self.period,
-            justification="Gracefully render a report when an old signature cannot decrypt.",
-            items=[
-                {
-                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
-                    "student_id": self.student1.id,
-                    "grade_activity_id": self.activity.id,
-                    "new_value": "45",
-                }
-            ],
-        )
-        closed_request = GradingGovernanceService.review_correction_request(
-            request_obj=correction,
-            reviewer=self.reviewer_user,
-            approved=True,
-            review_remarks="Approved with an unavailable stored signature.",
-        )
-
-        with self.assertLogs("teachermateplus.system", level="WARNING") as logs:
-            with patch("apps.grading.reporting.Paragraph", wraps=ReportLabParagraph) as paragraph:
-                pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
-
-        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
-        self.assertTrue(
-            any("No stored signature on file." in call.args[0] for call in paragraph.call_args_list)
-        )
-        self.assertIn(f"user_id={self.reviewer_user.id}", logs.output[0])
-        self.assertIn(f"credential_id={credential.id}", logs.output[0])
-        self.assertEqual(
-            UserSignatureUsageLog.objects.filter(
-                user=self.reviewer_user,
-                document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
-            ).count(),
-            0,
-        )
+            user=self.faculty_user, offering=self.offering, template_period=self.period,
+            justification="A corrupt credential must fail closed.",
+            items=[{"student_id": self.student1.pk, "grade_activity_id": self.activity.pk, "new_value": "45"}])
+        before = list(StudentActivityScore.objects.values_list("pk", "raw_score"))
+        with self.assertRaises(CorrectionSignatureRequired):
+            GradingGovernanceService.review_correction_request(request_obj=correction,
+                reviewer=self.reviewer_user, approved=True)
+        correction.refresh_from_db()
+        self.assertEqual(correction.status, GradeCorrectionRequest.Status.PENDING)
+        self.assertEqual(before, list(StudentActivityScore.objects.values_list("pk", "raw_score")))
+        self.assertEqual(correction.signature_evidence.count(), 1)
 
     def test_official_correction_report_keeps_fallback_without_signature(self):
         SystemSettingService.set(
@@ -2430,33 +2412,20 @@ class CorrectionWorkflowTests(TestCase):
             value_type="BOOL",
         )
 
-        correction = GradingGovernanceService.create_correction_request(
-            user=self.faculty_user,
-            offering=self.offering,
-            template_period=self.period,
-            justification="Render the existing no-signature fallback.",
-            items=[
-                {
-                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
-                    "student_id": self.student1.id,
-                    "grade_activity_id": self.activity.id,
-                    "new_value": "45",
-                }
-            ],
-        )
-        closed_request = GradingGovernanceService.review_correction_request(
-            request_obj=correction,
-            reviewer=self.reviewer_user,
-            approved=True,
-            review_remarks="Approved without stored signatures.",
-        )
+        # Historical actions did not capture evidence; today's credentials must not sign them.
+        closed_request = GradeCorrectionRequest.objects.create(tenant=self.tenant, campus=self.campus,
+            offering=self.offering, template_period=self.period, requested_by_user=self.faculty_user,
+            status=GradeCorrectionRequest.Status.CLOSED, justification="Historical unsigned request")
+        GradeCorrectionApprovalStep.objects.create(correction_request=closed_request, step_order=1,
+            approver_role=self.reviewer_role, approver_label="Dean", status="APPROVED",
+            reviewed_by_user=self.reviewer_user, reviewed_at=timezone.now())
 
         with patch("apps.grading.reporting.Paragraph", wraps=ReportLabParagraph) as paragraph:
             pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
 
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertEqual(
-            sum("No stored signature on file." in call.args[0] for call in paragraph.call_args_list),
+            sum("No signature captured at action time" in call.args[0] for call in paragraph.call_args_list),
             2,
         )
         self.assertEqual(
@@ -6085,3 +6054,540 @@ class GradeEncodingAccessControlTests(TestCase):
         )
 
         self.assertTrue(activity.pk)
+
+
+class _AttendanceGradeFixture:
+    """Synthetic relationships shared by correctness tests and the real-path baseline."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.tenant = Tenant.objects.create(code="ATTBASE", name="Attendance baseline")
+        cls.campus = Campus.objects.create(tenant=cls.tenant, code="MAIN", name="Main")
+        cls.department = Department.objects.create(
+            tenant=cls.tenant, campus=cls.campus, code="CS", name="Computing",
+        )
+        cls.program = Program.objects.create(
+            tenant=cls.tenant, campus=cls.campus, department=cls.department,
+            code="BSCS", name="Computing",
+        )
+        cls.year = AcademicYear.objects.create(
+            tenant=cls.tenant, code="2026-2027", name="2026-2027",
+            start_date=date(2026, 6, 1), end_date=date(2027, 5, 31),
+        )
+        cls.term = Term.objects.create(
+            tenant=cls.tenant, academic_year=cls.year, code="FIRST", name="First",
+            sequence_no=1, start_date=date(2026, 6, 1), end_date=date(2026, 12, 31),
+        )
+        cls.course = Course.objects.create(
+            tenant=cls.tenant, campus=cls.campus, department=cls.department,
+            code="ATT101", title="Attendance fixture",
+        )
+        cls.section = Section.objects.create(
+            tenant=cls.tenant, campus=cls.campus, department=cls.department,
+            program=cls.program, code="ATT-A", name="Attendance A",
+        )
+        cls.offering = CourseOffering.objects.create(
+            tenant=cls.tenant, campus=cls.campus, department=cls.department,
+            program=cls.program, academic_year=cls.year, term=cls.term,
+            course=cls.course, section=cls.section,
+        )
+        cls.faculty_user = User.objects.create_user(
+            username="attendance.baseline", email="attendance.baseline@example.com", password=None,
+            default_tenant=cls.tenant, default_campus=cls.campus,
+            default_department=cls.department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=cls.tenant, campus=cls.campus, offering=cls.offering,
+            faculty_user=cls.faculty_user, is_primary=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(), accepted_by=cls.faculty_user,
+        )
+        cls.template = GradingTemplate.objects.create(
+            tenant=cls.tenant, code="ATTENDANCE", name="Attendance",
+            is_published=True, approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        cls.period = GradingTemplatePeriod.objects.create(
+            template=cls.template, code="PRELIM", name="Prelim", sequence_no=1,
+            weight_percentage=Decimal("100"),
+        )
+        cls.component = GradingTemplateComponent.objects.create(
+            template_period=cls.period, code="CS", name="Class standing",
+            weight_percentage=Decimal("100"), sort_order=1,
+        )
+        cls.attendance = GradingTemplateSubcomponent.objects.create(
+            template_component=cls.component, code="ATT", name="Attendance",
+            weight_percentage=Decimal("100"), is_attendance_component=True,
+            sort_order=1,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=cls.course, grading_template=cls.template, effective_from_term=cls.term,
+        )
+
+    def _students(self, count):
+        students = Student.objects.bulk_create([
+            Student(
+                tenant=self.tenant, campus=self.campus, department=self.department,
+                program=self.program, student_no=f"ATT-{index:03d}",
+                last_name=f"Student{index:03d}", first_name="Attendance",
+            )
+            for index in range(count)
+        ])
+        Enrollment.objects.bulk_create([
+            Enrollment(
+                tenant=self.tenant, campus=self.campus, academic_year=self.year,
+                term=self.term, student=student, course_offering=self.offering,
+                enrollment_status=Enrollment.Status.ACTIVE,
+                encoded_by_user=self.faculty_user,
+            )
+            for student in students
+        ])
+        return students
+
+    def _sessions(self, count):
+        return [AttendanceSession.objects.create(
+            tenant=self.tenant, campus=self.campus, offering=self.offering,
+            template_period=self.period, session_date=date(2026, 7, 1) + timedelta(days=index),
+            title=f"Meeting {index + 1}", created_by_user=self.faculty_user,
+        ) for index in range(count)]
+
+    def _records(self, student, sessions, statuses):
+        self.assertEqual(len(sessions), len(statuses))
+        return AttendanceRecord.objects.bulk_create([
+            AttendanceRecord(
+                tenant=self.tenant, campus=self.campus, session=session,
+                student=student, status_code=status, recorded_by_user=self.faculty_user,
+            ) for session, status in zip(sessions, statuses)
+        ])
+
+    def _compute(self, **kwargs):
+        return FacultyGradingService.recompute_period_summary(
+            user=self.faculty_user, offering=self.offering, template_period=self.period,
+            **kwargs,
+        )
+
+    def _detail(self, student):
+        return FacultyGradingService.build_period_grade_detail_for_student(
+            offering=self.offering, template_period=self.period,
+            student_id=student.pk, include_details=True,
+        )
+
+    def _assert_saved_grades(self, expected):
+        periods = StudentPeriodGrade.objects.filter(
+            offering=self.offering, template_period=self.period,
+        )
+        finals = StudentFinalGrade.objects.filter(offering=self.offering)
+        self.assertEqual(dict(periods.values_list("student_id", "period_grade")), expected)
+        self.assertEqual(dict(finals.values_list("student_id", "final_grade")), expected)
+        for rows in (periods, finals):
+            self.assertEqual(set(rows.values_list("tenant_id", "campus_id")), {
+                (self.tenant.pk, self.campus.pk),
+            })
+
+    @staticmethod
+    def _attendance_selects(queries):
+        tables = [connection.ops.quote_name(model._meta.db_table).lower()
+                  for model in (AttendanceRecord, AttendanceSession)]
+        return [row["sql"] for row in queries
+                if row["sql"].lstrip().upper().startswith("SELECT")
+                and any(table in row["sql"].lower() for table in tables)]
+
+
+class AttendanceGradeBoundaryTests(_AttendanceGradeFixture, TestCase):
+    def test_present_late_excused_absent_compute_real_period_and_final_grades(self):
+        students = self._students(4)
+        sessions = self._sessions(1)
+        statuses = ("P", "L", "E", "A")
+        expected_values = (Decimal("100"), Decimal("90"), Decimal("100"), Decimal("0"))
+        for student, status in zip(students, statuses):
+            self._records(student, sessions, [status])
+        summary = self._compute()
+        expected = dict(zip([student.pk for student in students], expected_values))
+        self.assertEqual({row["student"].pk: row["period_grade"] for row in summary["rows"]}, expected)
+        self._assert_saved_grades(expected)
+
+    def test_missing_record_remains_distinct_from_encoded_absent_zero(self):
+        missing, absent = self._students(2)
+        sessions = self._sessions(1)
+        self._records(absent, sessions, ["A"])
+        missing_detail, absent_detail = self._detail(missing), self._detail(absent)
+        missing_sub = missing_detail["component_breakdown"][0]["subcomponents"][0]
+        absent_sub = absent_detail["component_breakdown"][0]["subcomponents"][0]
+        self.assertIsNone(missing_sub["score"])
+        self.assertEqual(absent_sub["score"], Decimal("0.00"))
+        self.assertTrue(missing_sub["attendance_records"][0]["missing"])
+        self.assertFalse(absent_sub["attendance_records"][0]["missing"])
+        # Current aggregate behavior is zero in both cases; missingness belongs
+        # to the attendance input/detail, not an invented NULL-period rule.
+        self._compute()
+        self._assert_saved_grades({missing.pk: Decimal("0"), absent.pk: Decimal("0")})
+
+    def test_inactive_sessions_and_records_do_not_contribute(self):
+        active, inactive_only = self._students(2)
+        sessions = self._sessions(3)
+        sessions[1].is_active = False
+        sessions[1].save(update_fields=["is_active"])
+        self._records(active, sessions, ["P", "A", "A"])
+        self._records(inactive_only, sessions[1:], ["P", "P"])
+        AttendanceRecord.objects.filter(session=sessions[2]).update(is_active=False)
+        self.assertEqual(self._detail(active)["component_scores"]["CS"], Decimal("100.00"))
+        inactive_sub = self._detail(inactive_only)["component_breakdown"][0]["subcomponents"][0]
+        self.assertIsNone(inactive_sub["score"])
+        self._compute()
+        self._assert_saved_grades({active.pk: Decimal("100"), inactive_only.pk: Decimal("0")})
+
+    def test_multiple_sessions_preserve_decimal_and_official_rounding_boundaries(self):
+        students = self._students(5)
+        sessions = self._sessions(16)
+        cases = [
+            (["P", "L", "L"], "93.33", "93"),
+            (["P", "L", "E", "A"], "72.50", "73"),
+            (["P", "P", "P", "L"], "97.50", "98"),
+            (["P"] * 15 + ["L"], "99.38", "99"),
+            (["P"] * 9 + ["L"] * 7, "95.62", "96"),
+        ]
+        expected = {}
+        for student, (statuses, component, official) in zip(students, cases):
+            self._records(student, sessions[:len(statuses)], statuses)
+            with self.subTest(component=component, official=official):
+                detail = self._detail(student)
+                self.assertEqual(detail["component_scores"]["CS"], Decimal(component))
+                self.assertEqual(detail["period_grade"], Decimal(official))
+            expected[student.pk] = Decimal(official)
+        summary = self._compute()
+        self.assertEqual({row["student"].pk: row["component_scores"]["CS"] for row in summary["rows"]},
+                         {student.pk: Decimal(case[1]) for student, case in zip(students, cases)})
+        self._assert_saved_grades(expected)
+
+    def test_attendance_subcomponents_respect_weights_without_double_counting(self):
+        student, = self._students(1)
+        self._records(student, self._sessions(1), ["L"])
+        self.attendance.weight_percentage = Decimal("25")
+        self.attendance.save(update_fields=["weight_percentage"])
+        GradingTemplateSubcomponent.objects.create(
+            template_component=self.component, code="ATT2", name="Second attendance",
+            weight_percentage=Decimal("75"), is_attendance_component=True, sort_order=2,
+        )
+        detail = self._detail(student)
+        self.assertEqual([sub["score"] for sub in detail["component_breakdown"][0]["subcomponents"]],
+                         [Decimal("90.00"), Decimal("90.00")])
+        with CaptureQueriesContext(connection) as queries:
+            self._compute()
+        self.assertEqual(len(self._attendance_selects(queries)), 1)
+        self._assert_saved_grades({student.pk: Decimal("90")})
+
+    def test_non_active_and_inactive_enrollments_keep_existing_grading_rules(self):
+        students = self._students(5)
+        session, = self._sessions(1)
+        for student in students:
+            self._records(student, [session], ["P"])
+        for student, status in zip(students[1:4], ("DRP", "W", "INC")):
+            Enrollment.objects.filter(course_offering=self.offering, student=student).update(enrollment_status=status)
+        Enrollment.objects.filter(course_offering=self.offering, student=students[4]).update(is_active=False)
+        summary = self._compute()
+        expected = {students[0].pk: Decimal("100"), **{student.pk: None for student in students[1:4]}}
+        self.assertEqual({row["student"].pk for row in summary["rows"]}, set(expected))
+        self._assert_saved_grades(expected)
+
+    def test_records_in_other_offerings_or_periods_do_not_leak_into_calculation(self):
+        student, = self._students(1)
+        self._records(student, self._sessions(1), ["L"])
+        other_period = GradingTemplatePeriod.objects.create(
+            template=self.template, code="MIDTERM", name="Midterm", sequence_no=2,
+        )
+        other_section = Section.objects.create(
+            tenant=self.tenant, campus=self.campus, department=self.department,
+            program=self.program, code="ATT-B", name="Attendance B",
+        )
+        other_offering = CourseOffering.objects.create(
+            tenant=self.tenant, campus=self.campus, department=self.department,
+            program=self.program, academic_year=self.year, term=self.term,
+            course=self.course, section=other_section,
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant, campus=self.campus, academic_year=self.year, term=self.term,
+            student=student, course_offering=other_offering,
+        )
+        for offering, period in ((other_offering, self.period), (self.offering, other_period)):
+            session = AttendanceSession.objects.create(
+                tenant=self.tenant, campus=self.campus, offering=offering,
+                template_period=period, session_date=date(2026, 7, 1),
+            )
+            self._records(student, [session], ["A"])
+        self.assertEqual(self._detail(student)["component_scores"]["CS"], Decimal("90.00"))
+        summary = self._compute()
+        self.assertEqual(summary["rows"][0]["period_grade"], Decimal("90"))
+        self.assertEqual(StudentPeriodGrade.objects.get(
+            offering=self.offering, template_period=self.period, student=student,
+        ).period_grade, Decimal("90"))
+
+    def test_submitted_finalized_attendance_results_and_audits_are_not_recomputed(self):
+        student, = self._students(1)
+        record, = self._records(student, self._sessions(1), ["P"])
+        self._compute(period_is_finalized=True, final_is_submitted=True)
+        GradeSubmission.objects.create(
+            tenant=self.tenant, campus=self.campus, offering=self.offering,
+            template_period=self.period, status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user, submitted_at=timezone.now(),
+        )
+        before = {model._meta.label: list(model.objects.order_by("pk").values())
+                  for model in (StudentPeriodGrade, StudentFinalGrade, GradeSubmission, AuditLog)}
+        AttendanceRecord.objects.filter(pk=record.pk).update(status_code="A")
+        with self.assertRaises(ValidationError):
+            self._compute()
+        after = {model._meta.label: list(model.objects.order_by("pk").values())
+                 for model in (StudentPeriodGrade, StudentFinalGrade, GradeSubmission, AuditLog)}
+        self.assertEqual(before, after)
+
+    def test_locked_attendance_period_rejects_computation_without_grade_writes(self):
+        student, = self._students(1)
+        self._records(student, self._sessions(1), ["P"])
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant, campus=self.campus, academic_year=self.year, term=self.term,
+            period_code=self.period.code, scope_type=GradingPeriodLock.ScopeType.COURSE,
+            course_offering=self.offering, is_locked=True,
+        )
+        before_audits = AuditLog.objects.count()
+        with self.assertRaises(ValidationError):
+            self._compute()
+        self.assertFalse(StudentPeriodGrade.objects.filter(offering=self.offering).exists())
+        self.assertFalse(StudentFinalGrade.objects.filter(offering=self.offering).exists())
+        self.assertEqual(AuditLog.objects.count(), before_audits)
+
+    def test_explicit_preserve_final_transition_keeps_submitted_attendance_final(self):
+        student, = self._students(1)
+        record, = self._records(student, self._sessions(1), ["P"])
+        self._compute(final_is_submitted=True)
+        final_before = list(StudentFinalGrade.objects.order_by("pk").values())
+        final_audits = list(AuditLog.objects.filter(entity_type="StudentFinalGrade").order_by("pk").values())
+        AttendanceRecord.objects.filter(pk=record.pk).update(status_code="A")
+        self._compute(final_is_submitted=None)
+        self.assertEqual(StudentPeriodGrade.objects.get(
+            offering=self.offering, template_period=self.period, student=student,
+        ).period_grade, Decimal("0"))
+        self.assertEqual(list(StudentFinalGrade.objects.order_by("pk").values()), final_before)
+        self.assertEqual(list(AuditLog.objects.filter(
+            entity_type="StudentFinalGrade").order_by("pk").values()), final_audits)
+
+    def test_scalar_and_bulk_scores_match_without_bulk_fallback_queries(self):
+        students = self._students(4)
+        sessions = self._sessions(4)
+        statuses = ([], ["A"], ["P", "L", "E", "A"], ["P", "L", "L"])
+        expected = (None, Decimal("0.00"), Decimal("72.50"), Decimal("93.33"))
+        lookup = {}
+        for student, codes in zip(students, statuses):
+            self._records(student, sessions[:len(codes)], codes)
+            if codes:
+                lookup[student.pk] = codes
+        for base_value in (Decimal("0"), Decimal("50")):
+            for student, score in zip(students, expected):
+                with self.subTest(student=student.pk, base_value=base_value):
+                    scalar = FacultyGradingService._attendance_subcomponent_score(
+                        offering=self.offering, template_period=self.period,
+                        student_id=student.pk, base_value=base_value,
+                    )
+                    with self.assertNumQueries(0):
+                        bulk = FacultyGradingService._attendance_subcomponent_score(
+                            offering=self.offering, template_period=self.period,
+                            student_id=student.pk, base_value=base_value,
+                            attendance_lookup=lookup,
+                        )
+                    self.assertEqual(scalar, score)
+                    self.assertEqual(bulk, scalar)
+        with self.assertNumQueries(0):
+            self.assertIsNone(FacultyGradingService._attendance_subcomponent_score(
+                offering=self.offering, template_period=self.period,
+                student_id=students[1].pk, base_value=Decimal("50"), attendance_lookup={},
+            ))
+
+    def test_empty_bulk_result_reads_once_and_preserves_missing_scores(self):
+        students = self._students(5)
+        self._sessions(1)
+        with CaptureQueriesContext(connection) as queries:
+            summary = self._compute()
+        self.assertEqual(len(self._attendance_selects(queries)), 1)
+        self.assertTrue(all(row["component_scores"]["CS"] == Decimal("0.00")
+                            for row in summary["rows"]))
+        self._assert_saved_grades({student.pk: Decimal("0") for student in students})
+
+    def test_scoped_recompute_updates_only_eligible_requested_students(self):
+        target, untouched, dropped, inactive = self._students(4)
+        session, = self._sessions(1)
+        for student, status in zip((target, untouched, dropped, inactive), ("L", "P", "E", "P")):
+            self._records(student, [session], [status])
+        Enrollment.objects.filter(student=dropped).update(enrollment_status="DRP")
+        Enrollment.objects.filter(student=inactive).update(is_active=False)
+        with CaptureQueriesContext(connection) as queries:
+            summary = self._compute(student_ids=[target.pk, dropped.pk, inactive.pk])
+        self.assertEqual(len(self._attendance_selects(queries)), 1)
+        self.assertEqual({row["student"].pk for row in summary["rows"]}, {target.pk, dropped.pk})
+        self._assert_saved_grades({target.pk: Decimal("90"), dropped.pk: None})
+
+    def test_unused_attendance_and_empty_eligible_cohorts_do_not_read_facts(self):
+        student, = self._students(1)
+        self._records(student, self._sessions(1), ["P"])
+        with CaptureQueriesContext(connection) as queries:
+            self._compute(student_ids=[])
+        self.assertEqual(self._attendance_selects(queries), [])
+        Enrollment.objects.filter(student=student).update(enrollment_status="DRP")
+        with CaptureQueriesContext(connection) as queries:
+            self._compute()
+        self.assertEqual(self._attendance_selects(queries), [])
+        self._assert_saved_grades({student.pk: None})
+        Enrollment.objects.filter(student=student).update(enrollment_status="ACTIVE")
+        self.attendance.is_active = False
+        self.attendance.save(update_fields=["is_active"])
+        with CaptureQueriesContext(connection) as queries:
+            self._compute()
+        self.assertEqual(self._attendance_selects(queries), [])
+        self._assert_saved_grades({student.pk: Decimal("0")})
+
+    def test_other_tenant_and_campus_cohorts_and_grades_remain_isolated(self):
+        student, = self._students(1)
+        self._records(student, self._sessions(1), ["L"])
+        other_tenant = Tenant.objects.create(code="OTHER", name="Other tenant")
+        foreign_finals = []
+        for index, tenant in enumerate((self.tenant, other_tenant), start=1):
+            campus = Campus.objects.create(tenant=tenant, code="OTHER", name="Other campus")
+            department = Department.objects.create(tenant=tenant, campus=campus, code="CS", name="Computing")
+            program = Program.objects.create(
+                tenant=tenant, campus=campus, department=department, code="BSCS", name="Computing",
+            )
+            year = AcademicYear.objects.create(
+                tenant=tenant, code=f"OTHER-{index}", name="Other year",
+                start_date=date(2026, 6, 1), end_date=date(2027, 5, 31),
+            )
+            term = Term.objects.create(
+                tenant=tenant, academic_year=year, code="FIRST", name="First", sequence_no=1,
+                start_date=date(2026, 6, 1), end_date=date(2026, 12, 31),
+            )
+            course = Course.objects.create(
+                tenant=tenant, campus=campus, department=department, code="OTHER-ATT101", title="Other attendance",
+            )
+            section = Section.objects.create(
+                tenant=tenant, campus=campus, department=department, program=program, code="ATT-A", name="Other A",
+            )
+            offering = CourseOffering.objects.create(
+                tenant=tenant, campus=campus, department=department, program=program,
+                academic_year=year, term=term, course=course, section=section,
+            )
+            foreign_student = Student.objects.create(
+                tenant=tenant, campus=campus, department=department, program=program,
+                student_no=f"OTHER-{index}", last_name="Other", first_name="Attendance",
+            )
+            Enrollment.objects.create(
+                tenant=tenant, campus=campus, academic_year=year, term=term,
+                student=foreign_student, course_offering=offering,
+            )
+            template = GradingTemplate.objects.create(tenant=tenant, code=f"OTHER-{index}", name="Other template")
+            period = GradingTemplatePeriod.objects.create(
+                template=template, code="PRELIM", name="Prelim", sequence_no=1,
+            )
+            session = AttendanceSession.objects.create(
+                tenant=tenant, campus=campus, offering=offering, template_period=period,
+                session_date=date(2026, 7, 1),
+            )
+            AttendanceRecord.objects.create(
+                tenant=tenant, campus=campus, session=session, student=foreign_student, status_code="A",
+            )
+            foreign_finals.append(StudentFinalGrade.objects.create(
+                tenant=tenant, campus=campus, offering=offering, student=foreign_student,
+                final_grade=Decimal("41"), is_submitted=True,
+            ).pk)
+        before = list(StudentFinalGrade.objects.filter(pk__in=foreign_finals).order_by("pk").values())
+        with CaptureQueriesContext(connection) as queries:
+            self._compute()
+        self.assertEqual(len(self._attendance_selects(queries)), 1)
+        self._assert_saved_grades({student.pk: Decimal("90")})
+        self.assertEqual(list(StudentFinalGrade.objects.filter(
+            pk__in=foreign_finals).order_by("pk").values()), before)
+        self.assertFalse(StudentPeriodGrade.objects.exclude(offering=self.offering).exists())
+
+    def test_audits_prediction_invalidation_and_attendance_history_are_preserved(self):
+        students = self._students(2)
+        sessions = self._sessions(1)
+        for student in students:
+            self._records(student, sessions, ["P"])
+        history = {model._meta.label: list(model.objects.order_by("pk").values())
+                   for model in (AttendanceSession, AttendanceRecord)}
+        audits = AuditLog.objects.filter(action="RECOMPUTE", tenant=self.tenant, campus=self.campus)
+        before_audits = audits.count()
+        dirty = PredictionDirtyQueue.objects.filter(
+            tenant=self.tenant, campus=self.campus, offering=self.offering,
+            template_period=self.period, reason="SCORE_CHANGE", status="PENDING",
+        )
+        before_dirty = dirty.count()
+        self._compute()
+        self.assertEqual(audits.count() - before_audits, 4)
+        for entity in ("StudentPeriodGrade", "StudentFinalGrade"):
+            rows = audits.filter(entity_type=entity)
+            self.assertEqual(rows.count(), 2)
+            for audit in rows:
+                self.assertEqual(audit.metadata_json["reason"], "PERIOD_GRADE_RECOMPUTE")
+                self.assertEqual(audit.metadata_json["offering_id"], self.offering.pk)
+        self.assertEqual(dirty.count(), before_dirty + 1)
+        snapshots = list(audits.order_by("pk").values())
+        self._compute()
+        self.assertEqual(list(audits.order_by("pk").values()), snapshots)
+        self.assertEqual(dirty.count(), before_dirty + 2)
+        self.assertEqual({model._meta.label: list(model.objects.order_by("pk").values())
+                          for model in (AttendanceSession, AttendanceRecord)}, history)
+
+
+class AttendanceGradePerformanceBaselineTests(_AttendanceGradeFixture, TestCase):
+    """Bounded attendance reads, with observational timing and total SQL counts.
+
+    Run this class with verbosity 2 and buffering disabled for JSON benchmark
+    rows. Fixture creation/assertions are excluded from each capture. Both the
+    initial grade-writing calculation and an unchanged repeat use real ORM,
+    attendance computation, audits and prediction invalidation. Timings include
+    CaptureQueriesContext overhead and are not HTTP/concurrency measurements.
+    """
+
+    def test_query_growth_baseline_for_30_50_75_100_students(self):
+        measurements = []
+        attendance_tables = [connection.ops.quote_name(model._meta.db_table).lower()
+                             for model in (AttendanceRecord, AttendanceSession)]
+        for count in (30, 50, 75, 100):
+            # Roll back each tier so grade existence and class size start from
+            # the same fixture state. This remains inside Django's test DB.
+            with self.subTest(students=count), transaction.atomic():
+                students = self._students(count)
+                sessions = self._sessions(4)
+                for student in students:
+                    self._records(student, sessions, ["P", "L", "E", "A"])
+                expected = {student.pk: Decimal("73") for student in students}
+                for phase in ("initial_write", "unchanged_repeat"):
+                    with CaptureQueriesContext(connection) as queries:
+                        started = perf_counter()
+                        summary = self._compute()
+                        elapsed_ms = (perf_counter() - started) * 1000
+                    selects = [row["sql"] for row in queries
+                               if row["sql"].lstrip().upper().startswith("SELECT")]
+                    measurement = {
+                        "students": count, "sessions": 4, "attendance_subcomponents": 1,
+                        "phase": phase, "backend": connection.vendor,
+                        "selects": len(selects),
+                        "attendance_selects": sum(any(table in sql.lower() for table in attendance_tables)
+                                                  for sql in selects),
+                        "sql_statements": len(queries), "elapsed_ms": round(elapsed_ms, 3),
+                    }
+                    self.assertEqual({row["student"].pk: row["period_grade"]
+                                      for row in summary["rows"]}, expected)
+                    self.assertTrue(all(row["component_scores"]["CS"] == Decimal("72.50")
+                                        for row in summary["rows"]))
+                    self.assertLessEqual(measurement["attendance_selects"], 1)
+                    self._assert_saved_grades(expected)
+                    measurements.append(measurement)
+                    print("ATTENDANCE_BASELINE " + json.dumps(measurement, sort_keys=True), flush=True)
+                transaction.set_rollback(True)
+        for phase in ("initial_write", "unchanged_repeat"):
+            rows = [row for row in measurements if row["phase"] == phase]
+            self.assertEqual({row["attendance_selects"] for row in rows}, {1})
+            for smaller, larger in zip(rows, rows[1:]):
+                print("ATTENDANCE_QUERY_GROWTH " + json.dumps({
+                    "phase": phase, "from_students": smaller["students"],
+                    "to_students": larger["students"],
+                    "select_delta": larger["selects"] - smaller["selects"],
+                    "attendance_select_delta": larger["attendance_selects"] - smaller["attendance_selects"],
+                }, sort_keys=True), flush=True)

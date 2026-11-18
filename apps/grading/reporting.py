@@ -38,7 +38,7 @@ from apps.grading.models import (
     StudentFinalGrade,
     StudentPeriodGrade,
 )
-from apps.grading.services import FacultyGradingService
+from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.grading.tabulation import DetailedTabulationSheetGridService
 
 
@@ -750,204 +750,120 @@ class CorrectionOfficialReportService:
         return table
 
     @classmethod
-    def build_pdf_bytes(cls, *, request_obj):
+    def build_pdf_bytes(cls, *, request_obj, generated_by_user=None):
+        # Presentation only: retain the existing official grade source and labels.
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         report = cls.build_report_data(request_obj=request_obj)
-        request_obj = report["request_obj"]
-        signature_usage_entries = []
-
-        buffer = BytesIO()
-        doc = SimpleDocTemplate(
-            buffer,
-            pagesize=A4,
-            leftMargin=15 * mm,
-            rightMargin=15 * mm,
-            topMargin=15 * mm,
-            bottomMargin=15 * mm,
-            title=f"Petition for Correction of Grades {report['reference_no']}",
-        )
         styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle(name="SmallBody", fontSize=8, leading=10))
-        styles.add(
-            ParagraphStyle(
-                name="SectionTitle",
-                fontSize=11,
-                leading=13,
-                spaceBefore=2,
-                spaceAfter=8,
-                textColor=colors.HexColor("#0f172a"),
-                alignment=0,
-            )
-        )
-        styles.add(ParagraphStyle(name="ReportHeader", fontSize=14, leading=17, alignment=1, textColor=colors.HexColor("#0f172a")))
-        styles.add(ParagraphStyle(name="CenteredBody", parent=styles["BodyText"], alignment=1))
-
-        story = []
-        if cls.LOGO_PATH.exists():
-            logo = Image(str(cls.LOGO_PATH), width=22 * mm, height=22 * mm)
-            logo.hAlign = "CENTER"
-            story.extend([logo, Spacer(1, 6)])
-        story.append(Paragraph(cls._safe_text(report["print_header_name"]), styles["ReportHeader"]))
-        if report["print_header_address"]:
-            story.append(Paragraph(cls._safe_text(report["print_header_address"]), styles["CenteredBody"]))
-        story.extend(
-            [
-                Spacer(1, 4),
-                Paragraph("Petition for Correction of Grades", styles["Title"]),
-                Paragraph(
-                    f"Generated: {report['generated_at'].strftime('%Y-%m-%d %H:%M')} | Reference No: {report['reference_no']}",
-                    styles["SmallBody"],
-                ),
-                Spacer(1, 12),
-                Paragraph("A. ACADEMIC CONTEXT", styles["SectionTitle"]),
-            ]
-        )
-
-        metadata_rows = [
-            ["Campus / Branch", request_obj.campus.name, "Academic Year", request_obj.offering.academic_year.code],
-            ["Term", request_obj.offering.term.name or request_obj.offering.term.code, "Course", request_obj.offering.course.title or request_obj.offering.course.code],
-            ["Section", request_obj.offering.section.name or request_obj.offering.section.code, "Faculty", request_obj.requested_by_user.full_name],
-            ["Period", request_obj.template_period.name or request_obj.template_period.code, "Status", request_obj.status],
+        styles.add(ParagraphStyle(name="CorrectionSmall", fontSize=7, leading=9))
+        styles.add(ParagraphStyle(name="CorrectionSection", fontName="Helvetica-Bold", fontSize=10, leading=12, spaceBefore=12, spaceAfter=6))
+        styles.add(ParagraphStyle(name="CorrectionTitle", fontName="Helvetica-Bold", fontSize=13, leading=16, alignment=1, spaceAfter=8))
+        small = styles["CorrectionSmall"]
+        def para(value):
+            return Paragraph(cls._safe_text(value).replace("\n", "<br/>"), small)
+        def table(rows, widths, headers=True):
+            converted = [[(Paragraph(f"<b>{cls._safe_text(cell)}</b>", small) if headers and index == 0 else para(cell))
+                          if isinstance(cell, (str, int)) else cell for cell in row] for index, row in enumerate(rows)]
+            result = cls._table(converted, col_widths=[w * mm for w in widths], repeat_rows=1 if headers else 0)
+            if not headers:
+                result.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, 0), "Helvetica"),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.white)]))
+            return result
+        evidence = list(request_obj.signature_evidence.select_related("signer").all())
+        petitioner = next((row for row in evidence if row.action == "SUBMIT" and row.approval_step_id is None), None)
+        if request_obj.request_source == request_obj.RequestSource.ADMIN_ON_BEHALF and petitioner and (
+            petitioner.signer_id != request_obj.initiated_by_user_id
+            or petitioner.tenant_id != request_obj.tenant_id or petitioner.campus_id != request_obj.campus_id
+        ):
+            petitioner = None
+        by_step = {row.approval_step_id: row for row in evidence if row.action == "APPROVE"}
+        display_signatures = cls._signature_enabled_for_document(tenant_id=request_obj.tenant_id,
+            document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT)
+        used = []
+        def signature_cell(row, max_width=23 * mm, max_height=10 * mm):
+            if not row:
+                return para("No signature captured at action time")
+            if not display_signatures:
+                return para("Captured; display disabled by policy")
+            try:
+                raw = AESGCM(UserSignatureService._encryption_key()).decrypt(
+                    bytes(row.encryption_nonce), bytes(row.encrypted_blob), None)
+                if hashlib.sha256(raw).hexdigest() != row.content_sha256:
+                    raise ValueError("signature hash mismatch")
+                scale = min(max_width / max(row.image_width, 1), max_height / max(row.image_height, 1))
+                result = Image(BytesIO(raw), width=row.image_width * scale, height=row.image_height * scale)
+                result.hAlign = "LEFT"
+                used.append(row)
+                return result
+            except (InvalidTag, ValueError):
+                logger.warning("Captured correction signature unavailable; evidence_id=%s", row.pk)
+                return para("Captured signature unavailable")
+        ctx = request_obj
+        metadata = [
+            [f"CAMPUS/BRANCH: {ctx.campus.name}", f"ACADEMIC YEAR/TERM: {ctx.offering.academic_year.code} | {ctx.offering.term.name or ctx.offering.term.code}"],
+            [f"COURSE CODE: {ctx.offering.course.code}", f"COURSE: {ctx.offering.course.title}"],
+            [f"SECTION: {ctx.offering.section.name or ctx.offering.section.code}", f"FACULTY: {ctx.requested_by_user.full_name}"],
+            [f"PERIOD: {ctx.template_period.name or ctx.template_period.code}", f"STATUS: {ctx.status}"],
         ]
-        if request_obj.request_source == request_obj.RequestSource.ADMIN_ON_BEHALF:
-            initiated_by = request_obj.initiated_by_user.full_name if request_obj.initiated_by_user_id else "-"
-            metadata_rows.append(["Petition Source", "Admin on behalf", "Initiated By", initiated_by])
-        story.append(cls._table([["Field", "Value", "Field", "Value"]] + metadata_rows, col_widths=[45*mm, 55*mm, 45*mm, 40*mm]))
-        story.extend(
-            [
-                Spacer(1, 12),
-                Paragraph("B. JUSTIFICATION AND REMARKS", styles["SectionTitle"]),
-                Paragraph(f"<b>Faculty Justification:</b> {cls._safe_text(request_obj.justification)}", styles["BodyText"]),
-                Spacer(1, 3),
-                Paragraph(
-                    f"<b>Final Review Remarks:</b> {cls._safe_text(request_obj.review_remarks or '-')}",
-                    styles["BodyText"],
-                ),
-                Spacer(1, 12),
-                Paragraph("C. OFFICIAL GRADE SUMMARY", styles["SectionTitle"]),
-                Paragraph(
-                    "Detailed correction scope remains available inside TeacherMate+. This printable report shows only the official grade value to be posted in AIMS.",
-                    styles["SmallBody"],
-                ),
-                Spacer(1, 4),
-                cls._table(
-                    [
-                        [
-                            "Student No.",
-                            "Student Name",
-                            f"{report['official_grade_label']} (From)",
-                            f"{report['official_grade_label']} (To)",
-                        ]
-                    ]
-                    + (report["official_grade_rows"] or [["-", "-", "-", "-"]]),
-                    col_widths=[28*mm, 56*mm, 43*mm, 43*mm],
-                ),
-                Spacer(1, 12),
-                Paragraph("D. APPROVAL SUMMARY", styles["SectionTitle"]),
-                cls._table(
-                    [["Step", "Approver Role", "Status", "Reviewed By", "Reviewed At"]]
-                    + (report["approval_rows"] or [["-", "-", "-", "-", "-"]]),
-                    col_widths=[12*mm, 45*mm, 24*mm, 50*mm, 35*mm],
-                ),
-                Spacer(1, 12),
-            ]
-        )
-
-        signatures_enabled = cls._signature_enabled_for_document(
-            tenant_id=request_obj.tenant_id,
-            document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
-        )
-        if signatures_enabled:
-            signature_panels = [
-                cls._signature_panel(
-                    user=request_obj.requested_by_user,
-                    label="Faculty Petitioner",
-                    role_caption="Requested By",
-                    styles=styles,
-                    usage_collector=signature_usage_entries,
-                    usage_kwargs={
-                        "user": request_obj.requested_by_user,
-                        "document_type": UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
-                        "document_reference": report["reference_no"],
-                        "usage_role": "Faculty Petitioner",
-                        "actor": request_obj.requested_by_user,
-                        "portal_code": "FACULTY",
-                        "metadata": {
-                            "correction_request_id": request_obj.id,
-                            "tenant_id": request_obj.tenant_id,
-                            "campus_id": request_obj.campus_id,
-                        },
-                    },
-                )
-            ]
-            for approval_step in request_obj.approval_steps.select_related("reviewed_by_user").order_by("step_order"):
-                if not approval_step.reviewed_by_user_id:
-                    continue
-                signature_panels.append(
-                    cls._signature_panel(
-                        user=approval_step.reviewed_by_user,
-                        label=approval_step.approver_label,
-                        role_caption=f"{approval_step.status.title()} Step {approval_step.step_order}",
-                        styles=styles,
-                        usage_collector=signature_usage_entries,
-                        usage_kwargs={
-                            "user": approval_step.reviewed_by_user,
-                            "document_type": UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
-                            "document_reference": report["reference_no"],
-                            "usage_role": approval_step.approver_label,
-                            "actor": approval_step.reviewed_by_user,
-                            "portal_code": "ADMIN",
-                            "metadata": {
-                                "correction_request_id": request_obj.id,
-                                "approval_step_id": approval_step.id,
-                                "tenant_id": request_obj.tenant_id,
-                                "campus_id": request_obj.campus_id,
-                            },
-                        },
-                    )
-                )
-            signature_table_rows = []
-            for index in range(0, len(signature_panels), 2):
-                row = signature_panels[index:index + 2]
-                if len(row) == 1:
-                    row.append(Spacer(1, 1))
-                signature_table_rows.append(row)
-
-            story.extend(
-                [
-                    Paragraph("E. SIGNATURES", styles["SectionTitle"]),
-                    Paragraph(
-                        "Stored NCBA user signatures appear below only when the signature feature is enabled and the signer has an encrypted signature on file.",
-                        styles["SmallBody"],
-                    ),
-                    Spacer(1, 4),
-                    Table(signature_table_rows, colWidths=[85 * mm, 85 * mm], hAlign="LEFT"),
-                    Spacer(1, 12),
-                ]
-            )
-
-        story.extend(
-            [
-                Paragraph("F. REGISTRAR REFERENCE" if signatures_enabled else "E. REGISTRAR REFERENCE", styles["SectionTitle"]),
-                Paragraph(
-                    "This correction completed academic approval in TeacherMate+ and is issued as the official reference document for registrar posting in AIMS.",
-                    styles["BodyText"],
-                ),
-                Spacer(1, 4),
-                cls._table(
-                    [
-                        ["For Registrar Use", "", "", ""],
-                        ["Applicable Campus", request_obj.campus.name, "Posted to AIMS By", ""],
-                        ["Date Posted", "", "AIMS Reference / Transaction No.", ""],
-                        ["Remarks", "", "", ""],
-                    ],
-                    col_widths=[38*mm, 52*mm, 45*mm, 40*mm],
-                ),
-            ]
-        )
-
+        if ctx.request_source == ctx.RequestSource.ADMIN_ON_BEHALF:
+            metadata.append(["PETITION SOURCE: Admin on behalf", f"INITIATED BY: {ctx.initiated_by_user.full_name if ctx.initiated_by_user_id else '-'}"])
+        story = [Paragraph(cls._safe_text(report["print_header_name"]), styles["CorrectionTitle"]),
+            Paragraph("PETITION FOR CORRECTION OF GRADES", styles["CorrectionTitle"]),
+            para(f"Reference No: {report['reference_no']} | Generated: {report['generated_at']:%Y-%m-%d %H:%M}"),
+            Paragraph("I. ACADEMIC CONTEXT", styles["CorrectionSection"]), table(metadata, [85, 85], False),
+            Paragraph("II. OFFICIAL GRADE SUMMARY", styles["CorrectionSection"]),
+            table([["Student No.", "Student Name", f"{report['official_grade_label']} (From)", f"{report['official_grade_label']} (To)"]]
+                + (report["official_grade_rows"] or [["-", "-", "-", "-"]]), [27, 65, 39, 39])]
+        justification_label = "Administrative Justification" if ctx.request_source == ctx.RequestSource.ADMIN_ON_BEHALF else "Faculty Justification"
+        remarks_block = [Paragraph("III. JUSTIFICATION AND REMARKS", styles["CorrectionSection"]),
+            para(f"{justification_label}: {ctx.justification}"), Spacer(1, 4),
+            para(f"Final Review Remarks: {ctx.review_remarks or '-'}")]
+        # Keep a short section intact, but allow long justifications to fill/split pages.
+        story.extend([KeepTogether(remarks_block)] if len(ctx.justification) + len(ctx.review_remarks or "") < 1200 else remarks_block)
+        story.append(Paragraph("IV. APPROVAL SUMMARY AND SIGNATURES", styles["CorrectionSection"]))
+        rows = [["Step", "Approver Role", "Status", "Reviewed By", "Reviewed At", "Approved At", "E-Signature"]]
+        for step in ctx.approval_steps.select_related("reviewed_by_user", "authority_snapshot__approval_audit_log").order_by("step_order"):
+            captured = by_step.get(step.pk)
+            authority = getattr(step, "authority_snapshot", None)
+            verified = (step.status == "APPROVED" and authority and authority.reviewer_user_id == step.reviewed_by_user_id
+                        and authority.correction_request_id == ctx.pk and authority.decided_at == step.reviewed_at
+                        and GradingGovernanceService._correction_approval_audit_matches(
+                            audit_row=authority.approval_audit_log, snapshot=authority, request_obj=ctx, step=step))
+            stamp = lambda value: timezone.localtime(value).strftime("%Y-%m-%d %H:%M") if value else "-"
+            rows.append([str(step.step_order), step.approver_label, step.status,
+                captured.signer_name if captured else (step.reviewed_by_user.full_name if step.reviewed_by_user_id else "-"),
+                stamp(step.reviewed_at), stamp(authority.decided_at) if verified else "-", signature_cell(captured)])
+        if len(rows) == 1:
+            rows.append(["-"] * 7)
+        story.append(table(rows, [9, 30, 20, 32, 25, 25, 29]))
+        name = petitioner.signer_name if petitioner else ctx.requested_by_user.full_name
+        role = petitioner.signing_role if petitioner else "Faculty Petitioner (no captured signing evidence)"
+        petitioner_lines = []
+        if ctx.request_source == ctx.RequestSource.ADMIN_ON_BEHALF:
+            # Legacy petitions stay unsigned; attribution never borrows a live faculty credential.
+            name = petitioner.signer_name if petitioner else (ctx.initiated_by_user.full_name if ctx.initiated_by_user_id else "Not recorded")
+            role = petitioner.signing_role if petitioner else "Administrative Petitioner (no captured signing evidence)"
+            petitioner_lines = [para(f"FACULTY CONCERNED: {ctx.requested_by_user.full_name}"),
+                para("Filed administratively on behalf of the faculty member.")]
+        story.extend([KeepTogether([Spacer(1, 8), *petitioner_lines, para(f"PETITIONER: {name}"), para(role), signature_cell(petitioner, 42 * mm, 14 * mm)]),
+            KeepTogether([Paragraph("V. REGISTRAR REFERENCE", styles["CorrectionSection"]),
+            para("This correction completed academic approval in TeacherMate+ and is issued as the official reference document for registrar posting in AIMS."),
+            Spacer(1, 4), table([["For Registrar Use", ""], ["POSTED TO AIMS BY: __________________", "DATE POSTED: __________________"],
+                ["AIMS REFERENCE / TRANSACTION NO.: __________________", "REMARKS: __________________"]], [100, 70], False)])])
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm,
+            topMargin=15 * mm, bottomMargin=15 * mm, title=f"Petition for Correction of Grades {report['reference_no']}")
         doc.build(story)
-        for usage_kwargs in signature_usage_entries:
-            UserSignatureService.log_signature_usage(**usage_kwargs)
+        for row in used:
+            UserSignatureService.log_signature_usage(user=row.signer,
+                document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+                document_reference=report["reference_no"], usage_role=row.signing_role, actor=generated_by_user,
+                portal_code="FACULTY" if row.action == "SUBMIT" else "ADMIN",
+                metadata={"correction_request_id": ctx.pk, "signature_evidence_id": row.pk,
+                          "tenant_id": ctx.tenant_id, "campus_id": ctx.campus_id,
+                          "approval_step_id": row.approval_step_id,
+                          "signed_at": row.signed_at.isoformat(), "content_sha256": row.content_sha256},
+                credential_sha256=row.content_sha256)
         return buffer.getvalue()
 
 

@@ -1099,8 +1099,9 @@ class UserSignatureService:
         )
 
     @classmethod
+    @transaction.atomic
     def clear_signature(cls, *, user):
-        credential, _created = UserSignatureCredential.objects.get_or_create(user=user)
+        credential, _created = UserSignatureCredential.objects.select_for_update().get_or_create(user=user)
         credential.encrypted_blob = None
         credential.encryption_nonce = None
         credential.original_filename = None
@@ -1146,9 +1147,10 @@ class UserSignatureService:
         actor,
         portal_code: str,
         metadata: dict | None = None,
+        credential_sha256: str | None = None,
     ):
         credential = cls.get_active_credential(user=user)
-        if credential:
+        if credential and (credential_sha256 is None or credential.content_sha256 == credential_sha256):
             credential.last_used_at = timezone.now()
             credential.save(update_fields=["last_used_at", "updated_at"])
         return UserSignatureUsageLog.objects.create(

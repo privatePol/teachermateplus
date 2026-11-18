@@ -177,12 +177,13 @@
         {% else %}
           <div class="alert alert-secondary py-2">Intermediate step: this will move to the next approver step.</div>
         {% endif %}
-        <form method="post" novalidate>
+        <form method="post" novalidate id="correction-review-form">
           {% csrf_token %}
+          {{ form.action_token }}{{ form.expected_step_id }}
           {% if form.non_field_errors %}
           <div class="alert alert-danger">{{ form.non_field_errors }}</div>
           {% endif %}
-          {% for field in form %}
+          {% for field in form.visible_fields %}
           <div class="mb-3">
             <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
             {{ field }}
@@ -196,4 +197,24 @@
     </div>
   </div>
 </div>
+<dialog id="review-signature-required" aria-labelledby="review-signature-title" class="border rounded shadow p-4">
+  <h3 id="review-signature-title" class="h5">Registered e-signature required</h3>
+  <p>Approval requires your registered e-signature. Save it in My Signature, then return here. Rejection does not require signing.</p>
+  <a class="btn btn-primary" target="_blank" rel="noopener" href="{% url 'accounts:admin_signature' %}?correction_context={{ form.action_token.value|urlencode }}">Open My Signature</a>
+  <button type="button" class="btn btn-secondary" onclick="this.closest('dialog').close()">Return to review</button>
+</dialog>
+<script>
+(() => {
+  const form = document.getElementById("correction-review-form");
+  if (!form) return;
+  const button = form.querySelector('button[type="submit"]');
+  let pending = false;
+  window.addEventListener("pageshow", () => { pending = false; button.disabled = {{ can_review|yesno:"false,true" }}; button.textContent = "Submit Review"; });
+  form.addEventListener("submit", (event) => {
+    if (pending || !form.reportValidity()) { event.preventDefault(); return; }
+    pending = true; button.disabled = true; button.textContent = "Recording your decision...";
+  });
+})();
+</script>
+{% if signature_required %}<script>document.getElementById("review-signature-required").showModal();</script>{% endif %}
 {% endblock %}

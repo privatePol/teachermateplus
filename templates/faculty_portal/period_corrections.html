@@ -49,7 +49,7 @@
 {% endif %}
 
 <div class="card border-0 shadow-sm mb-3">
-  <div class="card-header bg-white"><strong>My Correction Requests</strong></div>
+  <div class="card-header bg-white"><strong id="correction-requests">My Correction Requests</strong></div>
   <div class="table-responsive">
     <table class="table table-hover mb-0 align-middle">
       <thead>
@@ -64,7 +64,7 @@
       </thead>
       <tbody>
       {% for req in requests %}
-        <tr>
+        <tr id="correction-{{ req.id }}">
           <td>#{{ req.id }}</td>
           <td>
             {% if req.status == "APPROVED" %}
@@ -201,8 +201,9 @@
         Submit the grading period first before filing a correction request.
       </div>
     {% else %}
-    <form method="post" enctype="multipart/form-data" novalidate>
+    <form method="post" enctype="multipart/form-data" novalidate id="correction-submission-form">
       {% csrf_token %}
+      {{ form.submission_token }}
       {% if form.errors %}
       <div id="correction-validation-summary" class="alert alert-danger border border-danger" role="alert" tabindex="-1">
         <strong>Your correction request could not be submitted.</strong>
@@ -339,10 +340,12 @@
           {% for e in form.attachment.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
         </div>
         <div class="col-md-4 d-flex align-items-end">
-          <button class="btn btn-primary w-100" type="submit">Submit Request</button>
+          <button class="btn btn-primary w-100" type="submit" id="correction-submit">Submit Request</button>
+          <span id="correction-submitting-status" class="visually-hidden" role="status" aria-live="polite"></span>
         </div>
       </div>
     </form>
+    <p class="small text-muted mt-2">If your connection is interrupted, check <a target="_blank" rel="noopener" href="{% url 'faculty_portal:period_corrections' offering.id period.id %}#correction-requests">My Correction Requests in a new tab</a> before retrying. Keep this original form available; retrying it recovers the same application.</p>
     {% endif %}
   </div>
 </div>
@@ -624,11 +627,40 @@
       syncAttachmentRequirement();
       renderGrid();
     }));
+    const submitButton = document.getElementById("correction-submit");
+    const submissionStatus = document.getElementById("correction-submitting-status");
+    let submitting = false;
+    function restoreSubmit() {
+      submitting = false;
+      submitButton.disabled = false;
+      submitButton.textContent = "Submit Request";
+      correctionForm.removeAttribute("aria-busy");
+      submissionStatus.textContent = "";
+    }
+    window.addEventListener("pageshow", restoreSubmit);
     correctionForm.addEventListener("submit", (event) => {
+      if (submitting) { event.preventDefault(); return; }
       syncPayloadFromGrid();
-      if (!validateCorrectionInputs()) {
+      const selected = selectedActivityIds().map((id) => activityMap.get(String(id)));
+      const needsAttachment = selected.some((row) => row && (row.is_exam_component || row.is_quiz_activity));
+      const attachment = correctionForm.querySelector('input[type="file"]');
+      if (!validateCorrectionInputs() || !correctionForm.reportValidity()) {
         event.preventDefault();
+        restoreSubmit();
+        return;
       }
+      if (!selectedStudentIds().length || !selected.length || !parsePayload().some((row) => row.new_value) ||
+          (needsAttachment && (!attachment || !attachment.files.length))) {
+        event.preventDefault();
+        showValidationError("Select students and grading items, enter a corrected value, and attach required quiz/exam evidence.");
+        restoreSubmit();
+        return;
+      }
+      submitting = true;
+      submitButton.disabled = true;
+      submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Submitting your request...';
+      correctionForm.setAttribute("aria-busy", "true");
+      submissionStatus.textContent = "Submitting your request...";
     });
 
     studentSelect.disabled = applyAllCheckbox.checked;
@@ -636,4 +668,11 @@
     renderGrid();
   })();
 </script>
+<dialog id="correction-signature-required" aria-labelledby="correction-signature-title" class="border rounded shadow p-4">
+  <h3 id="correction-signature-title" class="h5">Registered e-signature required</h3>
+  <p>Open My Signature and save your signature before submitting. This form and its submission identity remain available in this tab.</p>
+  <a class="btn btn-primary" target="_blank" rel="noopener" href="{% url 'accounts:faculty_signature' %}?correction_context={{ form.submission_token.value|urlencode }}">Open My Signature</a>
+  <button type="button" class="btn btn-secondary" onclick="this.closest('dialog').close()">Return to form</button>
+</dialog>
+{% if signature_required %}<script>document.getElementById("correction-signature-required").showModal();</script>{% endif %}
 {% endblock %}

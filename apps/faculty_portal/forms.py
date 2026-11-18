@@ -209,6 +209,7 @@ class AttendanceSessionForm(forms.Form):
 
 
 class GradeCorrectionRequestForm(forms.Form):
+    submission_token = forms.CharField(required=False, widget=forms.HiddenInput())
     apply_to_all_students = forms.BooleanField(required=False)
     students = forms.ModelMultipleChoiceField(queryset=None, required=False)
     grade_activities = forms.ModelMultipleChoiceField(
