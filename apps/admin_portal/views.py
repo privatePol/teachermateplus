@@ -8244,7 +8244,7 @@ def menu_item_update_view(request, item_id: int):
 @portal_required("ADMIN")
 @permission_required("audit_logs.read")
 def audit_log_list_view(request):
-    queryset = _scoped_audit_queryset(request)
+    queryset = _scoped_audit_queryset(request).defer("before_json", "after_json", "metadata_json")
     portal = request.GET.get("portal", "").strip()
     action = request.GET.get("action", "").strip()
     q = request.GET.get("q", "").strip()
