@@ -168,6 +168,9 @@ class GeneratedExamIntegrityService:
 
     @classmethod
     def verify(cls, *, revision, generated_sets, generated_items, problem):
+        if revision.set_policy_snapshot:
+            from .set_modes import verify_policy_approval
+            return verify_policy_approval(revision=revision, problem=problem, integrity_service=cls)
         if revision.final_item_count_snapshot < 1:
             raise ApprovalConflict("Generated final item count evidence is invalid.")
         if len(generated_sets) != 2 or [row.set_code for row in generated_sets] != ["A", "B"]:

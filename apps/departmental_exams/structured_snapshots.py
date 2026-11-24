@@ -29,6 +29,10 @@ CONTENT_FIELDS = (
 
 
 def verify_revision_structure(revision):
+    if revision.set_policy_snapshot:
+        from .set_modes import verify_policy_revision
+        verify_policy_revision(revision)
+        return
     if revision.algorithm_version not in {ALGORITHM_VERSION, LEGACY_ALGORITHM_VERSION}:
         return
     from .models import GeneratedExamSet
@@ -69,6 +73,10 @@ def verify_structured_set(generated_set, items, *, algorithm_version):
             or len(items) != generated_set.item_count
             or [item.position for item in items] != list(range(1, len(items) + 1))):
         raise PermissionDenied("Generated Case snapshot integrity failed. Do not use this revision.")
+    verify_item_layout(generated_set, items)
+
+
+def verify_item_layout(generated_set, items):
     section_counts = Counter(str(item.section_id_snapshot or 0) for item in items)
     if dict(section_counts) != generated_set.section_quotas_snapshot:
         raise PermissionDenied("Generated section quotas do not match the immutable questionnaire.")

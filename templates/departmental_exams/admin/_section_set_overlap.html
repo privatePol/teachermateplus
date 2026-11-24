@@ -1,0 +1,7 @@
+{% if section_set_overlap %}
+<div class="card mb-3"><div class="card-body"><h2 class="h5">Actual pairwise question overlap</h2>
+<p>Reuse is valid, including 100%. Same-question modes intentionally reuse every question. The pool lower bound proves that amount unavoidable. Additional overlap can follow blueprint quotas, whole Cases, or earlier section selections; it is not a shortage.</p>
+<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Sets</th><th>Shared questions</th><th>Overlap</th><th>Unavoidable pool lower bound</th></tr></thead><tbody>
+{% for pair in section_set_overlap %}<tr><td>{{ pair.left }} / {{ pair.right }}</td><td>{{ pair.count }}</td><td>{{ pair.percent }}%</td><td>{{ pair.unavoidable_pool_lower_bound }}</td></tr>{% endfor %}
+</tbody></table></div></div></div>
+{% endif %}

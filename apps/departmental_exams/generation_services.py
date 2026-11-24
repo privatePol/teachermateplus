@@ -102,6 +102,14 @@ class ExamGenerationService:
             .filter(cycle_course_id__in=unit.member_ids)
             .order_by("cycle_course_id")
         )
+        from .set_modes import active_policy
+        if active_policy(course):
+            from apps.academics.models import CourseOffering
+            from .models import CycleCourseOffering
+            snapshots = list(CycleCourseOffering.objects.select_for_update()
+                             .filter(cycle_course_id__in=unit.member_ids).order_by("id"))
+            list(CourseOffering.objects.select_for_update()
+                 .filter(id__in=[row.offering_id for row in snapshots]).order_by("id"))
         from .setup_services import case_aware_automatic_enabled
         structured_automatic = case_aware_automatic_enabled(course)
         blueprint = None
@@ -333,6 +341,13 @@ class ExamGenerationService:
             raise GenerationConflict("A current generation already exists. Use Regenerate.")
         if current is not None and current.status != ExamGenerationRevision.Status.GENERATED:
             raise GenerationConflict("This generation lifecycle no longer permits regeneration.")
+
+        if problem.set_policy_snapshot:
+            from .set_modes import persist_policy_revision
+            revision = persist_policy_revision(service=cls, problem=problem, course=course, current=current,
+                revisions=revisions, actor=actor, token_digest=token_digest, generation_trigger=generation_trigger,
+                reason=reason, request=request)
+            return GenerationOutcome(revision=revision)
 
         next_revision = max((row.revision_number for row in revisions), default=0) + 1
         hmac_context = {

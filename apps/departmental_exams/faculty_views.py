@@ -1450,6 +1450,7 @@ def _question_initial(question, contribution):
                     "correct_answer",
                     "difficulty",
                     "content_format",
+                    "choices_fixed_order",
                 )
             }
         )

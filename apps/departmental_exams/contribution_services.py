@@ -216,7 +216,7 @@ class ContributionSectionCountService:
             try:
                 QuestionPayloadService.validate({
                     field: getattr(question, field)
-                    for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty", "content_format")
+                    for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty", "content_format", "choices_fixed_order")
                 })
             except ValidationError:
                 continue
@@ -785,6 +785,10 @@ class QuestionPayloadService:
         cleaned["correct_answer"] = answer
         cleaned["difficulty"] = difficulty
         cleaned["content_format"] = requested_format
+        flag = payload.get("choices_fixed_order", getattr(current_question, "choices_fixed_order", False))
+        if type(flag) is not bool:
+            raise ValidationError({"choices_fixed_order": ["Choose Yes or No."]})
+        cleaned["choices_fixed_order"] = flag
         return cleaned
 
 
@@ -1451,7 +1455,7 @@ class QuestionMutationService:
             QuestionPayloadService.validate(
                 {
                     field: getattr(question, field)
-                    for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty", "content_format")
+                    for field in (*QuestionPayloadService.TEXT_FIELDS, "correct_answer", "difficulty", "content_format", "choices_fixed_order")
                 }
             )
         from .faculty_case_services import FacultyCasePolicy

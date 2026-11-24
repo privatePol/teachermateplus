@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .set_modes import valid_set_code
+
 from collections import Counter
 from zoneinfo import ZoneInfo
 
@@ -148,7 +150,7 @@ class GenerationSelectionAuditReportService:
     def _selection_maps(items):
         positions = {"A": {}, "B": {}}
         for item in items:
-            positions[item["generated_set__set_code"]][
+            positions.setdefault(item["generated_set__set_code"], {})[
                 item["source_question_id"]
             ] = item["position"]
         return positions
@@ -176,7 +178,7 @@ class GenerationSelectionAuditReportService:
         if filter_code == "all":
             return True
         if filter_code == "selected":
-            return row["selected_a"] or row["selected_b"]
+            return row.get("selected_any", row["selected_a"] or row["selected_b"])
         if filter_code == "set-a":
             return row["selected_a"]
         if filter_code == "set-b":
@@ -184,7 +186,7 @@ class GenerationSelectionAuditReportService:
         if filter_code == "both":
             return row["selected_a"] and row["selected_b"]
         if filter_code == "not-selected":
-            return not row["selected_a"] and not row["selected_b"]
+            return not row.get("selected_any", row["selected_a"] or row["selected_b"])
         if filter_code == "duplicate":
             return row["is_equivalent"]
         return False
@@ -226,14 +228,19 @@ class GenerationSelectionAuditReportService:
 
     @classmethod
     def build_context(cls, *, revision, filter_code):
+        if revision.set_policy_snapshot:
+            from .set_modes import verify_policy_revision
+            verify_policy_revision(revision)
         normalized_filter = (filter_code or "all").strip().lower()
         if normalized_filter not in cls.FILTER_CODES:
             normalized_filter = "all"
         items = cls._selection_items(revision)
+        if not revision.set_policy_snapshot and any(row["generated_set__set_code"] not in {"A", "B"} for row in items):
+            raise GenerationReportIntegrityError("Section-set policy evidence is missing.")
         positions = cls._selection_maps(items)
         selected_a_ids = set(positions["A"])
         selected_b_ids = set(positions["B"])
-        selected_ids = selected_a_ids | selected_b_ids
+        selected_ids = set().union(*(set(p) for p in positions.values()))
         overlap = len(selected_a_ids & selected_b_ids)
         set_counts = {
             "A": len(selected_a_ids),
@@ -338,7 +345,7 @@ class GenerationSelectionAuditReportService:
                 equivalence_status = (
                     f"Equivalent text; Manual Review did not deduplicate ({group_label})"
                 )
-            elif selected_a or selected_b:
+            elif source_id in selected_ids:
                 equivalence_status = f"Selected representative ({group_label})"
             elif source.normalized_fingerprint in selected_fingerprints:
                 equivalence_status = f"Equivalent copy not selected ({group_label})"
@@ -367,6 +374,8 @@ class GenerationSelectionAuditReportService:
                 "set_b_position": positions["B"].get(source_id),
                 "selected_a": selected_a,
                 "selected_b": selected_b,
+                "selected_any": source_id in selected_ids,
+                "section_membership": ", ".join(f"{code}: {mapping[source_id]}" for code, mapping in positions.items() if source_id in mapping),
                 "is_equivalent": is_equivalent,
                 "equivalence_status": equivalence_status,
                 "eligible": source.eligible_for_generation,
@@ -403,11 +412,14 @@ class GenerationSelectionAuditReportService:
             "academic_year": cycle.academic_year.name,
             "term": cycle.term.name,
             "exam_period": cycle.get_exam_period_display(),
-            "filters": cls.FILTERS,
+            "filters": tuple(f for f in cls.FILTERS if not revision.set_policy_snapshot or f[0] in {"all", "selected", "not-selected", "duplicate"}),
+            "section_set_counts": tuple({"code": r.set_code, "count": r.item_count} for r in revision.generated_sets.all()) if revision.set_policy_snapshot else (),
             "active_filter": filter_code,
             "rows": rows,
             "summary": summary,
             "audit_available": audit_available,
+            "section_set_policy": bool(revision.set_policy_snapshot),
+            "section_set_overlap": revision.set_policy_snapshot.get("overlap", []),
             "printed_at": timezone.now().astimezone(MANILA_TIMEZONE),
         }
 
@@ -415,8 +427,10 @@ class GenerationSelectionAuditReportService:
 class GenerationAnswerKeyService:
     @staticmethod
     def build_context(*, revision, set_code):
+        from .structured_snapshots import verify_revision_structure
+        verify_revision_structure(revision)
         normalized_set = (set_code or "").strip().upper()
-        if normalized_set not in GeneratedExamSet.SetCode.values:
+        if not valid_set_code(normalized_set) or (not revision.set_policy_snapshot and normalized_set not in {"A", "B"}):
             raise GenerationReportIntegrityError(
                 "The requested generated examination set is unavailable."
             )

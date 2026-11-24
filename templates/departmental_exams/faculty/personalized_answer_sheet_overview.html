@@ -13,23 +13,24 @@
 {% if offering_rows %}
   <div class="table-responsive">
     <table class="table align-middle">
-      <thead><tr><th>Section</th><th class="text-end">Active Students</th><th class="text-end">Set A</th><th class="text-end">Set B</th><th class="text-end">Missing</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Section</th><th class="text-end">Active Students</th>{% if section_sets %}<th class="text-end">Saved Set</th><th class="text-end">Assigned</th>{% else %}<th class="text-end">Set A</th><th class="text-end">Set B</th>{% endif %}<th class="text-end">Missing</th><th>Actions</th></tr></thead>
       <tbody>
         {% for row in offering_rows %}
           <tr>
             <td><strong>{{ row.offering.section.code }}</strong><div class="small text-muted">{{ row.offering.campus.name }}</div></td>
             <td class="text-end">{{ row.active_students }}</td>
-            <td class="text-end">{{ row.set_a }}</td>
-            <td class="text-end">{{ row.set_b }}</td>
+            {% if section_sets %}<td class="text-end">{{ row.section_set|default:"Unavailable" }}</td><td class="text-end">{{ row.assigned }}</td>{% else %}<td class="text-end">{{ row.set_a }}</td><td class="text-end">{{ row.set_b }}</td>{% endif %}
             <td class="text-end">{{ row.missing }}</td>
             <td>
-              {% if row.missing %}
-                <form method="post" action="{% url 'departmental_exams:personalized_answer_sheet_prepare' contribution.id release.id row.offering.id %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">{% if row.set_a or row.set_b %}Prepare New Enrollment{% else %}Prepare Personalized Sheets{% endif %}</button></form>
+              {% if row.section_set_unavailable %}
+                <span class="text-muted small">No saved set for this section in released R{{ revision_number }}. Contact the exam coordinator.</span>
+              {% elif row.missing %}
+                <form method="post" action="{% url 'departmental_exams:personalized_answer_sheet_prepare' contribution.id release.id row.offering.id %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">{% if row.assigned %}Prepare New Enrollment{% else %}Prepare Personalized Sheets{% endif %}</button></form>
               {% elif row.ready %}
                 <div class="d-flex flex-wrap gap-2">
                   <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'all' %}">Print All</a>
-                  <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'A' %}">Print Set A</a>
-                  <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'B' %}">Print Set B</a>
+                  {% if not row.section_set %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'A' %}">Print Set A</a>
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'B' %}">Print Set B</a>{% endif %}
                 </div>
               {% else %}
                 <span class="text-muted small">No active students</span>

@@ -162,6 +162,9 @@ class GenerationProblem:
     automatic_selection: IdentitySelectionResult | None = None
     algorithm_version: str = GENERATION_ALGORITHM_VERSION
     pool_warnings: tuple[dict, ...] = ()
+    set_policy_snapshot: dict | None = None
+    section_set_plan: tuple = ()
+    fixed_order_flags: dict | None = None
 
 
 def generation_question_source_digest(*, source_id, revision, question_text, choices, correct_answer, difficulty,
@@ -1618,4 +1621,11 @@ class Stage6ReadinessService:
                     "UNUSABLE_CASE_EXCLUDED", "UNPLACED_SINGLETONS_EXCLUDED", "INVALID_QUESTIONS_EXCLUDED",
                     "BLOCKED_DRAFTS_UNRESOLVED"}),
             )
+        if problem is not None:
+            from .set_modes import apply_policy
+            try:
+                problem, report = apply_policy(problem, report)
+            except ValidationError as exc:
+                cls._block(report["blockers"], "SECTION_SET_BLOCKED", " ".join(exc.messages))
+                report["ready"], report["status"], problem = False, "BLOCKED", None
         return problem, report

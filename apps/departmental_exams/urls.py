@@ -13,9 +13,12 @@ from . import (
     views,
 )
 
+from . import set_mode_views
+
 app_name = "departmental_exams"
 
 urlpatterns = [
+    path("admin-portal/departmental-exams/cycles/<int:cycle_id>/generator-policy/", set_mode_views.generator_policy_view, name="generator_policy"),
     path("admin-portal/departmental-exams/equivalent-courses/", persistent_equivalency_views.saved_equivalency_landing, name="saved_equivalent_courses"),
     path("admin-portal/departmental-exams/equivalent-courses/search/", persistent_equivalency_views.search_equivalent_courses, name="saved_equivalent_courses_search"),
     path("admin-portal/departmental-exams/equivalent-courses/save/", persistent_equivalency_views.save_equivalent_definition, name="saved_equivalent_courses_save"),

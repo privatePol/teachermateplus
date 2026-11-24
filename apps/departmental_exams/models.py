@@ -1303,6 +1303,8 @@ class Question(TimeStampedModel):
         PLAIN_TEXT = "PLAIN_TEXT", "Plain text"
         RICH_HTML_V1 = "RICH_HTML_V1", "Rich HTML V1"
 
+    choices_fixed_order = models.BooleanField(default=False)
+
     class Difficulty(models.TextChoices):
         EASY = "EASY", "Easy"
         MODERATE = "MODERATE", "Moderate"
@@ -2540,6 +2542,7 @@ class QuestionBankRevision(TimeStampedModel):
         choices=ExamScenario.ContentFormat.choices,
         default=ExamScenario.ContentFormat.PLAIN_TEXT,
     )
+    choices_fixed_order = models.BooleanField(default=False)
     content_format = models.CharField(
         max_length=20,
         choices=Question.ContentFormat.choices,
@@ -2592,6 +2595,7 @@ class QuestionBankCaseMember(TimeStampedModel):
         QuestionBankRevision, on_delete=models.PROTECT, related_name="members"
     )
     position = models.PositiveSmallIntegerField()
+    choices_fixed_order = models.BooleanField(default=False)
     content_format = models.CharField(
         max_length=20,
         choices=Question.ContentFormat.choices,
@@ -2652,6 +2656,7 @@ class ExamGenerationRevision(TimeStampedModel):
         "proportional_score",
         "contributors_represented",
         "squared_contributor_concentration",
+        "set_policy_snapshot",
     )
     class Status(models.TextChoices):
         GENERATED = "GENERATED", "Generated"
@@ -2676,6 +2681,7 @@ class ExamGenerationRevision(TimeStampedModel):
     # MariaDB permits multiple NULL values in a composite unique constraint.
     # Current rows use 1; superseded rows use NULL.
     current_marker = models.PositiveSmallIntegerField(null=True, blank=True, default=1)
+    set_policy_snapshot = models.JSONField(default=dict, blank=True)
     source_input_fingerprint = models.CharField(max_length=64)
     algorithm_version = models.CharField(max_length=64)
     generated_at = models.DateTimeField(default=timezone.now)
@@ -3107,6 +3113,7 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
     class AssignmentMethod(models.TextChoices):
         INITIAL_BALANCED = "INITIAL_BALANCED", "Initial balanced assignment"
         LATE_BALANCED = "LATE_BALANCED", "Late balanced assignment"
+        SECTION = "SECTION", "Saved section assignment"
 
     generation_revision = models.ForeignKey(
         ExamGenerationRevision,
@@ -3124,8 +3131,7 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
         related_name="personalized_answer_sheet_assignments",
     )
     set_code = models.CharField(
-        max_length=1,
-        choices=(("A", "Set A"), ("B", "Set B")),
+        max_length=32,
     )
     assignment_method = models.CharField(
         max_length=20,
@@ -3150,12 +3156,12 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
                 name="uq_de_personalized_revision_enrollment",
             ),
             models.CheckConstraint(
-                condition=models.Q(set_code__in=["A", "B"]),
+                condition=models.Q(set_code__regex=r"^(A|B|S[1-9][0-9]*)$"),
                 name="ck_de_personalized_set_code",
             ),
             models.CheckConstraint(
                 condition=models.Q(
-                    assignment_method__in=["INITIAL_BALANCED", "LATE_BALANCED"]
+                    assignment_method__in=["INITIAL_BALANCED", "LATE_BALANCED", "SECTION"]
                 ),
                 name="ck_de_personalized_method",
             ),
@@ -3215,6 +3221,14 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
                 errors["course_offering"] = (
                     "Course offering must belong to the generated course examination."
                 )
+        if self.generation_revision_id and self.course_offering_id:
+            if self.generation_revision.set_policy_snapshot:
+                if (self.assignment_method != self.AssignmentMethod.SECTION
+                        or not self.generation_revision.section_set_assignments.filter(
+                            offering_id=self.course_offering_id, generated_set__set_code=self.set_code).exists()):
+                    errors["set_code"] = "Use the exact saved set assigned to this academic section."
+            elif self.set_code not in {"A", "B"} or self.assignment_method == self.AssignmentMethod.SECTION:
+                errors["set_code"] = "Legacy answer sheets require Set A or Set B and balanced assignment."
         if errors:
             raise ValidationError(errors)
 
@@ -3455,7 +3469,7 @@ class GeneratedExamSet(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="generated_sets",
     )
-    set_code = models.CharField(max_length=1, choices=SetCode.choices)
+    set_code = models.CharField(max_length=32)
     campus_quotas_snapshot = models.JSONField(default=dict)
     difficulty_quotas_snapshot = models.JSONField(default=dict)
     section_quotas_snapshot = models.JSONField(default=dict)
@@ -3472,7 +3486,7 @@ class GeneratedExamSet(TimeStampedModel):
                 name="uq_de_gen_set_code",
             ),
             models.CheckConstraint(
-                condition=models.Q(set_code__in=["A", "B"], item_count__gte=1),
+                condition=(models.Q(set_code__regex=r"^(A|B|S[1-9][0-9]*)$", item_count__gte=1)),
                 name="ck_de_gen_set_values",
             ),
         ]
@@ -3538,6 +3552,10 @@ class GeneratedExamItem(TimeStampedModel):
         default=Question.ContentFormat.PLAIN_TEXT,
     )
     choices_snapshot = models.JSONField(default=list)
+    original_choices_snapshot = models.JSONField(default=list, blank=True)
+    original_correct_answer_snapshot = models.CharField(max_length=1, blank=True)
+    choice_order_snapshot = models.JSONField(default=list, blank=True)
+    choices_fixed_order_snapshot = models.BooleanField(default=False)
     correct_answer_snapshot = models.CharField(
         max_length=1,
         choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")],
@@ -3794,3 +3812,65 @@ class AutomaticGenerationAuditRun(TimeStampedModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Automatic generation audit runs are immutable.")
+
+
+class ExamGeneratorPolicy(TimeStampedModel):
+    class Mode(models.TextChoices):
+        SAME_ORDER = "SAME_ORDER", "Same questions / same order"
+        SHUFFLED_ORDER = "SHUFFLED_ORDER", "Same questions / shuffled order"
+        DIFFERENT = "DIFFERENT", "Different questions per academic section (overlap allowed)"
+
+    cycle = models.OneToOneField(ExaminationCycle, on_delete=models.PROTECT, related_name="set_policy")
+    departmental = models.BooleanField(default=False)
+    standardized = models.BooleanField(default=False)
+    mode = models.CharField(max_length=20, choices=Mode.choices, default=Mode.SAME_ORDER)
+    shuffle_choices = models.BooleanField(default=False)
+    revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(mode__in=["SAME_ORDER", "SHUFFLED_ORDER", "DIFFERENT"], revision__gte=1), name="ck_de_set_policy_values")]
+
+
+class _ImmutableSectionSetQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Saved section set assignments are immutable.")
+
+    def delete(self):
+        raise ValidationError("Saved section set assignments are immutable.")
+
+    def bulk_update(self, objs, fields, **kwargs):
+        raise ValidationError("Saved section set assignments are immutable.")
+
+
+class ExamSectionSetAssignment(TimeStampedModel):
+    objects = _ImmutableSectionSetQuerySet.as_manager()
+    generation_revision = models.ForeignKey(ExamGenerationRevision, on_delete=models.PROTECT, related_name="section_set_assignments")
+    generated_set = models.OneToOneField(GeneratedExamSet, on_delete=models.PROTECT, related_name="section_assignment")
+    offering = models.ForeignKey("academics.CourseOffering", on_delete=models.PROTECT)
+    campus_id_snapshot = models.PositiveBigIntegerField()
+    section_label_snapshot = models.CharField(max_length=255)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["generation_revision", "offering"], name="uq_de_revision_offering_set")]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Saved section set assignments are immutable.")
+        if self.generated_set.generation_revision_id != self.generation_revision_id:
+            raise ValidationError("Section set must belong to the exact saved revision.")
+        revision = self.generation_revision
+        evidence = revision.set_policy_snapshot.get("offerings", [])
+        if (revision.status != "GENERATED" or revision.current_marker != 1 or not any(
+                o.get("offering_id") == self.offering_id and o.get("set_code") == self.generated_set.set_code
+                and o.get("campus_id") == self.campus_id_snapshot and o.get("label") == self.section_label_snapshot
+                for o in evidence)):
+            raise ValidationError("Section assignment must match the current generation policy evidence.")
+        cycle = self.generation_revision.cycle_course.cycle
+        if (self.offering.tenant_id != cycle.tenant_id or self.offering.term_id != cycle.term_id
+                or self.offering.academic_year_id != cycle.academic_year_id
+                or self.offering.campus_id != self.campus_id_snapshot):
+            raise ValidationError("Section assignment is outside the examination scope.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Saved section set assignments are immutable.")

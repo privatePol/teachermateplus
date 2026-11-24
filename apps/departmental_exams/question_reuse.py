@@ -333,7 +333,8 @@ def destination_sections(*, destination, tenant_id):
 def _validated_payload(question):
     payload = {field: getattr(question, field) for field in QuestionPayloadService.TEXT_FIELDS}
     payload.update(content_format=question.content_format,
-                   correct_answer=question.correct_answer, difficulty=question.difficulty)
+                   correct_answer=question.correct_answer, difficulty=question.difficulty,
+                   choices_fixed_order=question.choices_fixed_order)
     cleaned = QuestionPayloadService.validate(payload)
     if any(cleaned[field] != payload[field] for field in cleaned):
         raise ValidationError("A selected historical question cannot be copied safely. Review that source and try again.")

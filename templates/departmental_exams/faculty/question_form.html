@@ -32,7 +32,7 @@
     {% endfor %}
     <section class="qb-author-section mb-4"><h2 class="h5 qb-author-heading">Difficulty &amp; Correct Answer</h2>
       <div class="mb-3"><label class="form-label" for="{{ form.difficulty.id_for_label }}">Difficulty <span class="text-danger">*</span></label>{{ form.difficulty }}{% for error in form.difficulty.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
-      <div class="mb-0"><label class="form-label" for="{{ form.correct_answer.id_for_label }}">Correct answer <span class="text-danger">*</span></label>{{ form.correct_answer }}<div class="form-text">The answer letter remains fixed to Choice A, B, C, or D; formatting never reorders choices.</div>{% for error in form.correct_answer.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+      <div class="mb-0"><label class="form-label" for="{{ form.correct_answer.id_for_label }}">Correct answer <span class="text-danger">*</span></label>{{ form.correct_answer }}<div class="form-check mt-2">{{ form.choices_fixed_order }} <label for="{{ form.choices_fixed_order.id_for_label }}">{{ form.choices_fixed_order.label }}</label><div class="form-text">{{ form.choices_fixed_order.help_text }}</div>{{ form.choices_fixed_order.errors }}</div><div class="form-text">The answer letter remains fixed to Choice A, B, C, or D; formatting never reorders choices.</div>{% for error in form.correct_answer.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
     </section>
     {% for error in form.content_format.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
     <div class="alert alert-danger" role="alert" data-question-editor-errors hidden></div>

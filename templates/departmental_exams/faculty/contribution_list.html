@@ -119,8 +119,10 @@
                   {% if material.status == 'NOT_YET_AVAILABLE' and material.opens_at %}<div class="qb-resource-meta"><strong>Available from:</strong> {{ material.opens_at|localtime|date:"M j, Y g:i A" }}</div>{% endif %}
                   {% if material.actions %}
                     <div class="qb-action-row" aria-label="Questionnaire actions">
-                      <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id material.release_id 'A' %}">Print Set A</a>
-                      <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id material.release_id 'B' %}">Print Set B</a>
+                      {% if material.actions.section_sets %}{% for option in material.actions.set_options %}
+                      <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id material.release_id option.code %}">Print {{ option.label }}</a>
+                      {% endfor %}{% else %}<a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id material.release_id 'A' %}">Print Set A</a>
+                      <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id material.release_id 'B' %}">Print Set B</a>{% endif %}
                       <a class="btn btn-success" href="{% url 'departmental_exams:personalized_answer_sheet_overview' contribution.id material.release_id %}">Personalized Answer Sheets</a>
                     </div>
                   {% endif %}
@@ -143,8 +145,10 @@
                   {% if material.status == 'NOT_YET_AVAILABLE' and material.opens_at %}<div class="qb-resource-meta"><strong>Available from:</strong> {{ material.opens_at|localtime|date:"M j, Y g:i A" }}</div>{% endif %}
                   {% if material.actions %}
                     <div class="qb-action-row" aria-label="Answer Key actions">
-                      <a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id material.release_id 'A' %}">View Set A Answer Key</a>
-                      <a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id material.release_id 'B' %}">View Set B Answer Key</a>
+                      {% if material.actions.section_sets %}{% for option in material.actions.set_options %}
+                      <a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id material.release_id option.code %}">View {{ option.label }} Answer Key</a>
+                      {% endfor %}{% else %}<a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id material.release_id 'A' %}">View Set A Answer Key</a>
+                      <a class="btn btn-outline-danger" href="{% url 'departmental_exams:faculty_answer_key' contribution.id material.release_id 'B' %}">View Set B Answer Key</a>{% endif %}
                     </div>
                   {% endif %}
                 </article>
@@ -164,8 +168,10 @@
                   {% if material.status == 'NOT_YET_AVAILABLE' and material.opens_at %}<div class="qb-resource-meta"><strong>Available from:</strong> {{ material.opens_at|localtime|date:"M j, Y g:i A" }}</div>{% endif %}
                   {% if material.actions %}
                     <div class="qb-action-row" aria-label="Checking Master actions">
-                      <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id material.release_id 'A' %}">Print Set A Master</a>
-                      <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id material.release_id 'B' %}">Print Set B Master</a>
+                      {% if material.actions.section_sets %}{% for option in material.actions.set_options %}
+                      <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id material.release_id option.code %}">Print {{ option.label }} Master</a>
+                      {% endfor %}{% else %}<a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id material.release_id 'A' %}">Print Set A Master</a>
+                      <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="{% url 'departmental_exams:faculty_checking_master_print' contribution.id material.release_id 'B' %}">Print Set B Master</a>{% endif %}
                     </div>
                   {% endif %}
                 </article>

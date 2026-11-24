@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .set_modes import valid_set_code, expected_set_codes, faculty_set_options
+
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -88,6 +90,8 @@ def _questionnaire_paper_context(value):
 def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None):
     if generated_set.generation_revision_id != revision.id:
         raise PermissionDenied("The generated questionnaire set is unavailable.")
+    if not revision.set_policy_snapshot and generated_set.set_code not in {"A", "B"}:
+        raise PermissionDenied("Section-set policy evidence is missing.")
     from .structured_snapshots import ALGORITHM_VERSION, verify_structured_set
     snapshot_fields = (
         "position", "question_text_snapshot", "question_content_format_snapshot", "choices_snapshot",
@@ -95,7 +99,11 @@ def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None
         "scenario_id_snapshot", "scenario_title_snapshot", "scenario_stimulus_snapshot",
         "scenario_content_format_snapshot", "scenario_member_position_snapshot",
     )
-    if revision.algorithm_version == ALGORITHM_VERSION:
+    if revision.set_policy_snapshot:
+        from .set_modes import verify_policy_revision
+        verify_policy_revision(revision)
+        item_rows = list(generated_set.items.order_by("position").values(*snapshot_fields))
+    elif revision.algorithm_version == ALGORITHM_VERSION:
         snapshots = list(generated_set.items.order_by("position"))
         verify_structured_set(generated_set, snapshots, algorithm_version=revision.algorithm_version)
         item_rows = [{field: getattr(item, field) for field in snapshot_fields} for item in snapshots]
@@ -282,10 +290,7 @@ class QuestionnairePrintReleaseService:
             .values("set_code", "item_count", "actual_item_count")
         )
         set_codes = {row["set_code"] for row in set_rows}
-        if set_codes != {
-            GeneratedExamSet.SetCode.A,
-            GeneratedExamSet.SetCode.B,
-        } or any(
+        if set_codes != expected_set_codes(revision) or any(
             row["item_count"] < 1
             or row["actual_item_count"] != row["item_count"]
             for row in set_rows
@@ -644,9 +649,9 @@ class FacultyQuestionnairePrintService:
                     continue
                 set_rows = GeneratedExamSet.objects.filter(
                     generation_revision=release.generation_revision,
-                    set_code__in=(GeneratedExamSet.SetCode.A, GeneratedExamSet.SetCode.B),
+                    set_code__in=expected_set_codes(release.generation_revision),
                 ).annotate(actual_item_count=Count("items"))
-                if set(set_rows.values_list("set_code", flat=True)) != {"A", "B"} or any(
+                if set(set_rows.values_list("set_code", flat=True)) != expected_set_codes(release.generation_revision) or any(
                     row.actual_item_count != row.item_count for row in set_rows
                 ):
                     continue
@@ -655,6 +660,9 @@ class FacultyQuestionnairePrintService:
                         "release_id": release.id,
                         "revision_number": release.generation_revision.revision_number,
                         "campus_id": campus_id,
+                        "section_sets": bool(release.generation_revision.set_policy_snapshot),
+                        "set_options": faculty_set_options(
+                            revision=release.generation_revision, contribution=contribution, campus_id=campus_id),
                     })
             if matches:
                 options[contribution.id] = tuple(matches)
@@ -743,7 +751,7 @@ class FacultyQuestionnairePrintService:
     @staticmethod
     def _printable_release(*, contribution, release_id, set_code, now=None):
         normalized_set = (set_code or "").upper()
-        if normalized_set not in GeneratedExamSet.SetCode.values:
+        if not valid_set_code(normalized_set):
             raise Http404("Questionnaire set does not exist.")
         primary_course = resolve_examination_unit(contribution.cycle_course).primary
         try:
@@ -793,6 +801,10 @@ class FacultyQuestionnairePrintService:
             )
         except GeneratedExamSet.DoesNotExist as exc:
             raise PermissionDenied("The released questionnaire set is incomplete.") from exc
+        from .set_modes import require_faculty_section_set
+        require_faculty_section_set(revision=release.generation_revision, set_code=normalized_set,
+            contribution=contribution, campus_id=release.target_campus_id,
+            assignments=ContributionAuthorizationService.retained_current_print_assignments(contribution=contribution))
         return release, generated_set, normalized_set
 
     @classmethod
@@ -856,7 +868,7 @@ class AdminQuestionnairePrintService:
             revision=revision,
         )
         normalized_set = (set_code or "").strip().upper()
-        if normalized_set not in GeneratedExamSet.SetCode.values:
+        if not valid_set_code(normalized_set):
             raise Http404("Questionnaire set does not exist.")
         try:
             generated_set = GeneratedExamSet.objects.get(

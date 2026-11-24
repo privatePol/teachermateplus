@@ -79,6 +79,7 @@ from .stage6_campus_codes import (
     Stage6CampusCodeAmbiguity,
     canonicalize_participating_campus_rows,
 )
+from .set_modes import active_policy
 from .stage6_forms import (
     BlockedContributionResolutionForm,
     BlueprintForm,
@@ -620,6 +621,7 @@ def generation_workspace_view(request, cycle_course_id):
         {
             "cycle_course": course,
             "readiness": readiness,
+            "has_section_set_policy": bool(active_policy(course)),
             "problem": problem,
             "current_revision": current,
             "generation_form": (
@@ -696,7 +698,7 @@ def _generation_post(request, *, cycle_course_id, regeneration):
         (
             "The existing generation revision was reused for this request."
             if outcome.reused
-            else "Set A and Set B were generated atomically."
+            else ("Section sets were generated atomically." if outcome.revision.set_policy_snapshot else "Set A and Set B were generated atomically.")
         ),
     )
     return redirect(
@@ -773,14 +775,20 @@ def generated_revision_detail_view(request, revision_id):
         .prefetch_related("items")
         .order_by("set_code")
     )
+    if revision.set_policy_snapshot:
+        from .set_modes import verify_policy_revision
+        verify_policy_revision(revision)
+    elif any(row.set_code not in {"A", "B"} for row in generated_sets):
+        raise PermissionDenied("Section-set policy evidence is missing.")
     for generated_set in generated_sets:
         generated_set.ordered_items = sorted(
             generated_set.items.all(),
             key=lambda item: item.position,
         )
         from .structured_snapshots import verify_structured_set
-        verify_structured_set(generated_set, generated_set.ordered_items,
-                              algorithm_version=revision.algorithm_version)
+        if not revision.set_policy_snapshot:
+            verify_structured_set(generated_set, generated_set.ordered_items,
+                                  algorithm_version=revision.algorithm_version)
     history = (
         list(
             ExamGenerationRevision.objects.filter(cycle_course=revision.cycle_course)
@@ -804,6 +812,8 @@ def generated_revision_detail_view(request, revision_id):
             "revision": revision,
             "cycle_course": revision.cycle_course,
             "generated_sets": generated_sets,
+            "section_set_overlap": revision.set_policy_snapshot.get("overlap", []),
+            "section_set_assignments": revision.section_set_assignments.select_related("generated_set"),
             "revision_history": history,
             "approve_form": (
                 ApproveAndLockForm(

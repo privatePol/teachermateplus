@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .set_modes import valid_set_code, expected_set_codes, faculty_set_options
+
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -73,10 +75,7 @@ def _complete_sets(revision):
             "item_count",
         )
     )
-    if len(rows) != 2 or {row["set_code"] for row in rows} != {
-        GeneratedExamSet.SetCode.A,
-        GeneratedExamSet.SetCode.B,
-    }:
+    if len(rows) != len(expected_set_codes(revision)) or {row["set_code"] for row in rows} != expected_set_codes(revision):
         return False
     if not 1 <= revision.final_item_count_snapshot <= 75:
         return False
@@ -539,6 +538,9 @@ class FacultyAnswerKeyReleaseService:
                         "recipient_course_id": release.recipient_course_id,
                         "revision_number": release.generation_revision.revision_number,
                         "campus_name": release.target_campus.name,
+                        "section_sets": bool(release.generation_revision.set_policy_snapshot),
+                        "set_options": faculty_set_options(revision=release.generation_revision,
+                            contribution=contribution, campus_id=release.target_campus_id),
                     })
         return options
 
@@ -671,7 +673,7 @@ class FacultyAnswerKeyReleaseService:
         ):
             raise PermissionDenied("Answer Key access is unavailable.")
         normalized_set = (set_code or "").strip().upper()
-        if normalized_set not in GeneratedExamSet.SetCode.values:
+        if not valid_set_code(normalized_set):
             raise Http404("Answer Key set does not exist.")
         primary_course = resolve_examination_unit(contribution.cycle_course).primary
         try:
@@ -730,6 +732,10 @@ class FacultyAnswerKeyReleaseService:
             != list(range(1, generated_set.item_count + 1))
         ):
             raise PermissionDenied("The released Answer Key set is incomplete.")
+        from .set_modes import require_faculty_section_set
+        require_faculty_section_set(revision=release.generation_revision, set_code=normalized_set,
+            contribution=contribution, campus_id=release.target_campus_id,
+            assignments=FacultyAnswerKeyReleaseService._matching_assignments(contribution=contribution, release=release))
         return release, normalized_set, items
 
     @classmethod
@@ -1004,7 +1010,7 @@ class AnswerKeyViewerReportService:
                 },
             )
             set_code = (event.metadata_json or {}).get("set_code")
-            if set_code in GeneratedExamSet.SetCode.values:
+            if valid_set_code(set_code):
                 row["sets_viewed"].add(set_code)
             row["last_viewed"] = event.created_at
         rows = tuple(

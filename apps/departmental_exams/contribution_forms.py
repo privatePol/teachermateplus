@@ -102,6 +102,8 @@ class QuestionReuseForm(ContributionRevisionForm):
 
 
 class QuestionForm(ContributionRevisionForm):
+    choices_fixed_order = forms.BooleanField(required=False, label="Keep answer choices in their original order",
+        help_text="Select for ordered answers or choices that refer to A, B, C or D. Overrides exam choice shuffling.")
     expected_question_revision = forms.IntegerField(
         min_value=1, required=False, widget=forms.HiddenInput
     )
@@ -234,6 +236,9 @@ class MyCaseForm(BootstrapFormMixin, forms.Form):
 
 
 class MyCaseBundleForm(MyCaseForm):
+    choices_fixed_order = forms.BooleanField(
+        required=False, label="Keep answer choices in their original order"
+    )
     question_text = forms.CharField(
         max_length=MAX_RAW_BY_FIELD["question_text"],
         widget=forms.Textarea(attrs={"rows": 5}),

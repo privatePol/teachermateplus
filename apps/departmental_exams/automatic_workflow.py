@@ -1012,6 +1012,7 @@ class AutomaticContributionReopenService:
                 question_text=row.question_text, choice_a=row.choice_a,
                 choice_b=row.choice_b, choice_c=row.choice_c, choice_d=row.choice_d,
                 correct_answer=row.correct_answer, difficulty=row.difficulty,
+                choices_fixed_order=row.choices_fixed_order,
                 position=row.position, entry_method=row.entry_method,
                 import_batch=None, import_row_number=None,
             )
@@ -1717,7 +1718,7 @@ class AutomaticGenerationSummaryService:
             if current:
                 sets = {item.set_code: item for item in current.generated_sets.all()}
                 actual_set_counts = []
-                for set_code in (GeneratedExamSet.SetCode.A, GeneratedExamSet.SetCode.B):
+                for set_code in (sorted(sets) if current.set_policy_snapshot else (GeneratedExamSet.SetCode.A, GeneratedExamSet.SetCode.B)):
                     generated_set = sets.get(set_code)
                     campus_counts = {}
                     if generated_set is not None:

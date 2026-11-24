@@ -457,10 +457,11 @@ class AnswerKeyScopeMigrationTests(Stage4TransactionTestCase):
         executor.migrate(previous)
         try:
             historical = executor.loader.project_state(previous).apps
+            OldRevision = historical.get_model("departmental_exams", "ExamGenerationRevision")
             old_release = historical.get_model("departmental_exams", "AnswerKeyRelease")
             course = self.make_course()
-            revision = ExamGenerationRevision.objects.create(
-                cycle_course=course, revision_number=1, source_input_fingerprint="f" * 64,
+            revision = OldRevision.objects.create(
+                cycle_course_id=course.id, revision_number=1, source_input_fingerprint="f" * 64,
                 algorithm_version="scope-migration-test", generation_trigger="AUTOMATIC",
                 configuration_revision_snapshot=1, blueprint_revision_snapshot=1,
                 roster_boundary_snapshot="r" * 64, final_item_count_snapshot=2,
@@ -495,7 +496,7 @@ class AnswerKeyScopeMigrationTests(Stage4TransactionTestCase):
             self.assertEqual(AuditLog.objects.filter(pk=audit.id).values().get(), audit_before)
             # Separate scoped rows can coexist with the preserved legacy ACTIVE row.
             scoped = AnswerKeyRelease.objects.create(
-                cycle_course=course, generation_revision=revision, recipient_course=course,
+                cycle_course=course, generation_revision_id=revision.id, recipient_course=course,
                 target_campus=self.campus, available_from=now,
                 available_until=now + timezone.timedelta(hours=2), released_by=self.admin,
                 attestation_version="all-sessions-concluded-v1")

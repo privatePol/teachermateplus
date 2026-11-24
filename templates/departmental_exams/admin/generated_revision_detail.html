@@ -2,6 +2,8 @@
 {% load static departmental_exam_content %}
 {% block extra_head %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_questionnaire_presentation.css' %}">{% endblock %}
 {% block admin_content %}
+{% include "departmental_exams/admin/_section_set_overlap.html" %}
+{% if revision.set_policy_snapshot %}<h2 class="h5">Saved academic section assignments</h2><ul>{% for row in section_set_assignments %}<li>{{ row.section_label_snapshot }} &mdash; Set {{ row.generated_set.set_code }}</li>{% endfor %}</ul>{% endif %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li>{% if automatic_mode %}<li class="breadcrumb-item"><a href="{% url 'departmental_exams:automatic_generation_summary' cycle_course.cycle_id %}">Exam Generation Status</a></li>{% endif %}<li class="breadcrumb-item active">Generated Revision</li></ol></nav>
 <header class="de-exam-hero">
@@ -14,7 +16,7 @@
 
 {% if revision.status == 'SUPERSEDED' %}<div class="alert alert-warning" role="status"><strong>Superseded historical revision.</strong> This exact output remains available to authorized administrators for audit. It is no longer available through Faculty releases; a replacement needs separate new releases.</div>{% endif %}
 
-{% if revision.status == 'LOCKED' %}<div class="de-locked-panel mb-3" role="status"><span class="badge text-bg-light text-dark mb-2">LOCKED</span><h2 class="h5">This is the permanent final examination.</h2><p class="mb-0">Set A, Set B, their ordering, correct answers, sections, and scenario snapshots cannot be changed or regenerated. This page renders only the approved snapshots.</p></div>{% endif %}
+{% if revision.status == 'LOCKED' %}<div class="de-locked-panel mb-3" role="status"><span class="badge text-bg-light text-dark mb-2">LOCKED</span><h2 class="h5">This is the permanent final examination.</h2><p class="mb-0">{% if revision.set_policy_snapshot %}The section sets, their ordering{% else %}Set A, Set B, their ordering{% endif %}, correct answers, sections, and scenario snapshots cannot be changed or regenerated. This page renders only the approved snapshots.</p></div>{% endif %}
 
 <nav class="de-generation-set-nav d-flex flex-wrap gap-2 mb-3" aria-label="Generated set navigation">
   {% for generated_set in generated_sets %}<a class="btn {% if generated_set.set_code == 'A' %}btn-success{% else %}btn-warning{% endif %}" href="#set-{{ generated_set.set_code|lower }}">Set {{ generated_set.set_code }}</a>{% endfor %}
@@ -24,7 +26,7 @@
 
 <div class="row g-3 mb-3">
   <div class="col-sm-6 col-lg-4"><div class="de-generation-metric"><span class="small text-muted">Items per set</span><strong>{{ revision.final_item_count_snapshot }}</strong></div></div>
-  <div class="col-sm-6 col-lg-4"><div class="de-generation-metric"><span class="small text-muted">Exact overlap</span><strong>{{ revision.minimum_overlap }}</strong></div></div>
+  <div class="col-sm-6 col-lg-4"><div class="de-generation-metric"><span class="small text-muted">{% if revision.set_policy_snapshot %}Lowest actual pair overlap{% else %}Exact overlap{% endif %}</span><strong>{{ revision.minimum_overlap }}</strong></div></div>
   <div class="col-sm-6 col-lg-4"><div class="de-generation-metric"><span class="small text-muted">Algorithm</span><strong class="fs-6">{{ revision.algorithm_version }}</strong></div></div>
 </div>
 

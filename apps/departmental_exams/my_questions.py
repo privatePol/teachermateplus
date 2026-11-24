@@ -40,6 +40,7 @@ QUESTION_FIELDS = (
     "choice_d",
     "correct_answer",
     "difficulty",
+    "choices_fixed_order",
 )
 
 
@@ -172,7 +173,7 @@ def current_revision(item, *, for_update=False):
 
 def _clean_question(payload):
     cleaned = QuestionPayloadService.validate(
-        {field: payload.get(field, "") for field in QUESTION_FIELDS}
+        {field: payload.get(field, False if field == "choices_fixed_order" else "") for field in QUESTION_FIELDS}
     )
     return {field: cleaned[field] for field in QUESTION_FIELDS}
 

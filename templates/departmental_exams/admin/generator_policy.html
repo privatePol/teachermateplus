@@ -1,0 +1,13 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<h1>Exam Generator Config</h1>
+<p>{{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }}</p>
+<p>Select Departmental, Standardized, or both. Unselected classifications keep the existing A/B workflow. Generalized means Standardized.</p>
+<p>Each active academic section/offering receives a saved set. The existing blueprint, eligible Submitted pool, and whole Case/passages remain authoritative. Reuse is allowed up to 100%; an insufficient pool for one valid exam blocks generation.</p>
+{% if locked %}<div class="alert alert-info">This policy is frozen. Saved revisions, sets, and keys retain their original settings.</div>{% endif %}
+<form method="post">{% csrf_token %}{{ form.non_field_errors }}{{ form.expected_revision }}
+<fieldset {% if locked %}disabled{% endif %}>
+{% for field in form.visible_fields %}<div class="mb-3">{{ field.label_tag }} {{ field }} {{ field.errors }}</div>{% endfor %}
+<button class="btn btn-primary" type="submit">Save generator policy</button></fieldset></form>
+<p class="mt-3"><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Back to cycle configuration</a></p>
+{% endblock %}

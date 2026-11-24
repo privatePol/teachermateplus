@@ -151,6 +151,26 @@ class AutomaticGenerationAuditService:
 
     @classmethod
     def _build_findings(cls, *, revision):
+        if revision.set_policy_snapshot:
+            from .set_modes import verify_policy_revision
+            verify_policy_revision(revision)
+            sets = list(revision.generated_sets.all())
+            findings = [cls._finding("SECTION_SET_INTEGRITY", "PASS",
+                "All saved section assignments, whole units, original choices and displayed keys match retained evidence.",
+                set_count=len(sets))]
+            for row in sets:
+                target = revision.set_policy_snapshot["difficulty_target"]
+                actual = row.difficulty_quotas_snapshot
+                met = all(actual.get(code, 0) == count for code, count in target.items())
+                findings.append(cls._finding("SECTION_DIFFICULTY_TARGET", "PASS" if met else "WARNING",
+                    f"{row.set_code}: preferred difficulty mix {'met' if met else 'unavailable with whole-unit quotas; hard quotas remain valid'}.",
+                    set_code=row.set_code, target=target, actual=actual))
+            for pair in revision.set_policy_snapshot["overlap"]:
+                findings.append(cls._finding("SECTION_PAIR_OVERLAP", "PASS",
+                    f"{pair['left']} / {pair['right']}: {pair['count']} shared questions ({pair['percent']}%). Reuse is allowed.",
+                    **pair))
+            return findings, {"section_set_count": len(sets), "total_items": sum(s.item_count for s in sets),
+                              "overlap_count": revision.minimum_overlap}
         generated_sets = list(
             GeneratedExamSet.objects.filter(generation_revision=revision)
             .prefetch_related(

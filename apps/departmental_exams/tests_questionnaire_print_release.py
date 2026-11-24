@@ -2415,6 +2415,7 @@ class QuestionnaireCampusMigrationTests(Stage4TransactionTestCase):
         executor.migrate(previous)
         try:
             historical = executor.loader.project_state(previous).apps
+            OldRevision = historical.get_model("departmental_exams", "ExamGenerationRevision")
             OldRelease = historical.get_model("departmental_exams", "QuestionnairePrintRelease")
             course = self.make_course()
             program = Program.objects.create(
@@ -2437,8 +2438,8 @@ class QuestionnaireCampusMigrationTests(Stage4TransactionTestCase):
             )
             self.other_campus.is_active = False
             self.other_campus.save(update_fields=["is_active"])
-            revision = ExamGenerationRevision.objects.create(
-                cycle_course=course, revision_number=1,
+            revision = OldRevision.objects.create(
+                cycle_course_id=course.id, revision_number=1,
                 source_input_fingerprint="f" * 64, algorithm_version="migration-test",
                 generation_trigger="AUTOMATIC", configuration_revision_snapshot=1,
                 blueprint_revision_snapshot=1, roster_boundary_snapshot="r" * 64,
@@ -2476,7 +2477,7 @@ class QuestionnaireCampusMigrationTests(Stage4TransactionTestCase):
             scoped = QuestionnairePrintRelease.objects.create(
                 scope_kind="SCOPED", target_campus=self.campus,
                 scope_key=self.campus.id, cycle_course=course,
-                generation_revision=revision, print_from=now,
+                generation_revision_id=revision.id, print_from=now,
                 print_until=now + timezone.timedelta(hours=2),
                 released_by=self.admin,
             )
