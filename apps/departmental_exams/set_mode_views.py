@@ -17,6 +17,12 @@ class ExamGeneratorPolicyForm(forms.ModelForm):
     class Meta:
         model = ExamGeneratorPolicy
         fields = ["departmental", "standardized", "mode", "shuffle_choices"]
+        widgets = {
+            "departmental": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "standardized": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "mode": forms.Select(attrs={"class": "form-select"}),
+            "shuffle_choices": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+        }
         labels = {"departmental": "Apply to Departmental exams", "standardized": "Apply to Standardized exams",
                   "mode": "Set mode", "shuffle_choices": "Shuffle answer choices"}
 

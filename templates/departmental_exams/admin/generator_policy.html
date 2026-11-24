@@ -1,13 +1,31 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
-<h1>Exam Generator Config</h1>
-<p>{{ cycle.academic_year }} / {{ cycle.term }} / {{ cycle.get_exam_period_display }}</p>
-<p>Select Departmental, Standardized, or both. Unselected classifications keep the existing A/B workflow. Generalized means Standardized.</p>
-<p>Each active academic section/offering receives a saved set. The existing blueprint, eligible Submitted pool, and whole Case/passages remain authoritative. Reuse is allowed up to 100%; an insufficient pool for one valid exam blocks generation.</p>
-{% if locked %}<div class="alert alert-info">This policy is frozen. Saved revisions, sets, and keys retain their original settings.</div>{% endif %}
-<form method="post">{% csrf_token %}{{ form.non_field_errors }}{{ form.expected_revision }}
-<fieldset {% if locked %}disabled{% endif %}>
-{% for field in form.visible_fields %}<div class="mb-3">{{ field.label_tag }} {{ field }} {{ field.errors }}</div>{% endfor %}
-<button class="btn btn-primary" type="submit">Save generator policy</button></fieldset></form>
-<p class="mt-3"><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Back to cycle configuration</a></p>
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_list' %}?cycle_status={{ cycle.status }}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Configure Examination Cycle</a></li><li class="breadcrumb-item active" aria-current="page">Exam Generator Config</li></ol></nav>
+<header class="de-exam-hero"><div class="d-flex justify-content-between gap-3 flex-wrap"><div><h1>Exam Generator Config</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }} <span class="badge {% if cycle.status == 'DRAFT' %}text-bg-secondary{% elif cycle.status == 'OPEN' %}text-bg-success{% else %}text-bg-dark{% endif %}">{{ cycle.get_status_display }}</span></p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Back to Configure Examination Cycle</a></div></header>
+<div class="alert alert-info">
+  Each active academic section/offering receives a saved set. The existing blueprint, eligible Submitted pool, and whole Cases/passages remain authoritative. Reuse is allowed up to 100%; an insufficient pool for one valid exam blocks generation.
+</div>
+{% if locked %}<div class="alert alert-info" role="status">This policy is frozen. Saved revisions, sets, and keys retain their original settings.</div>{% endif %}
+<div class="card de-exam-card"><div class="card-body">
+  <div class="de-exam-section-title mb-1">Generator Settings</div><p class="text-muted">Configure applicability, question order, and answer choice order for this cycle.</p>
+  <form method="post">{% csrf_token %}
+    {% for hidden_field in form.hidden_fields %}{% if hidden_field.errors %}<div class="alert alert-danger" role="alert">{{ hidden_field.errors }}</div>{% endif %}{{ hidden_field }}{% endfor %}
+    {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+    <fieldset {% if locked %}disabled{% endif %}>
+      <legend class="h6 mb-2">Applicability</legend>
+      <p class="text-muted mb-3">Select Departmental, Standardized, or both. Unselected classifications keep the existing A/B workflow.</p>
+      <div class="row g-3 mb-4">
+        <div class="col-md-6"><div class="form-check">{{ form.departmental }}<label class="form-check-label" for="{{ form.departmental.id_for_label }}">{{ form.departmental.label }}</label></div>{{ form.departmental.errors }}</div>
+        <div class="col-md-6"><div class="form-check">{{ form.standardized }}<label class="form-check-label" for="{{ form.standardized.id_for_label }}">{{ form.standardized.label }}</label></div>{{ form.standardized.errors }}</div>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6"><label class="form-label fw-semibold" for="{{ form.mode.id_for_label }}">Set Mode</label>{{ form.mode }}{{ form.mode.errors }}</div>
+        <div class="col-md-6"><div class="fw-semibold mb-2">Shuffle Answer Choices</div><div class="form-check">{{ form.shuffle_choices }}<label class="form-check-label" for="{{ form.shuffle_choices.id_for_label }}">{{ form.shuffle_choices.label }}</label></div><div class="form-text">Enable to shuffle answer choices independently of question order. Fixed-order choices retain their order.</div>{{ form.shuffle_choices.errors }}</div>
+      </div>
+      <button class="btn btn-success mt-3" type="submit">Save Configuration</button>
+    </fieldset>
+  </form>
+  <a class="btn btn-outline-secondary mt-3" href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Back to Configure Examination Cycle</a>
+</div></div>
 {% endblock %}
