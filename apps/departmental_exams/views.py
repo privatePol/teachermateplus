@@ -274,11 +274,20 @@ def cycle_configuration_view(request, cycle_id):
             for course in automatic_courses
         )
     )
-    form = ExaminationCycleConfigurationForm(request.POST or None, instance=cycle, initial={"expected_updated_at": ExaminationCycleConfigurationService.transition_token(cycle)})
+    from .set_mode_views import generator_policy_context, save_generator_policy
+
+    generator_post = request.method == "POST" and request.POST.get("action") == "save_generator_policy"
+    generator_context = generator_policy_context(cycle, data=request.POST if generator_post else None)
+    form = ExaminationCycleConfigurationForm((request.POST or None) if not generator_post else None,
+        instance=cycle, initial={"expected_updated_at": ExaminationCycleConfigurationService.transition_token(cycle)})
     status = 200
-    if request.method == "POST" and not lifecycle_flags["can_edit_cycle_configuration"]:
+    if generator_post:
+        saved, status = save_generator_policy(request, cycle, generator_context["generator_form"])
+        if saved:
+            return redirect("departmental_exams:cycle_configuration", cycle_id=cycle.id)
+    if request.method == "POST" and not generator_post and not lifecycle_flags["can_edit_cycle_configuration"]:
         raise Http404("Cycle configuration is read-only in its current lifecycle state.")
-    if request.method == "POST" and form.is_valid():
+    if request.method == "POST" and not generator_post and form.is_valid():
         confirmation_state = _cycle_defaults_confirmation_token(
             request=request,
             cycle=cycle,
@@ -297,7 +306,7 @@ def cycle_configuration_view(request, cycle_id):
                 "proposed_defaults": form.cleaned_data,
             },
         )
-    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags, "can_view_course_examinations": can_view_course_examinations, "can_manage_automatic_generation": can_manage_automatic_generation, "safe_delete": safe_delete}, status=status)
+    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags, "can_view_course_examinations": can_view_course_examinations, "can_manage_automatic_generation": can_manage_automatic_generation, "safe_delete": safe_delete, **generator_context}, status=status)
 
 
 @portal_required("ADMIN")

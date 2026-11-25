@@ -1,3 +1,9 @@
+## 2026-11-25 - Embedded Exam Generator Config
+- Configure Examination Cycle groups the two automatic policies under Automatic Generation and both item-count defaults under Question Requirements, with responsive paired columns in editable and read-only layouts.
+- Exam Generator Config is a separate card above Lifecycle Actions. Save Generator Policy shares the existing guarded save path and changes only the policy; Save Configuration retains the defaults confirmation/apply workflow. Existing direct generator URLs remain compatible.
+- Lifecycle rule unchanged: opening the cycle alone permits policy edits; the first course contribution Open, a saved generation revision, or closing the cycle locks it. Locked values remain visible, and direct POSTs fail without changing persisted values.
+- Focused validation and limitations are recorded in HANDOFF.md. No schema change or non-test migration application.
+
 ## 2026-11-24 - Exam Generator set-mode correction and print fixes
 - Returned standalone and Case-linked questions retain author fixed-order choice flags through Draft correction and resubmission.
 - Release Center Admin questionnaire actions use each revision's saved sets, including third and later section sets; legacy A/B actions and existing access checks remain.

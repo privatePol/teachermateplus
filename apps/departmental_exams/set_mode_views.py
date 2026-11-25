@@ -33,21 +33,22 @@ def require_mutable(cycle):
         raise ValidationError("Generator policy freezes at first contribution Open. Existing exams and historical output are preserved.")
 
 
-@portal_required("ADMIN")
-@require_http_methods(["GET", "POST"])
-def generator_policy_view(request, cycle_id):
-    cycle = get_object_or_404(ExaminationCycle, pk=cycle_id, tenant_id=_tenant_id(request))
-    DepartmentalExamAuthorizationService.require_permission(user=request.user,
-        permission="departmental_exams.manage_cycles", tenant_id=cycle.tenant_id)
+def generator_policy_context(cycle, *, data=None):
     instance = ExamGeneratorPolicy.objects.filter(cycle=cycle).first()
-    initial = {"expected_revision": instance.revision if instance else 0}
-    form = ExamGeneratorPolicyForm(request.POST if request.method == "POST" else None, instance=instance, initial=initial)
-    status, locked = 200, False
+    form = ExamGeneratorPolicyForm(data, instance=instance,
+        initial={"expected_revision": instance.revision if instance else 0})
+    locked = False
     try:
         require_mutable(cycle)
     except ValidationError:
         locked = True
-    if request.method == "POST" and form.is_valid():
+    return {"generator_form": form, "generator_locked": locked}
+
+
+def save_generator_policy(request, cycle, form):
+    """Shared save path for the embedded card and compatible direct URL."""
+    status = 200
+    if form.is_valid():
         try:
             with transaction.atomic():
                 cycle = ExaminationCycle.objects.select_for_update().get(pk=cycle.pk, tenant_id=cycle.tenant_id)
@@ -65,9 +66,25 @@ def generator_policy_view(request, cycle_id):
                     metadata={"cycle_id": cycle.id, "policy_revision": policy.revision,
                               "departmental": policy.departmental, "standardized": policy.standardized,
                               "set_mode": policy.mode, "shuffle_choices": policy.shuffle_choices}, request=request)
-            return redirect("departmental_exams:generator_policy", cycle_id=cycle.id)
+            return True, 200
         except ValidationError as exc:
             form.add_error(None, exc)
             status = 409
+    return False, status
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def generator_policy_view(request, cycle_id):
+    cycle = get_object_or_404(ExaminationCycle, pk=cycle_id, tenant_id=_tenant_id(request))
+    DepartmentalExamAuthorizationService.require_permission(user=request.user,
+        permission="departmental_exams.manage_cycles", tenant_id=cycle.tenant_id)
+    context = generator_policy_context(cycle, data=request.POST if request.method == "POST" else None)
+    form, locked = context["generator_form"], context["generator_locked"]
+    status = 200
+    if request.method == "POST":
+        saved, status = save_generator_policy(request, cycle, form)
+        if saved:
+            return redirect("departmental_exams:generator_policy", cycle_id=cycle.id)
     return render(request, "departmental_exams/admin/generator_policy.html",
                   {"cycle": cycle, "form": form, "locked": locked}, status=status)
