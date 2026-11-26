@@ -13,13 +13,13 @@
 {% if offering_rows %}
   <div class="table-responsive">
     <table class="table align-middle">
-      <thead><tr><th>Section</th><th class="text-end">Active Students</th>{% if section_sets %}<th class="text-end">Saved Set</th><th class="text-end">Assigned</th>{% else %}<th class="text-end">Set A</th><th class="text-end">Set B</th>{% endif %}<th class="text-end">Missing</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Section</th><th class="text-end">Active Students</th>{% if paired_section_sets %}<th class="text-end">Set A</th><th class="text-end">Set B</th>{% elif section_sets %}<th class="text-end">Saved Set</th><th class="text-end">Assigned</th>{% else %}<th class="text-end">Set A</th><th class="text-end">Set B</th>{% endif %}<th class="text-end">Missing</th><th>Actions</th></tr></thead>
       <tbody>
         {% for row in offering_rows %}
           <tr>
-            <td><strong>{{ row.offering.section.code }}</strong><div class="small text-muted">{{ row.offering.campus.name }}</div></td>
+            <td><strong>{{ row.section_label|default:row.offering.section.code }}</strong><div class="small text-muted">{{ row.offering.campus.name }}</div></td>
             <td class="text-end">{{ row.active_students }}</td>
-            {% if section_sets %}<td class="text-end">{{ row.section_set|default:"Unavailable" }}</td><td class="text-end">{{ row.assigned }}</td>{% else %}<td class="text-end">{{ row.set_a }}</td><td class="text-end">{{ row.set_b }}</td>{% endif %}
+            {% if row.paired %}<td class="text-end">{{ row.set_a }}</td><td class="text-end">{{ row.set_b }}</td>{% elif section_sets %}<td class="text-end">{{ row.section_set|default:"Unavailable" }}</td><td class="text-end">{{ row.assigned }}</td>{% else %}<td class="text-end">{{ row.set_a }}</td><td class="text-end">{{ row.set_b }}</td>{% endif %}
             <td class="text-end">{{ row.missing }}</td>
             <td>
               {% if row.section_set_unavailable %}
@@ -29,7 +29,7 @@
               {% elif row.ready %}
                 <div class="d-flex flex-wrap gap-2">
                   <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'all' %}">Print All</a>
-                  {% if not row.section_set %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'A' %}">Print Set A</a>
+                  {% if row.set_options %}{% for option in row.set_options %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id option.code %}">Print Set {{ option.label }}</a>{% endfor %}{% elif not row.section_set %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'A' %}">Print Set A</a>
                   <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:personalized_answer_sheet_print' contribution.id release.id row.offering.id 'B' %}">Print Set B</a>{% endif %}
                 </div>
               {% else %}

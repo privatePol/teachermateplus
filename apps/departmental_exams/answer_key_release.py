@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .set_modes import valid_set_code, expected_set_codes, faculty_set_options
+from .set_modes import saved_set_display, valid_set_code, expected_set_codes, faculty_set_options
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -778,6 +778,7 @@ class FacultyAnswerKeyReleaseService:
             "course_code": release.recipient_course.course.code,
             "course_title": release.recipient_course.course.title,
             "set_code": normalized_set,
+            **saved_set_display(release.generation_revision.generated_sets.get(set_code=normalized_set)),
             "revision_number": release.generation_revision.revision_number,
             "accessed_at": accessed_at,
             "items": tuple(
@@ -918,6 +919,7 @@ class FacultyAnswerKeyReleaseService:
             "course_code": release.recipient_course.course.code,
             "course_title": release.recipient_course.course.title,
             "set_code": normalized_set,
+            **saved_set_display(release.generation_revision.generated_sets.get(set_code=normalized_set)),
             "revision_number": release.generation_revision.revision_number,
             "final_item_count": final_item_count,
             "accessed_at": accessed_at,

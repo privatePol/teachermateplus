@@ -4,7 +4,7 @@
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_list' %}?cycle_status={{ cycle.status }}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Configure Examination Cycle</a></li><li class="breadcrumb-item active" aria-current="page">Exam Generator Config</li></ol></nav>
 <header class="de-exam-hero"><div class="d-flex justify-content-between gap-3 flex-wrap"><div><h1>Exam Generator Config</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }} <span class="badge {% if cycle.status == 'DRAFT' %}text-bg-secondary{% elif cycle.status == 'OPEN' %}text-bg-success{% else %}text-bg-dark{% endif %}">{{ cycle.get_status_display }}</span></p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Back to Configure Examination Cycle</a></div></header>
 <div class="alert alert-info">
-  Each active academic section/offering receives a saved set. The existing blueprint, eligible Submitted pool, and whole Cases/passages remain authoritative. Reuse is allowed up to 100%; an insufficient pool for one valid exam blocks generation.
+  Each active academic section/offering receives a saved Set A/Set B pair. The existing blueprint, eligible Submitted pool, and whole Cases/passages remain authoritative. Reuse is allowed up to 100%; an insufficient pool for one valid exam blocks generation.
 </div>
 {% include "departmental_exams/admin/_generator_policy_card.html" %}
 {% endblock %}

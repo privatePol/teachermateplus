@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
@@ -42,6 +42,7 @@ from .set_modes import expected_set_codes, valid_set_code
 
 class PersonalizedAnswerSheetService:
     ALGORITHM_VERSION = PersonalizedAnswerSheetAssignment.ALGORITHM_VERSION
+    SECTION_PAIR_ALGORITHM_VERSION = "section-pair-balanced-v1"
     RANK_DOMAIN = "departmental-exams.personalized-sheets.rank.v1"
     ODD_START_DOMAIN = "departmental-exams.personalized-sheets.odd-start.v1"
     LATE_TIE_DOMAIN = "departmental-exams.personalized-sheets.late-tie.v1"
@@ -176,19 +177,20 @@ class PersonalizedAnswerSheetService:
         cls._validate_offering_scope(release=release, offering=offering)
         if offering.id not in cls._authorized_offering_ids(contribution=contribution):
             raise PermissionDenied("Course offering is unavailable to this faculty member.")
-        return cls._saved_section_code(revision=release.generation_revision, offering=offering)
+        return cls._saved_section_codes(revision=release.generation_revision, offering=offering)
 
     @staticmethod
-    def _saved_section_code(*, revision, offering):
+    def _saved_section_codes(*, revision, offering):
         if not revision.set_policy_snapshot:
             return None
-        assignment = revision.section_set_assignments.filter(
+        assignments = revision.section_set_assignments.filter(
             offering_id=offering.id, campus_id_snapshot=offering.campus_id,
             generated_set__generation_revision=revision,
-        ).select_related("generated_set").first()
-        if assignment is None:
+        ).select_related("generated_set").order_by("version_code")
+        codes = tuple(row.generated_set.set_code for row in assignments)
+        if not codes:
             raise PermissionDenied("No saved set for this section in the released revision.")
-        return assignment.generated_set.set_code
+        return codes
 
     @staticmethod
     def _validate_generated_output(*, revision):
@@ -263,10 +265,12 @@ class PersonalizedAnswerSheetService:
         ))
         offerings = [row for row in offerings if row.campus_id in matching_campus_ids]
         section_sets = bool(release.generation_revision.set_policy_snapshot)
-        saved_codes = {
-            row.offering_id: row.generated_set.set_code
-            for row in release.generation_revision.section_set_assignments.select_related("generated_set")
-        } if section_sets else {}
+        saved_codes = defaultdict(list)
+        saved_sets = {}
+        if section_sets:
+            for row in release.generation_revision.section_set_assignments.select_related("generated_set").order_by("version_code"):
+                saved_codes[row.offering_id].append(row.generated_set.set_code)
+                saved_sets[row.generated_set.set_code] = row
         rows = []
         for offering in offerings:
             cls._validate_offering_scope(release=release, offering=offering)
@@ -280,7 +284,9 @@ class PersonalizedAnswerSheetService:
             counts = Counter(assignments.values_list("set_code", flat=True))
             assigned_ids = set(assignments.values_list("enrollment_id", flat=True))
             missing = len(set(enrollment_ids) - assigned_ids)
-            section_code = saved_codes.get(offering.id)
+            section_codes = saved_codes.get(offering.id)
+            paired = bool(section_codes and len(section_codes) == 2)
+            section_code = " / ".join(saved_sets[code].generated_set.display_version for code in section_codes) if section_codes else None
             section_set_unavailable = section_sets and section_code is None
             rows.append(
                 {
@@ -289,8 +295,11 @@ class PersonalizedAnswerSheetService:
                     "section_set": section_code,
                     "section_set_unavailable": section_set_unavailable,
                     "assigned": len(assigned_ids),
-                    "set_a": counts["A"],
-                    "set_b": counts["B"],
+                    "set_a": counts[section_codes[0]] if paired else counts["A"],
+                    "set_b": counts[section_codes[1]] if paired else counts["B"],
+                    "set_options": tuple({"code": code, "label": saved_sets[code].generated_set.display_version} for code in (section_codes or ())),
+                    "paired": paired,
+                    "section_label": saved_sets[section_codes[0]].section_label_snapshot if section_codes else str(offering.section),
                     "missing": missing,
                     "ready": not section_set_unavailable and bool(enrollments) and missing == 0,
                 }
@@ -308,6 +317,7 @@ class PersonalizedAnswerSheetService:
             "item_count": item_count,
             "offering_rows": rows,
             "section_sets": section_sets,
+            "paired_section_sets": release.generation_revision.set_policy_snapshot.get("schema") == "section-sets-v2",
         }
 
     @classmethod
@@ -358,7 +368,7 @@ class PersonalizedAnswerSheetService:
         )
         if offering is None:
             raise PermissionDenied("Course offering is unavailable.")
-        section_code = cls._require_authorized_offering(
+        section_codes = cls._require_authorized_offering(
             contribution=locked_contribution,
             release=release,
             offering=offering,
@@ -388,47 +398,53 @@ class PersonalizedAnswerSheetService:
         )
         initial = not all_existing
         counts = Counter(row.set_code for row in active_existing)
+        code_a, code_b = section_codes if section_codes and len(section_codes) == 2 else ("A", "B")
         start_set = cls._tie_set(
             domain=cls.ODD_START_DOMAIN,
             revision_id=release.generation_revision_id,
             offering_id=offering.id,
         )
+        start_set = code_a if start_set == "A" else code_b
         created = []
         for index, enrollment in enumerate(missing):
-            if section_code:
-                set_code = section_code
+            if section_codes and len(section_codes) == 1:
+                set_code = section_codes[0]
                 assignment_method = PersonalizedAnswerSheetAssignment.AssignmentMethod.SECTION
             elif initial:
                 set_code = (
                     start_set
                     if index % 2 == 0
-                    else ("B" if start_set == "A" else "A")
+                    else (code_b if start_set == code_a else code_a)
                 )
                 assignment_method = (
                     PersonalizedAnswerSheetAssignment.AssignmentMethod.INITIAL_BALANCED
                 )
             else:
-                if counts["A"] < counts["B"]:
-                    set_code = "A"
-                elif counts["B"] < counts["A"]:
-                    set_code = "B"
+                if counts[code_a] < counts[code_b]:
+                    set_code = code_a
+                elif counts[code_b] < counts[code_a]:
+                    set_code = code_b
                 else:
-                    set_code = cls._tie_set(
+                    tie = cls._tie_set(
                         domain=cls.LATE_TIE_DOMAIN,
                         revision_id=release.generation_revision_id,
                         offering_id=offering.id,
                         enrollment_id=enrollment.id,
                     )
+                if counts[code_a] == counts[code_b]:
+                    set_code = code_a if tie == "A" else code_b
                 assignment_method = (
                     PersonalizedAnswerSheetAssignment.AssignmentMethod.LATE_BALANCED
                 )
+            if section_codes:
+                assignment_method = PersonalizedAnswerSheetAssignment.AssignmentMethod.SECTION
             assignment = PersonalizedAnswerSheetAssignment(
                 generation_revision=release.generation_revision,
                 enrollment=enrollment,
                 course_offering=offering,
                 set_code=set_code,
                 assignment_method=assignment_method,
-                algorithm_version=cls.ALGORITHM_VERSION,
+                algorithm_version=cls.SECTION_PAIR_ALGORITHM_VERSION if section_codes and len(section_codes) == 2 else cls.ALGORITHM_VERSION,
                 assigned_by=actor,
             )
             assignment.full_clean()
@@ -447,21 +463,23 @@ class PersonalizedAnswerSheetService:
                 "release_id": release.id,
                 "revision_id": release.generation_revision_id,
                 "course_offering_id": offering.id,
-                "algorithm_version": cls.ALGORITHM_VERSION,
+                "algorithm_version": cls.SECTION_PAIR_ALGORITHM_VERSION if section_codes and len(section_codes) == 2 else cls.ALGORITHM_VERSION,
                 "created_count": len(created),
                 "existing_count": len(active_existing),
-                "set_a_total": counts["A"],
-                "set_b_total": counts["B"],
-                **({"section_set_code": section_code, "section_set_total": counts[section_code]} if section_code else {}),
+                "set_a_total": counts[code_a],
+                "set_b_total": counts[code_b],
+                **({("section_set_code" if len(section_codes) == 1 else "section_set_codes"): section_codes[0] if len(section_codes) == 1 else section_codes,
+                    "section_set_total": sum(counts[c] for c in section_codes)} if section_codes else {}),
             },
             request=request,
         )
         return {
             "created_count": len(created),
             "existing_count": len(active_existing),
-            "set_a_total": counts["A"],
-            "set_b_total": counts["B"],
-            **({"section_set_code": section_code, "section_set_total": counts[section_code]} if section_code else {}),
+            "set_a_total": counts[code_a],
+            "set_b_total": counts[code_b],
+            **({("section_set_code" if len(section_codes) == 1 else "section_set_codes"): section_codes[0] if len(section_codes) == 1 else section_codes,
+                    "section_set_total": sum(counts[c] for c in section_codes)} if section_codes else {}),
         }
 
     @classmethod
@@ -492,13 +510,15 @@ class PersonalizedAnswerSheetService:
         )
         if offering is None:
             raise PermissionDenied("Course offering is unavailable.")
-        assigned_code = cls._require_authorized_offering(
+        assigned_codes = cls._require_authorized_offering(
             contribution=contribution,
             release=release,
             offering=offering,
         )
         if release.generation_revision.set_policy_snapshot:
-            if normalized_filter not in {"ALL", assigned_code}:
+            if len(assigned_codes) == 2 and normalized_filter in {"A", "B"}:
+                normalized_filter = assigned_codes["AB".index(normalized_filter)]
+            if normalized_filter not in {"ALL", *assigned_codes}:
                 raise PermissionDenied("The requested set is not assigned to this academic section.")
         enrollments = list(cls._active_enrollments(offering=offering))
         if not enrollments:
@@ -515,10 +535,11 @@ class PersonalizedAnswerSheetService:
             raise PermissionDenied(
                 "Prepare assignments for every active student before printing."
             )
+        saved_sets = {row.generated_set.set_code: row for row in release.generation_revision.section_set_assignments.select_related("generated_set")}
         sheets = []
         for enrollment in enrollments:
             assignment = assignment_by_enrollment[enrollment.id]
-            if release.generation_revision.set_policy_snapshot and assignment.set_code != assigned_code:
+            if release.generation_revision.set_policy_snapshot and assignment.set_code not in assigned_codes:
                 raise PermissionDenied("The student sheet does not match the exact saved section set.")
             if normalized_filter != "ALL" and assignment.set_code != normalized_filter:
                 continue
@@ -527,6 +548,7 @@ class PersonalizedAnswerSheetService:
                     "student_number": enrollment.student.student_no,
                     "student_name": cls._student_name(enrollment.student),
                     "set_code": assignment.set_code,
+                    "set_version": saved_sets[assignment.set_code].generated_set.display_version if assigned_codes else assignment.set_code,
                 }
             )
         paper = _questionnaire_paper_context(paper_size)
@@ -570,7 +592,7 @@ class PersonalizedAnswerSheetService:
             ),
             "course_code": offering.course.code,
             "course_title": offering.course.title,
-            "section": offering.section.code,
+            "section": saved_sets[assigned_codes[0]].section_label_snapshot if assigned_codes else offering.section.code,
             "academic_year": cycle.academic_year.name,
             "term": cycle.term.name,
             "exam_period": cycle.get_exam_period_display(),

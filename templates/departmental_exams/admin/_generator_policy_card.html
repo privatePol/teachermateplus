@@ -1,5 +1,5 @@
 <div class="card de-exam-card mt-3"><div class="card-body">
-  <div class="de-exam-section-title mb-1">Exam Generator Config</div><p class="text-muted">Configure applicability, question order, and answer choice order for this cycle.</p>
+  <div class="de-exam-section-title mb-1">Exam Generator Config</div><p class="text-muted">Configure applicability, question selection across sections, and answer choice order for this cycle. Each eligible section receives Set A and Set B with the same questions in different question order. The set mode applies across sections; answer choice shuffling is independent.</p>
   {% if locked %}<div class="alert alert-info" role="status">This policy is frozen. Saved revisions, sets, and keys retain their original settings.</div>{% else %}<p class="small text-muted">Settings lock when contributions first open.</p>{% endif %}
   <form method="post">{% csrf_token %}{% if embedded %}<input type="hidden" name="action" value="save_generator_policy">{% endif %}
     {% for hidden_field in form.hidden_fields %}{% if hidden_field.errors %}<div class="alert alert-danger" role="alert">{{ hidden_field.errors }}</div>{% endif %}{{ hidden_field }}{% endfor %}

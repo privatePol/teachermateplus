@@ -3,7 +3,7 @@
 {% block extra_head %}<link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}<link rel="stylesheet" href="{% static 'css/departmental_exam_questionnaire_presentation.css' %}">{% endblock %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_section_set_overlap.html" %}
-{% if revision.set_policy_snapshot %}<h2 class="h5">Saved academic section assignments</h2><ul>{% for row in section_set_assignments %}<li>{{ row.section_label_snapshot }} &mdash; Set {{ row.generated_set.set_code }}</li>{% endfor %}</ul>{% endif %}
+{% if revision.set_policy_snapshot %}<h2 class="h5">Saved academic section assignments</h2><ul>{% for row in section_set_assignments %}<li>{{ row.section_label_snapshot }} &mdash; Set {{ row.generated_set.display_version }}</li>{% endfor %}</ul>{% endif %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li>{% if automatic_mode %}<li class="breadcrumb-item"><a href="{% url 'departmental_exams:automatic_generation_summary' cycle_course.cycle_id %}">Exam Generation Status</a></li>{% endif %}<li class="breadcrumb-item active">Generated Revision</li></ol></nav>
 <header class="de-exam-hero">
@@ -19,7 +19,7 @@
 {% if revision.status == 'LOCKED' %}<div class="de-locked-panel mb-3" role="status"><span class="badge text-bg-light text-dark mb-2">LOCKED</span><h2 class="h5">This is the permanent final examination.</h2><p class="mb-0">{% if revision.set_policy_snapshot %}The section sets, their ordering{% else %}Set A, Set B, their ordering{% endif %}, correct answers, sections, and scenario snapshots cannot be changed or regenerated. This page renders only the approved snapshots.</p></div>{% endif %}
 
 <nav class="de-generation-set-nav d-flex flex-wrap gap-2 mb-3" aria-label="Generated set navigation">
-  {% for generated_set in generated_sets %}<a class="btn {% if generated_set.set_code == 'A' %}btn-success{% else %}btn-warning{% endif %}" href="#set-{{ generated_set.set_code|lower }}">Set {{ generated_set.set_code }}</a>{% endfor %}
+  {% for generated_set in generated_sets %}<a class="btn {% if generated_set.display_version == 'A' %}btn-success{% else %}btn-warning{% endif %}" href="#set-{{ generated_set.set_code|lower }}">{{ generated_set.display_label }}</a>{% endfor %}
   <a class="btn btn-outline-dark" href="{% url 'departmental_exams:generation_selection_audit' revision.id %}">Question Selection Audit</a>
   {% if can_regenerate %}<a class="btn btn-outline-warning ms-md-auto" data-approval-conflict href="{% url 'departmental_exams:generation_workspace' cycle_course.id %}#generation-actions">Regenerate</a>{% else %}<a class="btn btn-outline-secondary ms-md-auto" href="{% url 'departmental_exams:assigned_course_examinations' %}">Assigned examinations</a>{% endif %}
 </nav>
@@ -34,7 +34,7 @@
 
 {% for generated_set in generated_sets %}
 <section id="set-{{ generated_set.set_code|lower }}" class="card de-exam-card mb-4">
-  <div class="card-header bg-white border-0 p-4 pb-0 d-flex flex-wrap justify-content-between align-items-center gap-2"><div><span class="badge {% if generated_set.set_code == 'A' %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">SET {{ generated_set.set_code }}</span><h2 class="h4 mb-0">Final snapshot questionnaire</h2></div><div class="d-flex align-items-center gap-2"><span class="text-muted">{{ generated_set.item_count }} items</span><a class="btn btn-sm btn-outline-dark" href="{% url 'departmental_exams:generation_answer_key' revision.id generated_set.set_code %}">View Set {{ generated_set.set_code }} Answer Key</a></div></div>
+  <div class="card-header bg-white border-0 p-4 pb-0 d-flex flex-wrap justify-content-between align-items-center gap-2"><div><span class="badge {% if generated_set.display_version == 'A' %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">{{ generated_set.display_label }}</span><h2 class="h4 mb-0">Final snapshot questionnaire</h2></div><div class="d-flex align-items-center gap-2"><span class="text-muted">{{ generated_set.item_count }} items</span><a class="btn btn-sm btn-outline-dark" href="{% url 'departmental_exams:generation_answer_key' revision.id generated_set.set_code %}">View {{ generated_set.display_label }} Answer Key</a></div></div>
   <div class="card-body p-4">
     {% for item in generated_set.ordered_items %}
       {% ifchanged item.section_id_snapshot %}<div class="de-generation-section rounded p-3 mb-3 mt-2"><h3 class="h5 mb-1">{{ item.section_title_snapshot }}</h3>{% if item.section_instructions_snapshot %}<p class="text-muted mb-0">{{ item.section_instructions_snapshot }}</p>{% endif %}</div>{% endifchanged %}

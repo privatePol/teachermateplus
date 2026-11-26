@@ -41,12 +41,19 @@ class SectionQuotaInfeasible(ValidationError):
     """A proved one-set shortage, distinct from an unproved computation limit."""
 
 
-def select_blocks(problem, usage, *, seed, budget):
+class SectionOrderInfeasible(ValidationError):
+    """Quotas are satisfiable, but no valid selection permits distinct A/B order."""
+
+
+def select_blocks(problem, usage, *, seed, budget, require_orderable=False):
     """Exact minimum cumulative reuse for one set, bounded and whole-unit aware.
 
-    Nonconflicting units with equal hard vectors are interchangeable. Conflicting
-    logical copies stay separate and reserve identities across groups. Reuse is a
-    cost, never a hard restriction. A budget failure is not reported as a shortage.
+    Nonconflicting units with equal hard vectors and ordering sections are
+    interchangeable. Conflicting logical copies stay separate and reserve
+    identities across groups. Section-pair callers require a whole-block A/B
+    reorder; quota-only callers retain their original contract. Reuse is a cost,
+    never a hard restriction. A budget failure is
+    not reported as a shortage or proof that an orderable selection is impossible.
     """
     blocks = tuple(problem.blocks)
     identities = {str(b.block_id): tuple(problem.questions[m.source_id].normalized_fingerprint
@@ -61,7 +68,8 @@ def select_blocks(problem, usage, *, seed, budget):
         cost = sum(usage[i] for i in ids)
         rank = confidential_hmac_rank(secret=settings.SECRET_KEY, domain="section-set.selection.v1",
                                      context={"seed": seed, "block": str(block.block_id)})
-        grouped[(block.vector, str(block.block_id) if conflict else None)].append((cost, rank, block))
+        grouped[(block.vector, block.members[0].section_id,
+                 str(block.block_id) if conflict else None)].append((cost, rank, block))
     groups = [sorted(rows, key=lambda row: (row[0], row[1], str(row[2].block_id))) for rows in grouped.values()]
     groups.sort(key=lambda rows: (-rows[0][2].size, rows[0][2].vector, rows[0][1]))
     suffix = [tuple(0 for _ in problem.margins) for _ in range(len(groups) + 1)]
@@ -72,15 +80,17 @@ def select_blocks(problem, usage, *, seed, budget):
         local = min(row[0] / row[2].size for row in groups[i])
         min_cost[i] = min(local, min_cost[i + 1]) if i + 1 < len(groups) else local
     states = 0
+    quota_valid_seen = False
 
     @lru_cache(maxsize=None)
-    def solve(index, remaining, reserved):
-        nonlocal states
+    def solve(index, remaining, reserved, seen_sections):
+        nonlocal states, quota_valid_seen
         states += 1
         if states > budget:
-            raise ValidationError("Section-set computation budget reached; feasibility was not established. No output was saved.")
+            raise ValidationError("Section-set computation budget reached; orderable selection feasibility or minimum reuse was not established. No output was saved.")
         if not any(remaining):
-            return 0, ()
+            quota_valid_seen = True
+            return (0, ()) if seen_sections is None else None
         if index == len(groups) or any(n < 0 or n > suffix[index][j] for j, n in enumerate(remaining)):
             return None
         rows = groups[index]
@@ -93,7 +103,14 @@ def select_blocks(problem, usage, *, seed, budget):
             claimed = frozenset(i for _, _, b in selected for i in identities[str(b.block_id)] if occurrence[i] > 1)
             if reserved & claimed:
                 continue
-            tail = solve(index + 1, tuple(n - count * v for n, v in zip(remaining, vector)), reserved | claimed)
+            # Until two blocks share an ordering section, retain the sections
+            # seen once. None means a distinct A/B whole-block order is possible.
+            next_sections = seen_sections
+            if count and seen_sections is not None:
+                section = rows[0][2].members[0].section_id
+                next_sections = None if count > 1 or section in seen_sections else seen_sections | {section}
+            tail = solve(index + 1, tuple(n - count * v for n, v in zip(remaining, vector)),
+                         reserved | claimed, next_sections)
             if tail is None:
                 continue
             trial = (sum(row[0] for row in selected) + tail[0],
@@ -105,10 +122,13 @@ def select_blocks(problem, usage, *, seed, budget):
         return best
 
     try:
-        result = solve(0, tuple(problem.margins), frozenset())
+        result = solve(0, tuple(problem.margins), frozenset(),
+                       frozenset() if require_orderable else None)
     except RecursionError as exc:
         raise ValidationError("Section-set pool structure exceeds the computation limit. No output was saved.") from exc
     if result is None:
+        if quota_valid_seen:
+            raise SectionOrderInfeasible("Blueprint quotas are satisfiable, but no valid selection permits different A/B whole-block order. At least two selected whole questions or cases must share a blueprint section. Cases/passages cannot be split. No output was saved.")
         raise SectionQuotaInfeasible("Eligible whole questions and cases cannot satisfy the blueprint quotas for one valid exam. Reuse across sections is allowed, including 100% overlap.")
     return result[1]
 
@@ -124,10 +144,10 @@ def select_policy_blocks(problem, usage, *, seed, budget):
                 sum(problem.questions[m.source_id].difficulty == c for m in block.members) for c in codes))
                 for block in problem.blocks))
         try:
-            return select_blocks(preferred, usage, seed=seed, budget=budget)
-        except SectionQuotaInfeasible:
+            return select_blocks(preferred, usage, seed=seed, budget=budget, require_orderable=True)
+        except (SectionQuotaInfeasible, SectionOrderInfeasible):
             pass
-    return select_blocks(problem, usage, seed=seed, budget=budget)
+    return select_blocks(problem, usage, seed=seed, budget=budget, require_orderable=True)
 
 
 def overlap_rows(plans, questions):
@@ -142,6 +162,28 @@ def overlap_rows(plans, questions):
                          "count": shared, "percent": round(100 * shared / len(identities[i]), 2),
                          "unavoidable_pool_lower_bound": lower})
     return rows
+
+
+def paired_order(problem, selected, *, code, fingerprint, reference=None):
+    members = order_selected_blocks(blocks=problem.blocks, selected_block_ids=selected,
+        set_code=code, secret=settings.SECRET_KEY,
+        hmac_context={"fingerprint": fingerprint}, section_order=problem.section_order)
+    if reference is None or members != reference:
+        return members
+    # Hash ranks may coincide. Swap whole blocks within one blueprint section;
+    # never move a linked question away from its passage or cross section order.
+    by_source = {m.source_id: b for b in problem.blocks for m in b.members if str(b.block_id) in set(selected)}
+    ordered, seen = [], set()
+    for member in reference:
+        block = by_source[member.source_id]
+        if str(block.block_id) not in seen:
+            ordered.append(block)
+            seen.add(str(block.block_id))
+    for index in range(len(ordered) - 1):
+        if ordered[index].members[0].section_id == ordered[index + 1].members[0].section_id:
+            ordered[index], ordered[index + 1] = ordered[index + 1], ordered[index]
+            return tuple(m for b in ordered for m in sorted(b.members, key=lambda m: m.member_order))
+    raise ValidationError("Different A/B question order requires at least two selected whole questions or cases in one blueprint section. Cases/passages cannot be split. No output was saved.")
 
 
 def apply_policy(problem, report):
@@ -170,18 +212,20 @@ def apply_policy(problem, report):
         if not offering.is_active or offering.status != "OPEN" or not offering.campus.is_active:
             continue
         offerings.append({"offering_id": offering.id, "campus_id": offering.campus_id,
-                          "label": str(offering.section)[:255], "course_id": offering.course_id,
+                          "label": offering.section.name[:255], "course_id": offering.course_id,
                           "set_code": f"S{offering.id}"})
     if not offerings:
         raise ValidationError("At least one active scoped academic section/offering is required for section sets.")
     fixed = {q.id: choices_fixed_order(q) for q in Question.objects.filter(id__in=problem.questions)}
-    snapshot = {"schema": "section-sets-v1", "mode": policy.mode, "shuffle_choices": policy.shuffle_choices,
+    snapshot = {"schema": "section-sets-v2", "mode": policy.mode, "shuffle_choices": policy.shuffle_choices,
                 "departmental": policy.departmental, "standardized": policy.standardized,
-                "policy_revision": policy.revision, "offerings": offerings,
+                "policy_revision": policy.revision, "offerings": [
+                    {**o, "set_code": o["set_code"] + version, "version": version}
+                    for o in offerings for version in "AB"],
                 "fixed_order_flags": {str(q): v for q, v in fixed.items()}}
     fingerprint = digest({"source": problem.input_fingerprint, "policy": snapshot, "fixed_order": fixed})
     usage = Counter()
-    plans, first_ids, first_order = [], None, None
+    plans, first_ids, first_orders = [], None, {}
     budget = int(getattr(settings, "DEPARTMENTAL_EXAM_GENERATION_MAX_STATES", 500_000))
     for offering in offerings:
         code = offering["set_code"]
@@ -189,17 +233,20 @@ def apply_policy(problem, report):
             selected = select_policy_blocks(problem, usage, seed=fingerprint + code, budget=budget)
         else:
             selected = first_ids
-        members = order_selected_blocks(blocks=problem.blocks, selected_block_ids=selected,
-                                        set_code=code, secret=settings.SECRET_KEY,
-                                        hmac_context={"fingerprint": fingerprint}, section_order=problem.section_order)
-        if policy.mode == ExamGeneratorPolicy.Mode.SAME_ORDER and first_order is not None:
-            members = first_order
+        orders = {}
+        for version in "AB":
+            members = paired_order(problem, selected, code=code + version, fingerprint=fingerprint,
+                                   reference=orders.get("A") if version == "B" else None)
+            if policy.mode == ExamGeneratorPolicy.Mode.SAME_ORDER and first_orders:
+                members = first_orders[version]
+            orders[version] = members
+            plans.append({**offering, "set_code": code + version, "version": version,
+                          "source_ids": tuple(m.source_id for m in members)})
         if first_ids is None:
-            first_ids, first_order = selected, members
-        ids = tuple(m.source_id for m in members)
-        plans.append({**offering, "source_ids": ids})
-        usage.update(problem.questions[q].normalized_fingerprint or f"q:{q}" for q in ids)
-    overlaps = overlap_rows(plans, problem.questions)
+            first_ids, first_orders = selected, orders
+        # Allocation/reuse costs count one selection per offering, never its B copy.
+        usage.update(problem.questions[m.source_id].normalized_fingerprint or f"q:{m.source_id}" for m in orders["A"])
+    overlaps = overlap_rows([p for p in plans if p["version"] == "A"], problem.questions)
     snapshot["overlap"] = overlaps
     actual_difficulty = {p["set_code"]: dict(Counter(problem.questions[q].difficulty for q in p["source_ids"])) for p in plans}
     snapshot["difficulty_target"] = problem.difficulty_quotas
@@ -263,17 +310,23 @@ def _verify_policy_revision(revision):
     policy = revision.set_policy_snapshot
     if not policy:
         return
-    if policy.get("schema") != "section-sets-v1":
+    if policy.get("schema") not in {"section-sets-v1", "section-sets-v2"}:
         raise PermissionDenied("Unsupported section-set policy snapshot.")
     if (policy.get("mode") not in ExamGeneratorPolicy.Mode.values
             or any(type(policy.get(key)) is not bool for key in ("shuffle_choices", "departmental", "standardized"))
             or type(policy.get("policy_revision")) is not int or policy["policy_revision"] < 1):
         raise PermissionDenied("Invalid section-set policy settings.")
     expected = {o["set_code"]: o for o in policy["offerings"]}
+    paired = policy["schema"] == "section-sets-v2"
+    groups = defaultdict(list)
+    for offering in policy["offerings"]:
+        groups[offering["offering_id"]].append(offering)
     if (len(expected) != len(policy["offerings"])
-            or len({o["offering_id"] for o in policy["offerings"]}) != len(expected)
-            or any(o["set_code"] != f"S{o['offering_id']}" or not valid_set_code(o["set_code"])
-                   for o in policy["offerings"])):
+            or any(not valid_set_code(o["set_code"]) or o["set_code"] != f"S{o['offering_id']}" + (o.get("version", "") if paired else "")
+                   for o in policy["offerings"])
+            or any((len(rows) != 2 or {o.get("version") for o in rows} != {"A", "B"}
+                    or any(o[k] != rows[0][k] for o in rows for k in ("label", "campus_id", "course_id")))
+                   if paired else len(rows) != 1 for rows in groups.values())):
         raise PermissionDenied("Invalid saved section assignment coverage.")
     sets = list(revision.generated_sets.prefetch_related("items").order_by("set_code"))
     assignments = list(revision.section_set_assignments.select_related("generated_set"))
@@ -283,7 +336,8 @@ def _verify_policy_revision(revision):
     for a in assignments:
         original = expected.get(a.generated_set.set_code, {})
         if (a.generated_set.generation_revision_id != revision.id or a.offering_id != original.get("offering_id")
-                or a.campus_id_snapshot != original.get("campus_id") or a.section_label_snapshot != original.get("label")):
+                or a.campus_id_snapshot != original.get("campus_id") or a.section_label_snapshot != original.get("label")
+                or a.version_code != original.get("version", "")):
             raise PermissionDenied("Section assignment does not match the saved revision.")
     from .structured_snapshots import verify_item_layout
     source_rows = {r.source_question_id_snapshot: r for r in revision.source_audit_snapshot.question_snapshots.all()}
@@ -326,14 +380,25 @@ def _verify_policy_revision(revision):
     # Preserve the original offering order in the overlap matrix.
     by_code = {p["set_code"]: p for p in actual_plans}
     actual_plans = [by_code[o["set_code"]] for o in policy["offerings"]]
-    if overlap_rows(actual_plans, questions) != policy["overlap"]:
+    comparison = actual_plans
+    if paired:
+        comparison = [p for p in actual_plans if expected[p["set_code"]]["version"] == "A"]
+        for rows in groups.values():
+            pair = {o["version"]: by_code[o["set_code"]]["source_ids"] for o in rows}
+            if set(pair["A"]) != set(pair["B"]) or pair["A"] == pair["B"]:
+                raise PermissionDenied("Section A/B membership or order does not match the saved pair.")
+    if overlap_rows(comparison, questions) != policy["overlap"]:
         raise PermissionDenied("Pairwise overlap does not match the saved output.")
     if policy["mode"] in {"SAME_ORDER", "SHUFFLED_ORDER"}:
-        first = actual_plans[0]["source_ids"]
-        if any(set(p["source_ids"]) != set(first) for p in actual_plans):
+        first = comparison[0]["source_ids"]
+        if any(set(p["source_ids"]) != set(first) for p in comparison):
             raise PermissionDenied("Same-question sets have different membership.")
-        if policy["mode"] == "SAME_ORDER" and any(p["source_ids"] != first for p in actual_plans):
-            raise PermissionDenied("Same-order sets have different ordering.")
+        if policy["mode"] == "SAME_ORDER":
+            versions = ("A", "B") if paired else (None,)
+            for version in versions:
+                rows = [p for p in actual_plans if not paired or expected[p["set_code"]]["version"] == version]
+                if any(p["source_ids"] != rows[0]["source_ids"] for p in rows):
+                    raise PermissionDenied("Same-order sets have different ordering.")
 
 
 def verify_policy_revision(revision):
@@ -352,7 +417,7 @@ def expected_set_codes(revision):
 
 def valid_set_code(value):
     import re
-    return bool(isinstance(value, str) and re.fullmatch(r"A|B|S[1-9][0-9]{0,29}", value))
+    return bool(isinstance(value, str) and len(value) <= 32 and re.fullmatch(r"A|B|S[1-9][0-9]{0,29}(?:[AB])?", value))
 
 
 def require_faculty_section_set(*, revision, set_code, contribution, campus_id, assignments):
@@ -374,10 +439,11 @@ def persist_policy_revision(*, service, problem, course, current, revisions, act
     if current:
         current.status, current.current_marker = "SUPERSEDED", None
         current.save(update_fields=["status", "current_marker", "updated_at"])
-    appearances = Counter(problem.questions[q].contributor_id for p in problem.section_set_plan for q in p["source_ids"])
+    selections = [p for p in problem.section_set_plan if p.get("version", "A") == "A"]
+    appearances = Counter(problem.questions[q].contributor_id for p in selections for q in p["source_ids"])
     from .generation_algorithms import proportional_campus_difficulty_score
     proportional = 0
-    for plan in problem.section_set_plan:
+    for plan in selections:
         cells = Counter((problem.questions[q].campus_id if isinstance(next(iter(problem.campus_quotas)), int)
                          else problem.questions[q].campus_code, problem.questions[q].difficulty) for q in plan["source_ids"])
         proportional += proportional_campus_difficulty_score(total=problem.final_count,
@@ -403,7 +469,7 @@ def persist_policy_revision(*, service, problem, course, current, revisions, act
                  for i, q in enumerate(plan["source_ids"], 1)]
         for item in items:
             # A common seed gives identical displayed papers in SAME_ORDER mode.
-            seed = problem.input_fingerprint + ("shared" if problem.set_policy_snapshot["mode"] == "SAME_ORDER" else row.set_code)
+            seed = problem.input_fingerprint + (("shared" + plan.get("version", "")) if problem.set_policy_snapshot["mode"] == "SAME_ORDER" else row.set_code)
             apply_choices(item, shuffle=problem.set_policy_snapshot["shuffle_choices"],
                           fixed=problem.fixed_order_flags[item.source_question_id], seed=seed)
         row.structured_content_digest_version = "section-set-content-v1"
@@ -413,7 +479,7 @@ def persist_policy_revision(*, service, problem, course, current, revisions, act
             item.generated_set = row
         GeneratedExamItem.objects.bulk_create(items)
         ExamSectionSetAssignment.objects.create(generation_revision=revision, generated_set=row,
-            offering_id=plan["offering_id"], campus_id_snapshot=plan["campus_id"], section_label_snapshot=plan["label"])
+            offering_id=plan["offering_id"], campus_id_snapshot=plan["campus_id"], section_label_snapshot=plan["label"], version_code=plan.get("version", ""))
     verify_policy_revision(revision)
     reason_metadata = {}
     if reason:
@@ -458,6 +524,12 @@ def faculty_set_options(*, revision, contribution, campus_id):
     offering_ids = [a.offering_id for a in ContributionAuthorizationService.retained_current_print_assignments(contribution=contribution)
                     if a.offering.campus_id == campus_id]
     verify_policy_revision(revision)
-    return tuple({"code": a.generated_set.set_code, "label": f"{a.section_label_snapshot} - Set {a.generated_set.set_code}"}
+    return tuple({"code": a.generated_set.set_code, "label": a.generated_set.display_label}
                  for a in revision.section_set_assignments.filter(offering_id__in=offering_ids,
-                     campus_id_snapshot=campus_id).select_related("generated_set").order_by("offering_id"))
+                     campus_id_snapshot=campus_id).select_related("generated_set").order_by("offering_id", "version_code"))
+
+
+def saved_set_display(generated_set):
+    return {"set_version": generated_set.display_version,
+            "section_label": generated_set.saved_section_label,
+            "set_label": generated_set.display_label}

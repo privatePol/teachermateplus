@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ course_code }} — Set {{ set_code }} Questionnaire</title>
+  <title>{{ course_code }}{% if section_label %} {{ section_label }}{% endif %} — Set {{ set_version|default:set_code }} Questionnaire</title>
   {% include "departmental_exams/_scientific_notation_assets.html" %}
   <link rel="stylesheet" href="{% static 'css/departmental_exam_case_editor.css' %}">
   <link rel="stylesheet" href="{% static 'css/departmental_exam_questionnaire_presentation.css' %}">
@@ -91,7 +91,8 @@
       <h1>{{ exam_heading }}</h1>
       <div class="course-title">{{ course_title }}</div>
       <div class="course-code">{{ course_code }}</div>
-      <div class="set-label">SET {{ set_code }}</div>
+      {% if section_label %}<div class="section-name">{{ section_label }}</div>{% endif %}
+      <div class="set-label">SET {{ set_version|default:set_code }}</div>
     </section>
     <div class="instructions">
       <p><strong>Instructions:</strong> Read each question carefully and select the correct answer.</p>
@@ -108,7 +109,7 @@
           <ol class="choices{% if item.question_format == 'RICH_HTML_V1' %} choices-rich{% endif %}" type="A">{% for choice in item.choices %}<li>{% if item.question_format == 'RICH_HTML_V1' %}<div class="tmp-case-content tmp-mcq-output" data-scientific-content>{{ choice|questionnaire_choice_content:item.question_format }}</div>{% else %}<span data-scientific-content>{{ choice|questionnaire_choice_content:item.question_format }}</span>{% endif %}</li>{% endfor %}</ol>
         </article>
         {% if forloop.last %}
-          <footer class="confidential-footer">CONFIDENTIAL &bull; {{ course_code }} &bull; SET {{ set_code }} &bull; Revision R{{ revision_number }} &bull; Printed {{ printed_at|date:"M j, Y g:i A" }}</footer>
+          <footer class="confidential-footer">CONFIDENTIAL &bull; {{ course_code }} &bull; {% if section_label %}{{ section_label }} &bull; {% endif %}SET {{ set_version|default:set_code }} &bull; Revision R{{ revision_number }} &bull; Printed {{ printed_at|date:"M j, Y g:i A" }}</footer>
         </div>
         {% endif %}
       {% endfor %}

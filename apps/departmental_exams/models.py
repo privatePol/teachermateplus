@@ -3156,7 +3156,7 @@ class PersonalizedAnswerSheetAssignment(TimeStampedModel):
                 name="uq_de_personalized_revision_enrollment",
             ),
             models.CheckConstraint(
-                condition=models.Q(set_code__regex=r"^(A|B|S[1-9][0-9]*)$"),
+                condition=models.Q(set_code__regex=r"^(A|B|S[1-9][0-9]*[AB]?)$"),
                 name="ck_de_personalized_set_code",
             ),
             models.CheckConstraint(
@@ -3486,7 +3486,7 @@ class GeneratedExamSet(TimeStampedModel):
                 name="uq_de_gen_set_code",
             ),
             models.CheckConstraint(
-                condition=(models.Q(set_code__regex=r"^(A|B|S[1-9][0-9]*)$", item_count__gte=1)),
+                condition=(models.Q(set_code__regex=r"^(A|B|S[1-9][0-9]*[AB]?)$", item_count__gte=1)),
                 name="ck_de_gen_set_values",
             ),
         ]
@@ -3496,6 +3496,25 @@ class GeneratedExamSet(TimeStampedModel):
                 name="idx_de_gen_set_code",
             )
         ]
+
+    @property
+    def display_version(self):
+        try:
+            return self.section_assignment.version_code or self.set_code
+        except ExamSectionSetAssignment.DoesNotExist:
+            return self.set_code
+
+    @property
+    def saved_section_label(self):
+        try:
+            return self.section_assignment.section_label_snapshot
+        except ExamSectionSetAssignment.DoesNotExist:
+            return ""
+
+    @property
+    def display_label(self):
+        label = f"Set {self.display_version}"
+        return f"{self.saved_section_label} - {label}" if self.saved_section_label else label
 
     def save(self, *args, **kwargs):
         if self.pk and type(self).objects.filter(pk=self.pk).exists():
@@ -3849,9 +3868,13 @@ class ExamSectionSetAssignment(TimeStampedModel):
     offering = models.ForeignKey("academics.CourseOffering", on_delete=models.PROTECT)
     campus_id_snapshot = models.PositiveBigIntegerField()
     section_label_snapshot = models.CharField(max_length=255)
+    version_code = models.CharField(max_length=1, blank=True, default="", choices=[("A", "Set A"), ("B", "Set B")])
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["generation_revision", "offering"], name="uq_de_revision_offering_set")]
+        constraints = [
+            models.UniqueConstraint(fields=["generation_revision", "offering", "version_code"], name="uq_de_revision_offering_version"),
+            models.CheckConstraint(condition=models.Q(version_code__in=["", "A", "B"]), name="ck_de_section_version"),
+        ]
 
     def save(self, *args, **kwargs):
         if self.pk:
@@ -3863,6 +3886,7 @@ class ExamSectionSetAssignment(TimeStampedModel):
         if (revision.status != "GENERATED" or revision.current_marker != 1 or not any(
                 o.get("offering_id") == self.offering_id and o.get("set_code") == self.generated_set.set_code
                 and o.get("campus_id") == self.campus_id_snapshot and o.get("label") == self.section_label_snapshot
+                and o.get("version", "") == self.version_code
                 for o in evidence)):
             raise ValidationError("Section assignment must match the current generation policy evidence.")
         cycle = self.generation_revision.cycle_course.cycle

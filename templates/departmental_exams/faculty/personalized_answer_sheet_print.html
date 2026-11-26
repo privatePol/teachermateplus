@@ -88,7 +88,7 @@
       <div class="selection-row"><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>Prelim</span><span class="selection-option"><span class="selection-box{% if exam_period_code == 'MIDTERM' %} checked{% endif %}" aria-hidden="true"></span>Midterm</span><span class="selection-option"><span class="selection-box{% if exam_period_code == 'FINAL' %} checked{% endif %}" aria-hidden="true"></span>Final</span></div>
       <div class="selection-row"><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>BSA</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>BSBA</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>HM</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>IS/CS</span><span class="selection-option"><span class="selection-box" aria-hidden="true"></span>EDUC</span></div>
     </div>
-    <div class="sheet-set">SET {{ sheet.set_code }}</div>
+    <div class="sheet-set">SET {{ sheet.set_version|default:sheet.set_code }}</div>
     <div class="sheet-fields">
       <div class="field-row"><div class="field"><strong>Stud Number:</strong><span class="field-value student-number">{{ sheet.student_number }}</span></div><div class="field"><strong>Date:</strong><span class="field-value blank"></span></div></div>
       <div class="field-row single"><div class="field"><strong>Student Name:</strong><span class="field-value student-name">{{ sheet.student_name }}</span></div></div>
@@ -105,7 +105,7 @@
   <footer class="sheet-footer">
     <div class="footer-zone reminders"><strong class="reminders-title">REMINDERS:</strong><ul><li>Use a dark pen or pencil only.</li><li>Fill in the circle completely.</li><li>Erase cleanly any answer you wish to change.</li></ul></div>
     <div class="footer-zone statement">EDUCATING GLOBALLY<br>COMPETITIVE FILIPINOS</div>
-    <div class="footer-zone"><div class="matching-box"><div class="matching-title">FOR MATCHING PURPOSES ONLY</div><div class="matching-fields"><div class="matching-field">Set: <strong>{{ sheet.set_code }}</strong></div><div class="matching-field">Revision: <strong>R{{ revision_number }}</strong></div><div class="matching-field" style="grid-column:1/-1;">Pair Code:<span class="matching-line"></span></div></div></div></div>
+    <div class="footer-zone"><div class="matching-box"><div class="matching-title">FOR MATCHING PURPOSES ONLY</div><div class="matching-fields"><div class="matching-field">Set: <strong>{{ sheet.set_version|default:sheet.set_code }}</strong></div><div class="matching-field">Revision: <strong>R{{ revision_number }}</strong></div><div class="matching-field" style="grid-column:1/-1;">Pair Code:<span class="matching-line"></span></div></div></div></div>
   </footer>
 </article>
 {% empty %}<div class="alert alert-info screen-only">No active students match this Set filter.</div>{% endfor %}

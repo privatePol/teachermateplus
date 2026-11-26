@@ -67,7 +67,7 @@ class SavedSetOutputRemediationTests(Stage6BGenerationFixtureMixin, Stage4TestCa
         course = self.automatic_course()
         revision = self.generate(course)
         sets = list(revision.generated_sets.order_by("set_code"))
-        self.assertEqual(len(sets), 3)
+        self.assertEqual(len(sets), 6)
         client = Client()
         client.force_login(self.admin)
         manage = client.get(reverse("departmental_exams:assigned_course_examinations"))
@@ -157,7 +157,7 @@ class SavedSetOutputRemediationTests(Stage6BGenerationFixtureMixin, Stage4TestCa
             assignment_id_snapshot=assignment.id, offering_id_snapshot=later.id,
             tenant_id_snapshot=self.tenant.id, campus_id_snapshot=self.campus.id)
         revision = self.generate(course)
-        self.assertEqual(revision.section_set_assignments.count(), 3)
+        self.assertEqual(revision.section_set_assignments.count(), 6)
         self.assertFalse(revision.section_set_assignments.filter(offering=later).exists())
         later.is_active = True
         later.save(update_fields=["is_active"])
@@ -167,14 +167,14 @@ class SavedSetOutputRemediationTests(Stage6BGenerationFixtureMixin, Stage4TestCa
         release = QuestionnairePrintReleaseService.release(cycle_course_id=course.id, revision_id=revision.id,
             tenant_id=self.tenant.id, actor=self.admin, target_campus_id=self.campus.id,
             print_from=now-timezone.timedelta(minutes=1), print_until=now+timezone.timedelta(hours=1))
-        code = revision.section_set_assignments.get(offering=offering).generated_set.set_code
+        code = revision.section_set_assignments.get(offering=offering, version_code="A").generated_set.set_code
         client = Client()
         client.force_login(faculty)
         overview_url = reverse("departmental_exams:personalized_answer_sheet_overview", args=[contribution.id, release.id])
         overview = client.get(overview_url)
         self.assertEqual(overview.status_code, 200)
         rows = {r["offering"].id: r for r in overview.context["offering_rows"]}
-        self.assertEqual(rows[offering.id]["section_set"], code)
+        self.assertEqual(rows[offering.id]["section_set"], "A / B")
         self.assertTrue(rows[later.id]["section_set_unavailable"])
         self.assertContains(overview, "No saved set for this section")
         prepare = lambda row: reverse("departmental_exams:personalized_answer_sheet_prepare", args=[contribution.id, release.id, row.id])
@@ -186,12 +186,12 @@ class SavedSetOutputRemediationTests(Stage6BGenerationFixtureMixin, Stage4TestCa
         self.assertFalse(PersonalizedAnswerSheetAssignment.objects.filter(generation_revision=revision, course_offering=later).exists())
         printed = client.get(paper(offering))
         self.assertEqual(printed.status_code, 200)
-        self.assertEqual([s["set_code"] for s in printed.context["sheets"]], [code])
-        other_code = revision.generated_sets.exclude(set_code=code).first().set_code
+        self.assertIn(printed.context["sheets"][0]["set_code"], revision.section_set_assignments.filter(offering=offering).values_list("generated_set__set_code", flat=True))
+        other_code = revision.section_set_assignments.exclude(offering=offering).first().generated_set.set_code
         self.assertEqual(client.get(paper(offering, other_code)).status_code, 403)
         again = client.get(overview_url)
         self.assertEqual(again.status_code, 200)
-        self.assertEqual(PersonalizedAnswerSheetAssignment.objects.get(generation_revision=revision, course_offering=offering).set_code, code)
+        self.assertEqual(PersonalizedAnswerSheetAssignment.objects.get(generation_revision=revision, course_offering=offering).set_code, printed.context["sheets"][0]["set_code"])
 
 
 class ReturnedChoiceEvidenceTests(fixtures.AutomaticCaseSectionSetTests):
@@ -224,7 +224,7 @@ class ReturnedChoiceEvidenceTests(fixtures.AutomaticCaseSectionSetTests):
         copies = set(successor.questions.filter(choices_fixed_order=True).values_list("id", flat=True))
         items = list(GeneratedExamItem.objects.filter(generated_set__generation_revision=revision,
             source_question_id__in=copies))
-        self.assertEqual(len(items), 2)
+        self.assertEqual(len(items), 4)
         self.assertTrue(any(i.scenario_id_snapshot for i in items))
         self.assertTrue(any(i.scenario_id_snapshot is None for i in items))
         for item in items:

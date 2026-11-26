@@ -1,7 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% load static %}
 
-{% block title %}{{ course_code }} Set {{ set_code }} Pre-Shaded Checking Master | TeacherMate+{% endblock %}
+{% block title %}{{ course_code }}{% if section_label %} {{ section_label }}{% endif %} Set {{ set_version|default:set_code }} Pre-Shaded Checking Master | TeacherMate+{% endblock %}
 
 {% block extra_head %}
 {{ block.super }}
@@ -234,7 +234,7 @@
 {% block faculty_content %}
 <div class="checking-master-controls screen-only">
   <div>
-    <h1 class="h3 mb-1">Pre-Shaded Checking Master &mdash; Set {{ set_code }}</h1>
+    <h1 class="h3 mb-1">Pre-Shaded Checking Master &mdash; Set {{ set_version|default:set_code }}</h1>
     <p class="text-muted mb-0">Previewing {{ paper_label }} portrait. Choose the same paper size in your browser print dialog.</p>
   </div>
   <div class="checking-master-actions">
@@ -252,7 +252,7 @@
   </div>
 </div>
 
-<article class="checking-master-page" aria-label="Set {{ set_code }} pre-shaded checking master" data-paper-size="{{ paper_size }}" style="--checking-master-width: {{ paper_sheet_width }}; --checking-master-height: {{ paper_sheet_height }};">
+<article class="checking-master-page" aria-label="Set {{ set_version|default:set_code }} pre-shaded checking master" data-paper-size="{{ paper_size }}" style="--checking-master-width: {{ paper_sheet_width }}; --checking-master-height: {{ paper_sheet_height }};">
   <header class="checking-master-header">
     <div class="checking-master-brand">
       <img class="checking-master-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA logo">
@@ -268,7 +268,7 @@
       <span>Revision R{{ revision_number }}</span>
       <span>Final Item Count: {{ final_item_count }}</span>
     </div>
-    <div class="checking-master-set">SET {{ set_code }}</div>
+    {% if section_label %}<div>{{ section_label }}</div>{% endif %}<div class="checking-master-set">SET {{ set_version|default:set_code }}</div>
     <hr class="checking-master-divider">
   </header>
 
@@ -293,6 +293,6 @@
     </div>
   </section>
 
-  <footer class="checking-master-footer">FOR FACULTY CHECKING ONLY &mdash; CONFIDENTIAL &bull; {{ course_code }} &bull; SET {{ set_code }} &bull; Revision R{{ revision_number }} &bull; {{ final_item_count }} active items &bull; Accessed {{ accessed_at|date:"M j, Y g:i A" }} Asia/Manila</footer>
+  <footer class="checking-master-footer">FOR FACULTY CHECKING ONLY &mdash; CONFIDENTIAL &bull; {{ course_code }} &bull; {% if section_label %}{{ section_label }} &bull; {% endif %}SET {{ set_version|default:set_code }} &bull; Revision R{{ revision_number }} &bull; {{ final_item_count }} active items &bull; Accessed {{ accessed_at|date:"M j, Y g:i A" }} Asia/Manila</footer>
 </article>
 {% endblock %}

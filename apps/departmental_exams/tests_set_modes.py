@@ -117,8 +117,8 @@ class SectionSetIntegrationTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             Question.objects.filter(pk=question.pk).update(choices_fixed_order=index % 2 == 0,
                 choice_a="Hydrogen", choice_b="Helium", choice_c="Lithium", choice_d="Beryllium", correct_answer="B")
         problem, preview, revision = self.generate(parent)
-        self.assertEqual(revision.generated_sets.count(), 3)
-        self.assertEqual(revision.section_set_assignments.count(), 3)
+        self.assertEqual(revision.generated_sets.count(), 6)
+        self.assertEqual(revision.section_set_assignments.count(), 6)
         self.assertEqual(preview["pairwise_overlap"], revision.set_policy_snapshot["overlap"])
         self.assertGreater(len(set(q for p in problem.section_set_plan for q in p["source_ids"])), 100)
         for plan in problem.section_set_plan:
@@ -160,7 +160,8 @@ class SectionSetIntegrationTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                 sequences = [p["source_ids"] for p in problem.section_set_plan]
                 self.assertTrue(all(set(ids) == set(sequences[0]) for ids in sequences))
                 if mode == "SAME_ORDER":
-                    self.assertTrue(all(ids == sequences[0] for ids in sequences))
+                    self.assertTrue(all(p["source_ids"] == problem.section_set_plan[index % 2]["source_ids"] for index, p in enumerate(problem.section_set_plan)))
+                    self.assertNotEqual(sequences[0], sequences[1])
                 else:
                     self.assertGreater(len(set(sequences)), 1)
                 self.assertTrue(all(r["percent"] == 100 for r in report["pairwise_overlap"]))
@@ -355,7 +356,7 @@ class SectionSetIntegrationTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         first = FacultyQuestionnairePrintService.build_safe_context(**kwargs)
         second = FacultyQuestionnairePrintService.build_safe_context(**kwargs)
         self.assertEqual(first["items"], second["items"])
-        foreign = revision.section_set_assignments.exclude(pk=assignment.pk).select_related("generated_set").first()
+        foreign = revision.section_set_assignments.exclude(offering_id=assignment.offering_id).select_related("generated_set").first()
         with self.assertRaises(PermissionDenied):
             FacultyQuestionnairePrintService.build_safe_context(**{**kwargs, "set_code": foreign.generated_set.set_code})
         key_release = AnswerKeyReleaseService.release(cycle_course_id=parent.id, revision_id=revision.id,
@@ -377,10 +378,10 @@ class SectionSetIntegrationTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             campus=offering.campus, academic_year=offering.academic_year, term=offering.term)
         PersonalizedAnswerSheetService.prepare(contribution=contribution, release_id=release.id,
             offering_id=offering.id, actor=faculty)
-        self.assertEqual(revision.personalized_answer_sheet_assignments.get().set_code, assignment.generated_set.set_code)
+        self.assertIn(revision.personalized_answer_sheet_assignments.get().set_code, revision.section_set_assignments.filter(offering=offering).values_list("generated_set__set_code", flat=True))
         findings, counts = AutomaticGenerationAuditService._build_findings(revision=revision)
         self.assertTrue(all(f["status"] == "PASS" for f in findings))
-        self.assertEqual(counts["section_set_count"], 3)
+        self.assertEqual(counts["section_set_count"], 6)
 
     def test_new_policy_both_applicabilities_stale_state_and_direct_deny(self):
         from apps.rbac.models import Permission
@@ -438,7 +439,8 @@ class AutomaticCaseSectionSetTests(FacultyCaseFixtureMixin, Stage4TestCase):
         cases = self.fill_and_submit()
         revision = self.generate()
         self.assertEqual(revision.algorithm_version, "automatic-case-v2")
-        row = revision.generated_sets.get()
+        self.assertEqual(revision.generated_sets.count(), 2)
+        row = revision.generated_sets.order_by("set_code").first()
         self.assertEqual(row.items.filter(scenario_id_snapshot__isnull=False).count(), 50)
         verify_policy_revision(revision)
         self.client.force_login(self.admin)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .set_modes import valid_set_code, expected_set_codes, faculty_set_options
+from .set_modes import saved_set_display, valid_set_code, expected_set_codes, faculty_set_options
 
 from zoneinfo import ZoneInfo
 
@@ -137,6 +137,7 @@ def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None
             revision.cycle_course.exam_classification
         ),
         "set_code": generated_set.set_code,
+        **saved_set_display(generated_set),
         "revision_number": revision.revision_number,
         "printed_at": timezone.now().astimezone(MANILA_TIMEZONE),
         "items": tuple(

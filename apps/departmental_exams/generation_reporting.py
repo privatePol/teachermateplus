@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .set_modes import valid_set_code
+from .set_modes import saved_set_display, valid_set_code
 
 from collections import Counter
 from zoneinfo import ZoneInfo
@@ -467,6 +467,7 @@ class GenerationAnswerKeyService:
             "term": cycle.term.name,
             "exam_period": cycle.get_exam_period_display(),
             "set_code": normalized_set,
+            **saved_set_display(generated_set),
             "items": items,
             "printed_at": timezone.now().astimezone(MANILA_TIMEZONE),
         }
